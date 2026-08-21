@@ -5,6 +5,10 @@ interface Settings {
   model: string;
   temperature: number;
   systemPrompt: string;
+  perf?: {
+    /** cửa sổ gom render markdown khi stream (ms). Máy yếu: 250–300 */
+    throttleMs: number;
+  };
 }
 
 interface AppState {
@@ -22,6 +26,9 @@ export const useAppStore = create<AppState>()(
         model: 'gpt-5.6-luna', // Mặc định dựa trên ảnh bạn gửi
         temperature: 0.7,
         systemPrompt: 'You are a helpful, brilliant AI assistant. Use Markdown and LaTeX when appropriate. For inline math use $...$ and for block math use $$...$$. Do not use \\( or \\[. ',
+        perf: {
+          throttleMs: 150,
+        },
       },
       setCurrentChatId: (id) => set({ currentChatId: id }),
       updateSettings: (newSettings) => 
