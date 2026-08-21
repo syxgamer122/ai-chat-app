@@ -104,8 +104,9 @@ export default function ChatInterface() {
     const dataTransfer = new DataTransfer();
     attachments.forEach(file => dataTransfer.items.add(file));
     
+    const options = attachments.length > 0 ? { experimental_attachments: dataTransfer.files } : undefined;
     setAttachments([]); // Clear attachments UI
-    handleSubmit(e, { experimental_attachments: dataTransfer.files });
+    handleSubmit(e, options);
   };
 
   return (

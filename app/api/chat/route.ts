@@ -13,9 +13,19 @@ export async function POST(req: Request) {
       baseURL: process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1',
     });
 
+    const sanitizedMessages = messages.reduce((acc: any[], curr: any) => {
+      const last = acc[acc.length - 1];
+      if (last && last.role === curr.role) {
+        last.content += '\n\n' + curr.content;
+      } else {
+        acc.push({ ...curr });
+      }
+      return acc;
+    }, []);
+
     const result = await streamText({
       model: openai(model || 'gpt-5.6-luna'),
-      messages,
+      messages: sanitizedMessages,
       temperature: temperature ?? 0.7,
       system: system,
     });
