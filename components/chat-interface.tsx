@@ -5,6 +5,12 @@ import { useChat, type Message } from 'ai/react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useAppStore } from '@/lib/store';
 import { db, Dexie, type StoredMessage, type StoredAttachment } from '@/lib/db';
+import {
+  reconstructActiveThread,
+  getSiblings,
+  findDeepestLeafId,
+  type SiblingResult,
+} from '@/lib/tree-utils';
 import { MarkdownRenderer } from './markdown-renderer';
 import { ErrorBoundary } from './error-boundary';
 import { motion } from 'framer-motion';
@@ -12,6 +18,7 @@ import TextareaAutosize from 'react-textarea-autosize';
 import {
   Send, StopCircle, RefreshCcw, ArrowDown, Paperclip, X,
   Pencil, Copy, Check, Trash2, Menu,
+  ChevronLeft, ChevronRight,
 } from 'lucide-react';
 
 const attachmentCache = new WeakMap<object, StoredAttachment>();
@@ -60,6 +67,41 @@ async function toStoredAttachment(a: any): Promise<StoredAttachment> {
   return stored;
 }
 
+async function getStoredAttachments(
+  message: Message,
+): Promise<StoredAttachment[] | undefined> {
+  const rawAttachments =
+    message.experimental_attachments as
+      | any[]
+      | undefined;
+
+  if (
+    !rawAttachments ||
+    rawAttachments.length === 0
+  ) {
+    return undefined;
+  }
+
+  return Promise.all(
+    rawAttachments.map(toStoredAttachment),
+  );
+}
+
+function getMessageCreatedAt(
+  message: Message,
+  fallback: number,
+): number {
+  if (typeof message.createdAt === 'number') {
+    return message.createdAt;
+  }
+
+  if (message.createdAt instanceof Date) {
+    return message.createdAt.getTime();
+  }
+
+  return fallback;
+}
+
 function revokeObjectUrls(urls: Set<string>) {
   for (const url of urls) {
     URL.revokeObjectURL(url);
@@ -76,11 +118,548 @@ function createAttachmentUrl(attachment: StoredAttachment, urls: Set<string>): s
   return attachment.url ?? '';
 }
 
+function toChatMessage(
+  row: StoredMessage,
+  objectUrls: Set<string>,
+): Message {
+  return {
+    id: row.id,
+    role: row.role as Message['role'],
+    content: row.content,
+    experimental_attachments: row.attachments?.map(
+      (attachment) => ({
+        name: attachment.name,
+        contentType: attachment.contentType,
+        url: createAttachmentUrl(
+          attachment,
+          objectUrls,
+        ),
+      }),
+    ) as any,
+  };
+}
+
+function getNextBranchOrder(
+  allMessages: StoredMessage[],
+  parentId: string | null,
+): number {
+  let maxBranchOrder = -1;
+
+  for (const message of allMessages) {
+    if (message.parentId !== parentId) {
+      continue;
+    }
+
+    const order =
+      typeof message.branchOrder === 'number'
+        ? message.branchOrder
+        : 0;
+
+    if (order > maxBranchOrder) {
+      maxBranchOrder = order;
+    }
+  }
+
+  return maxBranchOrder + 1;
+}
+
+function getNextSequence(
+  allMessages: StoredMessage[],
+): number {
+  let maxSequence = -1;
+
+  for (const message of allMessages) {
+    if (
+      typeof message.seq === 'number' &&
+      Number.isFinite(message.seq) &&
+      message.seq > maxSequence
+    ) {
+      maxSequence = message.seq;
+    }
+  }
+
+  return maxSequence + 1;
+}
+
+function upsertStoredMessages(
+  current: StoredMessage[],
+  updates: StoredMessage[],
+): StoredMessage[] {
+  if (updates.length === 0) {
+    return current;
+  }
+
+  const updateById = new Map(
+    updates.map((message) => [
+      message.id,
+      message,
+    ]),
+  );
+
+  const result = current.map(
+    (message) =>
+      updateById.get(message.id) ?? message,
+  );
+
+  const existingIds = new Set(
+    current.map((message) => message.id),
+  );
+
+  for (const update of updates) {
+    if (!existingIds.has(update.id)) {
+      result.push(update);
+    }
+  }
+
+  return result;
+}
+
+function reconstructParentPath(
+  allMessages: StoredMessage[],
+  parentId: string | null,
+): StoredMessage[] {
+  if (parentId === null) {
+    return [];
+  }
+
+  return reconstructActiveThread(
+    allMessages,
+    parentId,
+  );
+}
+
+function getFinalStoredStatus(
+  finishReason: StoredMessage['finishReason'],
+): StoredMessage['status'] {
+  switch (finishReason) {
+    case 'abort':
+      return 'aborted';
+
+    case 'error':
+      return 'error';
+
+    case 'stop':
+    default:
+      return 'complete';
+  }
+}
+
+interface ReconcileResult {
+  /**
+   * Toàn bộ tree sau khi reconcile.
+   */
+  allRows: StoredMessage[];
+
+  /**
+   * Chỉ các row cần ghi vào IndexedDB.
+   */
+  changedRows: StoredMessage[];
+
+  /**
+   * Leaf mới nhất của active projection.
+   */
+  activeLeafId: string | null;
+
+  /**
+   * Assistant mới được phát hiện trong lần reconcile này.
+   */
+  createdAssistantId?: string;
+}
+
+function attachmentMetadataSignature(
+  attachments:
+    | StoredAttachment[]
+    | undefined,
+): string {
+  if (!attachments?.length) {
+    return '';
+  }
+
+  return attachments
+    .map((attachment) =>
+      [
+        attachment.name,
+        attachment.contentType,
+        attachment.url ?? '',
+        attachment.blob?.size ?? 0,
+      ].join(':'),
+    )
+    .join('|');
+}
+
+function hasStoredMessageChanged(
+  previous: StoredMessage,
+  next: StoredMessage,
+): boolean {
+  return (
+    previous.content !== next.content ||
+    previous.status !== next.status ||
+    previous.finishReason !==
+      next.finishReason ||
+    attachmentMetadataSignature(
+      previous.attachments,
+    ) !==
+      attachmentMetadataSignature(
+        next.attachments,
+      )
+  );
+}
+
+async function reconcileActiveMessages(
+  chatId: string,
+  visibleMessages: Message[],
+  currentTree: StoredMessage[],
+  pendingFork: PendingAssistantFork | null,
+  isCurrentlyLoading: boolean,
+  finishReason: StoredMessage['finishReason'],
+): Promise<ReconcileResult> {
+  if (visibleMessages.length === 0) {
+    return {
+      allRows: currentTree,
+      changedRows: [],
+      activeLeafId: null,
+    };
+  }
+
+  /**
+   * Map toàn bộ tree hiện tại để lookup O(1).
+   */
+  const rowById = new Map<string, StoredMessage>();
+
+  for (const row of currentTree) {
+    rowById.set(row.id, row);
+  }
+
+  /**
+   * workingRows chứa cả dữ liệu cũ và node mới được phát hiện
+   * trong cùng một lượt reconcile.
+   */
+  const workingRows = [...currentTree];
+  const changedRows: StoredMessage[] = [];
+
+  let nextSequence =
+    getNextSequence(currentTree);
+
+  let previousVisibleId: string | null = null;
+  let createdAssistantId: string | undefined;
+
+  for (
+    let index = 0;
+    index < visibleMessages.length;
+    index++
+  ) {
+    const message = visibleMessages[index];
+    const existing = rowById.get(message.id);
+
+    const isLast =
+      index === visibleMessages.length - 1;
+
+    const isStreamingAssistant =
+      isCurrentlyLoading &&
+      isLast &&
+      message.role === 'assistant';
+
+    /**
+     * Message đã tồn tại trong tree.
+     */
+    if (existing) {
+      const nextFinishReason:
+        StoredMessage['finishReason'] =
+        isStreamingAssistant
+          ? existing.finishReason
+          : isLast &&
+              message.role === 'assistant'
+            ? finishReason ?? 'stop'
+            : existing.finishReason ?? 'stop';
+
+      const nextStatus:
+        StoredMessage['status'] =
+        isStreamingAssistant
+          ? 'streaming'
+          : isLast &&
+              message.role === 'assistant'
+            ? getFinalStoredStatus(
+                nextFinishReason,
+              )
+            : existing.status ?? 'complete';
+
+      const updated: StoredMessage = {
+        ...existing,
+
+        /**
+         * Content có thể thay đổi từng token trong lúc stream.
+         */
+        content: message.content,
+
+        /**
+         * Không thay đổi:
+         * - parentId
+         * - seq
+         * - branchOrder
+         */
+        finishReason: nextFinishReason,
+        status: nextStatus,
+      };
+
+      if (
+        hasStoredMessageChanged(
+          existing,
+          updated,
+        )
+      ) {
+        changedRows.push(updated);
+        rowById.set(updated.id, updated);
+
+        const existingIndex =
+          workingRows.findIndex(
+            (row) => row.id === updated.id,
+          );
+
+        if (existingIndex >= 0) {
+          workingRows[existingIndex] =
+            updated;
+        }
+      }
+
+      previousVisibleId = existing.id;
+      continue;
+    }
+
+    /**
+     * Message mới chưa tồn tại trong cây.
+     */
+    let parentId: string | null =
+      previousVisibleId;
+
+    let branchOrder: number;
+
+    const isPendingForkAssistant =
+      message.role === 'assistant' &&
+      pendingFork !== null &&
+      pendingFork.chatId === chatId &&
+      !pendingFork.assistantMessageId &&
+      previousVisibleId ===
+        pendingFork.parentId;
+
+    if (isPendingForkAssistant) {
+      /**
+       * Assistant được tạo bởi Edit hoặc Regenerate.
+       * Metadata phải lấy từ reservation đã tạo trước reload().
+       */
+      parentId = pendingFork.parentId;
+      branchOrder =
+        pendingFork.branchOrder;
+
+      createdAssistantId = message.id;
+    } else {
+      /**
+       * Message bình thường nối vào message trước đó
+       * trong active projection.
+       */
+      branchOrder = getNextBranchOrder(
+        workingRows,
+        parentId,
+      );
+    }
+
+    const attachments =
+      await getStoredAttachments(message);
+
+    const now = Date.now();
+
+    const newRow: StoredMessage = {
+      id: message.id,
+      chatId,
+      role:
+        message.role as StoredMessage['role'],
+      content: message.content,
+
+      parentId,
+
+      seq: nextSequence++,
+
+      createdAt: getMessageCreatedAt(
+        message,
+        now + index,
+      ),
+
+      attachments,
+
+      branchOrder,
+
+      finishReason:
+        isStreamingAssistant
+          ? undefined
+          : isLast &&
+              message.role === 'assistant'
+            ? finishReason ?? 'stop'
+            : 'stop',
+
+      status:
+        isStreamingAssistant
+          ? 'streaming'
+          : isLast &&
+              message.role === 'assistant'
+            ? getFinalStoredStatus(
+                finishReason ?? 'stop',
+              )
+            : 'complete',
+    };
+
+    workingRows.push(newRow);
+    changedRows.push(newRow);
+    rowById.set(newRow.id, newRow);
+
+    previousVisibleId = newRow.id;
+  }
+
+  return {
+    allRows: workingRows,
+    changedRows,
+    activeLeafId:
+      visibleMessages[
+        visibleMessages.length - 1
+      ]?.id ?? null,
+    createdAssistantId,
+  };
+}
+
+type AssistantForkSource =
+  | 'edit'
+  | 'regenerate';
+
+interface PendingAssistantFork {
+  chatId: string;
+
+  /**
+   * User message mà assistant mới sẽ trả lời.
+   */
+  parentId: string;
+
+  /**
+   * Thứ tự assistant mới trong nhóm siblings.
+   */
+  branchOrder: number;
+
+  source: AssistantForkSource;
+
+  /**
+   * Khi useChat tạo assistant thực tế, lưu id tại đây.
+   */
+  assistantMessageId?: string;
+
+  createdAt: number;
+}
+
 /* ------------------------------------------------------------------ */
 /* Memoized Message Item                                              */
 /* ------------------------------------------------------------------ */
+interface BranchInfo {
+  /**
+   * Index zero-based của message hiện tại trong nhóm siblings.
+   */
+  currentIndex: number;
+
+  /**
+   * Tổng số siblings.
+   */
+  total: number;
+}
+
+interface BranchSwitcherProps {
+  currentIndex: number;
+  total: number;
+  isTouchDevice: boolean;
+  disabled?: boolean;
+  onPrevious: () => void;
+  onNext: () => void;
+}
+
+const BranchSwitcher = memo(function BranchSwitcher({
+  currentIndex,
+  total,
+  isTouchDevice,
+  disabled = false,
+  onPrevious,
+  onNext,
+}: BranchSwitcherProps) {
+  /**
+   * Không hiển thị widget nếu message không có nhiều version.
+   */
+  if (total <= 1) {
+    return null;
+  }
+
+  const isFirst = currentIndex <= 0;
+  const isLast = currentIndex >= total - 1;
+
+  return (
+    <div
+      role="group"
+      aria-label={`Phiên bản ${currentIndex + 1} trên ${total}`}
+      className={`mt-2 flex items-center gap-1 text-zinc-400 ${
+        isTouchDevice ? 'min-h-8' : 'min-h-6'
+      }`}
+    >
+      <button
+        type="button"
+        onClick={onPrevious}
+        disabled={disabled || isFirst}
+        aria-label="Chuyển sang phiên bản trước"
+        title="Phiên bản trước"
+        className={`inline-flex items-center justify-center rounded-md
+          text-zinc-400 transition-colors
+          hover:bg-black/10 hover:text-zinc-100
+          dark:hover:bg-white/10
+          disabled:pointer-events-none disabled:opacity-30
+          ${
+            isTouchDevice
+              ? 'min-h-8 min-w-8'
+              : 'min-h-6 min-w-6'
+          }`}
+      >
+        <ChevronLeft size={15} strokeWidth={2} />
+      </button>
+
+      <span
+        aria-live="polite"
+        className="min-w-[42px] select-none text-center font-mono text-[11px]"
+      >
+        {currentIndex + 1} / {total}
+      </span>
+
+      <button
+        type="button"
+        onClick={onNext}
+        disabled={disabled || isLast}
+        aria-label="Chuyển sang phiên bản tiếp theo"
+        title="Phiên bản tiếp theo"
+        className={`inline-flex items-center justify-center rounded-md
+          text-zinc-400 transition-colors
+          hover:bg-black/10 hover:text-zinc-100
+          dark:hover:bg-white/10
+          disabled:pointer-events-none disabled:opacity-30
+          ${
+            isTouchDevice
+              ? 'min-h-8 min-w-8'
+              : 'min-h-6 min-w-6'
+          }`}
+      >
+        <ChevronRight size={15} strokeWidth={2} />
+      </button>
+    </div>
+  );
+});
+
 interface MessageItemProps {
   m: Message;
+
+  /**
+   * Thông tin branch của message đang hiển thị.
+   * undefined nếu message không có siblings.
+   */
+  branchInfo?: BranchInfo;
+
   isStreaming: boolean;
   isEditing: boolean;
   isCopied: boolean;
@@ -89,8 +668,13 @@ interface MessageItemProps {
   sendOnEnter: boolean;
   throttleMs: number;
   animations: boolean;
+
   onCopy: (m: Message) => void;
   onRegenerate: (id: string) => void;
+  onSwitchBranch: (
+    messageId: string,
+    direction: 'previous' | 'next',
+  ) => void;
   onStartEdit: (m: Message) => void;
   onSaveEdit: (id: string) => void;
   onCancelEdit: () => void;
@@ -100,6 +684,7 @@ interface MessageItemProps {
 const MessageItem = memo(
   function MessageItem({
     m,
+    branchInfo,
     isStreaming,
     isEditing,
     isCopied,
@@ -110,19 +695,20 @@ const MessageItem = memo(
     animations,
     onCopy,
     onRegenerate,
+    onSwitchBranch,
     onStartEdit,
     onSaveEdit,
     onCancelEdit,
     onDraftChange,
   }: MessageItemProps) {
-    const shouldAnimateLayout = animations && !isStreaming;
+    const shouldAnimate = animations && !isStreaming;
 
     return (
       <motion.div
-        layout={shouldAnimateLayout}
-        initial={shouldAnimateLayout ? { opacity: 0, y: 10 } : false}
-        animate={shouldAnimateLayout ? { opacity: 1, y: 0 } : false}
-        transition={{ duration: shouldAnimateLayout ? 0.2 : 0 }}
+        layout={false}
+        initial={shouldAnimate ? { opacity: 0, y: 10 } : false}
+        animate={shouldAnimate ? { opacity: 1, y: 0 } : false}
+        transition={{ duration: shouldAnimate ? 0.2 : 0 }}
         style={{ contentVisibility: 'auto', containIntrinsicSize: '0 160px' }}
         className={`group flex w-full ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}
       >
@@ -197,6 +783,22 @@ const MessageItem = memo(
             </ErrorBoundary>
           )}
 
+          {/* Branch Switcher */}
+          {!isEditing && branchInfo && (
+            <BranchSwitcher
+              currentIndex={branchInfo.currentIndex}
+              total={branchInfo.total}
+              isTouchDevice={isTouchDevice}
+              disabled={isStreaming}
+              onPrevious={() =>
+                onSwitchBranch(m.id, 'previous')
+              }
+              onNext={() =>
+                onSwitchBranch(m.id, 'next')
+              }
+            />
+          )}
+
           {/* Action toolbar */}
           {!isEditing && (
             <div
@@ -241,6 +843,8 @@ const MessageItem = memo(
     prev.m.id === next.m.id &&
     prev.m.content === next.m.content &&
     prev.m.role === next.m.role &&
+    prev.branchInfo?.currentIndex === next.branchInfo?.currentIndex &&
+    prev.branchInfo?.total === next.branchInfo?.total &&
     prev.isStreaming === next.isStreaming &&
     prev.isEditing === next.isEditing &&
     prev.isCopied === next.isCopied &&
@@ -318,6 +922,12 @@ const ChatHeader = memo(function ChatHeader({
 /* ------------------------------------------------------------------ */
 interface MessageListProps {
   messages: Message[];
+
+  branchInfoByMessageId: Map<
+    string,
+    BranchInfo
+  >;
+
   isLoading: boolean;
   lastMessageId?: string;
   editingId: string | null;
@@ -330,10 +940,17 @@ interface MessageListProps {
   error?: Error;
   autoScroll: boolean;
   scrollRef: React.RefObject<HTMLDivElement | null>;
+
   onScroll: () => void;
   onScrollToBottom: () => void;
   onCopy: (m: Message) => void;
   onRegenerate: (id: string) => void;
+
+  onSwitchBranch: (
+    messageId: string,
+    direction: 'previous' | 'next',
+  ) => void;
+
   onStartEdit: (m: Message) => void;
   onSaveEdit: (id: string) => void;
   onCancelEdit: () => void;
@@ -344,6 +961,7 @@ interface MessageListProps {
 
 const MessageList = memo(function MessageList({
   messages,
+  branchInfoByMessageId,
   isLoading,
   lastMessageId,
   editingId,
@@ -360,6 +978,7 @@ const MessageList = memo(function MessageList({
   onScrollToBottom,
   onCopy,
   onRegenerate,
+  onSwitchBranch,
   onStartEdit,
   onSaveEdit,
   onCancelEdit,
@@ -372,8 +991,37 @@ const MessageList = memo(function MessageList({
     getScrollElement: () => scrollRef.current,
     estimateSize: () => 140,
     overscan: 5,
-    getItemKey: (index) => messages[index]?.id ?? index,
+
+    /**
+     * Message id ổn định quan trọng hơn index.
+     * Khi đổi branch, row có thể đổi nội dung và thứ tự,
+     * nhưng mỗi message vẫn có identity riêng.
+     */
+    getItemKey: (index) =>
+      messages[index]?.id ?? `row-${index}`,
   });
+
+  const branchLayoutSignature = useMemo(
+    () =>
+      messages
+        .map((message) => {
+          const info =
+            branchInfoByMessageId.get(message.id);
+
+          return [
+            message.id,
+            message.content.length,
+            info?.currentIndex ?? -1,
+            info?.total ?? 1,
+          ].join(':');
+        })
+        .join('|'),
+    [messages, branchInfoByMessageId],
+  );
+
+  useEffect(() => {
+    rowVirtualizer.measure();
+  }, [branchLayoutSignature, rowVirtualizer]);
 
   const suggestions = useMemo(
     () => ['Explain quantum computing', 'Write a Python script for scraping', 'Plan a healthy meal', 'Summarize an article'],
@@ -426,6 +1074,7 @@ const MessageList = memo(function MessageList({
                   key={m.id}
                   ref={rowVirtualizer.measureElement}
                   data-index={virtualRow.index}
+                  data-message-id={m.id}
                   style={{
                     position: 'absolute',
                     top: 0,
@@ -437,6 +1086,7 @@ const MessageList = memo(function MessageList({
                 >
                   <MessageItem
                     m={m}
+                    branchInfo={branchInfoByMessageId.get(m.id)}
                     isStreaming={isLoading && m.role === 'assistant' && m.id === lastMessageId}
                     isEditing={editingId === m.id}
                     isCopied={copiedId === m.id}
@@ -447,6 +1097,7 @@ const MessageList = memo(function MessageList({
                     animations={animations}
                     onCopy={onCopy}
                     onRegenerate={onRegenerate}
+                    onSwitchBranch={onSwitchBranch}
                     onStartEdit={onStartEdit}
                     onSaveEdit={onSaveEdit}
                     onCancelEdit={onCancelEdit}
@@ -660,7 +1311,6 @@ export default function ChatInterface() {
   const tabId = useRef(crypto.randomUUID());
   const requestEpoch = useRef(0);
   const previousChatId = useRef<string | null>(currentChatId);
-  const messageRowsCache = useRef<Map<string, { content: string; finishReason: string; row: StoredMessage }>>(new Map());
   const broadcastRef = useRef<BroadcastChannel | null>(null);
 
   useEffect(() => {
@@ -690,6 +1340,30 @@ export default function ChatInterface() {
   const [draft, setDraft] = useState('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
+
+  const [allStoredMessages, setAllStoredMessages] = useState<StoredMessage[]>([]);
+  const [activeLeafId, setActiveLeafId] = useState<string | null>(null);
+
+  const allStoredMessagesRef = useRef<StoredMessage[]>([]);
+  const activeLeafIdRef = useRef<string | null>(null);
+  const pendingAssistantForkRef = useRef<PendingAssistantFork | null>(null);
+  const treePersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const treePersistQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const latestPersistSnapshotRef = useRef<{
+    chatId: string;
+    messages: Message[];
+    epoch: number;
+  } | null>(null);
+  const treePersistEpochRef = useRef(0);
+  const wasLoadingRef = useRef(false);
+
+  useEffect(() => {
+    allStoredMessagesRef.current = allStoredMessages;
+  }, [allStoredMessages]);
+
+  useEffect(() => {
+    activeLeafIdRef.current = activeLeafId;
+  }, [activeLeafId]);
 
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -801,16 +1475,72 @@ export default function ChatInterface() {
     onError: (err) => console.error('[useChat]', err),
   });
 
+  const isLoadingRef = useRef(isLoading);
+
   useEffect(() => {
-    if (previousChatId.current !== currentChatId) {
-      requestEpoch.current++;
+    isLoadingRef.current = isLoading;
+  }, [isLoading]);
+
+  const branchInfoByMessageId = useMemo(() => {
+    const result = new Map<string, BranchInfo>();
+
+    for (const message of messages) {
+      const siblingInfo = getSiblings(
+        allStoredMessages,
+        message.id,
+      );
+
+      if (siblingInfo.total <= 1) {
+        continue;
+      }
+
+      result.set(message.id, {
+        currentIndex: siblingInfo.currentIndex,
+        total: siblingInfo.total,
+      });
+    }
+
+    return result;
+  }, [messages, allStoredMessages]);
+
+  useEffect(() => {
+    if (
+      previousChatId.current !==
+      currentChatId
+    ) {
+      requestEpoch.current += 1;
+      treePersistEpochRef.current += 1;
+
+      /**
+       * Hủy timer persist chưa chạy.
+       */
+      if (treePersistTimerRef.current) {
+        clearTimeout(
+          treePersistTimerRef.current,
+        );
+
+        treePersistTimerRef.current = null;
+      }
+
+      /**
+       * Fork reservation chỉ hợp lệ trong chat đã tạo ra nó.
+       */
+      pendingAssistantForkRef.current =
+        null;
+
       if (isLoading) {
         finishRef.current = 'abort';
         stop();
       }
-      previousChatId.current = currentChatId;
+
+      previousChatId.current =
+        currentChatId;
     }
-  }, [currentChatId, isLoading, stop]);
+  }, [
+    currentChatId,
+    isLoading,
+    stop,
+  ]);
 
   useEffect(() => {
     if (error) finishRef.current = 'error';
@@ -828,45 +1558,127 @@ export default function ChatInterface() {
   const handleStop = useCallback(() => {
     finishRef.current = 'abort';
     stop();
+
+    /**
+     * Không xóa ngay nếu Assistant đã xuất hiện vì persistence
+     * vẫn cần metadata của node đó.
+     */
+    const pending = pendingAssistantForkRef.current;
+
+    if (
+      pending &&
+      !pending.assistantMessageId
+    ) {
+      pendingAssistantForkRef.current = null;
+    }
   }, [stop]);
+
+  useEffect(() => {
+    if (isLoading) {
+      return;
+    }
+
+    const pending = pendingAssistantForkRef.current;
+
+    if (!pending) {
+      return;
+    }
+
+    /**
+     * Nếu request đã dừng nhưng Assistant chưa từng xuất hiện,
+     * reservation này không còn sử dụng được.
+     */
+    if (
+      !pending.assistantMessageId &&
+      (error || finishRef.current === 'error')
+    ) {
+      pendingAssistantForkRef.current = null;
+    }
+  }, [isLoading, error]);
 
   useEffect(() => {
     if (!currentChatId) {
       hydratedFor.current = null;
+
+      revokeObjectUrls(createdObjectUrls.current);
+
+      allStoredMessagesRef.current = [];
+      activeLeafIdRef.current = null;
+
+      setAllStoredMessages([]);
+      setActiveLeafId(null);
       setMessages([]);
+
       return;
     }
-    if (hydratedFor.current === currentChatId) return;
+
     const chatId = currentChatId;
-    hydratedFor.current = chatId;
     const epoch = requestEpoch.current;
     let cancelled = false;
 
     (async () => {
       try {
-        const rows = await db.messages
-          .where('[chatId+seq]')
-          .between([chatId, Dexie.minKey], [chatId, Dexie.maxKey])
-          .toArray();
+        const [chat, rows] = await Promise.all([
+          db.chats.get(chatId),
+          db.messages
+            .where('chatId')
+            .equals(chatId)
+            .toArray(),
+        ]);
 
-        if (cancelled || epoch !== requestEpoch.current || chatId !== useAppStore.getState().currentChatId) return;
+        if (
+          cancelled ||
+          epoch !== requestEpoch.current ||
+          chatId !== useAppStore.getState().currentChatId
+        ) {
+          return;
+        }
+
+        /**
+         * activeLeafId trong ChatSession là nguồn chính.
+         * Fallback về message cuối theo createdAt nếu dữ liệu cũ
+         * chưa có activeLeafId.
+         */
+        const fallbackLeafId = rows
+          .slice()
+          .sort((a, b) => {
+            if (a.createdAt !== b.createdAt) {
+              return b.createdAt - a.createdAt;
+            }
+
+            return b.seq - a.seq;
+          })[0]?.id;
+
+        const nextActiveLeafId =
+          chat?.activeLeafId ?? fallbackLeafId ?? null;
+
+        const activeThread =
+          reconstructActiveThread(
+            rows,
+            nextActiveLeafId ?? undefined,
+          );
 
         revokeObjectUrls(createdObjectUrls.current);
 
-        setMessages(
-          rows.map((m) => ({
-            id: m.id,
-            role: m.role,
-            content: m.content,
-            experimental_attachments: m.attachments?.map((a) => ({
-              name: a.name,
-              contentType: a.contentType,
-              url: createAttachmentUrl(a, createdObjectUrls.current),
-            })) as any,
-          })) as Message[],
+        const nextMessages = activeThread.map((row) =>
+          toChatMessage(
+            row,
+            createdObjectUrls.current,
+          ),
         );
-      } catch (err) {
-        console.error('[hydrate]', err);
+
+        if (cancelled) return;
+
+        allStoredMessagesRef.current = rows;
+        activeLeafIdRef.current = nextActiveLeafId;
+
+        setAllStoredMessages(rows);
+        setActiveLeafId(nextActiveLeafId);
+        setMessages(nextMessages);
+
+        hydratedFor.current = chatId;
+      } catch (error) {
+        console.error('[hydrate-tree]', error);
       }
     })();
 
@@ -878,85 +1690,331 @@ export default function ChatInterface() {
 
   useEffect(() => {
     return () => {
-      revokeObjectUrls(createdObjectUrls.current);
-      if (noticeTimer.current) clearTimeout(noticeTimer.current);
-      if (copiedTimer.current) clearTimeout(copiedTimer.current);
-      if (reloadTimer.current) clearTimeout(reloadTimer.current);
-      if (scrollFrame.current !== null) cancelAnimationFrame(scrollFrame.current);
+      requestEpoch.current += 1;
+      treePersistEpochRef.current += 1;
+
+      pendingAssistantForkRef.current = null;
+
+      revokeObjectUrls(
+        createdObjectUrls.current,
+      );
+
+      if (noticeTimer.current) {
+        clearTimeout(noticeTimer.current);
+      }
+
+      if (copiedTimer.current) {
+        clearTimeout(copiedTimer.current);
+      }
+
+      if (reloadTimer.current) {
+        clearTimeout(reloadTimer.current);
+      }
+
+      if (treePersistTimerRef.current) {
+        clearTimeout(
+          treePersistTimerRef.current,
+        );
+      }
+
+      if (scrollFrame.current !== null) {
+        cancelAnimationFrame(
+          scrollFrame.current,
+        );
+      }
     };
   }, []);
 
-  useEffect(() => {
-    if (isLoading || !currentChatId || !messages.length) return;
-    const chatId = currentChatId;
-    const reason = finishRef.current;
-    const epoch = requestEpoch.current;
+  const persistActiveProjection = useCallback(
+    async (
+      chatId: string,
+      visibleMessages: Message[],
+      epoch: number,
+    ) => {
+      if (
+        visibleMessages.length === 0 ||
+        chatId !==
+          useAppStore.getState()
+            .currentChatId ||
+        epoch !==
+          treePersistEpochRef.current
+      ) {
+        return;
+      }
 
-    (async () => {
-      try {
-        if (epoch !== requestEpoch.current || chatId !== useAppStore.getState().currentChatId) return;
+      const currentTree =
+        allStoredMessagesRef.current;
 
-        const baseTime = Date.now();
+      const pendingFork =
+        pendingAssistantForkRef.current;
 
-        const rows: StoredMessage[] = await Promise.all(
-          messages.map(async (m, i) => {
-            const isLast = i === messages.length - 1;
-            const itemReason = isLast ? reason : 'stop';
-            const cacheKey = `${chatId}:${m.id}`;
-            const cached = messageRowsCache.current.get(cacheKey);
+      const loading =
+        isLoadingRef.current;
 
-            if (cached && cached.content === m.content && cached.finishReason === itemReason) {
-              return { ...cached.row, seq: i };
-            }
+      const finalReason =
+        finishRef.current;
 
-            const rawAttachments = m.experimental_attachments as any[] | undefined;
-            const attachments = rawAttachments?.length
-              ? await Promise.all(rawAttachments.map(toStoredAttachment))
-              : undefined;
-
-            const createdAt =
-              typeof m.createdAt === 'number'
-                ? m.createdAt
-                : m.createdAt instanceof Date
-                  ? m.createdAt.getTime()
-                  : baseTime + i;
-
-            const row: StoredMessage = {
-              id: m.id,
-              chatId,
-              role: m.role as StoredMessage['role'],
-              content: m.content,
-              parentId: i === 0 ? null : (messages[i - 1]?.id ?? null),
-              seq: i,
-              createdAt,
-              attachments,
-              finishReason: itemReason,
-            };
-
-            messageRowsCache.current.set(cacheKey, { content: m.content, finishReason: itemReason, row });
-            return row;
-          }),
+      const result =
+        await reconcileActiveMessages(
+          chatId,
+          visibleMessages,
+          currentTree,
+          pendingFork,
+          loading,
+          finalReason,
         );
 
-        const keep = new Set(rows.map((r) => r.id));
+      if (
+        epoch !==
+          treePersistEpochRef.current ||
+        chatId !==
+          useAppStore.getState().currentChatId
+      ) {
+        return;
+      }
 
-        await db.transaction('rw', db.messages, db.chats, async () => {
-          const existing = await db.messages.where('chatId').equals(chatId).primaryKeys();
-          const stale = existing.filter((id) => !keep.has(id as string));
-          if (stale.length) await db.messages.bulkDelete(stale as string[]);
-          await db.messages.bulkPut(rows);
-          await db.chats.update(chatId, { updatedAt: Date.now() });
-        });
+      /**
+       * Nếu Assistant mới do reload() tạo đã được phát hiện,
+       * gắn ID thật của SDK vào reservation.
+       */
+      if (
+        result.createdAssistantId &&
+        pendingAssistantForkRef.current &&
+        pendingAssistantForkRef.current
+          .chatId === chatId
+      ) {
+        pendingAssistantForkRef.current = {
+          ...pendingAssistantForkRef.current,
+          assistantMessageId:
+            result.createdAssistantId,
+        };
+      }
 
-        notifyChatUpdated(chatId);
-      } catch (err: any) {
-        console.error('[persist]', err);
-        if (err?.name === 'QuotaExceededError') {
-          showNotice('Bộ nhớ IndexedDB đã đầy. Vui lòng dọn bớt ảnh hoặc đoạn chat cũ.');
+      /**
+       * Nếu không có row thay đổi, chỉ cần bảo đảm pointer đúng.
+       */
+      const leafId =
+        result.activeLeafId;
+
+      try {
+        await db.transaction(
+          'rw',
+          db.messages,
+          db.chats,
+          async () => {
+            if (
+              result.changedRows.length > 0
+            ) {
+              /**
+               * Chỉ upsert row thay đổi.
+               * Không xóa bất kỳ node nào.
+               */
+              await db.messages.bulkPut(
+                result.changedRows,
+              );
+            }
+
+            if (leafId) {
+              await db.chats.update(chatId, {
+                activeLeafId: leafId,
+
+                /**
+                 * Không làm sidebar reorder mỗi 250ms.
+                 */
+                ...(!loading
+                  ? {
+                      updatedAt: Date.now(),
+                    }
+                  : {}),
+              });
+            }
+          },
+        );
+
+        if (
+          epoch !==
+          treePersistEpochRef.current
+        ) {
+          return;
+        }
+
+        /**
+         * Đồng bộ toàn bộ in-memory tree.
+         */
+        allStoredMessagesRef.current =
+          result.allRows;
+
+        setAllStoredMessages(
+          result.allRows,
+        );
+
+        activeLeafIdRef.current =
+          leafId;
+
+        setActiveLeafId(leafId);
+
+        /**
+         * Khi stream đã kết thúc, reservation có thể được dọn.
+         *
+         * Chỉ dọn nếu Assistant thực tế đã xuất hiện.
+         */
+        const currentPending =
+          pendingAssistantForkRef.current;
+
+        if (
+          !loading &&
+          currentPending?.assistantMessageId
+        ) {
+          pendingAssistantForkRef.current =
+            null;
+        }
+
+        /**
+         * Không broadcast mỗi token để tránh các tab khác
+         * hydrate liên tục.
+         */
+        if (!loading) {
+          notifyChatUpdated(chatId);
+        }
+      } catch (error: any) {
+        console.error(
+          '[persistActiveProjection]',
+          error,
+        );
+
+        if (
+          error?.name ===
+          'QuotaExceededError'
+        ) {
+          showNotice(
+            'Bộ nhớ IndexedDB đã đầy. Vui lòng xóa bớt file hoặc cuộc trò chuyện cũ.',
+          );
         }
       }
-    })();
-  }, [isLoading, messages, currentChatId, notifyChatUpdated, showNotice]);
+    },
+    [
+      notifyChatUpdated,
+      showNotice,
+    ],
+  );
+
+  const enqueueTreePersistence = useCallback(
+    (
+      chatId: string,
+      snapshot: Message[],
+      epoch: number,
+    ) => {
+      treePersistQueueRef.current =
+        treePersistQueueRef.current
+          .catch((error) => {
+            /**
+             * Một task lỗi không được phá hỏng toàn bộ queue.
+             */
+            console.error(
+              '[treePersistQueue] Previous task failed:',
+              error,
+            );
+          })
+          .then(() =>
+            persistActiveProjection(
+              chatId,
+              snapshot,
+              epoch,
+            ),
+          );
+    },
+    [persistActiveProjection],
+  );
+
+  useEffect(() => {
+    if (
+      !currentChatId ||
+      messages.length === 0
+    ) {
+      latestPersistSnapshotRef.current = null;
+      wasLoadingRef.current = isLoading;
+      return;
+    }
+
+    const chatId = currentChatId;
+    const epoch = treePersistEpochRef.current;
+
+    /**
+     * Luôn lưu snapshot mới nhất.
+     *
+     * Shallow copy array là đủ vì Message object từ useChat được xem
+     * như immutable snapshot trong flow hiện tại.
+     */
+    latestPersistSnapshotRef.current = {
+      chatId,
+      messages: [...messages],
+      epoch,
+    };
+
+    const streamJustFinished =
+      wasLoadingRef.current && !isLoading;
+
+    wasLoadingRef.current = isLoading;
+
+    /**
+     * Khi stream kết thúc, phải flush snapshot cuối ngay lập tức.
+     */
+    if (streamJustFinished || !isLoading) {
+      if (treePersistTimerRef.current) {
+        clearTimeout(treePersistTimerRef.current);
+        treePersistTimerRef.current = null;
+      }
+
+      const latest =
+        latestPersistSnapshotRef.current;
+
+      latestPersistSnapshotRef.current = null;
+
+      if (latest) {
+        enqueueTreePersistence(
+          latest.chatId,
+          latest.messages,
+          latest.epoch,
+        );
+      }
+
+      return;
+    }
+
+    /**
+     * Đang stream:
+     * Nếu đã có timer thì chỉ cập nhật latestPersistSnapshotRef,
+     * không reset timer.
+     */
+    if (treePersistTimerRef.current) {
+      return;
+    }
+
+    treePersistTimerRef.current =
+      setTimeout(() => {
+        treePersistTimerRef.current = null;
+
+        const latest =
+          latestPersistSnapshotRef.current;
+
+        latestPersistSnapshotRef.current = null;
+
+        if (!latest) {
+          return;
+        }
+
+        enqueueTreePersistence(
+          latest.chatId,
+          latest.messages,
+          latest.epoch,
+        );
+      }, 250);
+  }, [
+    currentChatId,
+    messages,
+    isLoading,
+    enqueueTreePersistence,
+  ]);
 
   useEffect(() => {
     if (typeof window === 'undefined' || !('BroadcastChannel' in window)) return;
@@ -973,27 +2031,44 @@ export default function ChatInterface() {
       hydratedFor.current = null;
       const chatId = currentChatId;
       try {
-        const rows = await db.messages
-          .where('[chatId+seq]')
-          .between([chatId, Dexie.minKey], [chatId, Dexie.maxKey])
-          .toArray();
+        const [chat, rows] = await Promise.all([
+          db.chats.get(chatId),
+          db.messages
+            .where('chatId')
+            .equals(chatId)
+            .toArray(),
+        ]);
 
         if (cancelled || chatId !== useAppStore.getState().currentChatId) return;
 
+        const nextLeafId =
+          chat?.activeLeafId ??
+          rows
+            .slice()
+            .sort((a, b) => b.createdAt - a.createdAt)[0]
+            ?.id ??
+          null;
+
+        const activeThread = reconstructActiveThread(
+          rows,
+          nextLeafId ?? undefined,
+        );
+
         revokeObjectUrls(createdObjectUrls.current);
 
-        setMessages(
-          rows.map((m) => ({
-            id: m.id,
-            role: m.role,
-            content: m.content,
-            experimental_attachments: m.attachments?.map((a) => ({
-              name: a.name,
-              contentType: a.contentType,
-              url: createAttachmentUrl(a, createdObjectUrls.current),
-            })) as any,
-          })) as Message[],
+        const nextMessages = activeThread.map((row) =>
+          toChatMessage(
+            row,
+            createdObjectUrls.current,
+          ),
         );
+
+        allStoredMessagesRef.current = rows;
+        activeLeafIdRef.current = nextLeafId;
+
+        setAllStoredMessages(rows);
+        setActiveLeafId(nextLeafId);
+        setMessages(nextMessages);
       } catch (err) {
         console.error('[broadcastSync]', err);
       }
@@ -1098,32 +2173,6 @@ export default function ChatInterface() {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
   }, []);
 
-  const truncateFrom = useCallback(
-    async (index: number, keep: Message[]) => {
-      if (currentChatId) {
-        await db.transaction('rw', db.messages, db.chats, async () => {
-          await db.messages
-            .where('[chatId+seq]')
-            .between([currentChatId, index], [currentChatId, Dexie.maxKey], true, true)
-            .delete();
-
-          const stale = await db.messages
-            .where('chatId')
-            .equals(currentChatId)
-            .filter((m) => m.seq >= index)
-            .primaryKeys();
-
-          if (stale.length) {
-            await db.messages.bulkDelete(stale as string[]);
-          }
-
-          await db.chats.update(currentChatId, { updatedAt: Date.now() });
-        });
-      }
-      setMessages(keep);
-    },
-    [currentChatId, setMessages],
-  );
 
   const triggerReload = useCallback(() => {
     if (reloadTimer.current) {
@@ -1135,16 +2184,281 @@ export default function ChatInterface() {
     }, 0);
   }, [reload]);
 
-  const handleRegenerate = useCallback(
-    async (id: string) => {
-      if (isLoading) return;
-      const idx = messages.findIndex((m) => m.id === id);
-      if (idx < 1 || messages[idx - 1]?.role !== 'user') return;
-      finishRef.current = 'stop';
-      await truncateFrom(idx, messages.slice(0, idx));
-      triggerReload();
+  const handleSwitchBranch = useCallback(
+    async (
+      targetMessageId: string,
+      direction: 'previous' | 'next',
+    ) => {
+      /**
+       * Chưa xử lý stop stream trong Giai đoạn 2.
+       * Widget cũng đã disabled khi message đang stream.
+       */
+      if (isLoading) {
+        return;
+      }
+
+      const chatId = currentChatId;
+
+      if (!chatId) {
+        return;
+      }
+
+      const rows = allStoredMessagesRef.current;
+
+      if (rows.length === 0) {
+        return;
+      }
+
+      const siblings = getSiblings(
+        rows,
+        targetMessageId,
+      );
+
+      if (
+        siblings.total <= 1 ||
+        siblings.currentIndex < 0
+      ) {
+        return;
+      }
+
+      const nextIndex =
+        direction === 'previous'
+          ? siblings.currentIndex - 1
+          : siblings.currentIndex + 1;
+
+      if (
+        nextIndex < 0 ||
+        nextIndex >= siblings.total
+      ) {
+        return;
+      }
+
+      const selectedSibling =
+        siblings.siblings[nextIndex];
+
+      if (!selectedSibling) {
+        return;
+      }
+
+      const nextLeafId = findDeepestLeafId(
+        rows,
+        selectedSibling.id,
+      );
+
+      if (!nextLeafId) {
+        return;
+      }
+
+      const nextThread = reconstructActiveThread(
+        rows,
+        nextLeafId,
+      );
+
+      if (nextThread.length === 0) {
+        return;
+      }
+
+      /**
+       * Đổi URL attachment theo active thread mới.
+       */
+      revokeObjectUrls(createdObjectUrls.current);
+
+      const nextMessages = nextThread.map((row) =>
+        toChatMessage(
+          row,
+          createdObjectUrls.current,
+        ),
+      );
+
+      /**
+       * Optimistic UI update.
+       */
+      treePersistEpochRef.current += 1;
+      activeLeafIdRef.current = nextLeafId;
+      setActiveLeafId(nextLeafId);
+      setMessages(nextMessages);
+
+      /**
+       * Chỉ cập nhật pointer, không xóa message và không thay đổi cây.
+       */
+      try {
+        await db.chats.update(chatId, {
+          activeLeafId: nextLeafId,
+          updatedAt: Date.now(),
+        });
+
+        notifyChatUpdated(chatId);
+      } catch (error) {
+        console.error(
+          '[handleSwitchBranch] Failed to persist active leaf:',
+          error,
+        );
+      }
     },
-    [isLoading, messages, truncateFrom, triggerReload],
+    [
+      currentChatId,
+      isLoading,
+      notifyChatUpdated,
+      setMessages,
+    ],
+  );
+
+  const handleRegenerate = useCallback(
+    async (assistantMessageId: string) => {
+      if (
+        isLoading ||
+        !currentChatId
+      ) {
+        return;
+      }
+
+      const chatId = currentChatId;
+      const currentRows =
+        allStoredMessagesRef.current;
+
+      const originalAssistant =
+        currentRows.find(
+          (message) =>
+            message.id === assistantMessageId,
+        );
+
+      if (
+        !originalAssistant ||
+        originalAssistant.role !== 'assistant'
+      ) {
+        console.warn(
+          '[handleRegenerate] Không tìm thấy Assistant message hợp lệ:',
+          assistantMessageId,
+        );
+        return;
+      }
+
+      /**
+       * Assistant mới phải có cùng parentId với Assistant cũ.
+       * Parent thông thường là User message ngay trước đó.
+       */
+      const userParentId =
+        originalAssistant.parentId;
+
+      if (!userParentId) {
+        showNotice(
+          'Không thể tạo lại phản hồi vì không tìm thấy User message cha.',
+        );
+        return;
+      }
+
+      const userParent = currentRows.find(
+        (message) =>
+          message.id === userParentId,
+      );
+
+      if (
+        !userParent ||
+        userParent.role !== 'user'
+      ) {
+        showNotice(
+          'Không thể tạo lại phản hồi vì cấu trúc hội thoại không hợp lệ.',
+        );
+        return;
+      }
+
+      const contextThread =
+        reconstructActiveThread(
+          currentRows,
+          userParentId,
+        );
+
+      if (
+        contextThread.length === 0 ||
+        contextThread[
+          contextThread.length - 1
+        ]?.id !== userParentId
+      ) {
+        showNotice(
+          'Không thể tái tạo ngữ cảnh hội thoại.',
+        );
+        return;
+      }
+
+      finishRef.current = 'stop';
+
+      treePersistEpochRef.current += 1;
+
+      if (treePersistTimerRef.current) {
+        clearTimeout(treePersistTimerRef.current);
+        treePersistTimerRef.current = null;
+      }
+
+      latestPersistSnapshotRef.current = null;
+
+      const now = Date.now();
+
+      const pendingFork: PendingAssistantFork = {
+        chatId,
+        parentId: userParentId,
+        branchOrder: getNextBranchOrder(
+          currentRows,
+          userParentId,
+        ),
+        source: 'regenerate',
+        createdAt: now,
+      };
+
+      try {
+        /**
+         * Assistant mới chưa xuất hiện, nên User parent tạm là leaf.
+         */
+        await db.chats.update(chatId, {
+          activeLeafId: userParentId,
+          updatedAt: now,
+        });
+
+        pendingAssistantForkRef.current =
+          pendingFork;
+
+        activeLeafIdRef.current =
+          userParentId;
+
+        setActiveLeafId(userParentId);
+
+        revokeObjectUrls(
+          createdObjectUrls.current,
+        );
+
+        setMessages(
+          contextThread.map((row) =>
+            toChatMessage(
+              row,
+              createdObjectUrls.current,
+            ),
+          ),
+        );
+
+        notifyChatUpdated(chatId);
+
+        triggerReload();
+      } catch (error) {
+        pendingAssistantForkRef.current =
+          null;
+
+        console.error(
+          '[handleRegenerate]',
+          error,
+        );
+
+        showNotice(
+          'Không thể bắt đầu tạo lại phản hồi.',
+        );
+      }
+    },
+    [
+      currentChatId,
+      isLoading,
+      notifyChatUpdated,
+      setMessages,
+      showNotice,
+      triggerReload,
+    ],
   );
 
   const startEdit = useCallback((m: Message) => {
@@ -1158,19 +2472,225 @@ export default function ChatInterface() {
   }, []);
 
   const saveEdit = useCallback(
-    async (id: string) => {
+    async (messageId: string) => {
       const text = draft.trim();
-      if (!text || isLoading) return;
-      const idx = messages.findIndex((m) => m.id === id);
-      if (idx === -1) return;
-      const edited: Message = { ...messages[idx], content: text };
+
+      if (
+        !text ||
+        isLoading ||
+        !currentChatId
+      ) {
+        return;
+      }
+
+      const chatId = currentChatId;
+      const currentRows =
+        allStoredMessagesRef.current;
+
+      const originalUser = currentRows.find(
+        (message) => message.id === messageId,
+      );
+
+      if (
+        !originalUser ||
+        originalUser.role !== 'user'
+      ) {
+        console.warn(
+          '[saveEdit] Không tìm thấy User message hợp lệ:',
+          messageId,
+        );
+        return;
+      }
+
       finishRef.current = 'stop';
-      await truncateFrom(idx, [...messages.slice(0, idx), edited]);
-      setEditingId(null);
-      setDraft('');
-      triggerReload();
+
+      /**
+       * Projection cũ không còn là active projection.
+       */
+      treePersistEpochRef.current += 1;
+
+      if (treePersistTimerRef.current) {
+        clearTimeout(treePersistTimerRef.current);
+        treePersistTimerRef.current = null;
+      }
+
+      latestPersistSnapshotRef.current = null;
+
+      const now = Date.now();
+
+      /**
+       * Edited User phải là sibling của User cũ,
+       * do đó dùng cùng parentId.
+       */
+      const editedUserParentId =
+        originalUser.parentId;
+
+      const editedUser: StoredMessage = {
+        /**
+         * Copy các metadata có thể tái sử dụng,
+         * đặc biệt là attachments.
+         */
+        ...originalUser,
+
+        /**
+         * Tuyệt đối không dùng lại ID cũ.
+         */
+        id: crypto.randomUUID(),
+
+        chatId,
+
+        role: 'user',
+
+        content: text,
+
+        parentId: editedUserParentId,
+
+        seq: getNextSequence(currentRows),
+
+        createdAt: now,
+
+        branchOrder: getNextBranchOrder(
+          currentRows,
+          editedUserParentId,
+        ),
+
+        finishReason: 'stop',
+
+        status: 'complete',
+      };
+
+      /**
+       * Thêm node mới vào cây mà không thay đổi hoặc xóa
+       * originalUser và descendants cũ.
+       */
+      const nextAllRows = [
+        ...currentRows,
+        editedUser,
+      ];
+
+      /**
+       * Active thread mới:
+       *
+       * ancestors của User cũ
+       * + edited User mới
+       *
+       * Không copy assistant descendant cũ sang branch mới.
+       */
+      const parentPath = reconstructParentPath(
+        currentRows,
+        editedUserParentId,
+      );
+
+      const nextThread = [
+        ...parentPath,
+        editedUser,
+      ];
+
+      /**
+       * Chuẩn bị metadata cho Assistant sắp được useChat tạo.
+       * Assistant mới sẽ là child của editedUser.
+       */
+      const pendingFork: PendingAssistantFork = {
+        chatId,
+        parentId: editedUser.id,
+        branchOrder: getNextBranchOrder(
+          nextAllRows,
+          editedUser.id,
+        ),
+        source: 'edit',
+        createdAt: now,
+      };
+
+      try {
+        /**
+         * Ghi User branch mới trước khi gọi AI.
+         *
+         * Nếu ghi IndexedDB thất bại, không nên khởi động stream,
+         * vì nếu không UI và database sẽ lệch nhau.
+         */
+        await db.transaction(
+          'rw',
+          db.messages,
+          db.chats,
+          async () => {
+            await db.messages.put(editedUser);
+
+            await db.chats.update(chatId, {
+              /**
+               * Trước khi Assistant mới xuất hiện,
+               * editedUser tạm thời là active leaf.
+               */
+              activeLeafId: editedUser.id,
+              updatedAt: now,
+            });
+          },
+        );
+
+        /**
+         * Chỉ reserve sau khi User branch đã được lưu thành công.
+         */
+        pendingAssistantForkRef.current =
+          pendingFork;
+
+        /**
+         * Đồng bộ in-memory tree.
+         */
+        allStoredMessagesRef.current =
+          nextAllRows;
+
+        setAllStoredMessages(nextAllRows);
+
+        activeLeafIdRef.current =
+          editedUser.id;
+
+        setActiveLeafId(editedUser.id);
+
+        /**
+         * Chuyển projection của useChat sang branch mới.
+         */
+        revokeObjectUrls(
+          createdObjectUrls.current,
+        );
+
+        const nextChatMessages =
+          nextThread.map((row) =>
+            toChatMessage(
+              row,
+              createdObjectUrls.current,
+            ),
+          );
+
+        setMessages(nextChatMessages);
+
+        setEditingId(null);
+        setDraft('');
+
+        notifyChatUpdated(chatId);
+
+        /**
+         * Active thread hiện kết thúc bằng User message,
+         * nên reload() sẽ yêu cầu AI tạo Assistant mới.
+         */
+        triggerReload();
+      } catch (error) {
+        pendingAssistantForkRef.current = null;
+
+        console.error('[saveEdit]', error);
+
+        showNotice(
+          'Không thể tạo nhánh chỉnh sửa. Vui lòng thử lại.',
+        );
+      }
     },
-    [draft, isLoading, messages, truncateFrom, triggerReload],
+    [
+      currentChatId,
+      draft,
+      isLoading,
+      notifyChatUpdated,
+      setMessages,
+      showNotice,
+      triggerReload,
+    ],
   );
 
   const copyMessage = useCallback(async (m: Message) => {
@@ -1192,24 +2712,75 @@ export default function ChatInterface() {
   const deleteChat = useCallback(async () => {
     try {
       handleStop();
-      if (currentChatId) {
-        await db.transaction('rw', db.messages, db.chats, async () => {
-          await db.messages.where('chatId').equals(currentChatId).delete();
-          await db.chats.delete(currentChatId);
-        });
+
+      requestEpoch.current += 1;
+      treePersistEpochRef.current += 1;
+
+      if (treePersistTimerRef.current) {
+        clearTimeout(
+          treePersistTimerRef.current,
+        );
+
+        treePersistTimerRef.current = null;
       }
+
+      pendingAssistantForkRef.current = null;
+
+      if (currentChatId) {
+        await db.transaction(
+          'rw',
+          db.messages,
+          db.chats,
+          async () => {
+            /**
+             * Đây là thao tác xóa toàn bộ chat do người dùng yêu cầu,
+             * nên được phép xóa tất cả message của chat.
+             *
+             * Quy tắc "không xóa message" chỉ áp dụng cho
+             * Edit và Regenerate.
+             */
+            await db.messages
+              .where('chatId')
+              .equals(currentChatId)
+              .delete();
+
+            await db.chats.delete(
+              currentChatId,
+            );
+          },
+        );
+      }
+
+      revokeObjectUrls(
+        createdObjectUrls.current,
+      );
+
+      allStoredMessagesRef.current = [];
+      activeLeafIdRef.current = null;
+
+      setAllStoredMessages([]);
+      setActiveLeafId(null);
+      setMessages([]);
+
       hydratedFor.current = null;
       titledFor.current = null;
-      setMessages([]);
+
       setDraftId(crypto.randomUUID());
       setCurrentChatId(null);
       setAttachments([]);
+      setEditingId(null);
+      setDraft('');
       setConfirmClear(false);
-    } catch (err) {
-      console.error('[deleteChat]', err);
+    } catch (error) {
+      console.error('[deleteChat]', error);
       setConfirmClear(false);
     }
-  }, [handleStop, currentChatId, setMessages, setCurrentChatId]);
+  }, [
+    currentChatId,
+    handleStop,
+    setCurrentChatId,
+    setMessages,
+  ]);
 
   const onSubmit = useCallback(async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -1217,6 +2788,13 @@ export default function ChatInterface() {
 
     try {
       finishRef.current = 'stop';
+
+      /**
+       * Đây là lượt gửi bình thường,
+       * không phải Edit hoặc Regenerate.
+       */
+      pendingAssistantForkRef.current = null;
+
       let chatId = currentChatId;
       if (!chatId) {
         chatId = draftId;
@@ -1268,6 +2846,7 @@ export default function ChatInterface() {
 
       <MessageList
         messages={messages}
+        branchInfoByMessageId={branchInfoByMessageId}
         isLoading={isLoading}
         lastMessageId={lastMessageId}
         editingId={editingId}
@@ -1284,6 +2863,7 @@ export default function ChatInterface() {
         onScrollToBottom={scrollToBottom}
         onCopy={copyMessage}
         onRegenerate={handleRegenerate}
+        onSwitchBranch={handleSwitchBranch}
         onStartEdit={startEdit}
         onSaveEdit={saveEdit}
         onCancelEdit={cancelEdit}

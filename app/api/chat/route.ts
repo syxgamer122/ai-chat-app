@@ -250,9 +250,24 @@ export async function POST(req: Request) {
     const isReasoning = Boolean(modelConfig.isReasoning);
     const contextMessages = messages.slice(-50);
 
+    const sanitizedContextMessages = contextMessages.map((msg) => {
+      if (!msg.experimental_attachments?.length) return msg;
+      return {
+        ...msg,
+        experimental_attachments: msg.experimental_attachments.filter((att) => {
+          const url = att.url ?? '';
+          return (
+            url.startsWith('http://') ||
+            url.startsWith('https://') ||
+            url.startsWith('data:')
+          );
+        }),
+      };
+    });
+
     let core: CoreMessage[];
     try {
-      core = mergeSameRole(normalize(convertToCoreMessages(contextMessages as any)));
+      core = mergeSameRole(normalize(convertToCoreMessages(sanitizedContextMessages as any)));
     } catch {
       return Response.json(
         { error: 'Dữ liệu tin nhắn hoặc file đính kèm không đúng định dạng.' },
