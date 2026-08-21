@@ -120,13 +120,16 @@ export default function Home() {
                 <label className="text-sm font-medium text-zinc-300 mb-1.5 block">
                   Custom API Key
                 </label>
-                <input
-                  type="password"
-                  placeholder="sk-..."
-                  value={settings.apiKey || ''}
-                  onChange={(e) => updateSettings({ apiKey: e.target.value })}
-                  className="w-full bg-zinc-900 border border-zinc-800 rounded-xl p-2.5 text-sm text-zinc-200 outline-none focus:border-indigo-500 font-mono transition"
-                />
+                <form onSubmit={(e) => e.preventDefault()}>
+                  <input
+                    type="password"
+                    placeholder="sk-..."
+                    autoComplete="current-password"
+                    value={settings.apiKey || ''}
+                    onChange={(e) => updateSettings({ apiKey: e.target.value })}
+                    className="w-full bg-zinc-900 border border-zinc-800 rounded-xl p-2.5 text-sm text-zinc-200 outline-none focus:border-indigo-500 font-mono transition"
+                  />
+                </form>
                 <div className="flex items-start gap-1.5 mt-1.5 text-xs text-amber-500/90">
                   <ShieldAlert size={14} className="flex-shrink-0 mt-0.5" />
                   <span>

@@ -3,6 +3,7 @@ import {
   convertToCoreMessages,
   streamText,
   createDataStreamResponse,
+  formatDataStreamPart,
   APICallError,
   type CoreMessage,
 } from 'ai';
@@ -14,7 +15,7 @@ import { checkRateLimit, getClientIp } from '@/lib/rate-limit';
 export const runtime = 'edge';
 export const maxDuration = 60;
 
-const MAX_BODY_BYTES = 10 * 1024 * 1024; // 10MB limit
+const MAX_BODY_BYTES = 4.5 * 1024 * 1024; // 4.5MB Vercel platform limit
 
 const BodySchema = z.object({
   messages: z.array(z.any()).min(1).max(500),
@@ -22,6 +23,17 @@ const BodySchema = z.object({
   temperature: z.number().min(0).max(2).optional(),
   system: z.string().max(8000).optional(),
 });
+
+const REASONING_MODELS = new Set([
+  'gpt-5.6-luna',
+  'gpt-5.6-sol',
+  'gpt-5.6-terra',
+  'gpt-5.5',
+  'o1',
+  'o1-mini',
+  'o1-preview',
+  'o3-mini',
+]);
 
 const SECRET_REGEX = /\b(sk|sk-proj|sk-ant|Bearer)\s*[:=]?\s*[A-Za-z0-9_\-]{4,}/gi;
 
@@ -75,7 +87,6 @@ export async function POST(req: Request) {
   try {
     const customKey = req.headers.get('x-api-key')?.trim();
 
-    // 1. Rate Limiting (chỉ áp dụng cho bể key công khai, user dùng key riêng được miễn trừ)
     if (!customKey) {
       const clientIp = getClientIp(req);
       const { allowed, resetInSec } = checkRateLimit(clientIp, 30, 60_000);
@@ -87,7 +98,6 @@ export async function POST(req: Request) {
       }
     }
 
-    // 2. Payload size check
     const contentLength = Number(req.headers.get('content-length') || '0');
     if (contentLength > MAX_BODY_BYTES) {
       return Response.json({ error: 'Dữ liệu tin nhắn vượt quá giới hạn 10MB.' }, { status: 413 });
@@ -115,6 +125,8 @@ export async function POST(req: Request) {
       );
     }
 
+    const isReasoning = REASONING_MODELS.has(targetModel);
+
     // Tự động cắt context để giữ lại 50 tin nhắn gần nhất (tránh vượt token budget)
     const contextMessages = messages.slice(-50);
 
@@ -136,7 +148,7 @@ export async function POST(req: Request) {
 
     if (!candidateKeys.length) {
       return Response.json(
-        { error: 'Toàn bộ API Key của hệ thống đang tạm ngưng hoặc chưa được cấu hình. Vui lòng thử lại sau ít phút.' },
+        { error: 'Toàn bộ API Key của hệ thống đang tạm ngưng hoặc chưa được cấu hình. Vui lòng kiểm tra lại biến môi trường OPENAI_API_KEYS.' },
         { status: 503, headers: { 'Retry-After': '60' } },
       );
     }
@@ -156,39 +168,68 @@ export async function POST(req: Request) {
               baseURL: process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1',
             });
 
+            // Reasoning models không chấp nhận temperature != 1 hoặc max_tokens
             const result = streamText({
               model: openai(targetModel),
               messages: core,
-              temperature: Math.min(2, Math.max(0, temperature ?? 0.7)),
               system: system?.trim() ? system : undefined,
-              maxTokens: 4096,
               abortSignal: req.signal,
-              onError: ({ error }) => {
-                // Người dùng bấm Stop không phải là lỗi của Key -> Không phạt key vào cooldown
-                if (isAbort(error)) return;
-                console.error(`[streamText ${getKeyLabel(selectedKey)}]`, sanitizeErrorMessage(error));
-                markKeyFailure(selectedKey, getStatusCode(error));
-              },
-              onFinish: () => {
-                // Chỉ mở khóa và xóa bộ đếm lỗi khi stream hoàn thành thực sự thành công
-                markKeySuccess(selectedKey);
-              },
+              ...(isReasoning
+                ? {}
+                : {
+                    temperature: Math.min(2, Math.max(0, temperature ?? 0.7)),
+                    maxTokens: 4096,
+                  }),
             });
 
-            result.mergeIntoDataStream(dataStream);
-            return;
-          } catch (err) {
-            lastError = err;
-            if (!isAbort(err)) {
-              console.warn(`[Failover] ${getKeyLabel(selectedKey)} gặp lỗi:`, sanitizeErrorMessage(err));
-              markKeyFailure(selectedKey, getStatusCode(err));
+            const reader = result.fullStream.getReader();
+            let emitted = false;
+
+            try {
+              while (true) {
+                const { done, value } = await reader.read();
+                if (done) {
+                  markKeySuccess(selectedKey);
+                  return;
+                }
+
+                if (value.type === 'error') {
+                  throw value.error;
+                }
+
+                if (value.type === 'text-delta') {
+                  emitted = true;
+                  dataStream.write(formatDataStreamPart('text', value.textDelta));
+                } else if (value.type === 'reasoning') {
+                  emitted = true;
+                  dataStream.write(formatDataStreamPart('reasoning', value.textDelta));
+                } else if (value.type === 'source') {
+                  emitted = true;
+                  dataStream.write(formatDataStreamPart('source', value.source));
+                }
+              }
+            } catch (streamErr) {
+              void reader.cancel();
+              if (isAbort(streamErr)) return;
+              lastError = streamErr;
+              markKeyFailure(selectedKey, getStatusCode(streamErr));
+              console.warn(`[Failover] ${getKeyLabel(selectedKey)}:`, sanitizeErrorMessage(streamErr));
+              // Nếu đã stream một phần nội dung ra client thì không thể đổi key giữa chừng
+              if (emitted) {
+                throw streamErr;
+              }
             }
+          } catch (initErr) {
+            if (isAbort(initErr)) return;
+            lastError = initErr;
+            markKeyFailure(selectedKey, getStatusCode(initErr));
+            console.warn(`[Failover init] ${getKeyLabel(selectedKey)}:`, sanitizeErrorMessage(initErr));
           }
         }
 
         throw lastError;
       },
-      getErrorMessage: sanitizeErrorMessage,
+      onError: sanitizeErrorMessage, // Đổi từ getErrorMessage -> onError để hiển thị lỗi thật từ provider ra UI
     });
   } catch (error: any) {
     console.error('Chat API Fatal Error:', sanitizeErrorMessage(error));

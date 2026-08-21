@@ -83,6 +83,7 @@ export const db = new ChatDatabase();
 if (typeof window !== 'undefined') {
   db.on('versionchange', () => {
     db.close();
+    window.location.reload();
   });
   db.on('blocked', () => {
     console.warn('[IndexedDB] Database operation was blocked by another open tab.');

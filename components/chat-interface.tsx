@@ -30,7 +30,7 @@ async function toStoredAttachment(a: any): Promise<StoredAttachment> {
 }
 
 /* ------------------------------------------------------------------ */
-/* Memoized Message Item with content-visibility                      */
+/* Memoized Message Item                                              */
 /* ------------------------------------------------------------------ */
 interface MessageItemProps {
   m: Message;
@@ -74,7 +74,7 @@ const MessageItem = memo(
         initial={animations ? { opacity: 0, y: 10 } : false}
         animate={animations ? { opacity: 1, y: 0 } : false}
         transition={{ duration: animations ? 0.2 : 0 }}
-        style={{ contentVisibility: 'auto', containIntrinsicSize: '0 80px', contain: 'layout style' }}
+        style={{ contentVisibility: 'auto', containIntrinsicSize: '0 160px' }}
         className={`group flex w-full ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}
       >
         <div
@@ -207,10 +207,18 @@ export default function ChatInterface() {
   const currentChatId = useAppStore((s) => s.currentChatId);
   const setCurrentChatId = useAppStore((s) => s.setCurrentChatId);
   const setSidebarOpen = useAppStore((s) => s.setSidebarOpen);
-  const settings = useAppStore((s) => s.settings);
+
+  const model = useAppStore((s) => s.settings.model);
+  const temperature = useAppStore((s) => s.settings.temperature);
+  const systemPrompt = useAppStore((s) => s.settings.systemPrompt);
+  const apiKey = useAppStore((s) => s.settings.apiKey);
+  const sendOnEnter = useAppStore((s) => s.settings.sendOnEnter);
+  const throttleMs = useAppStore((s) => s.settings.perf.throttleMs);
+  const animations = useAppStore((s) => s.settings.perf.animations);
 
   const [draftId, setDraftId] = useState(() => crypto.randomUUID());
   const chatKey = currentChatId ?? draftId;
+  const tabId = useRef(crypto.randomUUID());
 
   const [autoScroll, setAutoScroll] = useState(true);
   const [attachments, setAttachments] = useState<File[]>([]);
@@ -221,6 +229,7 @@ export default function ChatInterface() {
   const [confirmClear, setConfirmClear] = useState(false);
 
   const [previewMap, setPreviewMap] = useState<Map<File, string>>(new Map());
+  const createdObjectUrls = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     const created: string[] = [];
@@ -237,7 +246,7 @@ export default function ChatInterface() {
     };
   }, [attachments]);
 
-  const MAX_TOTAL_ATTACHMENT_BYTES = 6 * 1024 * 1024;
+  const MAX_TOTAL_ATTACHMENT_BYTES = 3 * 1024 * 1024; // 3MB limit để không vượt trần Vercel 4.5MB
   const MAX_FILES = 4;
 
   const addFiles = (files: FileList | File[] | null) => {
@@ -257,7 +266,7 @@ export default function ChatInterface() {
     }
 
     if (rejected.length) {
-      setNotice(`Bỏ qua file vượt quá tổng giới hạn 6MB: ${rejected.join(', ')}`);
+      setNotice(`Bỏ qua file vượt quá tổng giới hạn 3MB: ${rejected.join(', ')}`);
       setTimeout(() => setNotice(null), 4000);
     }
     setAttachments((prev) => [...prev, ...ok].slice(0, MAX_FILES));
@@ -287,13 +296,13 @@ export default function ChatInterface() {
     handleSubmit, stop, reload, isLoading, error,
   } = useChat({
     id: chatKey,
-    headers: settings.apiKey ? { 'x-api-key': settings.apiKey } : undefined,
+    headers: apiKey ? { 'x-api-key': apiKey } : undefined,
     body: {
-      model: settings.model,
-      temperature: settings.temperature,
-      system: settings.systemPrompt,
+      model,
+      temperature,
+      system: systemPrompt,
     },
-    experimental_throttle: 50,
+    experimental_throttle: throttleMs,
     onError: (err) => console.error('[useChat]', err),
   });
 
@@ -306,6 +315,7 @@ export default function ChatInterface() {
     stop();
   }, [stop]);
 
+  /* Hydrate lịch sử từ Dexie và quản lý vòng đời ObjectURL không rò rỉ */
   useEffect(() => {
     if (!currentChatId) {
       hydratedFor.current = null;
@@ -326,16 +336,27 @@ export default function ChatInterface() {
 
         if (cancelled || chatId !== useAppStore.getState().currentChatId) return;
 
+        // Dọn sạch URL cũ trước khi tạo URL mới
+        createdObjectUrls.current.forEach((u) => URL.revokeObjectURL(u));
+        createdObjectUrls.current.clear();
+
         setMessages(
           rows.map((m) => ({
             id: m.id,
             role: m.role,
             content: m.content,
-            experimental_attachments: m.attachments?.map((a) => ({
-              name: a.name,
-              contentType: a.contentType,
-              url: a.blob ? URL.createObjectURL(a.blob) : (a.url ?? ''),
-            })) as any,
+            experimental_attachments: m.attachments?.map((a) => {
+              let url = a.url ?? '';
+              if (a.blob) {
+                url = URL.createObjectURL(a.blob);
+                createdObjectUrls.current.add(url);
+              }
+              return {
+                name: a.name,
+                contentType: a.contentType,
+                url,
+              };
+            }) as any,
           })) as Message[],
         );
       } catch (err) {
@@ -345,9 +366,12 @@ export default function ChatInterface() {
 
     return () => {
       cancelled = true;
+      createdObjectUrls.current.forEach((u) => URL.revokeObjectURL(u));
+      createdObjectUrls.current.clear();
     };
   }, [currentChatId, setMessages]);
 
+  /* Idempotent Projection Persist với BroadcastChannel chống tự dội */
   useEffect(() => {
     if (isLoading || !currentChatId || !messages.length) return;
     const chatId = currentChatId;
@@ -390,7 +414,7 @@ export default function ChatInterface() {
         if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
           try {
             const bc = new BroadcastChannel('ai-chat-sync');
-            bc.postMessage({ type: 'CHAT_UPDATED', chatId });
+            bc.postMessage({ type: 'CHAT_UPDATED', chatId, from: tabId.current });
             bc.close();
           } catch {}
         }
@@ -403,10 +427,12 @@ export default function ChatInterface() {
     })();
   }, [isLoading, messages, currentChatId]);
 
+  /* Lắng nghe đồng bộ từ tab khác (bỏ qua nếu là chính tab mình) */
   useEffect(() => {
     if (typeof window === 'undefined' || !('BroadcastChannel' in window)) return;
     const bc = new BroadcastChannel('ai-chat-sync');
     bc.onmessage = (e) => {
+      if (e.data?.from === tabId.current) return;
       if (e.data?.type === 'CHAT_UPDATED' && e.data?.chatId === currentChatId && !isLoading) {
         hydratedFor.current = null;
         void (async () => {
@@ -415,16 +441,26 @@ export default function ChatInterface() {
             .between([currentChatId, Dexie.minKey], [currentChatId, Dexie.maxKey])
             .toArray();
           if (currentChatId === useAppStore.getState().currentChatId) {
+            createdObjectUrls.current.forEach((u) => URL.revokeObjectURL(u));
+            createdObjectUrls.current.clear();
+
             setMessages(
               rows.map((m) => ({
                 id: m.id,
                 role: m.role,
                 content: m.content,
-                experimental_attachments: m.attachments?.map((a) => ({
-                  name: a.name,
-                  contentType: a.contentType,
-                  url: a.blob ? URL.createObjectURL(a.blob) : (a.url ?? ''),
-                })) as any,
+                experimental_attachments: m.attachments?.map((a) => {
+                  let url = a.url ?? '';
+                  if (a.blob) {
+                    url = URL.createObjectURL(a.blob);
+                    createdObjectUrls.current.add(url);
+                  }
+                  return {
+                    name: a.name,
+                    contentType: a.contentType,
+                    url,
+                  };
+                }) as any,
               })) as Message[],
             );
           }
@@ -434,6 +470,7 @@ export default function ChatInterface() {
     return () => bc.close();
   }, [currentChatId, isLoading, setMessages]);
 
+  /* Đặt tiêu đề tự động */
   useEffect(() => {
     if (!currentChatId || isLoading || messages.length < 2) return;
     if (titledFor.current === currentChatId) return;
@@ -452,7 +489,7 @@ export default function ChatInterface() {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            ...(settings.apiKey ? { 'x-api-key': settings.apiKey } : {}),
+            ...(apiKey ? { 'x-api-key': apiKey } : {}),
           },
           body: JSON.stringify({ message: userPrompt }),
           signal: ctrl.signal,
@@ -473,7 +510,7 @@ export default function ChatInterface() {
     return () => {
       ctrl.abort();
     };
-  }, [messages, currentChatId, isLoading, settings.apiKey]);
+  }, [messages, currentChatId, isLoading, apiKey]);
 
   const onScroll = useCallback(() => {
     const el = scrollRef.current;
@@ -487,9 +524,13 @@ export default function ChatInterface() {
   }, []);
 
   useEffect(() => {
-    const el = scrollRef.current;
-    if (!el || !stick.current) return;
-    el.scrollTo({ top: el.scrollHeight, behavior: isLoading ? 'auto' : 'smooth' });
+    if (!stick.current) return;
+    const frame = requestAnimationFrame(() => {
+      const el = scrollRef.current;
+      if (!el) return;
+      el.scrollTo({ top: el.scrollHeight, behavior: isLoading ? 'auto' : 'smooth' });
+    });
+    return () => cancelAnimationFrame(frame);
   }, [messages, isLoading]);
 
   const scrollToBottom = useCallback(() => {
@@ -611,7 +652,6 @@ export default function ChatInterface() {
       const options = attachments.length ? { experimental_attachments: dataTransfer.files } : undefined;
 
       setAttachments([]);
-
       handleSubmit(undefined, options);
     } catch (err) {
       console.error('[onSubmit]', err);
@@ -622,7 +662,7 @@ export default function ChatInterface() {
     if ((e.nativeEvent as any).isComposing || e.keyCode === 229) return;
     if (e.key === 'Escape') { handleStop(); return; }
     if (e.key !== 'Enter' || e.shiftKey) return;
-    if (isTouchDevice || !settings.sendOnEnter) return;
+    if (isTouchDevice || !sendOnEnter) return;
     e.preventDefault();
     void onSubmit();
   };
@@ -637,7 +677,6 @@ export default function ChatInterface() {
 
   return (
     <div className="flex-1 flex flex-col relative h-[100dvh]">
-      {/* Top Header: Hamburger on Mobile + Actions */}
       <div className="absolute top-0 left-0 right-0 z-20 p-3 flex items-center justify-between pointer-events-none">
         <button
           type="button"
@@ -673,7 +712,6 @@ export default function ChatInterface() {
         )}
       </div>
 
-      {/* Message scroll container */}
       <div
         ref={scrollRef}
         onScroll={onScroll}
@@ -710,9 +748,9 @@ export default function ChatInterface() {
                 isCopied={copiedId === m.id}
                 draft={editingId === m.id ? draft : ''}
                 isTouchDevice={isTouchDevice}
-                sendOnEnter={settings.sendOnEnter}
-                throttleMs={settings.perf?.throttleMs ?? 150}
-                animations={settings.perf?.animations ?? true}
+                sendOnEnter={sendOnEnter}
+                throttleMs={throttleMs}
+                animations={animations}
                 onCopy={copyMessage}
                 onRegenerate={handleRegenerate}
                 onStartEdit={startEdit}
