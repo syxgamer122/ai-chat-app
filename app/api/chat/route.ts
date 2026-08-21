@@ -67,11 +67,13 @@ const MessageSchema = z.object({
 });
 
 const BodySchema = z.object({
+  id: z.string().max(256).optional(),
   messages: z.array(MessageSchema).min(1).max(100),
   model: z.string().min(1).max(64).optional(),
   temperature: z.number().min(0).max(2).optional(),
   system: z.string().max(8_000).optional(),
-}).strict();
+  data: z.unknown().optional(),
+});
 
 const REASONING_MODELS = new Set([
   'gpt-5.6-luna',
