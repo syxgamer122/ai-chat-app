@@ -79,4 +79,14 @@ export class ChatDatabase extends Dexie {
 }
 
 export const db = new ChatDatabase();
+
+if (typeof window !== 'undefined') {
+  db.on('versionchange', () => {
+    db.close();
+  });
+  db.on('blocked', () => {
+    console.warn('[IndexedDB] Database operation was blocked by another open tab.');
+  });
+}
+
 export { Dexie };

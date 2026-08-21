@@ -6,23 +6,25 @@ import ChatInterface from '@/components/chat-interface';
 import { db } from '@/lib/db';
 import { useAppStore } from '@/lib/store';
 import { AVAILABLE_MODELS } from '@/lib/models';
-import { X } from 'lucide-react';
+import { X, ShieldAlert } from 'lucide-react';
 
 export default function Home() {
   const [isMounted, setIsMounted] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const { settings, updateSettings, updatePerf, setCurrentChatId } = useAppStore();
+
+  const settings = useAppStore((s) => s.settings);
+  const updateSettings = useAppStore((s) => s.updateSettings);
+  const updatePerf = useAppStore((s) => s.updatePerf);
+  const setCurrentChatId = useAppStore((s) => s.setCurrentChatId);
 
   useEffect(() => {
     setIsMounted(true);
     const handleKeyDown = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
-      // Phím tắt Ctrl/Cmd + Shift + O hoặc Ctrl/Cmd + N -> Tạo chat mới
       if ((mod && e.key === 'n') || (mod && e.shiftKey && e.key.toLowerCase() === 'o')) {
         e.preventDefault();
         setCurrentChatId(null);
       }
-      // Escape để đóng modal settings nếu đang mở
       if (e.key === 'Escape' && showSettings) {
         setShowSettings(false);
       }
@@ -30,6 +32,18 @@ export default function Home() {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [setCurrentChatId, showSettings]);
+
+  // Lock scroll khi mở modal Settings
+  useEffect(() => {
+    if (showSettings) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = 'unset';
+    }
+    return () => {
+      document.body.style.overflow = 'unset';
+    };
+  }, [showSettings]);
 
   if (!isMounted) {
     return (
@@ -48,7 +62,7 @@ export default function Home() {
         <div
           role="dialog"
           aria-modal="true"
-          aria-label="Settings"
+          aria-label="Cài đặt hệ thống"
           onClick={(e) => {
             if (e.target === e.currentTarget) setShowSettings(false);
           }}
@@ -60,6 +74,7 @@ export default function Home() {
               <button
                 type="button"
                 onClick={() => setShowSettings(false)}
+                aria-label="Đóng cài đặt"
                 className="p-1 text-zinc-500 hover:text-zinc-300 rounded-lg transition"
               >
                 <X size={18} />
@@ -67,7 +82,7 @@ export default function Home() {
             </div>
 
             <div className="space-y-5">
-              {/* AI Model */}
+              {/* Model */}
               <div>
                 <label className="text-sm font-medium text-zinc-300 mb-1.5 block">AI Model</label>
                 <select
@@ -92,8 +107,8 @@ export default function Home() {
                 <input
                   type="range"
                   min="0"
-                  max="2"
-                  step="0.1"
+                  max="1.5"
+                  step="0.05"
                   value={settings.temperature}
                   onChange={(e) => updateSettings({ temperature: parseFloat(e.target.value) })}
                   className="w-full accent-indigo-500 cursor-pointer"
@@ -112,9 +127,12 @@ export default function Home() {
                   onChange={(e) => updateSettings({ apiKey: e.target.value })}
                   className="w-full bg-zinc-900 border border-zinc-800 rounded-xl p-2.5 text-sm text-zinc-200 outline-none focus:border-indigo-500 font-mono transition"
                 />
-                <p className="text-xs text-zinc-500 mt-1">
-                  Để trống để dùng bể Key tự động của hệ thống.
-                </p>
+                <div className="flex items-start gap-1.5 mt-1.5 text-xs text-amber-500/90">
+                  <ShieldAlert size={14} className="flex-shrink-0 mt-0.5" />
+                  <span>
+                    Để trống để dùng bể Key tự động. Key nhập tại đây được lưu cục bộ trên trình duyệt của bạn.
+                  </span>
+                </div>
               </div>
 
               {/* System Prompt */}
@@ -128,12 +146,12 @@ export default function Home() {
                 />
               </div>
 
-              {/* Performance & Animation */}
+              {/* Performance */}
               <div className="pt-3 border-t border-zinc-800 space-y-3">
                 <div className="flex items-center justify-between">
                   <div>
                     <div className="text-sm font-medium text-zinc-300">Hiệu ứng chuyển động (Animations)</div>
-                    <div className="text-xs text-zinc-500">Tắt để máy yếu hoặc thiết bị cũ chạy mượt hơn</div>
+                    <div className="text-xs text-zinc-500">Tắt để tiết kiệm pin hoặc tối ưu máy cấu hình thấp</div>
                   </div>
                   <input
                     type="checkbox"
@@ -166,9 +184,17 @@ export default function Home() {
                   type="button"
                   onClick={async () => {
                     if (confirm('Bạn có chắc chắn muốn xóa toàn bộ lịch sử chat và dữ liệu cục bộ?')) {
-                      await db.close();
-                      await db.delete();
-                      window.location.reload();
+                      try {
+                        await db.close();
+                        await Promise.race([
+                          db.delete(),
+                          new Promise((resolve) => setTimeout(resolve, 2000)),
+                        ]);
+                      } catch (err) {
+                        console.error('[db.delete]', err);
+                      } finally {
+                        window.location.reload();
+                      }
                     }
                   }}
                   className="text-red-400 text-sm hover:text-red-300 font-medium transition"

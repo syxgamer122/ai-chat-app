@@ -1,10 +1,11 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { DEFAULT_MODEL_ID, ALLOWED_MODEL_IDS } from '@/lib/models';
 
 export interface PerfSettings {
-  /** cửa sổ gom render markdown khi stream (ms). Máy yếu: 250–300 */
+  /** Cửa sổ gom render markdown khi stream (ms). Máy yếu: 250–300 */
   throttleMs: number;
-  /** tắt animation cho máy yếu / prefers-reduced-motion */
+  /** Tắt animation cho máy yếu / prefers-reduced-motion */
   animations: boolean;
 }
 
@@ -19,15 +20,16 @@ export interface Settings {
 
 interface AppState {
   currentChatId: string | null;
+  isSidebarOpen: boolean;
   settings: Settings;
-  hydrated: boolean;
   setCurrentChatId: (id: string | null) => void;
+  setSidebarOpen: (open: boolean) => void;
   updateSettings: (s: Partial<Omit<Settings, 'perf'>>) => void;
   updatePerf: (p: Partial<PerfSettings>) => void;
 }
 
 const DEFAULT_SETTINGS: Settings = {
-  model: 'gpt-5.6-luna',
+  model: DEFAULT_MODEL_ID,
   temperature: 0.7,
   systemPrompt:
     'You are a helpful, brilliant AI assistant. Use Markdown and LaTeX when appropriate. ' +
@@ -41,9 +43,10 @@ export const useAppStore = create<AppState>()(
   persist(
     (set) => ({
       currentChatId: null,
+      isSidebarOpen: false,
       settings: DEFAULT_SETTINGS,
-      hydrated: false,
-      setCurrentChatId: (id) => set({ currentChatId: id }),
+      setCurrentChatId: (id) => set({ currentChatId: id, isSidebarOpen: false }),
+      setSidebarOpen: (open) => set({ isSidebarOpen: open }),
       updateSettings: (partial) =>
         set((s) => ({ settings: { ...s.settings, ...partial } })),
       updatePerf: (partial) =>
@@ -52,23 +55,24 @@ export const useAppStore = create<AppState>()(
     {
       name: 'ai-chat-settings',
       version: 2,
-      // Không persist currentChatId: mở tab mới trỏ vào chat cũ dễ gây race.
       partialize: (s) => ({ settings: s.settings }),
-      // Deep-merge để field mới luôn có mặc định.
       merge: (persisted, current) => {
         const p = (persisted ?? {}) as Partial<AppState>;
+        const rawModel = p.settings?.model;
+        const validModel = rawModel && ALLOWED_MODEL_IDS.has(rawModel) ? rawModel : DEFAULT_MODEL_ID;
+
         return {
           ...current,
           ...p,
           settings: {
             ...current.settings,
             ...(p.settings ?? {}),
+            model: validModel,
             perf: { ...current.settings.perf, ...(p.settings?.perf ?? {}) },
           },
         };
       },
       migrate: (state: any) => state,
-      onRehydrateStorage: () => (state) => state && (state.hydrated = true),
     },
   ),
 );

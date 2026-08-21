@@ -9,6 +9,7 @@ import {
 import { z } from 'zod';
 import { getKeyCandidates, markKeyFailure, markKeySuccess, getKeyLabel } from '@/lib/api-keys';
 import { ALLOWED_MODEL_IDS, DEFAULT_MODEL_ID } from '@/lib/models';
+import { checkRateLimit, getClientIp } from '@/lib/rate-limit';
 
 export const runtime = 'edge';
 export const maxDuration = 60;
@@ -16,7 +17,7 @@ export const maxDuration = 60;
 const MAX_BODY_BYTES = 10 * 1024 * 1024; // 10MB limit
 
 const BodySchema = z.object({
-  messages: z.array(z.any()).min(1).max(200),
+  messages: z.array(z.any()).min(1).max(500),
   model: z.string().min(1).max(64).optional(),
   temperature: z.number().min(0).max(2).optional(),
   system: z.string().max(8000).optional(),
@@ -40,7 +41,6 @@ function getStatusCode(e: unknown): number | undefined {
 const toParts = (content: CoreMessage['content']) =>
   typeof content === 'string' ? [{ type: 'text' as const, text: content }] : content;
 
-/** Gộp các message liên tiếp cùng role ở TẦNG PARTS -> không phá ảnh/file. */
 function mergeSameRole(messages: CoreMessage[]): CoreMessage[] {
   return messages.reduce<CoreMessage[]>((acc, cur) => {
     const last = acc[acc.length - 1];
@@ -61,22 +61,36 @@ function mergeSameRole(messages: CoreMessage[]): CoreMessage[] {
   }, []);
 }
 
-/** Bỏ message rỗng và mọi message trước lượt user đầu tiên. */
 function normalize(messages: CoreMessage[]): CoreMessage[] {
   const cleaned = messages.filter((m) => {
     const parts = toParts(m.content) as any[];
     return parts.some((p) => p.type !== 'text' || (p.text ?? '').trim().length > 0);
   });
   const firstUser = cleaned.findIndex((m) => m.role === 'user');
-  return firstUser <= 0 ? cleaned : cleaned.slice(firstUser);
+  if (firstUser === -1) return [];
+  return firstUser === 0 ? cleaned : cleaned.slice(firstUser);
 }
 
 export async function POST(req: Request) {
   try {
-    // 1. Kiểm tra kích thước payload
+    const customKey = req.headers.get('x-api-key')?.trim();
+
+    // 1. Rate Limiting (chỉ áp dụng cho bể key công khai, user dùng key riêng được miễn trừ)
+    if (!customKey) {
+      const clientIp = getClientIp(req);
+      const { allowed, resetInSec } = checkRateLimit(clientIp, 30, 60_000);
+      if (!allowed) {
+        return Response.json(
+          { error: `Bạn đang gửi tin nhắn quá nhanh. Vui lòng thử lại sau ${resetInSec} giây.` },
+          { status: 429, headers: { 'Retry-After': String(resetInSec) } },
+        );
+      }
+    }
+
+    // 2. Payload size check
     const contentLength = Number(req.headers.get('content-length') || '0');
     if (contentLength > MAX_BODY_BYTES) {
-      return Response.json({ error: 'Payload vượt quá giới hạn 10MB.' }, { status: 413 });
+      return Response.json({ error: 'Dữ liệu tin nhắn vượt quá giới hạn 10MB.' }, { status: 413 });
     }
 
     let jsonBody: unknown;
@@ -93,7 +107,6 @@ export async function POST(req: Request) {
 
     const { messages, model, temperature, system } = parsed.data;
 
-    // 2. Kiểm tra Model hợp lệ
     const targetModel = model ?? DEFAULT_MODEL_ID;
     if (!ALLOWED_MODEL_IDS.has(targetModel)) {
       return Response.json(
@@ -102,11 +115,13 @@ export async function POST(req: Request) {
       );
     }
 
-    // 3. Convert CoreMessages an toàn
+    // Tự động cắt context để giữ lại 50 tin nhắn gần nhất (tránh vượt token budget)
+    const contextMessages = messages.slice(-50);
+
     let core: CoreMessage[];
     try {
-      core = mergeSameRole(normalize(convertToCoreMessages(messages as any)));
-    } catch (convErr) {
+      core = mergeSameRole(normalize(convertToCoreMessages(contextMessages as any)));
+    } catch {
       return Response.json(
         { error: 'Dữ liệu tin nhắn hoặc file đính kèm không đúng định dạng.' },
         { status: 400 },
@@ -117,8 +132,6 @@ export async function POST(req: Request) {
       return Response.json({ error: 'Không có nội dung tin nhắn để gửi.' }, { status: 400 });
     }
 
-    // 4. Lấy danh sách key ứng viên (Ưu tiên Custom Key của user nếu có)
-    const customKey = req.headers.get('x-api-key')?.trim();
     const candidateKeys = customKey ? [customKey] : getKeyCandidates().slice(0, 3);
 
     if (!candidateKeys.length) {
@@ -128,7 +141,9 @@ export async function POST(req: Request) {
       );
     }
 
-    // 5. Thực thi stream với cơ chế Server-side Failover & DataStream
+    const isAbort = (e: unknown) =>
+      (e as any)?.name === 'AbortError' || (e as any)?.code === 'ERR_CANCELED' || req.signal.aborted;
+
     return createDataStreamResponse({
       headers: { 'Cache-Control': 'no-store, no-transform' },
       execute: async (dataStream) => {
@@ -149,18 +164,25 @@ export async function POST(req: Request) {
               maxTokens: 4096,
               abortSignal: req.signal,
               onError: ({ error }) => {
+                // Người dùng bấm Stop không phải là lỗi của Key -> Không phạt key vào cooldown
+                if (isAbort(error)) return;
                 console.error(`[streamText ${getKeyLabel(selectedKey)}]`, sanitizeErrorMessage(error));
                 markKeyFailure(selectedKey, getStatusCode(error));
+              },
+              onFinish: () => {
+                // Chỉ mở khóa và xóa bộ đếm lỗi khi stream hoàn thành thực sự thành công
+                markKeySuccess(selectedKey);
               },
             });
 
             result.mergeIntoDataStream(dataStream);
-            markKeySuccess(selectedKey);
-            return; // Thành công bắt đầu stream -> kết thúc execute
+            return;
           } catch (err) {
             lastError = err;
-            console.warn(`[Failover] ${getKeyLabel(selectedKey)} gặp lỗi khởi tạo:`, sanitizeErrorMessage(err));
-            markKeyFailure(selectedKey, getStatusCode(err));
+            if (!isAbort(err)) {
+              console.warn(`[Failover] ${getKeyLabel(selectedKey)} gặp lỗi:`, sanitizeErrorMessage(err));
+              markKeyFailure(selectedKey, getStatusCode(err));
+            }
           }
         }
 

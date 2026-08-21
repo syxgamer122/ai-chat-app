@@ -2,6 +2,7 @@ import { createOpenAI } from '@ai-sdk/openai';
 import { generateText, APICallError } from 'ai';
 import { z } from 'zod';
 import { getKeyCandidates, markKeyFailure, markKeySuccess, getKeyLabel } from '@/lib/api-keys';
+import { checkRateLimit, getClientIp } from '@/lib/rate-limit';
 
 export const runtime = 'edge';
 
@@ -26,20 +27,28 @@ function getStatusCode(e: unknown): number | undefined {
 
 export async function POST(req: Request) {
   try {
+    const customKey = req.headers.get('x-api-key')?.trim();
+
+    if (!customKey) {
+      const clientIp = getClientIp(req);
+      const { allowed } = checkRateLimit(`title:${clientIp}`, 60, 60_000);
+      if (!allowed) {
+        return Response.json({ title: 'New Chat' }, { status: 429 });
+      }
+    }
+
     const json = await req.json();
     const parsed = TitleSchema.safeParse(json);
     if (!parsed.success) {
       return Response.json({ title: 'New Chat' });
     }
 
-    // Làm sạch message để chống prompt injection
     const cleanMessage = parsed.data.message
       .replace(/[\r\n\t]+/g, ' ')
       .replace(/["'`]+/g, '')
       .trim()
       .slice(0, 1000);
 
-    const customKey = req.headers.get('x-api-key')?.trim();
     const candidateKeys = customKey ? [customKey] : getKeyCandidates().slice(0, 3);
 
     for (const key of candidateKeys) {
@@ -51,9 +60,10 @@ export async function POST(req: Request) {
 
         const result = await generateText({
           model: openai('gpt-4o-mini'),
-          prompt: `Summarize this user request into a concise 3-5 word title in the same language. Do not use quotes, punctuation or prefixes:\n\n${cleanMessage}`,
+          prompt: `Summarize this user request into a concise 3-5 word title in the same language. Do not use quotes, punctuation or prefixes:\n\n"""${cleanMessage}"""`,
           temperature: 0.3,
           maxTokens: 16,
+          abortSignal: req.signal,
         });
 
         const title = result.text.trim().replace(/^["']+|["']+$/g, '').slice(0, 60);
@@ -63,8 +73,11 @@ export async function POST(req: Request) {
           headers: { 'Content-Type': 'application/json' },
         });
       } catch (err) {
-        console.warn(`[Title API ${getKeyLabel(key)}] Error:`, sanitizeErrorMessage(err));
-        markKeyFailure(key, getStatusCode(err));
+        const isAbort = (err as any)?.name === 'AbortError' || req.signal.aborted;
+        if (!isAbort) {
+          console.warn(`[Title API ${getKeyLabel(key)}] Error:`, sanitizeErrorMessage(err));
+          markKeyFailure(key, getStatusCode(err));
+        }
       }
     }
 

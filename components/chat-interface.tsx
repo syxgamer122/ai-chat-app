@@ -3,17 +3,34 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useChat, type Message } from 'ai/react';
 import { useAppStore } from '@/lib/store';
-import { db, Dexie, type StoredMessage } from '@/lib/db';
+import { db, Dexie, type StoredMessage, type StoredAttachment } from '@/lib/db';
 import { MarkdownRenderer } from './markdown-renderer';
+import { ErrorBoundary } from './error-boundary';
 import { motion } from 'framer-motion';
 import TextareaAutosize from 'react-textarea-autosize';
 import {
   Send, StopCircle, RefreshCcw, ArrowDown, Paperclip, X,
-  Pencil, Copy, Check, Trash2,
+  Pencil, Copy, Check, Trash2, Menu,
 } from 'lucide-react';
 
+async function toStoredAttachment(a: any): Promise<StoredAttachment> {
+  if (a.blob instanceof Blob) {
+    return { name: a.name ?? 'file', contentType: a.contentType ?? a.blob.type, blob: a.blob };
+  }
+  if (typeof a.url === 'string' && a.url.startsWith('data:')) {
+    try {
+      const res = await fetch(a.url);
+      const blob = await res.blob();
+      return { name: a.name ?? 'file', contentType: a.contentType ?? blob.type, blob };
+    } catch {
+      return { name: a.name ?? 'file', contentType: a.contentType, url: a.url };
+    }
+  }
+  return { name: a.name ?? 'file', contentType: a.contentType, url: a.url };
+}
+
 /* ------------------------------------------------------------------ */
-/* Memoized Message Item (Chống re-render toàn danh sách khi gõ/stream)*/
+/* Memoized Message Item with content-visibility                      */
 /* ------------------------------------------------------------------ */
 interface MessageItemProps {
   m: Message;
@@ -57,7 +74,7 @@ const MessageItem = memo(
         initial={animations ? { opacity: 0, y: 10 } : false}
         animate={animations ? { opacity: 1, y: 0 } : false}
         transition={{ duration: animations ? 0.2 : 0 }}
-        style={{ contain: 'layout style' }}
+        style={{ contentVisibility: 'auto', containIntrinsicSize: '0 80px', contain: 'layout style' }}
         className={`group flex w-full ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}
       >
         <div
@@ -65,7 +82,6 @@ const MessageItem = memo(
             m.role === 'user' ? 'bg-zinc-800/80 text-zinc-100 ml-auto' : 'bg-transparent text-zinc-200'
           }`}
         >
-          {/* Attachments (Base64/URL) */}
           {m.experimental_attachments && m.experimental_attachments.length > 0 && (
             <div className="flex flex-wrap gap-2 mb-3">
               {m.experimental_attachments.map((a: any, i: number) => (
@@ -87,7 +103,6 @@ const MessageItem = memo(
             </div>
           )}
 
-          {/* Nội dung tin nhắn */}
           {isEditing ? (
             <div className="space-y-2">
               <TextareaAutosize
@@ -121,16 +136,19 @@ const MessageItem = memo(
               </div>
             </div>
           ) : m.role === 'assistant' ? (
-            <MarkdownRenderer
-              content={m.content}
-              isStreaming={isStreaming}
-              throttleMs={throttleMs}
-            />
+            <div aria-live={isStreaming ? 'polite' : 'off'}>
+              <ErrorBoundary>
+                <MarkdownRenderer
+                  content={m.content}
+                  isStreaming={isStreaming}
+                  throttleMs={throttleMs}
+                />
+              </ErrorBoundary>
+            </div>
           ) : (
             <p className="whitespace-pre-wrap leading-relaxed">{m.content}</p>
           )}
 
-          {/* Thanh hành động */}
           {!isEditing && !isStreaming && (
             <div className="mt-3 flex items-center gap-1 transition-opacity opacity-100 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 focus-within:opacity-100">
               {m.role === 'assistant' && (
@@ -183,10 +201,13 @@ const MessageItem = memo(
 );
 
 /* ------------------------------------------------------------------ */
-/* Main ChatInterface Component                                       */
+/* Main ChatInterface                                                 */
 /* ------------------------------------------------------------------ */
 export default function ChatInterface() {
-  const { currentChatId, settings, setCurrentChatId } = useAppStore();
+  const currentChatId = useAppStore((s) => s.currentChatId);
+  const setCurrentChatId = useAppStore((s) => s.setCurrentChatId);
+  const setSidebarOpen = useAppStore((s) => s.setSidebarOpen);
+  const settings = useAppStore((s) => s.settings);
 
   const [draftId, setDraftId] = useState(() => crypto.randomUUID());
   const chatKey = currentChatId ?? draftId;
@@ -198,46 +219,45 @@ export default function ChatInterface() {
   const [draft, setDraft] = useState('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
-  const [reloadTick, setReloadTick] = useState(0);
 
-  // Quản lý URL Preview ổn định (tránh revoke nhầm file cũ khi thêm file mới)
   const [previewMap, setPreviewMap] = useState<Map<File, string>>(new Map());
 
   useEffect(() => {
-    setPreviewMap((prevMap) => {
-      const nextMap = new Map<File, string>();
-      const currentFiles = new Set(attachments);
-
-      // Thu hồi file đã bị xóa
-      for (const [file, url] of prevMap.entries()) {
-        if (!currentFiles.has(file)) {
-          URL.revokeObjectURL(url);
-        }
-      }
-
-      // Giữ URL cũ hoặc tạo URL mới cho file ảnh
-      attachments.forEach((file) => {
-        if (prevMap.has(file)) {
-          nextMap.set(file, prevMap.get(file)!);
-        } else if (file.type.startsWith('image/')) {
-          nextMap.set(file, URL.createObjectURL(file));
-        }
-      });
-
-      return nextMap;
-    });
+    const created: string[] = [];
+    const next = new Map<File, string>();
+    for (const f of attachments) {
+      if (!f.type.startsWith('image/')) continue;
+      const url = URL.createObjectURL(f);
+      created.push(url);
+      next.set(f, url);
+    }
+    setPreviewMap(next);
+    return () => {
+      created.forEach((u) => URL.revokeObjectURL(u));
+    };
   }, [attachments]);
 
-  const MAX_FILE = 8 * 1024 * 1024;
-  const MAX_FILES = 5;
+  const MAX_TOTAL_ATTACHMENT_BYTES = 6 * 1024 * 1024;
+  const MAX_FILES = 4;
 
   const addFiles = (files: FileList | File[] | null) => {
     if (!files) return;
     const fileArr = Array.from(files);
+    let totalSize = attachments.reduce((sum, f) => sum + f.size, 0);
+    const ok: File[] = [];
     const rejected: string[] = [];
-    const ok = fileArr.filter((f) => (f.size <= MAX_FILE ? true : (rejected.push(f.name), false)));
+
+    for (const f of fileArr) {
+      if (totalSize + f.size > MAX_TOTAL_ATTACHMENT_BYTES) {
+        rejected.push(f.name);
+      } else {
+        totalSize += f.size;
+        ok.push(f);
+      }
+    }
+
     if (rejected.length) {
-      setNotice(`Bỏ qua (quá 8MB): ${rejected.join(', ')}`);
+      setNotice(`Bỏ qua file vượt quá tổng giới hạn 6MB: ${rejected.join(', ')}`);
       setTimeout(() => setNotice(null), 4000);
     }
     setAttachments((prev) => [...prev, ...ok].slice(0, MAX_FILES));
@@ -286,7 +306,6 @@ export default function ChatInterface() {
     stop();
   }, [stop]);
 
-  /* Hydrate lịch sử từ Dexie một lần duy nhất khi đổi chat */
   useEffect(() => {
     if (!currentChatId) {
       hydratedFor.current = null;
@@ -312,7 +331,11 @@ export default function ChatInterface() {
             id: m.id,
             role: m.role,
             content: m.content,
-            experimental_attachments: m.attachments as any,
+            experimental_attachments: m.attachments?.map((a) => ({
+              name: a.name,
+              contentType: a.contentType,
+              url: a.blob ? URL.createObjectURL(a.blob) : (a.url ?? ''),
+            })) as any,
           })) as Message[],
         );
       } catch (err) {
@@ -325,28 +348,37 @@ export default function ChatInterface() {
     };
   }, [currentChatId, setMessages]);
 
-  /* Idempotent Projection Persist */
   useEffect(() => {
     if (isLoading || !currentChatId || !messages.length) return;
     const chatId = currentChatId;
     const reason = finishRef.current;
 
-    const rows: StoredMessage[] = messages.map((m, i) => ({
-      id: m.id,
-      chatId,
-      role: m.role as StoredMessage['role'],
-      content: m.content,
-      seq: i,
-      createdAt: (m.createdAt as any)?.getTime?.() ?? Date.now(),
-      attachments: (m.experimental_attachments as any) ?? undefined,
-      finishReason: i === messages.length - 1 ? reason : 'stop',
-    }));
-
-    const keep = new Set(rows.map((r) => r.id));
-
     (async () => {
       try {
         if (chatId !== useAppStore.getState().currentChatId) return;
+
+        const rows: StoredMessage[] = await Promise.all(
+          messages.map(async (m, i) => {
+            const rawAttachments = m.experimental_attachments as any[] | undefined;
+            const attachments = rawAttachments?.length
+              ? await Promise.all(rawAttachments.map(toStoredAttachment))
+              : undefined;
+
+            return {
+              id: m.id,
+              chatId,
+              role: m.role as StoredMessage['role'],
+              content: m.content,
+              seq: i,
+              createdAt: (m.createdAt as any)?.getTime?.() ?? Date.now(),
+              attachments,
+              finishReason: i === messages.length - 1 ? reason : 'stop',
+            };
+          }),
+        );
+
+        const keep = new Set(rows.map((r) => r.id));
+
         await db.transaction('rw', db.messages, db.chats, async () => {
           const existing = await db.messages.where('chatId').equals(chatId).primaryKeys();
           const stale = existing.filter((id) => !keep.has(id as string));
@@ -354,6 +386,14 @@ export default function ChatInterface() {
           await db.messages.bulkPut(rows);
           await db.chats.update(chatId, { updatedAt: Date.now() });
         });
+
+        if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+          try {
+            const bc = new BroadcastChannel('ai-chat-sync');
+            bc.postMessage({ type: 'CHAT_UPDATED', chatId });
+            bc.close();
+          } catch {}
+        }
       } catch (err: any) {
         console.error('[persist]', err);
         if (err?.name === 'QuotaExceededError') {
@@ -363,13 +403,37 @@ export default function ChatInterface() {
     })();
   }, [isLoading, messages, currentChatId]);
 
-  /* Kích hoạt reload() an toàn sau commit */
   useEffect(() => {
-    if (reloadTick === 0 || isLoading) return;
-    void reload();
-  }, [reloadTick, isLoading, reload]);
+    if (typeof window === 'undefined' || !('BroadcastChannel' in window)) return;
+    const bc = new BroadcastChannel('ai-chat-sync');
+    bc.onmessage = (e) => {
+      if (e.data?.type === 'CHAT_UPDATED' && e.data?.chatId === currentChatId && !isLoading) {
+        hydratedFor.current = null;
+        void (async () => {
+          const rows = await db.messages
+            .where('[chatId+seq]')
+            .between([currentChatId, Dexie.minKey], [currentChatId, Dexie.maxKey])
+            .toArray();
+          if (currentChatId === useAppStore.getState().currentChatId) {
+            setMessages(
+              rows.map((m) => ({
+                id: m.id,
+                role: m.role,
+                content: m.content,
+                experimental_attachments: m.attachments?.map((a) => ({
+                  name: a.name,
+                  contentType: a.contentType,
+                  url: a.blob ? URL.createObjectURL(a.blob) : (a.url ?? ''),
+                })) as any,
+              })) as Message[],
+            );
+          }
+        })();
+      }
+    };
+    return () => bc.close();
+  }, [currentChatId, isLoading, setMessages]);
 
-  /* Đặt tiêu đề tự động */
   useEffect(() => {
     if (!currentChatId || isLoading || messages.length < 2) return;
     if (titledFor.current === currentChatId) return;
@@ -411,7 +475,6 @@ export default function ChatInterface() {
     };
   }, [messages, currentChatId, isLoading, settings.apiKey]);
 
-  /* Xử lý cuộn định hướng người dùng */
   const onScroll = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -456,9 +519,11 @@ export default function ChatInterface() {
       if (idx < 1 || messages[idx - 1]?.role !== 'user') return;
       finishRef.current = 'stop';
       await truncateFrom(idx, messages.slice(0, idx));
-      setReloadTick((t) => t + 1);
+      setTimeout(() => {
+        void reload();
+      }, 0);
     },
-    [isLoading, messages, truncateFrom],
+    [isLoading, messages, truncateFrom, reload],
   );
 
   const startEdit = useCallback((m: Message) => {
@@ -482,9 +547,11 @@ export default function ChatInterface() {
       await truncateFrom(idx, [...messages.slice(0, idx), edited]);
       setEditingId(null);
       setDraft('');
-      setReloadTick((t) => t + 1);
+      setTimeout(() => {
+        void reload();
+      }, 0);
     },
-    [draft, isLoading, messages, truncateFrom],
+    [draft, isLoading, messages, truncateFrom, reload],
   );
 
   const copyMessage = useCallback(async (m: Message) => {
@@ -496,25 +563,6 @@ export default function ChatInterface() {
       console.error('[copy]', err);
     }
   }, []);
-
-  const clearMessages = useCallback(async () => {
-    try {
-      handleStop();
-      if (currentChatId) {
-        await db.messages
-          .where('[chatId+seq]')
-          .between([currentChatId, Dexie.minKey], [currentChatId, Dexie.maxKey])
-          .delete();
-        await db.chats.update(currentChatId, { title: 'New Chat', updatedAt: Date.now() });
-      }
-      titledFor.current = null;
-      setMessages([]);
-      setConfirmClear(false);
-    } catch (err) {
-      console.error('[clearMessages]', err);
-      setConfirmClear(false);
-    }
-  }, [handleStop, currentChatId, setMessages]);
 
   const deleteChat = useCallback(async () => {
     try {
@@ -589,35 +637,47 @@ export default function ChatInterface() {
 
   return (
     <div className="flex-1 flex flex-col relative h-[100dvh]">
-      {/* HEADER: Clear chat */}
-      {hasMessages && (
-        <div className="absolute top-0 right-0 z-20 p-3 flex items-center gap-2">
-          {confirmClear ? (
-            <div className="flex items-center gap-1.5 bg-zinc-900/90 border border-zinc-800 rounded-xl p-1 backdrop-blur-sm">
-              <button onClick={deleteChat} className="px-2.5 py-1 text-xs text-red-400 hover:bg-red-950/50 rounded-lg transition">
-                Xóa hẳn
-              </button>
-              <button onClick={() => setConfirmClear(false)} className="px-2.5 py-1 text-xs text-zinc-400 hover:bg-zinc-800 rounded-lg transition">
-                Hủy
-              </button>
-            </div>
-          ) : (
-            <button
-              onClick={() => setConfirmClear(true)}
-              title="Xóa đoạn hội thoại"
-              aria-label="Clear chat conversation"
-              className="p-2 text-zinc-500 hover:text-red-400 hover:bg-zinc-900 rounded-xl transition-colors"
-            >
-              <Trash2 size={18} />
-            </button>
-          )}
-        </div>
-      )}
+      {/* Top Header: Hamburger on Mobile + Actions */}
+      <div className="absolute top-0 left-0 right-0 z-20 p-3 flex items-center justify-between pointer-events-none">
+        <button
+          type="button"
+          onClick={() => setSidebarOpen(true)}
+          aria-label="Open sidebar menu"
+          className="md:hidden pointer-events-auto p-2 bg-zinc-900/80 border border-zinc-800 text-zinc-400 hover:text-zinc-200 rounded-xl backdrop-blur-sm transition-colors shadow-sm"
+        >
+          <Menu size={18} />
+        </button>
 
+        {hasMessages && (
+          <div className="ml-auto pointer-events-auto flex items-center gap-2">
+            {confirmClear ? (
+              <div className="flex items-center gap-1.5 bg-zinc-900/90 border border-zinc-800 rounded-xl p-1 backdrop-blur-sm shadow-lg">
+                <button onClick={deleteChat} className="px-2.5 py-1 text-xs text-red-400 hover:bg-red-950/50 rounded-lg transition font-medium">
+                  Xóa hẳn
+                </button>
+                <button onClick={() => setConfirmClear(false)} className="px-2.5 py-1 text-xs text-zinc-400 hover:bg-zinc-800 rounded-lg transition">
+                  Hủy
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setConfirmClear(true)}
+                title="Xóa cuộc trò chuyện này"
+                aria-label="Delete chat conversation"
+                className="p-2 text-zinc-500 hover:text-red-400 hover:bg-zinc-900/80 border border-transparent hover:border-zinc-800 rounded-xl transition-all"
+              >
+                <Trash2 size={18} />
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Message scroll container */}
       <div
         ref={scrollRef}
         onScroll={onScroll}
-        className="flex-1 overflow-y-auto p-4 md:p-8 space-y-6 pb-40"
+        className="flex-1 overflow-y-auto p-4 md:p-8 space-y-6 pb-40 pt-14 md:pt-8"
       >
         {!hasMessages ? (
           <div className="flex flex-col items-center justify-center h-full pt-10 space-y-8">
@@ -648,7 +708,7 @@ export default function ChatInterface() {
                 isStreaming={isLoading && m.role === 'assistant' && m.id === lastMessageId}
                 isEditing={editingId === m.id}
                 isCopied={copiedId === m.id}
-                draft={draft}
+                draft={editingId === m.id ? draft : ''}
                 isTouchDevice={isTouchDevice}
                 sendOnEnter={settings.sendOnEnter}
                 throttleMs={settings.perf?.throttleMs ?? 150}

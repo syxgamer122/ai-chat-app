@@ -29,10 +29,12 @@ export function getKeyCandidates(): string[] {
 export function markKeyFailure(key: string, status?: number): void {
   if (!key || !getAllApiKeys().includes(key)) return; // Bảo vệ bộ nhớ: không bao giờ blacklist key riêng của user
   const fails = (state.get(key)?.fails ?? 0) + 1;
-  const base = status === 401 || status === 403 ? 3_600_000 : 60_000;
+  const isAuthError = status === 401 || status === 403;
+  const base = isAuthError ? 3_600_000 : 60_000;
+  const cap = isAuthError ? 21_600_000 : 1_800_000; // Auth: tối đa 6h, Rate Limit: tối đa 30m
   state.set(key, {
     fails,
-    failUntil: Date.now() + Math.min(base * 2 ** (fails - 1), 1_800_000),
+    failUntil: Date.now() + Math.min(base * 2 ** (fails - 1), cap),
   });
 }
 
