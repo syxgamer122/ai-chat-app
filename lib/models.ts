@@ -9,17 +9,44 @@ export interface ModelOption {
 }
 
 export const AVAILABLE_MODELS: ModelOption[] = [
+  // --- GPT & OpenAI High-Tier Models ---
   {
-    id: 'gpt-4o-mini',
-    name: 'GPT-4o Mini (Mặc định)',
-    provider: 'openai',
-    providerModel: 'gpt-4o-mini',
+    id: 'gpt-5.6-luna',
+    name: 'GPT-5.6 Luna',
+    provider: 'gateway',
+    providerModel: 'gpt-5.6-luna',
+    isReasoning: true,
+  },
+  {
+    id: 'gpt-5.6-sol',
+    name: 'GPT-5.6 Sol',
+    provider: 'gateway',
+    providerModel: 'gpt-5.6-sol',
+    isReasoning: true,
+  },
+  {
+    id: 'gpt-5.6-terra',
+    name: 'GPT-5.6 Terra',
+    provider: 'gateway',
+    providerModel: 'gpt-5.6-terra',
+  },
+  {
+    id: 'gpt-5.5',
+    name: 'GPT-5.5',
+    provider: 'gateway',
+    providerModel: 'gpt-5.5',
   },
   {
     id: 'gpt-4o',
     name: 'GPT-4o',
     provider: 'openai',
     providerModel: 'gpt-4o',
+  },
+  {
+    id: 'gpt-4o-mini',
+    name: 'GPT-4o Mini (Mặc định)',
+    provider: 'openai',
+    providerModel: 'gpt-4o-mini',
   },
   {
     id: 'o1',
@@ -42,6 +69,21 @@ export const AVAILABLE_MODELS: ModelOption[] = [
     providerModel: 'o3-mini',
     isReasoning: true,
   },
+
+  // --- Claude Anthropic Models ---
+  {
+    id: 'claude-opus-5',
+    name: 'Claude Opus 5',
+    provider: 'gateway',
+    providerModel: 'claude-opus-5',
+    isReasoning: true,
+  },
+  {
+    id: 'claude-sonnet-5',
+    name: 'Claude Sonnet 5',
+    provider: 'gateway',
+    providerModel: 'claude-sonnet-5',
+  },
   {
     id: 'claude-3-5-sonnet',
     name: 'Claude 3.5 Sonnet',
@@ -54,11 +96,14 @@ export const AVAILABLE_MODELS: ModelOption[] = [
     provider: 'gateway',
     providerModel: 'claude-3-5-haiku-20241022',
   },
+
+  // --- DeepSeek & Others ---
   {
-    id: 'deepseek-chat',
-    name: 'DeepSeek V3',
+    id: 'deepseek-v4-pro',
+    name: 'DeepSeek V4 Pro',
     provider: 'gateway',
-    providerModel: 'deepseek-chat',
+    providerModel: 'deepseek-v4-pro',
+    isReasoning: true,
   },
   {
     id: 'deepseek-reasoner',
@@ -66,6 +111,18 @@ export const AVAILABLE_MODELS: ModelOption[] = [
     provider: 'gateway',
     providerModel: 'deepseek-reasoner',
     isReasoning: true,
+  },
+  {
+    id: 'deepseek-chat',
+    name: 'DeepSeek V3',
+    provider: 'gateway',
+    providerModel: 'deepseek-chat',
+  },
+  {
+    id: 'minimax_m3',
+    name: 'MiniMax M3',
+    provider: 'gateway',
+    providerModel: 'minimax_m3',
   },
   {
     id: 'gemini-2.0-flash',
