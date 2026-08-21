@@ -303,7 +303,7 @@ export async function POST(req: Request) {
               baseURL: process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1',
             });
 
-            const timeoutMs = isReasoning ? 110_000 : 55_000;
+            const timeoutMs = 115_000;
             const timeoutSignal = typeof AbortSignal.timeout === 'function' ? AbortSignal.timeout(timeoutMs) : undefined;
             const abortSignal = combineAbortSignals(req.signal, timeoutSignal);
 

@@ -1021,26 +1021,20 @@ const MessageList = memo(function MessageList({
 
   useEffect(() => {
     rowVirtualizer.measure();
-  }, [branchLayoutSignature, rowVirtualizer]);
+    if (autoScroll && scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [branchLayoutSignature, rowVirtualizer, autoScroll, scrollRef]);
 
-  const lastMsgRole = messages[messages.length - 1]?.role;
   const lastMsgContent = messages[messages.length - 1]?.content;
 
   useEffect(() => {
     if (!autoScroll || messages.length === 0) return;
-
-    if (lastMsgRole === 'user') {
-      rowVirtualizer.scrollToIndex(messages.length - 1, {
-        align: 'start',
-        behavior: 'smooth',
-      });
-    } else {
-      const el = scrollRef.current;
-      if (el) {
-        el.scrollTop = el.scrollHeight;
-      }
+    const el = scrollRef.current;
+    if (el) {
+      el.scrollTop = el.scrollHeight;
     }
-  }, [messages.length, lastMsgRole, lastMsgContent, autoScroll, rowVirtualizer, scrollRef]);
+  }, [messages.length, lastMsgContent, autoScroll, scrollRef]);
 
   const suggestions = useMemo(
     () => ['Explain quantum computing', 'Write a Python script for scraping', 'Plan a healthy meal', 'Summarize an article'],
