@@ -1,6 +1,6 @@
 'use client';
 
-import React, { memo, useCallback, useMemo, useState } from 'react';
+import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
@@ -10,89 +10,111 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { useThrottledValue } from '@/lib/use-throttled-value';
 
-/* Khai báo NGOÀI component: tránh tạo array mới mỗi render -> tránh
-   việc react-markdown khởi tạo lại toàn bộ pipeline plugin. */
 const REMARK_PLUGINS = [remarkGfm, remarkMath];
 const REHYPE_PLUGINS: any[] = [
   [rehypeKatex, { throwOnError: false, errorColor: '#71717a', strict: false }],
 ];
 
 /* ------------------------------------------------------------------ */
-/* Tiền xử lý LaTeX                                                    */
+/* Tiền xử lý: chỉ tác động NGOÀI code                                 */
 /* ------------------------------------------------------------------ */
 
-/**
- * Chuyển \( \) và \[ \] sang $ $ / $$ $$.
- * Dùng replacer dạng function để tránh cạm bẫy "$$" là ký tự escape
- * trong chuỗi thay thế của String.replace (bug rất khó thấy).
- */
-function normalizeLatex(raw: string): string {
+/** split() với capture group -> phần tử index lẻ chính là code, giữ nguyên. */
+const CODE_MASK = /(```[\s\S]*?```|~~~[\s\S]*?~~~|`[^`\n]*`)/g;
+
+function outsideCode(raw: string, fn: (chunk: string) => string): string {
   return raw
+    .split(CODE_MASK)
+    .map((chunk, i) => (i % 2 === 1 ? chunk : fn(chunk)))
+    .join('');
+}
+
+function normalizeLatex(s: string): string {
+  return s
     .replace(/\\\[([\s\S]*?)\\\]/g, (_m, body: string) => `\n\n$$\n${body.trim()}\n$$\n\n`)
     .replace(/\\\(([\s\S]*?)\\\)/g, (_m, body: string) => `$${body.trim()}$`);
 }
 
 /**
- * Giữ cấu trúc Markdown hợp lệ giữa lúc stream để cây AST không "nhảy".
- * - fence ``` lẻ  -> đóng tạm
- * - $$ lẻ (khi stream) -> bỏ tạm cái cuối, tránh KaTeX báo lỗi nhấp nháy
+ * Heuristic tiền tệ: dòng chỉ có ĐÚNG 1 dấu $ và ngay sau là chữ số
+ * -> gần như chắc chắn là giá tiền, escape để remark-math không bắt.
+ * Không dùng lookbehind (Safari cũ không hỗ trợ).
  */
+function escapeCurrency(s: string): string {
+  return s
+    .split('\n')
+    .map((line) => ((line.match(/\$/g) ?? []).length === 1 ? line.replace(/\$(?=\d)/, '\\$') : line))
+    .join('\n');
+}
+
 function stabilize(raw: string, isStreaming: boolean): string {
   let out = raw;
 
-  const fences = out.match(/```/g)?.length ?? 0;
-  if (fences % 2 === 1) out += '\n```';
+  if ((out.match(/```/g)?.length ?? 0) % 2 === 1) out += '\n```';
+  if ((out.match(/~~~/g)?.length ?? 0) % 2 === 1) out += '\n~~~';
 
   if (isStreaming) {
-    const blocks = out.match(/\$\$/g)?.length ?? 0;
-    if (blocks % 2 === 1) {
+    // $$ lẻ -> bỏ tạm để KaTeX không nhấp nháy đỏ.
+    if ((out.match(/\$\$/g)?.length ?? 0) % 2 === 1) {
       const i = out.lastIndexOf('$$');
       out = out.slice(0, i) + out.slice(i + 2);
+    }
+    // $ đơn lẻ ở cuối -> cắt nốt (inline math chưa đóng).
+    const singles = out.replace(/\$\$/g, '').match(/\$/g)?.length ?? 0;
+    if (singles % 2 === 1) {
+      const i = out.lastIndexOf('$');
+      out = out.slice(0, i) + out.slice(i + 1);
     }
   }
 
   return out;
 }
 
+function preprocess(raw: string, isStreaming: boolean): string {
+  // stabilize TRƯỚC để fence được đóng -> mask code mới chính xác.
+  const stable = stabilize(raw, isStreaming);
+  return outsideCode(stable, (chunk) => escapeCurrency(normalizeLatex(chunk)));
+}
+
 /* ------------------------------------------------------------------ */
 /* Code block                                                          */
 /* ------------------------------------------------------------------ */
 
-interface CodeBlockProps {
+const CodeBlock = memo(function CodeBlock({
+  language,
+  value,
+  isStreaming,
+}: {
   language: string;
   value: string;
   isStreaming: boolean;
-}
-
-const CodeBlock = memo(function CodeBlock({ language, value, isStreaming }: CodeBlockProps) {
+}) {
   const [copied, setCopied] = useState(false);
+  const t = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => { if (t.current) clearTimeout(t.current); }, []);
 
   const onCopy = useCallback(async () => {
     try {
       await navigator.clipboard.writeText(value);
       setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      if (t.current) clearTimeout(t.current);
+      t.current = setTimeout(() => setCopied(false), 2000);
     } catch (err) {
       console.error('[CodeBlock] copy failed:', err);
     }
   }, [value]);
 
   return (
-    <div className="relative group rounded-md overflow-hidden my-4 border border-zinc-800 shadow-md">
+    <div className="relative group/code rounded-md overflow-hidden my-4 border border-zinc-800 shadow-md">
       <div className="flex items-center justify-between px-3 py-1.5 bg-zinc-900 border-b border-zinc-800 text-xs text-zinc-400 font-mono">
         <span>{language || 'text'}</span>
-        <button
-          type="button"
-          onClick={onCopy}
-          className="hover:text-zinc-100 transition-colors"
-          aria-label="Copy code"
-        >
+        <button type="button" onClick={onCopy} className="hover:text-zinc-100 transition-colors" aria-label="Copy code">
           {copied ? <Check size={14} /> : <Copy size={14} />}
         </button>
       </div>
 
       {isStreaming ? (
-        /* CHẾ ĐỘ NHẸ: không tokenize, chỉ đổ text thuần. */
         <pre className="m-0 p-4 overflow-x-auto bg-[#09090b] text-[13px] leading-relaxed font-mono text-zinc-300">
           <code>{value}</code>
         </pre>
@@ -114,26 +136,21 @@ const CodeBlock = memo(function CodeBlock({ language, value, isStreaming }: Code
 /* Renderer                                                            */
 /* ------------------------------------------------------------------ */
 
-interface MarkdownRendererProps {
-  content: string;
-  /** true khi tin nhắn này đang được stream */
-  isStreaming?: boolean;
-  /** cửa sổ gom render, ms */
-  throttleMs?: number;
-}
-
 export const MarkdownRenderer = memo(function MarkdownRenderer({
   content,
   isStreaming = false,
   throttleMs = 150,
-}: MarkdownRendererProps) {
+}: {
+  content: string;
+  isStreaming?: boolean;
+  throttleMs?: number;
+}) {
   const throttled = useThrottledValue(content ?? '', throttleMs, isStreaming);
 
   const source = useMemo(() => {
     try {
-      return stabilize(normalizeLatex(throttled), isStreaming);
+      return preprocess(throttled, isStreaming);
     } catch (err) {
-      // Không bao giờ để lỗi regex làm trắng tin nhắn.
       console.error('[MarkdownRenderer] preprocess failed:', err);
       return throttled;
     }
@@ -141,47 +158,57 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
 
   const components = useMemo(
     () => ({
-      code({ className, children, ...props }: any) {
-        const match = /language-(\w+)/.exec(className || '');
-        const value = String(children ?? '').replace(/\n$/, '');
+      /* Fenced code: xử lý ở tầng `pre`, đọc thẳng từ hast -> không đoán inline. */
+      pre({ node, children }: any) {
+        const codeNode = node?.children?.find((c: any) => c.tagName === 'code');
+        if (!codeNode) return <pre className="overflow-x-auto">{children}</pre>;
 
-        /* react-markdown v9 bỏ prop `inline`; tự suy luận để tương thích v8 + v9. */
-        const inline: boolean =
-          props.inline ?? (!className && !value.includes('\n'));
+        const cls = Array.isArray(codeNode.properties?.className)
+          ? codeNode.properties.className.join(' ')
+          : String(codeNode.properties?.className ?? '');
+        const lang = /language-([\w+#-]+)/.exec(cls)?.[1] ?? '';
+        const value = (codeNode.children ?? [])
+          .map((c: any) => c.value ?? '')
+          .join('')
+          .replace(/\n$/, '');
 
-        if (!inline) {
-          return (
-            <CodeBlock
-              language={match?.[1] ?? ''}
-              value={value}
-              isStreaming={isStreaming}
-            />
-          );
-        }
+        return <CodeBlock language={lang} value={value} isStreaming={isStreaming} />;
+      },
 
+      /* Tới đây chỉ còn inline code. */
+      code({ children }: any) {
         return (
-          <code className="bg-zinc-800/50 rounded px-1.5 py-0.5 text-[13px] font-mono text-indigo-400">
+          <code className="bg-zinc-800/50 rounded px-1.5 py-0.5 text-[13px] font-mono text-indigo-400 break-words">
             {children}
           </code>
         );
       },
+
       p: ({ children }: any) => <p className="mb-4 last:mb-0">{children}</p>,
+
       a: ({ href, children }: any) => (
-        <a href={href} target="_blank" rel="noreferrer" className="text-indigo-400 hover:underline">
+        <a href={href} target="_blank" rel="noreferrer noopener" className="text-indigo-400 hover:underline break-words">
           {children}
         </a>
+      ),
+
+      /* Bảng GFM tràn ngang trên mobile -> bọc scroll container. */
+      table: ({ children }: any) => (
+        <div className="my-4 w-full overflow-x-auto">
+          <table className="w-full text-sm">{children}</table>
+        </div>
+      ),
+
+      img: ({ src, alt }: any) => (
+        <img src={src} alt={alt ?? ''} loading="lazy" className="rounded-xl max-w-full h-auto" />
       ),
     }),
     [isStreaming],
   );
 
   return (
-    <div className="prose prose-invert prose-p:leading-relaxed prose-pre:p-0 max-w-none w-full">
-      <ReactMarkdown
-        remarkPlugins={REMARK_PLUGINS}
-        rehypePlugins={REHYPE_PLUGINS}
-        components={components}
-      >
+    <div className="prose prose-invert prose-p:leading-relaxed prose-pre:p-0 max-w-none w-full [&_.katex-display]:overflow-x-auto [&_.katex-display]:overflow-y-hidden [&_.katex-display]:py-1">
+      <ReactMarkdown remarkPlugins={REMARK_PLUGINS} rehypePlugins={REHYPE_PLUGINS} components={components}>
         {source}
       </ReactMarkdown>
     </div>

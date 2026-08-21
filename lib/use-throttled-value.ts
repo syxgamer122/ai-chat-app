@@ -3,51 +3,55 @@
 import { useEffect, useRef, useState } from 'react';
 
 /**
- * Throttle một giá trị đang thay đổi liên tục (leading + trailing edge).
- *
- * @param value  giá trị nguồn (nội dung stream)
- * @param delay  khoảng gom nhóm, ms
- * @param active chỉ throttle khi true. Khi false -> trả về value gốc ngay lập tức.
+ * Throttle giá trị stream (leading + trailing edge), luôn flush giá trị cuối.
+ * Khác bản cũ: timer chỉ tạo MỘT lần cho mỗi cửa sổ và đọc `latest.current`,
+ * nên không bao giờ render giá trị cũ và không tạo/hủy timer theo từng token.
  */
 export function useThrottledValue<T>(value: T, delay = 150, active = true): T {
   const [throttled, setThrottled] = useState<T>(value);
-  const lastRun = useRef<number>(0);
+  const latest = useRef(value);
+  const lastRun = useRef(0);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mounted = useRef(true);
+
+  latest.current = value;
+
+  useEffect(
+    () => () => {
+      mounted.current = false;
+      if (timer.current) clearTimeout(timer.current);
+    },
+    [],
+  );
 
   useEffect(() => {
-    const clear = () => {
+    // Stream kết thúc -> flush ngay, reset cửa sổ cho lần stream sau.
+    if (!active) {
       if (timer.current) {
         clearTimeout(timer.current);
         timer.current = null;
       }
-    };
-
-    // Stream kết thúc -> hủy timer treo, đồng bộ ngay giá trị cuối.
-    if (!active) {
-      clear();
+      lastRun.current = 0;
       setThrottled(value);
       return;
     }
 
-    const elapsed = Date.now() - lastRun.current;
+    // Đã có hẹn giờ -> để nó tự đọc latest.current, không churn timer.
+    if (timer.current) return;
 
-    // Leading edge: đủ thời gian thì render luôn cho cảm giác phản hồi tức thì.
+    const elapsed = Date.now() - lastRun.current;
     if (elapsed >= delay) {
       lastRun.current = Date.now();
       setThrottled(value);
-      return clear;
+      return;
     }
 
-    // Trailing edge: hẹn giờ cho phần còn lại của cửa sổ throttle.
     timer.current = setTimeout(() => {
-      lastRun.current = Date.now();
       timer.current = null;
-      setThrottled(value);
+      lastRun.current = Date.now();
+      if (mounted.current) setThrottled(latest.current);
     }, delay - elapsed);
-
-    return clear;
   }, [value, delay, active]);
 
-  // Chốt an toàn kép: khi không throttle, luôn đọc thẳng từ nguồn.
   return active ? throttled : value;
 }

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useChat, type Message } from 'ai/react';
 import { useAppStore } from '@/lib/store';
-import { db } from '@/lib/db';
+import { db, Dexie, type StoredMessage } from '@/lib/db';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { MarkdownRenderer } from './markdown-renderer';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -16,22 +16,68 @@ import {
 export default function ChatInterface() {
   const { currentChatId, settings, setCurrentChatId } = useAppStore();
 
+  // Patch A: Sinh trước draftId để useChat luôn có key bất biến, không bị nhảy id giữa lúc stream
+  const [draftId, setDraftId] = useState(() => crypto.randomUUID());
+  const chatKey = currentChatId ?? draftId;
+
   const [autoScroll, setAutoScroll] = useState(true);
   const [attachments, setAttachments] = useState<File[]>([]);
+  const [notice, setNotice] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
+  const [reloadTick, setReloadTick] = useState(0);
+
+  const previews = useMemo(
+    () => attachments.map((f) => (f.type.startsWith('image/') ? URL.createObjectURL(f) : null)),
+    [attachments],
+  );
+
+  useEffect(
+    () => () => previews.forEach((u) => u && URL.revokeObjectURL(u)),
+    [previews],
+  );
+
+  const MAX_FILE = 8 * 1024 * 1024;
+  const MAX_FILES = 5;
+
+  const addFiles = (files: FileList | File[] | null) => {
+    if (!files) return;
+    const fileArr = Array.from(files);
+    const rejected: string[] = [];
+    const ok = fileArr.filter((f) => (f.size <= MAX_FILE ? true : (rejected.push(f.name), false)));
+    if (rejected.length) {
+      setNotice(`Bỏ qua (quá 8MB): ${rejected.join(', ')}`);
+      setTimeout(() => setNotice(null), 4000);
+    }
+    setAttachments((prev) => [...prev, ...ok].slice(0, MAX_FILES));
+  };
+
+  const removeAttachment = (index: number) => {
+    setAttachments((prev) => prev.filter((_, i) => i !== index));
+  };
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  /** chat đã nạp từ Dexie -> chống ghi đè luồng stream */
   const hydratedFor = useRef<string | null>(null);
+  const titledFor = useRef<string | null>(null);
+  const persistedIds = useRef<Set<string>>(new Set());
+  const isCoarse = useRef(false);
 
+  useEffect(() => {
+    isCoarse.current =
+      typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches;
+  }, []);
+
+  // Patch B: Nạp lịch sử từ Dexie bằng compound index [chatId+seq]
   const dbMessages = useLiveQuery(
     () =>
       currentChatId
-        ? db.messages.where('chatId').equals(currentChatId).sortBy('createdAt')
+        ? db.messages
+            .where('[chatId+seq]')
+            .between([currentChatId, Dexie.minKey], [currentChatId, Dexie.maxKey])
+            .toArray()
         : [],
     [currentChatId],
   );
@@ -40,84 +86,144 @@ export default function ChatInterface() {
     messages, setMessages, input, setInput, handleInputChange,
     handleSubmit, stop, reload, isLoading, error,
   } = useChat({
-    id: currentChatId || 'new',
+    id: chatKey,
     body: {
       model: settings.model,
       temperature: settings.temperature,
       system: settings.systemPrompt,
     },
-    // Có ở @ai-sdk/react >= 3.4; phiên bản cũ bỏ qua vô hại.
     experimental_throttle: 50,
-    onFinish: async (message) => {
-      try {
-        if (!currentChatId) return;
-        await db.messages.put({ ...message, chatId: currentChatId, createdAt: Date.now() });
-        await db.chats.update(currentChatId, { updatedAt: Date.now() });
-      } catch (err) {
-        console.error('[onFinish] persist failed:', err);
-      }
-    },
     onError: (err) => console.error('[useChat]', err),
   });
 
   /* ---------------------------------------------------------------- */
-  /* Nạp lịch sử từ Dexie đúng MỘT lần cho mỗi chat                    */
+  /* Hydrate lịch sử từ Dexie một lần duy nhất cho mỗi chat          */
   /* ---------------------------------------------------------------- */
   useEffect(() => {
     if (!currentChatId) {
       hydratedFor.current = null;
+      persistedIds.current.clear();
       setMessages([]);
       return;
     }
-    if (hydratedFor.current === currentChatId) return; // đã nạp -> không đụng vào
-    if (!dbMessages) return;                            // Dexie chưa trả kết quả
+    if (hydratedFor.current === currentChatId || !dbMessages) return;
     hydratedFor.current = currentChatId;
-    setMessages(dbMessages as Message[]);
+    persistedIds.current = new Set(dbMessages.map((m) => m.id));
+    setMessages(
+      dbMessages.map((m) => ({
+        id: m.id,
+        role: m.role,
+        content: m.content,
+        experimental_attachments: m.attachments as any,
+      })) as Message[],
+    );
   }, [currentChatId, dbMessages, setMessages]);
 
-  /* Đặt tiêu đề tự động */
+  /* ---------------------------------------------------------------- */
+  /* Patch B: Nguồn chân lý duy nhất ghi vào Dexie khi stream dừng    */
+  /* Bao gồm cả khi người dùng bấm Stop hoặc lỗi giữa chừng           */
+  /* ---------------------------------------------------------------- */
   useEffect(() => {
-    if (messages.length !== 2 || !currentChatId) return;
+    if (isLoading || !currentChatId || !messages.length) return;
+
+    const rows: StoredMessage[] = [];
+    messages.forEach((m, i) => {
+      if (persistedIds.current.has(m.id)) return;
+      rows.push({
+        id: m.id,
+        chatId: currentChatId,
+        role: m.role as StoredMessage['role'],
+        content: m.content,
+        seq: i,
+        createdAt: Date.now(),
+        attachments: (m.experimental_attachments as any) ?? undefined,
+        finishReason: 'stop',
+      });
+    });
+    if (!rows.length) return;
+
+    (async () => {
+      try {
+        await db.messages.bulkPut(rows);
+        rows.forEach((r) => persistedIds.current.add(r.id));
+        await db.chats.update(currentChatId, { updatedAt: Date.now() });
+      } catch (err) {
+        console.error('[persist]', err);
+      }
+    })();
+  }, [isLoading, messages, currentChatId]);
+
+  /* ---------------------------------------------------------------- */
+  /* Patch C: Kích hoạt reload() an toàn sau khi state đã commit      */
+  /* ---------------------------------------------------------------- */
+  useEffect(() => {
+    if (reloadTick === 0) return;
+    void reload();
+  }, [reloadTick]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /* Đặt tiêu đề tự động (chỉ chạy 1 lần sau khi có đủ 2 tin nhắn và đã stream xong) */
+  useEffect(() => {
+    if (!currentChatId || isLoading || messages.length < 2) return;
+    if (titledFor.current === currentChatId) return;
+    titledFor.current = currentChatId; // chốt trước khi await
+
+    const ctrl = new AbortController();
     (async () => {
       try {
         const chat = await db.chats.get(currentChatId);
         if (!chat || chat.title !== 'New Chat') return;
         const res = await fetch('/api/title', {
           method: 'POST',
-          body: JSON.stringify({ message: messages[0].content }),
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: messages[0].content.slice(0, 2000) }),
+          signal: ctrl.signal,
         });
+        if (!res.ok) return;
         const data = await res.json();
-        if (data?.title) await db.chats.update(currentChatId, { title: data.title });
+        if (data?.title) await db.chats.update(currentChatId, { title: String(data.title).slice(0, 80) });
       } catch (err) {
-        console.error('[title]', err);
+        if ((err as any)?.name !== 'AbortError') console.error('[title]', err);
       }
     })();
-  }, [messages, currentChatId]);
+    return () => ctrl.abort();
+  }, [messages.length, currentChatId, isLoading]);
+
+  const stick = useRef(true);
+
+  const onUserScrollIntent = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+    stick.current = atBottom;
+    setAutoScroll(atBottom);
+  };
 
   useEffect(() => {
     const el = scrollRef.current;
-    if (el && autoScroll) el.scrollTop = el.scrollHeight;
-  }, [messages, autoScroll]);
+    if (!el || !stick.current) return;
+    el.scrollTo({ top: el.scrollHeight, behavior: isLoading ? 'auto' : 'smooth' });
+  }, [messages, isLoading]);
 
-  const handleScroll = () => {
-    const el = scrollRef.current;
-    if (!el) return;
-    setAutoScroll(el.scrollHeight - el.scrollTop <= el.clientHeight + 50);
+  const scrollToBottom = () => {
+    stick.current = true;
+    setAutoScroll(true);
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
   };
 
   /* ---------------------------------------------------------------- */
-  /* Helper: cắt hội thoại từ index -> Dexie + state                   */
+  /* Helper: cắt hội thoại theo seq -> xóa dứt điểm trong Dexie       */
   /* ---------------------------------------------------------------- */
   const truncateFrom = useCallback(
     async (index: number, keep: Message[]) => {
-      const removed = messages.slice(index);
-      if (currentChatId && removed.length) {
-        await db.messages.bulkDelete(removed.map((m) => m.id));
+      if (currentChatId) {
+        await db.messages
+          .where('[chatId+seq]')
+          .between([currentChatId, index], [currentChatId, Dexie.maxKey], true, true)
+          .delete();
         await db.chats.update(currentChatId, { updatedAt: Date.now() });
       }
+      messages.slice(index).forEach((m) => persistedIds.current.delete(m.id));
       setMessages(keep);
-      // Nhường 1 frame để messagesRef của SDK chắc chắn đã đồng bộ.
-      await new Promise<void>((r) => requestAnimationFrame(() => r()));
     },
     [messages, currentChatId, setMessages],
   );
@@ -126,17 +232,12 @@ export default function ChatInterface() {
   const handleRegenerate = useCallback(
     async (id: string) => {
       if (isLoading) return;
-      try {
-        const idx = messages.findIndex((m) => m.id === id);
-        if (idx < 1) return; // phải có tin nhắn user phía trước
-        await truncateFrom(idx, messages.slice(0, idx));
-        // Lúc này tin nhắn cuối là của user -> reload() gửi lại nguyên trạng.
-        await reload();
-      } catch (err) {
-        console.error('[regenerate]', err);
-      }
+      const idx = messages.findIndex((m) => m.id === id);
+      if (idx < 1 || messages[idx - 1]?.role !== 'user') return;
+      await truncateFrom(idx, messages.slice(0, idx));
+      setReloadTick((t) => t + 1);
     },
-    [isLoading, messages, truncateFrom, reload],
+    [isLoading, messages, truncateFrom],
   );
 
   /* 2. EDIT MESSAGE -------------------------------------------------- */
@@ -154,26 +255,15 @@ export default function ChatInterface() {
     async (id: string) => {
       const text = draft.trim();
       if (!text || isLoading) return;
-      try {
-        const idx = messages.findIndex((m) => m.id === id);
-        if (idx === -1) return;
-
-        // Giữ nguyên attachments Base64 của tin nhắn gốc.
-        const edited: Message = { ...messages[idx], content: text };
-
-        await truncateFrom(idx, [...messages.slice(0, idx), edited]);
-        if (currentChatId) {
-          await db.messages.put({ ...edited, chatId: currentChatId, createdAt: Date.now() });
-        }
-        setEditingId(null);
-        setDraft('');
-        await reload();
-      } catch (err) {
-        console.error('[saveEdit]', err);
-        setEditingId(null);
-      }
+      const idx = messages.findIndex((m) => m.id === id);
+      if (idx === -1) return;
+      const edited: Message = { ...messages[idx], content: text };
+      await truncateFrom(idx, [...messages.slice(0, idx), edited]);
+      setEditingId(null);
+      setDraft('');
+      setReloadTick((t) => t + 1);
     },
-    [draft, isLoading, messages, truncateFrom, currentChatId, reload],
+    [draft, isLoading, messages, truncateFrom],
   );
 
   /* 3. COPY ---------------------------------------------------------- */
@@ -188,20 +278,45 @@ export default function ChatInterface() {
   }, []);
 
   /* 4. CLEAR / DELETE CHAT ------------------------------------------ */
-  const clearChat = useCallback(async () => {
+  const clearMessages = useCallback(async () => {
     try {
       stop();
       if (currentChatId) {
-        await db.messages.where('chatId').equals(currentChatId).delete();
-        await db.chats.delete(currentChatId);
+        await db.messages
+          .where('[chatId+seq]')
+          .between([currentChatId, Dexie.minKey], [currentChatId, Dexie.maxKey])
+          .delete();
+        await db.chats.update(currentChatId, { title: 'New Chat', updatedAt: Date.now() });
+      }
+      persistedIds.current.clear();
+      titledFor.current = null;
+      setMessages([]);
+      setConfirmClear(false);
+    } catch (err) {
+      console.error('[clearMessages]', err);
+      setConfirmClear(false);
+    }
+  }, [stop, currentChatId, setMessages]);
+
+  const deleteChat = useCallback(async () => {
+    try {
+      stop();
+      if (currentChatId) {
+        await db.transaction('rw', db.messages, db.chats, async () => {
+          await db.messages.where('chatId').equals(currentChatId).delete();
+          await db.chats.delete(currentChatId);
+        });
       }
       hydratedFor.current = null;
+      titledFor.current = null;
+      persistedIds.current.clear();
       setMessages([]);
+      setDraftId(crypto.randomUUID()); // khóa hook mới, sạch
       setCurrentChatId(null);
       setAttachments([]);
       setConfirmClear(false);
     } catch (err) {
-      console.error('[clearChat]', err);
+      console.error('[deleteChat]', err);
       setConfirmClear(false);
     }
   }, [stop, currentChatId, setMessages, setCurrentChatId]);
@@ -216,46 +331,38 @@ export default function ChatInterface() {
     try {
       let chatId = currentChatId;
       if (!chatId) {
-        chatId = crypto.randomUUID();
-        hydratedFor.current = chatId; // chặn effect hydrate ghi đè stream
+        chatId = draftId;
+        hydratedFor.current = chatId;
         setCurrentChatId(chatId);
         await db.chats.put({
-          id: chatId, title: 'New Chat', pinned: false,
-          createdAt: Date.now(), updatedAt: Date.now(),
+          id: chatId,
+          title: 'New Chat',
+          pinned: 0,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
         });
       }
-
-      const processedAttachments = await Promise.all(
-        attachments.map(
-          (file) =>
-            new Promise<{ name: string; contentType: string; url: string }>((resolve, reject) => {
-              const reader = new FileReader();
-              reader.onload = (ev) =>
-                resolve({ name: file.name, contentType: file.type, url: ev.target?.result as string });
-              reader.onerror = () => reject(reader.error);
-              reader.readAsDataURL(file);
-            }),
-        ),
-      );
-
-      await db.messages.put({
-        id: crypto.randomUUID(),
-        chatId,
-        role: 'user',
-        content: input,
-        createdAt: Date.now(),
-        experimental_attachments: processedAttachments.length ? processedAttachments : undefined,
-      });
 
       const dataTransfer = new DataTransfer();
       attachments.forEach((f) => dataTransfer.items.add(f));
       const options = attachments.length ? { experimental_attachments: dataTransfer.files } : undefined;
 
       setAttachments([]);
+
       handleSubmit(e, options);
     } catch (err) {
       console.error('[onSubmit]', err);
     }
+  };
+
+  const onTextareaKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // (e.nativeEvent as any).isComposing = true khi IME đang gõ tiếng Việt/Nhật/Hàn
+    if ((e.nativeEvent as any).isComposing || e.keyCode === 229) return;
+    if (e.key === 'Escape') { stop(); return; }
+    if (e.key !== 'Enter' || e.shiftKey) return;
+    if (isCoarse.current || !settings.sendOnEnter) return; // mobile -> xuống dòng
+    e.preventDefault();
+    void onSubmit(e as unknown as React.FormEvent);
   };
 
   const lastMessageId = messages[messages.length - 1]?.id;
@@ -267,13 +374,13 @@ export default function ChatInterface() {
   );
 
   return (
-    <div className="flex-1 flex flex-col relative h-full">
+    <div className="flex-1 flex flex-col relative h-[100dvh]">
       {/* HEADER: Clear chat */}
       {hasMessages && (
         <div className="absolute top-0 right-0 z-20 p-3 flex items-center gap-2">
           {confirmClear ? (
             <div className="flex items-center gap-1.5 bg-zinc-900/90 border border-zinc-800 rounded-xl p-1 backdrop-blur-sm">
-              <button onClick={clearChat} className="px-2.5 py-1 text-xs text-red-400 hover:bg-red-950/50 rounded-lg transition">
+              <button onClick={deleteChat} className="px-2.5 py-1 text-xs text-red-400 hover:bg-red-950/50 rounded-lg transition">
                 Xóa hẳn
               </button>
               <button onClick={() => setConfirmClear(false)} className="px-2.5 py-1 text-xs text-zinc-400 hover:bg-zinc-800 rounded-lg transition">
@@ -294,8 +401,10 @@ export default function ChatInterface() {
 
       <div
         ref={scrollRef}
-        onScroll={handleScroll}
-        className="flex-1 overflow-y-auto p-4 md:p-8 space-y-6 pb-40 scroll-smooth"
+        onWheel={onUserScrollIntent}
+        onTouchMove={onUserScrollIntent}
+        onScroll={onUserScrollIntent}
+        className="flex-1 overflow-y-auto p-4 md:p-8 space-y-6 pb-40"
       >
         {!hasMessages ? (
           <div className="flex flex-col items-center justify-center h-full pt-10 space-y-8">
@@ -366,11 +475,13 @@ export default function ChatInterface() {
                           value={draft}
                           onChange={(e) => setDraft(e.target.value)}
                           onKeyDown={(e) => {
+                            if ((e.nativeEvent as any).isComposing || e.keyCode === 229) return;
+                            if (e.key === 'Escape') { cancelEdit(); return; }
                             if (e.key === 'Enter' && !e.shiftKey) {
+                              if (isCoarse.current || !settings.sendOnEnter) return;
                               e.preventDefault();
                               void saveEdit(m.id);
                             }
-                            if (e.key === 'Escape') cancelEdit();
                           }}
                           autoFocus
                           minRows={1}
@@ -400,9 +511,9 @@ export default function ChatInterface() {
                       <p className="whitespace-pre-wrap leading-relaxed">{m.content}</p>
                     )}
 
-                    {/* Thanh hành động — dùng group-hover, không phải hover trên chính nó */}
+                    {/* Thanh hành động — hiển thị trên mobile và hover trên desktop */}
                     {!isEditing && !streamingThis && (
-                      <div className="mt-3 flex items-center gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                      <div className="mt-3 flex items-center gap-1 transition-opacity opacity-100 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 focus-within:opacity-100">
                         {m.role === 'assistant' && (
                           <>
                             <button onClick={() => copyMessage(m)} title="Copy" className="p-1.5 text-zinc-500 hover:text-zinc-200 rounded">
@@ -462,28 +573,39 @@ export default function ChatInterface() {
 
       {!autoScroll && (
         <button
-          onClick={() => setAutoScroll(true)}
+          type="button"
+          onClick={scrollToBottom}
           className="absolute bottom-32 left-1/2 -translate-x-1/2 p-2 bg-zinc-800 text-zinc-300 rounded-full shadow-lg border border-zinc-700 hover:bg-zinc-700 transition"
         >
           <ArrowDown size={18} />
         </button>
       )}
 
-      <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-zinc-950 via-zinc-950 to-transparent pt-10">
+      <div className="absolute bottom-0 left-0 right-0 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] bg-gradient-to-t from-zinc-950 via-zinc-950 to-transparent pt-10">
         <div className="max-w-[720px] mx-auto relative">
+          {/* Thông báo file vượt quá dung lượng */}
+          {notice && (
+            <div className="mb-2 p-2.5 bg-amber-950/80 border border-amber-800/80 rounded-xl text-xs text-amber-300 flex items-center justify-between shadow-lg">
+              <span>{notice}</span>
+              <button type="button" onClick={() => setNotice(null)} className="p-1 hover:text-amber-100 transition">
+                <X size={14} />
+              </button>
+            </div>
+          )}
+
           {attachments.length > 0 && (
             <div className="flex flex-wrap gap-2 mb-2 p-2 bg-zinc-900/80 border border-zinc-800 rounded-xl backdrop-blur-sm">
               {attachments.map((file, i) => (
                 <div key={`${file.name}-${i}`} className="relative flex items-center gap-2 bg-zinc-800 p-2 rounded-lg text-xs text-zinc-300">
-                  {file.type.startsWith('image/') ? (
-                    <img src={URL.createObjectURL(file)} alt={file.name} className="w-8 h-8 object-cover rounded" />
+                  {previews[i] ? (
+                    <img src={previews[i]!} alt={file.name} className="w-8 h-8 object-cover rounded" />
                   ) : (
                     <Paperclip size={14} className="text-zinc-500" />
                   )}
                   <span className="truncate max-w-[120px]">{file.name}</span>
                   <button
                     type="button"
-                    onClick={() => setAttachments((prev) => prev.filter((_, idx) => idx !== i))}
+                    onClick={() => removeAttachment(i)}
                     className="absolute -top-1.5 -right-1.5 bg-zinc-700 hover:bg-zinc-600 rounded-full p-0.5"
                   >
                     <X size={12} />
@@ -503,7 +625,7 @@ export default function ChatInterface() {
               className="hidden"
               ref={fileInputRef}
               onChange={(e) => {
-                if (e.target.files) setAttachments((prev) => [...prev, ...Array.from(e.target.files!)]);
+                addFiles(e.target.files);
                 e.target.value = '';
               }}
             />
@@ -519,12 +641,10 @@ export default function ChatInterface() {
             <TextareaAutosize
               value={input}
               onChange={handleInputChange}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  onSubmit(e as unknown as React.FormEvent);
-                }
-              }}
+              onKeyDown={onTextareaKeyDown}
+              enterKeyHint={isCoarse.current ? 'enter' : 'send'}
+              autoCapitalize="sentences"
+              spellCheck={false}
               placeholder="Gửi tin nhắn..."
               className="w-full max-h-[200px] bg-transparent text-zinc-100 placeholder:text-zinc-600 resize-none outline-none p-4 pl-14 pr-16 py-5"
               minRows={1}
