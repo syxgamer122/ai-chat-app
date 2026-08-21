@@ -1508,29 +1508,36 @@ export default function ChatInterface() {
       previousChatId.current !==
       currentChatId
     ) {
-      requestEpoch.current += 1;
-      treePersistEpochRef.current += 1;
+      const isSwitchingExisting =
+        previousChatId.current !== null &&
+        currentChatId !== null &&
+        previousChatId.current !== currentChatId;
 
-      /**
-       * Hủy timer persist chưa chạy.
-       */
-      if (treePersistTimerRef.current) {
-        clearTimeout(
-          treePersistTimerRef.current,
-        );
+      if (isSwitchingExisting) {
+        requestEpoch.current += 1;
+        treePersistEpochRef.current += 1;
 
-        treePersistTimerRef.current = null;
-      }
+        /**
+         * Hủy timer persist chưa chạy.
+         */
+        if (treePersistTimerRef.current) {
+          clearTimeout(
+            treePersistTimerRef.current,
+          );
 
-      /**
-       * Fork reservation chỉ hợp lệ trong chat đã tạo ra nó.
-       */
-      pendingAssistantForkRef.current =
-        null;
+          treePersistTimerRef.current = null;
+        }
 
-      if (isLoading) {
-        finishRef.current = 'abort';
-        stop();
+        /**
+         * Fork reservation chỉ hợp lệ trong chat đã tạo ra nó.
+         */
+        pendingAssistantForkRef.current =
+          null;
+
+        if (isLoading) {
+          finishRef.current = 'abort';
+          stop();
+        }
       }
 
       previousChatId.current =
@@ -1613,6 +1620,10 @@ export default function ChatInterface() {
     }
 
     const chatId = currentChatId;
+    if (hydratedFor.current === chatId) {
+      return;
+    }
+
     const epoch = requestEpoch.current;
     let cancelled = false;
 
