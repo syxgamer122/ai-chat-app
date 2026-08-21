@@ -16,13 +16,13 @@ export function useThrottledValue<T>(value: T, delay = 150, active = true): T {
 
   latest.current = value;
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
       mounted.current = false;
       if (timer.current) clearTimeout(timer.current);
-    },
-    [],
-  );
+    };
+  }, []);
 
   useEffect(() => {
     // Stream kết thúc -> flush ngay, reset cửa sổ cho lần stream sau.

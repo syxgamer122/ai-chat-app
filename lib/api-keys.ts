@@ -1,52 +1,49 @@
-const disabledKeys = new Map<string, number>();
-let keyCursor = 0;
+type KeyState = { failUntil: number; fails: number };
+const state = new Map<string, KeyState>();
+let cursor = 0;
 
-/**
- * Lấy danh sách toàn bộ API keys từ biến môi trường.
- * Hỗ trợ OPENAI_API_KEYS (ngăn cách bằng dấu phẩy hoặc xuống dòng)
- * hoặc OPENAI_API_KEY đơn lẻ (cũng có thể chứa dấu phẩy).
- */
+/** Lấy danh sách toàn bộ API keys hợp lệ từ biến môi trường. */
 export function getAllApiKeys(): string[] {
   const raw = process.env.OPENAI_API_KEYS || process.env.OPENAI_API_KEY || '';
-  return raw
-    .split(/[,\n]/)
-    .map((k) => k.trim())
-    .filter((k) => k.length > 0);
+  return [...new Set(raw.split(/[,\s]+/).map((k) => k.trim()).filter(Boolean))];
 }
 
 /**
- * Lấy danh sách các key còn hoạt động (không bị blacklist tạm thời do hết quota/token).
+ * Trả về danh sách ứng viên key để failover trong CÙNG một request.
+ * Đảm bảo phân phối đều và xếp các key đang cooldown xuống cuối.
  */
-export function getActiveApiKeys(): string[] {
+export function getKeyCandidates(): string[] {
   const all = getAllApiKeys();
+  if (!all.length) return [];
+  const start = (cursor++) % all.length;
+  const rotated = [...all.slice(start), ...all.slice(0, start)];
   const now = Date.now();
-  const valid = all.filter((k) => {
-    const until = disabledKeys.get(k);
-    if (!until) return true;
-    if (now > until) {
-      disabledKeys.delete(k);
-      return true;
-    }
-    return false;
+  const fresh = rotated.filter((k) => (state.get(k)?.failUntil ?? 0) <= now);
+  const cooling = rotated
+    .filter((k) => (state.get(k)?.failUntil ?? 0) > now)
+    .sort((a, b) => state.get(a)!.failUntil - state.get(b)!.failUntil);
+  return [...fresh, ...cooling];
+}
+
+/** Đánh dấu một key trong pool bị lỗi với exponential backoff. Tuyệt đối không lưu custom key của user. */
+export function markKeyFailure(key: string, status?: number): void {
+  if (!key || !getAllApiKeys().includes(key)) return; // Bảo vệ bộ nhớ: không bao giờ blacklist key riêng của user
+  const fails = (state.get(key)?.fails ?? 0) + 1;
+  const base = status === 401 || status === 403 ? 3_600_000 : 60_000;
+  state.set(key, {
+    fails,
+    failUntil: Date.now() + Math.min(base * 2 ** (fails - 1), 1_800_000),
   });
-  return valid.length > 0 ? valid : all;
 }
 
-/**
- * Lấy API key tiếp theo theo thuật toán Round-Robin để chia đều tải cho các tài khoản.
- */
-export function getNextApiKey(): string {
-  const keys = getActiveApiKeys();
-  if (!keys.length) return '';
-  keyCursor = (keyCursor + 1) % keys.length;
-  return keys[keyCursor];
+/** Đánh dấu key hoạt động thành công -> giải phóng cooldown. */
+export function markKeySuccess(key: string): void {
+  state.delete(key);
 }
 
-/**
- * Đánh dấu một key bị lỗi quota/token limit để tạm dừng dùng trong 10 phút.
- */
-export function markKeyRateLimited(key: string, durationMs = 10 * 60 * 1000): void {
-  if (!key) return;
-  disabledKeys.set(key, Date.now() + durationMs);
-  console.warn(`[KeyManager] Key ...${key.slice(-6)} bị đánh dấu tạm ngưng dùng trong ${Math.round(durationMs / 1000)}s`);
+/** Định danh key an toàn khi ghi log server (không ghi lộ token/suffix của user). */
+export function getKeyLabel(key: string): string {
+  const all = getAllApiKeys();
+  const idx = all.indexOf(key);
+  return idx !== -1 ? `pool-key#${idx + 1}` : 'custom-key';
 }

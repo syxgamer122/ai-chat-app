@@ -1,31 +1,75 @@
 import { createOpenAI } from '@ai-sdk/openai';
-import { generateText } from 'ai';
-import { getNextApiKey } from '@/lib/api-keys';
+import { generateText, APICallError } from 'ai';
+import { z } from 'zod';
+import { getKeyCandidates, markKeyFailure, markKeySuccess, getKeyLabel } from '@/lib/api-keys';
 
 export const runtime = 'edge';
 
+const TitleSchema = z.object({
+  message: z.string().min(1).max(2000),
+});
+
+const SECRET_REGEX = /\b(sk|sk-proj|sk-ant|Bearer)\s*[:=]?\s*[A-Za-z0-9_\-]{4,}/gi;
+
+function sanitizeErrorMessage(e: unknown): string {
+  const raw = e instanceof Error ? e.message : String(e ?? '');
+  return raw.replace(SECRET_REGEX, '[redacted]').slice(0, 300);
+}
+
+function getStatusCode(e: unknown): number | undefined {
+  if (APICallError.isInstance(e)) return e.statusCode;
+  if (typeof e === 'object' && e !== null && 'status' in e && typeof (e as any).status === 'number') {
+    return (e as any).status;
+  }
+  return undefined;
+}
+
 export async function POST(req: Request) {
   try {
-    const { message } = await req.json();
+    const json = await req.json();
+    const parsed = TitleSchema.safeParse(json);
+    if (!parsed.success) {
+      return Response.json({ title: 'New Chat' });
+    }
+
+    // Làm sạch message để chống prompt injection
+    const cleanMessage = parsed.data.message
+      .replace(/[\r\n\t]+/g, ' ')
+      .replace(/["'`]+/g, '')
+      .trim()
+      .slice(0, 1000);
+
     const customKey = req.headers.get('x-api-key')?.trim();
-    const selectedKey = customKey || getNextApiKey();
-    
-    const openai = createOpenAI({ 
-      apiKey: selectedKey,
-      baseURL: process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1',
-    });
+    const candidateKeys = customKey ? [customKey] : getKeyCandidates().slice(0, 3);
 
-    const result = await generateText({
-      model: openai('gpt-4o-mini'),
-      prompt: `Generate a short, concise title (max 5 words) for this message, without quotes or punctuation: "${message}"`,
-    });
+    for (const key of candidateKeys) {
+      try {
+        const openai = createOpenAI({
+          apiKey: key,
+          baseURL: process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1',
+        });
 
-    return new Response(JSON.stringify({ title: result.text }), {
-      headers: { 'Content-Type': 'application/json' },
-    });
-  } catch (e) {
-    return new Response(JSON.stringify({ title: "New Chat" }), {
-      headers: { 'Content-Type': 'application/json' },
-    });
+        const result = await generateText({
+          model: openai('gpt-4o-mini'),
+          prompt: `Summarize this user request into a concise 3-5 word title in the same language. Do not use quotes, punctuation or prefixes:\n\n${cleanMessage}`,
+          temperature: 0.3,
+          maxTokens: 16,
+        });
+
+        const title = result.text.trim().replace(/^["']+|["']+$/g, '').slice(0, 60);
+        markKeySuccess(key);
+
+        return Response.json({ title: title || 'New Chat' }, {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      } catch (err) {
+        console.warn(`[Title API ${getKeyLabel(key)}] Error:`, sanitizeErrorMessage(err));
+        markKeyFailure(key, getStatusCode(err));
+      }
+    }
+
+    return Response.json({ title: 'New Chat' });
+  } catch {
+    return Response.json({ title: 'New Chat' });
   }
 }

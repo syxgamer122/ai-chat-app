@@ -1,22 +1,193 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useChat, type Message } from 'ai/react';
 import { useAppStore } from '@/lib/store';
 import { db, Dexie, type StoredMessage } from '@/lib/db';
-import { useLiveQuery } from 'dexie-react-hooks';
 import { MarkdownRenderer } from './markdown-renderer';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import TextareaAutosize from 'react-textarea-autosize';
 import {
   Send, StopCircle, RefreshCcw, ArrowDown, Paperclip, X,
   Pencil, Copy, Check, Trash2,
 } from 'lucide-react';
 
+/* ------------------------------------------------------------------ */
+/* Memoized Message Item (Chống re-render toàn danh sách khi gõ/stream)*/
+/* ------------------------------------------------------------------ */
+interface MessageItemProps {
+  m: Message;
+  isStreaming: boolean;
+  isEditing: boolean;
+  isCopied: boolean;
+  draft: string;
+  isTouchDevice: boolean;
+  sendOnEnter: boolean;
+  throttleMs: number;
+  animations: boolean;
+  onCopy: (m: Message) => void;
+  onRegenerate: (id: string) => void;
+  onStartEdit: (m: Message) => void;
+  onSaveEdit: (id: string) => void;
+  onCancelEdit: () => void;
+  onDraftChange: (text: string) => void;
+}
+
+const MessageItem = memo(
+  function MessageItem({
+    m,
+    isStreaming,
+    isEditing,
+    isCopied,
+    draft,
+    isTouchDevice,
+    sendOnEnter,
+    throttleMs,
+    animations,
+    onCopy,
+    onRegenerate,
+    onStartEdit,
+    onSaveEdit,
+    onCancelEdit,
+    onDraftChange,
+  }: MessageItemProps) {
+    return (
+      <motion.div
+        layout={animations}
+        initial={animations ? { opacity: 0, y: 10 } : false}
+        animate={animations ? { opacity: 1, y: 0 } : false}
+        transition={{ duration: animations ? 0.2 : 0 }}
+        style={{ contain: 'layout style' }}
+        className={`group flex w-full ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}
+      >
+        <div
+          className={`max-w-[720px] w-full p-5 rounded-2xl ${
+            m.role === 'user' ? 'bg-zinc-800/80 text-zinc-100 ml-auto' : 'bg-transparent text-zinc-200'
+          }`}
+        >
+          {/* Attachments (Base64/URL) */}
+          {m.experimental_attachments && m.experimental_attachments.length > 0 && (
+            <div className="flex flex-wrap gap-2 mb-3">
+              {m.experimental_attachments.map((a: any, i: number) => (
+                <div key={i} className="flex items-center gap-2">
+                  {a.contentType?.startsWith('image/') ? (
+                    <img
+                      src={a.url}
+                      alt={a.name || 'Image'}
+                      className="w-40 rounded-xl object-contain bg-zinc-900 border border-zinc-700"
+                    />
+                  ) : (
+                    <div className="flex items-center gap-2 bg-zinc-900 border border-zinc-700 p-2.5 rounded-xl text-sm">
+                      <Paperclip size={16} />
+                      <span className="truncate max-w-[150px]">{a.name || 'File'}</span>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Nội dung tin nhắn */}
+          {isEditing ? (
+            <div className="space-y-2">
+              <TextareaAutosize
+                value={draft}
+                onChange={(e) => onDraftChange(e.target.value)}
+                onKeyDown={(e) => {
+                  if ((e.nativeEvent as any).isComposing || e.keyCode === 229) return;
+                  if (e.key === 'Escape') { onCancelEdit(); return; }
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    if (isTouchDevice || !sendOnEnter) return;
+                    e.preventDefault();
+                    onSaveEdit(m.id);
+                  }
+                }}
+                autoFocus
+                minRows={1}
+                maxRows={12}
+                className="w-full bg-zinc-900 border border-zinc-700 rounded-xl p-3 text-sm text-zinc-100 resize-none outline-none focus:border-indigo-500/60"
+              />
+              <div className="flex justify-end gap-2">
+                <button onClick={onCancelEdit} className="px-3 py-1.5 text-xs text-zinc-400 hover:text-zinc-200 rounded-lg transition">
+                  Hủy
+                </button>
+                <button
+                  onClick={() => onSaveEdit(m.id)}
+                  disabled={!draft.trim()}
+                  className="px-3 py-1.5 text-xs bg-indigo-600 text-white rounded-lg disabled:opacity-40 transition"
+                >
+                  Lưu &amp; gửi lại
+                </button>
+              </div>
+            </div>
+          ) : m.role === 'assistant' ? (
+            <MarkdownRenderer
+              content={m.content}
+              isStreaming={isStreaming}
+              throttleMs={throttleMs}
+            />
+          ) : (
+            <p className="whitespace-pre-wrap leading-relaxed">{m.content}</p>
+          )}
+
+          {/* Thanh hành động */}
+          {!isEditing && !isStreaming && (
+            <div className="mt-3 flex items-center gap-1 transition-opacity opacity-100 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 focus-within:opacity-100">
+              {m.role === 'assistant' && (
+                <>
+                  <button onClick={() => onCopy(m)} title="Copy" aria-label="Copy message" className="p-1.5 text-zinc-500 hover:text-zinc-200 rounded">
+                    {isCopied ? <Check size={14} /> : <Copy size={14} />}
+                  </button>
+                  <button
+                    onClick={() => onRegenerate(m.id)}
+                    title="Tạo lại câu trả lời"
+                    aria-label="Regenerate message"
+                    className="p-1.5 text-zinc-500 hover:text-zinc-200 rounded disabled:opacity-40"
+                  >
+                    <RefreshCcw size={14} />
+                  </button>
+                </>
+              )}
+              {m.role === 'user' && (
+                <>
+                  <button onClick={() => onCopy(m)} title="Copy" aria-label="Copy message" className="p-1.5 text-zinc-500 hover:text-zinc-200 rounded">
+                    {isCopied ? <Check size={14} /> : <Copy size={14} />}
+                  </button>
+                  <button
+                    onClick={() => onStartEdit(m)}
+                    title="Chỉnh sửa"
+                    aria-label="Edit message"
+                    className="p-1.5 text-zinc-500 hover:text-zinc-200 rounded disabled:opacity-40"
+                  >
+                    <Pencil size={14} />
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      </motion.div>
+    );
+  },
+  (prev, next) =>
+    prev.m.id === next.m.id &&
+    prev.m.content === next.m.content &&
+    prev.isStreaming === next.isStreaming &&
+    prev.isEditing === next.isEditing &&
+    prev.isCopied === next.isCopied &&
+    prev.draft === next.draft &&
+    prev.isTouchDevice === next.isTouchDevice &&
+    prev.sendOnEnter === next.sendOnEnter &&
+    prev.animations === next.animations &&
+    prev.throttleMs === next.throttleMs,
+);
+
+/* ------------------------------------------------------------------ */
+/* Main ChatInterface Component                                       */
+/* ------------------------------------------------------------------ */
 export default function ChatInterface() {
   const { currentChatId, settings, setCurrentChatId } = useAppStore();
 
-  // Patch A: Sinh trước draftId để useChat luôn có key bất biến, không bị nhảy id giữa lúc stream
   const [draftId, setDraftId] = useState(() => crypto.randomUUID());
   const chatKey = currentChatId ?? draftId;
 
@@ -29,15 +200,33 @@ export default function ChatInterface() {
   const [confirmClear, setConfirmClear] = useState(false);
   const [reloadTick, setReloadTick] = useState(0);
 
-  const previews = useMemo(
-    () => attachments.map((f) => (f.type.startsWith('image/') ? URL.createObjectURL(f) : null)),
-    [attachments],
-  );
+  // Quản lý URL Preview ổn định (tránh revoke nhầm file cũ khi thêm file mới)
+  const [previewMap, setPreviewMap] = useState<Map<File, string>>(new Map());
 
-  useEffect(
-    () => () => previews.forEach((u) => u && URL.revokeObjectURL(u)),
-    [previews],
-  );
+  useEffect(() => {
+    setPreviewMap((prevMap) => {
+      const nextMap = new Map<File, string>();
+      const currentFiles = new Set(attachments);
+
+      // Thu hồi file đã bị xóa
+      for (const [file, url] of prevMap.entries()) {
+        if (!currentFiles.has(file)) {
+          URL.revokeObjectURL(url);
+        }
+      }
+
+      // Giữ URL cũ hoặc tạo URL mới cho file ảnh
+      attachments.forEach((file) => {
+        if (prevMap.has(file)) {
+          nextMap.set(file, prevMap.get(file)!);
+        } else if (file.type.startsWith('image/')) {
+          nextMap.set(file, URL.createObjectURL(file));
+        }
+      });
+
+      return nextMap;
+    });
+  }, [attachments]);
 
   const MAX_FILE = 8 * 1024 * 1024;
   const MAX_FILES = 5;
@@ -59,28 +248,19 @@ export default function ChatInterface() {
   };
 
   const scrollRef = useRef<HTMLDivElement>(null);
+  const lastTop = useRef(0);
+  const stick = useRef(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const hydratedFor = useRef<string | null>(null);
   const titledFor = useRef<string | null>(null);
-  const persistedIds = useRef<Set<string>>(new Set());
-  const isCoarse = useRef(false);
+  const finishRef = useRef<'stop' | 'abort' | 'error'>('stop');
+  const [isTouchDevice, setIsTouchDevice] = useState(false);
 
   useEffect(() => {
-    isCoarse.current =
-      typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches;
+    setIsTouchDevice(
+      typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches,
+    );
   }, []);
-
-  // Patch B: Nạp lịch sử từ Dexie bằng compound index [chatId+seq]
-  const dbMessages = useLiveQuery(
-    () =>
-      currentChatId
-        ? db.messages
-            .where('[chatId+seq]')
-            .between([currentChatId, Dexie.minKey], [currentChatId, Dexie.maxKey])
-            .toArray()
-        : [],
-    [currentChatId],
-  );
 
   const {
     messages, setMessages, input, setInput, handleInputChange,
@@ -97,76 +277,107 @@ export default function ChatInterface() {
     onError: (err) => console.error('[useChat]', err),
   });
 
-  /* ---------------------------------------------------------------- */
-  /* Hydrate lịch sử từ Dexie một lần duy nhất cho mỗi chat          */
-  /* ---------------------------------------------------------------- */
+  useEffect(() => {
+    if (error) finishRef.current = 'error';
+  }, [error]);
+
+  const handleStop = useCallback(() => {
+    finishRef.current = 'abort';
+    stop();
+  }, [stop]);
+
+  /* Hydrate lịch sử từ Dexie một lần duy nhất khi đổi chat */
   useEffect(() => {
     if (!currentChatId) {
       hydratedFor.current = null;
-      persistedIds.current.clear();
       setMessages([]);
       return;
     }
-    if (hydratedFor.current === currentChatId || !dbMessages) return;
-    hydratedFor.current = currentChatId;
-    persistedIds.current = new Set(dbMessages.map((m) => m.id));
-    setMessages(
-      dbMessages.map((m) => ({
-        id: m.id,
-        role: m.role,
-        content: m.content,
-        experimental_attachments: m.attachments as any,
-      })) as Message[],
-    );
-  }, [currentChatId, dbMessages, setMessages]);
-
-  /* ---------------------------------------------------------------- */
-  /* Patch B: Nguồn chân lý duy nhất ghi vào Dexie khi stream dừng    */
-  /* Bao gồm cả khi người dùng bấm Stop hoặc lỗi giữa chừng           */
-  /* ---------------------------------------------------------------- */
-  useEffect(() => {
-    if (isLoading || !currentChatId || !messages.length) return;
-
-    const rows: StoredMessage[] = [];
-    messages.forEach((m, i) => {
-      if (persistedIds.current.has(m.id)) return;
-      rows.push({
-        id: m.id,
-        chatId: currentChatId,
-        role: m.role as StoredMessage['role'],
-        content: m.content,
-        seq: i,
-        createdAt: Date.now(),
-        attachments: (m.experimental_attachments as any) ?? undefined,
-        finishReason: 'stop',
-      });
-    });
-    if (!rows.length) return;
+    if (hydratedFor.current === currentChatId) return;
+    const chatId = currentChatId;
+    hydratedFor.current = chatId;
+    let cancelled = false;
 
     (async () => {
       try {
-        await db.messages.bulkPut(rows);
-        rows.forEach((r) => persistedIds.current.add(r.id));
-        await db.chats.update(currentChatId, { updatedAt: Date.now() });
+        const rows = await db.messages
+          .where('[chatId+seq]')
+          .between([chatId, Dexie.minKey], [chatId, Dexie.maxKey])
+          .toArray();
+
+        if (cancelled || chatId !== useAppStore.getState().currentChatId) return;
+
+        setMessages(
+          rows.map((m) => ({
+            id: m.id,
+            role: m.role,
+            content: m.content,
+            experimental_attachments: m.attachments as any,
+          })) as Message[],
+        );
       } catch (err) {
+        console.error('[hydrate]', err);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentChatId, setMessages]);
+
+  /* Idempotent Projection Persist */
+  useEffect(() => {
+    if (isLoading || !currentChatId || !messages.length) return;
+    const chatId = currentChatId;
+    const reason = finishRef.current;
+
+    const rows: StoredMessage[] = messages.map((m, i) => ({
+      id: m.id,
+      chatId,
+      role: m.role as StoredMessage['role'],
+      content: m.content,
+      seq: i,
+      createdAt: (m.createdAt as any)?.getTime?.() ?? Date.now(),
+      attachments: (m.experimental_attachments as any) ?? undefined,
+      finishReason: i === messages.length - 1 ? reason : 'stop',
+    }));
+
+    const keep = new Set(rows.map((r) => r.id));
+
+    (async () => {
+      try {
+        if (chatId !== useAppStore.getState().currentChatId) return;
+        await db.transaction('rw', db.messages, db.chats, async () => {
+          const existing = await db.messages.where('chatId').equals(chatId).primaryKeys();
+          const stale = existing.filter((id) => !keep.has(id as string));
+          if (stale.length) await db.messages.bulkDelete(stale as string[]);
+          await db.messages.bulkPut(rows);
+          await db.chats.update(chatId, { updatedAt: Date.now() });
+        });
+      } catch (err: any) {
         console.error('[persist]', err);
+        if (err?.name === 'QuotaExceededError') {
+          setNotice('Bộ nhớ IndexedDB đã đầy. Vui lòng dọn bớt ảnh hoặc đoạn chat cũ.');
+        }
       }
     })();
   }, [isLoading, messages, currentChatId]);
 
-  /* ---------------------------------------------------------------- */
-  /* Patch C: Kích hoạt reload() an toàn sau khi state đã commit      */
-  /* ---------------------------------------------------------------- */
+  /* Kích hoạt reload() an toàn sau commit */
   useEffect(() => {
-    if (reloadTick === 0) return;
+    if (reloadTick === 0 || isLoading) return;
     void reload();
-  }, [reloadTick]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [reloadTick, isLoading, reload]);
 
-  /* Đặt tiêu đề tự động (chỉ chạy 1 lần sau khi có đủ 2 tin nhắn và đã stream xong) */
+  /* Đặt tiêu đề tự động */
   useEffect(() => {
     if (!currentChatId || isLoading || messages.length < 2) return;
     if (titledFor.current === currentChatId) return;
-    titledFor.current = currentChatId; // chốt trước khi await
+    titledFor.current = currentChatId;
+
+    const firstUserMsg = messages.find((m) => m.role === 'user');
+    const userPrompt = (firstUserMsg?.content || '').slice(0, 1000).trim();
+    if (!userPrompt) return;
 
     const ctrl = new AbortController();
     (async () => {
@@ -175,29 +386,42 @@ export default function ChatInterface() {
         if (!chat || chat.title !== 'New Chat') return;
         const res = await fetch('/api/title', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: messages[0].content.slice(0, 2000) }),
+          headers: {
+            'Content-Type': 'application/json',
+            ...(settings.apiKey ? { 'x-api-key': settings.apiKey } : {}),
+          },
+          body: JSON.stringify({ message: userPrompt }),
           signal: ctrl.signal,
         });
-        if (!res.ok) return;
+        if (!res.ok) {
+          titledFor.current = null;
+          return;
+        }
         const data = await res.json();
-        if (data?.title) await db.chats.update(currentChatId, { title: String(data.title).slice(0, 80) });
-      } catch (err) {
-        if ((err as any)?.name !== 'AbortError') console.error('[title]', err);
+        if (data?.title) {
+          await db.chats.update(currentChatId, { title: String(data.title).slice(0, 60) });
+        }
+      } catch (err: any) {
+        titledFor.current = null;
+        if (err?.name !== 'AbortError') console.error('[title]', err);
       }
     })();
-    return () => ctrl.abort();
-  }, [messages.length, currentChatId, isLoading]);
+    return () => {
+      ctrl.abort();
+    };
+  }, [messages, currentChatId, isLoading, settings.apiKey]);
 
-  const stick = useRef(true);
-
-  const onUserScrollIntent = () => {
+  /* Xử lý cuộn định hướng người dùng */
+  const onScroll = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
+    const up = el.scrollTop < lastTop.current - 4;
+    lastTop.current = el.scrollTop;
     const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
-    stick.current = atBottom;
-    setAutoScroll(atBottom);
-  };
+    if (up) stick.current = false;
+    else if (atBottom) stick.current = true;
+    setAutoScroll(stick.current);
+  }, []);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -205,15 +429,12 @@ export default function ChatInterface() {
     el.scrollTo({ top: el.scrollHeight, behavior: isLoading ? 'auto' : 'smooth' });
   }, [messages, isLoading]);
 
-  const scrollToBottom = () => {
+  const scrollToBottom = useCallback(() => {
     stick.current = true;
     setAutoScroll(true);
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
-  };
+  }, []);
 
-  /* ---------------------------------------------------------------- */
-  /* Helper: cắt hội thoại theo seq -> xóa dứt điểm trong Dexie       */
-  /* ---------------------------------------------------------------- */
   const truncateFrom = useCallback(
     async (index: number, keep: Message[]) => {
       if (currentChatId) {
@@ -223,25 +444,23 @@ export default function ChatInterface() {
           .delete();
         await db.chats.update(currentChatId, { updatedAt: Date.now() });
       }
-      messages.slice(index).forEach((m) => persistedIds.current.delete(m.id));
       setMessages(keep);
     },
-    [messages, currentChatId, setMessages],
+    [currentChatId, setMessages],
   );
 
-  /* 1. REGENERATE ---------------------------------------------------- */
   const handleRegenerate = useCallback(
     async (id: string) => {
       if (isLoading) return;
       const idx = messages.findIndex((m) => m.id === id);
       if (idx < 1 || messages[idx - 1]?.role !== 'user') return;
+      finishRef.current = 'stop';
       await truncateFrom(idx, messages.slice(0, idx));
       setReloadTick((t) => t + 1);
     },
     [isLoading, messages, truncateFrom],
   );
 
-  /* 2. EDIT MESSAGE -------------------------------------------------- */
   const startEdit = useCallback((m: Message) => {
     setEditingId(m.id);
     setDraft(m.content);
@@ -259,6 +478,7 @@ export default function ChatInterface() {
       const idx = messages.findIndex((m) => m.id === id);
       if (idx === -1) return;
       const edited: Message = { ...messages[idx], content: text };
+      finishRef.current = 'stop';
       await truncateFrom(idx, [...messages.slice(0, idx), edited]);
       setEditingId(null);
       setDraft('');
@@ -267,7 +487,6 @@ export default function ChatInterface() {
     [draft, isLoading, messages, truncateFrom],
   );
 
-  /* 3. COPY ---------------------------------------------------------- */
   const copyMessage = useCallback(async (m: Message) => {
     try {
       await navigator.clipboard.writeText(m.content);
@@ -278,10 +497,9 @@ export default function ChatInterface() {
     }
   }, []);
 
-  /* 4. CLEAR / DELETE CHAT ------------------------------------------ */
   const clearMessages = useCallback(async () => {
     try {
-      stop();
+      handleStop();
       if (currentChatId) {
         await db.messages
           .where('[chatId+seq]')
@@ -289,7 +507,6 @@ export default function ChatInterface() {
           .delete();
         await db.chats.update(currentChatId, { title: 'New Chat', updatedAt: Date.now() });
       }
-      persistedIds.current.clear();
       titledFor.current = null;
       setMessages([]);
       setConfirmClear(false);
@@ -297,11 +514,11 @@ export default function ChatInterface() {
       console.error('[clearMessages]', err);
       setConfirmClear(false);
     }
-  }, [stop, currentChatId, setMessages]);
+  }, [handleStop, currentChatId, setMessages]);
 
   const deleteChat = useCallback(async () => {
     try {
-      stop();
+      handleStop();
       if (currentChatId) {
         await db.transaction('rw', db.messages, db.chats, async () => {
           await db.messages.where('chatId').equals(currentChatId).delete();
@@ -310,9 +527,8 @@ export default function ChatInterface() {
       }
       hydratedFor.current = null;
       titledFor.current = null;
-      persistedIds.current.clear();
       setMessages([]);
-      setDraftId(crypto.randomUUID()); // khóa hook mới, sạch
+      setDraftId(crypto.randomUUID());
       setCurrentChatId(null);
       setAttachments([]);
       setConfirmClear(false);
@@ -320,21 +536,18 @@ export default function ChatInterface() {
       console.error('[deleteChat]', err);
       setConfirmClear(false);
     }
-  }, [stop, currentChatId, setMessages, setCurrentChatId]);
+  }, [handleStop, currentChatId, setMessages, setCurrentChatId]);
 
-  /* ---------------------------------------------------------------- */
-  /* Gửi tin nhắn                                                      */
-  /* ---------------------------------------------------------------- */
-  const onSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const onSubmit = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     if ((!input.trim() && attachments.length === 0) || isLoading) return;
 
     try {
+      finishRef.current = 'stop';
       let chatId = currentChatId;
       if (!chatId) {
         chatId = draftId;
         hydratedFor.current = chatId;
-        setCurrentChatId(chatId);
         await db.chats.put({
           id: chatId,
           title: 'New Chat',
@@ -342,6 +555,7 @@ export default function ChatInterface() {
           createdAt: Date.now(),
           updatedAt: Date.now(),
         });
+        setCurrentChatId(chatId);
       }
 
       const dataTransfer = new DataTransfer();
@@ -350,20 +564,19 @@ export default function ChatInterface() {
 
       setAttachments([]);
 
-      handleSubmit(e, options);
+      handleSubmit(undefined, options);
     } catch (err) {
       console.error('[onSubmit]', err);
     }
   };
 
   const onTextareaKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    // (e.nativeEvent as any).isComposing = true khi IME đang gõ tiếng Việt/Nhật/Hàn
     if ((e.nativeEvent as any).isComposing || e.keyCode === 229) return;
-    if (e.key === 'Escape') { stop(); return; }
+    if (e.key === 'Escape') { handleStop(); return; }
     if (e.key !== 'Enter' || e.shiftKey) return;
-    if (isCoarse.current || !settings.sendOnEnter) return; // mobile -> xuống dòng
+    if (isTouchDevice || !settings.sendOnEnter) return;
     e.preventDefault();
-    void onSubmit(e as unknown as React.FormEvent);
+    void onSubmit();
   };
 
   const lastMessageId = messages[messages.length - 1]?.id;
@@ -392,6 +605,7 @@ export default function ChatInterface() {
             <button
               onClick={() => setConfirmClear(true)}
               title="Xóa đoạn hội thoại"
+              aria-label="Clear chat conversation"
               className="p-2 text-zinc-500 hover:text-red-400 hover:bg-zinc-900 rounded-xl transition-colors"
             >
               <Trash2 size={18} />
@@ -402,9 +616,7 @@ export default function ChatInterface() {
 
       <div
         ref={scrollRef}
-        onWheel={onUserScrollIntent}
-        onTouchMove={onUserScrollIntent}
-        onScroll={onUserScrollIntent}
+        onScroll={onScroll}
         className="flex-1 overflow-y-auto p-4 md:p-8 space-y-6 pb-40"
       >
         {!hasMessages ? (
@@ -428,138 +640,36 @@ export default function ChatInterface() {
             </div>
           </div>
         ) : (
-          <AnimatePresence initial={false}>
-            {messages.map((m) => {
-              const streamingThis = isLoading && m.role === 'assistant' && m.id === lastMessageId;
-              const isEditing = editingId === m.id;
-
-              return (
-                <motion.div
-                  key={m.id}
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.2 }}
-                  style={{ contain: 'layout style' }}
-                  className={`group flex w-full ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}
-                >
-                  <div
-                    className={`max-w-[720px] w-full p-5 rounded-2xl ${
-                      m.role === 'user' ? 'bg-zinc-800/80 text-zinc-100 ml-auto' : 'bg-transparent text-zinc-200'
-                    }`}
-                  >
-                    {/* Attachments (Base64) */}
-                    {m.experimental_attachments && m.experimental_attachments.length > 0 && (
-                      <div className="flex flex-wrap gap-2 mb-3">
-                        {m.experimental_attachments.map((a: any, i: number) => (
-                          <div key={i} className="flex items-center gap-2">
-                            {a.contentType?.startsWith('image/') ? (
-                              <img
-                                src={a.url}
-                                alt={a.name || 'Image'}
-                                className="w-40 rounded-xl object-contain bg-zinc-900 border border-zinc-700"
-                              />
-                            ) : (
-                              <div className="flex items-center gap-2 bg-zinc-900 border border-zinc-700 p-2.5 rounded-xl text-sm">
-                                <Paperclip size={16} />
-                                <span className="truncate max-w-[150px]">{a.name || 'File'}</span>
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    {/* Nội dung */}
-                    {isEditing ? (
-                      <div className="space-y-2">
-                        <TextareaAutosize
-                          value={draft}
-                          onChange={(e) => setDraft(e.target.value)}
-                          onKeyDown={(e) => {
-                            if ((e.nativeEvent as any).isComposing || e.keyCode === 229) return;
-                            if (e.key === 'Escape') { cancelEdit(); return; }
-                            if (e.key === 'Enter' && !e.shiftKey) {
-                              if (isCoarse.current || !settings.sendOnEnter) return;
-                              e.preventDefault();
-                              void saveEdit(m.id);
-                            }
-                          }}
-                          autoFocus
-                          minRows={1}
-                          maxRows={12}
-                          className="w-full bg-zinc-900 border border-zinc-700 rounded-xl p-3 text-sm text-zinc-100 resize-none outline-none focus:border-indigo-500/60"
-                        />
-                        <div className="flex justify-end gap-2">
-                          <button onClick={cancelEdit} className="px-3 py-1.5 text-xs text-zinc-400 hover:text-zinc-200 rounded-lg transition">
-                            Hủy
-                          </button>
-                          <button
-                            onClick={() => saveEdit(m.id)}
-                            disabled={!draft.trim()}
-                            className="px-3 py-1.5 text-xs bg-indigo-600 text-white rounded-lg disabled:opacity-40 transition"
-                          >
-                            Lưu &amp; gửi lại
-                          </button>
-                        </div>
-                      </div>
-                    ) : m.role === 'assistant' ? (
-                      <MarkdownRenderer
-                        content={m.content}
-                        isStreaming={streamingThis}
-                        throttleMs={settings.perf?.throttleMs ?? 150}
-                      />
-                    ) : (
-                      <p className="whitespace-pre-wrap leading-relaxed">{m.content}</p>
-                    )}
-
-                    {/* Thanh hành động — hiển thị trên mobile và hover trên desktop */}
-                    {!isEditing && !streamingThis && (
-                      <div className="mt-3 flex items-center gap-1 transition-opacity opacity-100 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 focus-within:opacity-100">
-                        {m.role === 'assistant' && (
-                          <>
-                            <button onClick={() => copyMessage(m)} title="Copy" className="p-1.5 text-zinc-500 hover:text-zinc-200 rounded">
-                              {copiedId === m.id ? <Check size={14} /> : <Copy size={14} />}
-                            </button>
-                            <button
-                              onClick={() => handleRegenerate(m.id)}
-                              disabled={isLoading}
-                              title="Tạo lại câu trả lời"
-                              className="p-1.5 text-zinc-500 hover:text-zinc-200 rounded disabled:opacity-40"
-                            >
-                              <RefreshCcw size={14} />
-                            </button>
-                          </>
-                        )}
-                        {m.role === 'user' && (
-                          <>
-                            <button onClick={() => copyMessage(m)} title="Copy" className="p-1.5 text-zinc-500 hover:text-zinc-200 rounded">
-                              {copiedId === m.id ? <Check size={14} /> : <Copy size={14} />}
-                            </button>
-                            <button
-                              onClick={() => startEdit(m)}
-                              disabled={isLoading}
-                              title="Chỉnh sửa"
-                              className="p-1.5 text-zinc-500 hover:text-zinc-200 rounded disabled:opacity-40"
-                            >
-                              <Pencil size={14} />
-                            </button>
-                          </>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </motion.div>
-              );
-            })}
+          <div className="space-y-6">
+            {messages.map((m) => (
+              <MessageItem
+                key={m.id}
+                m={m}
+                isStreaming={isLoading && m.role === 'assistant' && m.id === lastMessageId}
+                isEditing={editingId === m.id}
+                isCopied={copiedId === m.id}
+                draft={draft}
+                isTouchDevice={isTouchDevice}
+                sendOnEnter={settings.sendOnEnter}
+                throttleMs={settings.perf?.throttleMs ?? 150}
+                animations={settings.perf?.animations ?? true}
+                onCopy={copyMessage}
+                onRegenerate={handleRegenerate}
+                onStartEdit={startEdit}
+                onSaveEdit={saveEdit}
+                onCancelEdit={cancelEdit}
+                onDraftChange={setDraft}
+              />
+            ))}
 
             {isLoading && messages[messages.length - 1]?.role === 'user' && (
-              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex justify-start">
+              <div className="flex justify-start">
                 <div className="max-w-[720px] p-5">
                   <span className="inline-block w-2 h-4 bg-indigo-500 animate-pulse" />
                 </div>
-              </motion.div>
+              </div>
             )}
-          </AnimatePresence>
+          </div>
         )}
 
         {error && (
@@ -576,15 +686,16 @@ export default function ChatInterface() {
         <button
           type="button"
           onClick={scrollToBottom}
+          aria-label="Scroll to bottom"
           className="absolute bottom-32 left-1/2 -translate-x-1/2 p-2 bg-zinc-800 text-zinc-300 rounded-full shadow-lg border border-zinc-700 hover:bg-zinc-700 transition"
         >
           <ArrowDown size={18} />
         </button>
       )}
 
+      {/* Input container */}
       <div className="absolute bottom-0 left-0 right-0 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] bg-gradient-to-t from-zinc-950 via-zinc-950 to-transparent pt-10">
         <div className="max-w-[720px] mx-auto relative">
-          {/* Thông báo file vượt quá dung lượng */}
           {notice && (
             <div className="mb-2 p-2.5 bg-amber-950/80 border border-amber-800/80 rounded-xl text-xs text-amber-300 flex items-center justify-between shadow-lg">
               <span>{notice}</span>
@@ -596,23 +707,27 @@ export default function ChatInterface() {
 
           {attachments.length > 0 && (
             <div className="flex flex-wrap gap-2 mb-2 p-2 bg-zinc-900/80 border border-zinc-800 rounded-xl backdrop-blur-sm">
-              {attachments.map((file, i) => (
-                <div key={`${file.name}-${i}`} className="relative flex items-center gap-2 bg-zinc-800 p-2 rounded-lg text-xs text-zinc-300">
-                  {previews[i] ? (
-                    <img src={previews[i]!} alt={file.name} className="w-8 h-8 object-cover rounded" />
-                  ) : (
-                    <Paperclip size={14} className="text-zinc-500" />
-                  )}
-                  <span className="truncate max-w-[120px]">{file.name}</span>
-                  <button
-                    type="button"
-                    onClick={() => removeAttachment(i)}
-                    className="absolute -top-1.5 -right-1.5 bg-zinc-700 hover:bg-zinc-600 rounded-full p-0.5"
-                  >
-                    <X size={12} />
-                  </button>
-                </div>
-              ))}
+              {attachments.map((file, i) => {
+                const previewUrl = previewMap.get(file);
+                return (
+                  <div key={`${file.name}-${i}`} className="relative flex items-center gap-2 bg-zinc-800 p-2 rounded-lg text-xs text-zinc-300">
+                    {previewUrl ? (
+                      <img src={previewUrl} alt={file.name} className="w-8 h-8 object-cover rounded" />
+                    ) : (
+                      <Paperclip size={14} className="text-zinc-500" />
+                    )}
+                    <span className="truncate max-w-[120px]">{file.name}</span>
+                    <button
+                      type="button"
+                      onClick={() => removeAttachment(i)}
+                      aria-label="Remove attachment"
+                      className="absolute -top-1.5 -right-1.5 bg-zinc-700 hover:bg-zinc-600 rounded-full p-0.5"
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           )}
 
@@ -634,6 +749,7 @@ export default function ChatInterface() {
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
+              aria-label="Attach files"
               className="absolute left-3 bottom-3 p-2 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 rounded-xl transition-colors"
             >
               <Paperclip size={18} />
@@ -643,7 +759,7 @@ export default function ChatInterface() {
               value={input}
               onChange={handleInputChange}
               onKeyDown={onTextareaKeyDown}
-              enterKeyHint={isCoarse.current ? 'enter' : 'send'}
+              enterKeyHint={isTouchDevice ? 'enter' : 'send'}
               autoCapitalize="sentences"
               spellCheck={false}
               placeholder="Gửi tin nhắn..."
@@ -654,13 +770,14 @@ export default function ChatInterface() {
 
             <div className="absolute right-3 bottom-3 flex items-center gap-2">
               {isLoading ? (
-                <button type="button" onClick={stop} className="p-2 bg-zinc-800 text-zinc-300 rounded-xl hover:text-red-400 transition-colors">
+                <button type="button" onClick={handleStop} aria-label="Stop generation" className="p-2 bg-zinc-800 text-zinc-300 rounded-xl hover:text-red-400 transition-colors">
                   <StopCircle size={18} />
                 </button>
               ) : (
                 <button
                   type="submit"
                   disabled={!input.trim() && attachments.length === 0}
+                  aria-label="Send message"
                   className="p-2 bg-indigo-600 text-white rounded-xl disabled:opacity-50 disabled:bg-zinc-800 transition-colors"
                 >
                   <Send size={18} />

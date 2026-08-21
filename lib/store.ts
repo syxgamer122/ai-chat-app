@@ -31,7 +31,7 @@ const DEFAULT_SETTINGS: Settings = {
   temperature: 0.7,
   systemPrompt:
     'You are a helpful, brilliant AI assistant. Use Markdown and LaTeX when appropriate. ' +
-    'For inline math use $...$ and for block math use $$...$$. Do not use \\( or \\[.',
+    'For LaTeX math, always use $$...$$ for block math and \\(...\\) for inline math.',
   perf: { throttleMs: 150, animations: true },
   sendOnEnter: true,
   apiKey: '',

@@ -23,9 +23,15 @@ export function Sidebar({ onOpenSettings }: { onOpenSettings: () => void }) {
 
   const deleteChat = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
-    await db.chats.delete(id);
-    await db.messages.where('chatId').equals(id).delete();
-    if (currentChatId === id) setCurrentChatId(null);
+    try {
+      await db.transaction('rw', db.messages, db.chats, async () => {
+        await db.messages.where('chatId').equals(id).delete();
+        await db.chats.delete(id);
+      });
+      if (currentChatId === id) setCurrentChatId(null);
+    } catch (err) {
+      console.error('[sidebar deleteChat]', err);
+    }
   };
 
   const togglePin = async (e: React.MouseEvent, id: string, currentPin: boolean) => {

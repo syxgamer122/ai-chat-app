@@ -1,10 +1,19 @@
 import { createOpenAI } from '@ai-sdk/openai';
-import { convertToCoreMessages, streamText, type CoreMessage } from 'ai';
+import {
+  convertToCoreMessages,
+  streamText,
+  createDataStreamResponse,
+  APICallError,
+  type CoreMessage,
+} from 'ai';
 import { z } from 'zod';
-import { getNextApiKey, markKeyRateLimited } from '@/lib/api-keys';
+import { getKeyCandidates, markKeyFailure, markKeySuccess, getKeyLabel } from '@/lib/api-keys';
+import { ALLOWED_MODEL_IDS, DEFAULT_MODEL_ID } from '@/lib/models';
 
 export const runtime = 'edge';
 export const maxDuration = 60;
+
+const MAX_BODY_BYTES = 10 * 1024 * 1024; // 10MB limit
 
 const BodySchema = z.object({
   messages: z.array(z.any()).min(1).max(200),
@@ -13,8 +22,20 @@ const BodySchema = z.object({
   system: z.string().max(8000).optional(),
 });
 
-const ALLOWED_MODELS = new Set(['gpt-5.6-luna', 'gpt-4o', 'gpt-4o-mini']);
-const FALLBACK_MODEL = 'gpt-5.6-luna';
+const SECRET_REGEX = /\b(sk|sk-proj|sk-ant|Bearer)\s*[:=]?\s*[A-Za-z0-9_\-]{4,}/gi;
+
+function sanitizeErrorMessage(e: unknown): string {
+  const raw = e instanceof Error ? e.message : String(e ?? 'Lỗi từ AI Provider.');
+  return raw.replace(SECRET_REGEX, '[redacted]').slice(0, 500);
+}
+
+function getStatusCode(e: unknown): number | undefined {
+  if (APICallError.isInstance(e)) return e.statusCode;
+  if (typeof e === 'object' && e !== null && 'status' in e && typeof (e as any).status === 'number') {
+    return (e as any).status;
+  }
+  return undefined;
+}
 
 const toParts = (content: CoreMessage['content']) =>
   typeof content === 'string' ? [{ type: 'text' as const, text: content }] : content;
@@ -52,68 +73,105 @@ function normalize(messages: CoreMessage[]): CoreMessage[] {
 
 export async function POST(req: Request) {
   try {
-    const parsed = BodySchema.safeParse(await req.json());
+    // 1. Kiểm tra kích thước payload
+    const contentLength = Number(req.headers.get('content-length') || '0');
+    if (contentLength > MAX_BODY_BYTES) {
+      return Response.json({ error: 'Payload vượt quá giới hạn 10MB.' }, { status: 413 });
+    }
+
+    let jsonBody: unknown;
+    try {
+      jsonBody = await req.json();
+    } catch {
+      return Response.json({ error: 'JSON payload không hợp lệ.' }, { status: 400 });
+    }
+
+    const parsed = BodySchema.safeParse(jsonBody);
     if (!parsed.success) {
-      return Response.json({ error: 'Payload không hợp lệ.' }, { status: 400 });
+      return Response.json({ error: 'Cấu trúc dữ liệu không hợp lệ.', details: parsed.error.issues }, { status: 400 });
     }
 
     const { messages, model, temperature, system } = parsed.data;
 
-    // Ưu tiên custom key từ header (nếu client gửi), nếu không thì xoay vòng key từ pool
-    const customKey = req.headers.get('x-api-key')?.trim();
-    const selectedKey = customKey || getNextApiKey();
-
-    if (!selectedKey) {
+    // 2. Kiểm tra Model hợp lệ
+    const targetModel = model ?? DEFAULT_MODEL_ID;
+    if (!ALLOWED_MODEL_IDS.has(targetModel)) {
       return Response.json(
-        { error: 'Chưa cấu hình OPENAI_API_KEY hoặc danh sách OPENAI_API_KEYS trên máy chủ.' },
-        { status: 500 },
+        { error: `Model '${targetModel}' không được hỗ trợ. Vui lòng chọn model trong danh sách.` },
+        { status: 400 },
       );
     }
 
-    const openai = createOpenAI({
-      apiKey: selectedKey,
-      baseURL: process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1',
-    });
-
-    const core = mergeSameRole(normalize(convertToCoreMessages(messages as any)));
-    if (!core.length) {
-      return Response.json({ error: 'Không có nội dung để gửi.' }, { status: 400 });
+    // 3. Convert CoreMessages an toàn
+    let core: CoreMessage[];
+    try {
+      core = mergeSameRole(normalize(convertToCoreMessages(messages as any)));
+    } catch (convErr) {
+      return Response.json(
+        { error: 'Dữ liệu tin nhắn hoặc file đính kèm không đúng định dạng.' },
+        { status: 400 },
+      );
     }
 
-    // streamText từ v4 không còn blocking -> bỏ `await` để stream chạy sớm hơn.
-    const result = streamText({
-      model: openai(ALLOWED_MODELS.has(model ?? '') ? (model as string) : FALLBACK_MODEL),
-      messages: core,
-      temperature: Math.min(2, Math.max(0, temperature ?? 0.7)),
-      system: system?.trim() ? system : undefined,
-      // Người dùng bấm Stop -> hủy thật sự request tới provider (tiết kiệm token).
-      abortSignal: req.signal,
-      onError: ({ error }) => {
-        console.error(`[streamText Error with key ...${selectedKey.slice(-6)}]`, error);
-        const errMsg = error instanceof Error ? error.message : String(error);
-        if (
-          errMsg.includes('limit') ||
-          errMsg.includes('quota') ||
-          errMsg.includes('429') ||
-          errMsg.includes('401') ||
-          errMsg.includes('subscription') ||
-          errMsg.includes('exceeded')
-        ) {
-          markKeyRateLimited(selectedKey);
-        }
-      },
-    });
+    if (!core.length) {
+      return Response.json({ error: 'Không có nội dung tin nhắn để gửi.' }, { status: 400 });
+    }
 
-    return result.toDataStreamResponse({
+    // 4. Lấy danh sách key ứng viên (Ưu tiên Custom Key của user nếu có)
+    const customKey = req.headers.get('x-api-key')?.trim();
+    const candidateKeys = customKey ? [customKey] : getKeyCandidates().slice(0, 3);
+
+    if (!candidateKeys.length) {
+      return Response.json(
+        { error: 'Toàn bộ API Key của hệ thống đang tạm ngưng hoặc chưa được cấu hình. Vui lòng thử lại sau ít phút.' },
+        { status: 503, headers: { 'Retry-After': '60' } },
+      );
+    }
+
+    // 5. Thực thi stream với cơ chế Server-side Failover & DataStream
+    return createDataStreamResponse({
       headers: { 'Cache-Control': 'no-store, no-transform' },
-      // Không có option này, lỗi giữa stream về client thành chuỗi "An error occurred".
-      getErrorMessage: (e: unknown) =>
-        e instanceof Error ? e.message : 'Lỗi từ AI Provider.',
+      execute: async (dataStream) => {
+        let lastError: unknown;
+
+        for (const selectedKey of candidateKeys) {
+          try {
+            const openai = createOpenAI({
+              apiKey: selectedKey,
+              baseURL: process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1',
+            });
+
+            const result = streamText({
+              model: openai(targetModel),
+              messages: core,
+              temperature: Math.min(2, Math.max(0, temperature ?? 0.7)),
+              system: system?.trim() ? system : undefined,
+              maxTokens: 4096,
+              abortSignal: req.signal,
+              onError: ({ error }) => {
+                console.error(`[streamText ${getKeyLabel(selectedKey)}]`, sanitizeErrorMessage(error));
+                markKeyFailure(selectedKey, getStatusCode(error));
+              },
+            });
+
+            result.mergeIntoDataStream(dataStream);
+            markKeySuccess(selectedKey);
+            return; // Thành công bắt đầu stream -> kết thúc execute
+          } catch (err) {
+            lastError = err;
+            console.warn(`[Failover] ${getKeyLabel(selectedKey)} gặp lỗi khởi tạo:`, sanitizeErrorMessage(err));
+            markKeyFailure(selectedKey, getStatusCode(err));
+          }
+        }
+
+        throw lastError;
+      },
+      getErrorMessage: sanitizeErrorMessage,
     });
   } catch (error: any) {
-    console.error('Chat API Error:', error);
+    console.error('Chat API Fatal Error:', sanitizeErrorMessage(error));
     return Response.json(
-      { error: error?.message || 'Lỗi kết nối tới AI Provider.' },
+      { error: sanitizeErrorMessage(error) },
       { status: 500 },
     );
   }

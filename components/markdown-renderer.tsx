@@ -6,11 +6,62 @@ import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import { Check, Copy } from 'lucide-react';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { PrismLight as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { useThrottledValue } from '@/lib/use-throttled-value';
 
-const REMARK_PLUGINS = [remarkGfm, remarkMath];
+// Register essential languages for fast bundle and light weight
+import ts from 'react-syntax-highlighter/dist/esm/languages/prism/typescript';
+import js from 'react-syntax-highlighter/dist/esm/languages/prism/javascript';
+import jsx from 'react-syntax-highlighter/dist/esm/languages/prism/jsx';
+import tsx from 'react-syntax-highlighter/dist/esm/languages/prism/tsx';
+import python from 'react-syntax-highlighter/dist/esm/languages/prism/python';
+import bash from 'react-syntax-highlighter/dist/esm/languages/prism/bash';
+import json from 'react-syntax-highlighter/dist/esm/languages/prism/json';
+import css from 'react-syntax-highlighter/dist/esm/languages/prism/css';
+import markup from 'react-syntax-highlighter/dist/esm/languages/prism/markup';
+import sql from 'react-syntax-highlighter/dist/esm/languages/prism/sql';
+import markdown from 'react-syntax-highlighter/dist/esm/languages/prism/markdown';
+import yaml from 'react-syntax-highlighter/dist/esm/languages/prism/yaml';
+import go from 'react-syntax-highlighter/dist/esm/languages/prism/go';
+import rust from 'react-syntax-highlighter/dist/esm/languages/prism/rust';
+import cpp from 'react-syntax-highlighter/dist/esm/languages/prism/cpp';
+import c from 'react-syntax-highlighter/dist/esm/languages/prism/c';
+import java from 'react-syntax-highlighter/dist/esm/languages/prism/java';
+import csharp from 'react-syntax-highlighter/dist/esm/languages/prism/csharp';
+
+SyntaxHighlighter.registerLanguage('typescript', ts);
+SyntaxHighlighter.registerLanguage('ts', ts);
+SyntaxHighlighter.registerLanguage('javascript', js);
+SyntaxHighlighter.registerLanguage('js', js);
+SyntaxHighlighter.registerLanguage('jsx', jsx);
+SyntaxHighlighter.registerLanguage('tsx', tsx);
+SyntaxHighlighter.registerLanguage('python', python);
+SyntaxHighlighter.registerLanguage('py', python);
+SyntaxHighlighter.registerLanguage('bash', bash);
+SyntaxHighlighter.registerLanguage('sh', bash);
+SyntaxHighlighter.registerLanguage('shell', bash);
+SyntaxHighlighter.registerLanguage('json', json);
+SyntaxHighlighter.registerLanguage('css', css);
+SyntaxHighlighter.registerLanguage('html', markup);
+SyntaxHighlighter.registerLanguage('xml', markup);
+SyntaxHighlighter.registerLanguage('markup', markup);
+SyntaxHighlighter.registerLanguage('sql', sql);
+SyntaxHighlighter.registerLanguage('markdown', markdown);
+SyntaxHighlighter.registerLanguage('md', markdown);
+SyntaxHighlighter.registerLanguage('yaml', yaml);
+SyntaxHighlighter.registerLanguage('yml', yaml);
+SyntaxHighlighter.registerLanguage('go', go);
+SyntaxHighlighter.registerLanguage('rust', rust);
+SyntaxHighlighter.registerLanguage('rs', rust);
+SyntaxHighlighter.registerLanguage('cpp', cpp);
+SyntaxHighlighter.registerLanguage('c', c);
+SyntaxHighlighter.registerLanguage('java', java);
+SyntaxHighlighter.registerLanguage('csharp', csharp);
+SyntaxHighlighter.registerLanguage('cs', csharp);
+
+// Tắt singleDollarTextMath để chống xung đột với ký tự tiền tệ $20, $50
+const REMARK_PLUGINS: any[] = [remarkGfm, [remarkMath, { singleDollarTextMath: false }]];
 const REHYPE_PLUGINS: any[] = [
   [rehypeKatex, { throwOnError: false, errorColor: '#71717a', strict: false }],
 ];
@@ -19,7 +70,6 @@ const REHYPE_PLUGINS: any[] = [
 /* Tiền xử lý: chỉ tác động NGOÀI code                                 */
 /* ------------------------------------------------------------------ */
 
-/** split() với capture group -> phần tử index lẻ chính là code, giữ nguyên. */
 const CODE_MASK = /(```[\s\S]*?```|~~~[\s\S]*?~~~|`[^`\n]*`)/g;
 
 function outsideCode(raw: string, fn: (chunk: string) => string): string {
@@ -32,19 +82,7 @@ function outsideCode(raw: string, fn: (chunk: string) => string): string {
 function normalizeLatex(s: string): string {
   return s
     .replace(/\\\[([\s\S]*?)\\\]/g, (_m, body: string) => `\n\n$$\n${body.trim()}\n$$\n\n`)
-    .replace(/\\\(([\s\S]*?)\\\)/g, (_m, body: string) => `$${body.trim()}$`);
-}
-
-/**
- * Heuristic tiền tệ: dòng chỉ có ĐÚNG 1 dấu $ và ngay sau là chữ số
- * -> gần như chắc chắn là giá tiền, escape để remark-math không bắt.
- * Không dùng lookbehind (Safari cũ không hỗ trợ).
- */
-function escapeCurrency(s: string): string {
-  return s
-    .split('\n')
-    .map((line) => ((line.match(/\$/g) ?? []).length === 1 ? line.replace(/\$(?=\d)/, '\\$') : line))
-    .join('\n');
+    .replace(/\\\(([\s\S]*?)\\\)/g, (_m, body: string) => `$$${body.trim()}$$`);
 }
 
 function stabilize(raw: string, isStreaming: boolean): string {
@@ -54,16 +92,10 @@ function stabilize(raw: string, isStreaming: boolean): string {
   if ((out.match(/~~~/g)?.length ?? 0) % 2 === 1) out += '\n~~~';
 
   if (isStreaming) {
-    // $$ lẻ -> bỏ tạm để KaTeX không nhấp nháy đỏ.
+    // $$ lẻ -> bỏ tạm để KaTeX không nhấp nháy đỏ
     if ((out.match(/\$\$/g)?.length ?? 0) % 2 === 1) {
       const i = out.lastIndexOf('$$');
       out = out.slice(0, i) + out.slice(i + 2);
-    }
-    // $ đơn lẻ ở cuối -> cắt nốt (inline math chưa đóng).
-    const singles = out.replace(/\$\$/g, '').match(/\$/g)?.length ?? 0;
-    if (singles % 2 === 1) {
-      const i = out.lastIndexOf('$');
-      out = out.slice(0, i) + out.slice(i + 1);
     }
   }
 
@@ -71,9 +103,8 @@ function stabilize(raw: string, isStreaming: boolean): string {
 }
 
 function preprocess(raw: string, isStreaming: boolean): string {
-  // stabilize TRƯỚC để fence được đóng -> mask code mới chính xác.
   const stable = stabilize(raw, isStreaming);
-  return outsideCode(stable, (chunk) => escapeCurrency(normalizeLatex(chunk)));
+  return outsideCode(stable, (chunk) => normalizeLatex(chunk));
 }
 
 /* ------------------------------------------------------------------ */
@@ -158,7 +189,6 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
 
   const components = useMemo(
     () => ({
-      /* Fenced code: xử lý ở tầng `pre`, đọc thẳng từ hast -> không đoán inline. */
       pre({ node, children }: any) {
         const codeNode = node?.children?.find((c: any) => c.tagName === 'code');
         if (!codeNode) return <pre className="overflow-x-auto">{children}</pre>;
@@ -175,7 +205,6 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
         return <CodeBlock language={lang} value={value} isStreaming={isStreaming} />;
       },
 
-      /* Tới đây chỉ còn inline code. */
       code({ children }: any) {
         return (
           <code className="bg-zinc-800/50 rounded px-1.5 py-0.5 text-[13px] font-mono text-indigo-400 break-words">
@@ -192,7 +221,6 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
         </a>
       ),
 
-      /* Bảng GFM tràn ngang trên mobile -> bọc scroll container. */
       table: ({ children }: any) => (
         <div className="my-4 w-full overflow-x-auto">
           <table className="w-full text-sm">{children}</table>
