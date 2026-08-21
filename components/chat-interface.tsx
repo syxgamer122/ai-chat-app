@@ -7,12 +7,14 @@ import { useAppStore } from '@/lib/store';
 import { db, Dexie, type StoredMessage, type StoredAttachment } from '@/lib/db';
 import {
   reconstructActiveThread,
+  reconstructActiveThreadSafe,
   getSiblings,
   findDeepestLeafId,
   type SiblingResult,
 } from '@/lib/tree-utils';
 import { MarkdownRenderer } from './markdown-renderer';
 import { ErrorBoundary } from './error-boundary';
+import { ChatErrorBoundary } from './chat-error-boundary';
 import { motion } from 'framer-motion';
 import TextareaAutosize from 'react-textarea-autosize';
 import {
@@ -20,6 +22,16 @@ import {
   Pencil, Copy, Check, Trash2, Menu,
   ChevronLeft, ChevronRight, ChevronDown, ChevronUp,
 } from 'lucide-react';
+import { streamController } from '@/lib/stream-controller';
+import { useBranchKeyboardShortcuts } from '@/lib/use-branch-keyboard-shortcuts';
+import { useSwipeBranch } from '@/lib/use-swipe-branch';
+import { BranchSwitcher } from './branch-switcher';
+import { MessageStatusBadge } from './message-status-badge';
+import { repairSessionIfNeeded, repairAndBroadcastSession } from '@/lib/tree-repair';
+import { cleanupExpiredStreamLease, recoverInterruptedStreams } from '@/lib/stream-lease';
+import { useCrossTabChatSync } from '@/lib/use-cross-tab-chat-sync';
+import { useStreamLease } from '@/lib/use-stream-lease';
+import { shouldAcceptStreamUpdate, type StreamGeneration } from '@/lib/stream-generation';
 
 const attachmentCache = new WeakMap<object, StoredAttachment>();
 
@@ -121,11 +133,13 @@ function createAttachmentUrl(attachment: StoredAttachment, urls: Set<string>): s
 function toChatMessage(
   row: StoredMessage,
   objectUrls: Set<string>,
-): Message {
+): Message & { status?: StoredMessage['status']; finishReason?: StoredMessage['finishReason'] } {
   return {
     id: row.id,
     role: row.role as Message['role'],
     content: row.content,
+    status: row.status,
+    finishReason: row.finishReason,
     experimental_attachments: row.attachments?.map(
       (attachment) => ({
         name: attachment.name,
@@ -566,91 +580,6 @@ interface BranchInfo {
   total: number;
 }
 
-interface BranchSwitcherProps {
-  currentIndex: number;
-  total: number;
-  isTouchDevice: boolean;
-  disabled?: boolean;
-  onPrevious: () => void;
-  onNext: () => void;
-}
-
-const BranchSwitcher = memo(function BranchSwitcher({
-  currentIndex,
-  total,
-  isTouchDevice,
-  disabled = false,
-  onPrevious,
-  onNext,
-}: BranchSwitcherProps) {
-  /**
-   * Không hiển thị widget nếu message không có nhiều version.
-   */
-  if (total <= 1) {
-    return null;
-  }
-
-  const isFirst = currentIndex <= 0;
-  const isLast = currentIndex >= total - 1;
-
-  return (
-    <div
-      role="group"
-      aria-label={`Phiên bản ${currentIndex + 1} trên ${total}`}
-      className={`mt-2 flex items-center gap-1 text-zinc-400 ${
-        isTouchDevice ? 'min-h-8' : 'min-h-6'
-      }`}
-    >
-      <button
-        type="button"
-        onClick={onPrevious}
-        disabled={disabled || isFirst}
-        aria-label="Chuyển sang phiên bản trước"
-        title="Phiên bản trước"
-        className={`inline-flex items-center justify-center rounded-md
-          text-zinc-400 transition-colors
-          hover:bg-black/10 hover:text-zinc-100
-          dark:hover:bg-white/10
-          disabled:pointer-events-none disabled:opacity-30
-          ${
-            isTouchDevice
-              ? 'min-h-8 min-w-8'
-              : 'min-h-6 min-w-6'
-          }`}
-      >
-        <ChevronLeft size={15} strokeWidth={2} />
-      </button>
-
-      <span
-        aria-live="polite"
-        className="min-w-[42px] select-none text-center font-mono text-[11px]"
-      >
-        {currentIndex + 1} / {total}
-      </span>
-
-      <button
-        type="button"
-        onClick={onNext}
-        disabled={disabled || isLast}
-        aria-label="Chuyển sang phiên bản tiếp theo"
-        title="Phiên bản tiếp theo"
-        className={`inline-flex items-center justify-center rounded-md
-          text-zinc-400 transition-colors
-          hover:bg-black/10 hover:text-zinc-100
-          dark:hover:bg-white/10
-          disabled:pointer-events-none disabled:opacity-30
-          ${
-            isTouchDevice
-              ? 'min-h-8 min-w-8'
-              : 'min-h-6 min-w-6'
-          }`}
-      >
-        <ChevronRight size={15} strokeWidth={2} />
-      </button>
-    </div>
-  );
-});
-
 interface MessageItemProps {
   m: Message;
 
@@ -679,6 +608,7 @@ interface MessageItemProps {
   onSaveEdit: (id: string) => void;
   onCancelEdit: () => void;
   onDraftChange: (text: string) => void;
+  onContentResize?: () => void;
 }
 
 const MessageItem = memo(
@@ -700,6 +630,7 @@ const MessageItem = memo(
     onSaveEdit,
     onCancelEdit,
     onDraftChange,
+    onContentResize,
   }: MessageItemProps) {
     const [isExpanded, setIsExpanded] = useState(false);
     const isLongUserMsg = m.role === 'user' && m.content.length > 250;
@@ -725,16 +656,18 @@ const MessageItem = memo(
           {m.experimental_attachments && m.experimental_attachments.length > 0 && (
             <div className="mb-2 flex flex-wrap gap-2">
               {m.experimental_attachments.map((att, idx) => (
-                <div key={idx} className="relative overflow-hidden rounded-lg border border-black/10 dark:border-white/10">
+                <div key={idx} className="relative overflow-hidden rounded-lg border border-black/10 dark:border-white/10 bg-black/5 dark:bg-white/5">
                   {att.contentType?.startsWith('image/') ? (
                     <img
                       src={att.url}
                       alt={att.name ?? 'attachment'}
                       className="max-h-48 max-w-xs object-cover rounded-md"
                       loading="lazy"
+                      onLoad={onContentResize}
+                      onError={onContentResize}
                     />
                   ) : (
-                    <div className="flex items-center gap-2 bg-black/5 p-2 text-xs dark:bg-white/5">
+                    <div className="flex items-center gap-2 p-2 text-xs">
                       <Paperclip className="h-4 w-4" />
                       <span className="truncate max-w-[150px]">{att.name}</span>
                     </div>
@@ -815,6 +748,23 @@ const MessageItem = memo(
                     </>
                   )}
                 </button>
+              )}
+
+              {m.role === 'assistant' && (m as any).status === 'aborted' && (
+                <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-black/5 dark:border-white/5 pt-2">
+                  <div className="flex items-center gap-1.5">
+                    <MessageStatusBadge status="aborted" />
+                    <span className="text-[11px] text-zinc-400 dark:text-zinc-500">· Bạn có thể tạo lại để sinh câu trả lời mới</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => onRegenerate(m.id)}
+                    className="inline-flex items-center gap-1 rounded bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-600 hover:bg-amber-500/20 dark:text-amber-400"
+                  >
+                    <RefreshCcw size={12} />
+                    <span>Tạo nhánh mới</span>
+                  </button>
+                </div>
               )}
             </div>
           )}
@@ -1133,25 +1083,28 @@ const MessageList = memo(function MessageList({
                     paddingBottom: '1.5rem',
                   }}
                 >
-                  <MessageItem
-                    m={m}
-                    branchInfo={branchInfoByMessageId.get(m.id)}
-                    isStreaming={isLoading && m.role === 'assistant' && m.id === lastMessageId}
-                    isEditing={editingId === m.id}
-                    isCopied={copiedId === m.id}
-                    draft={editingId === m.id ? draft : ''}
-                    isTouchDevice={isTouchDevice}
-                    sendOnEnter={sendOnEnter}
-                    throttleMs={throttleMs}
-                    animations={animations}
-                    onCopy={onCopy}
-                    onRegenerate={onRegenerate}
-                    onSwitchBranch={onSwitchBranch}
-                    onStartEdit={onStartEdit}
-                    onSaveEdit={onSaveEdit}
-                    onCancelEdit={onCancelEdit}
-                    onDraftChange={onDraftChange}
-                  />
+                  <ChatErrorBoundary onReset={() => rowVirtualizer.measure()}>
+                    <MessageItem
+                      m={m}
+                      branchInfo={branchInfoByMessageId.get(m.id)}
+                      isStreaming={isLoading && m.role === 'assistant' && m.id === lastMessageId}
+                      isEditing={editingId === m.id}
+                      isCopied={copiedId === m.id}
+                      draft={editingId === m.id ? draft : ''}
+                      isTouchDevice={isTouchDevice}
+                      sendOnEnter={sendOnEnter}
+                      throttleMs={throttleMs}
+                      animations={animations}
+                      onCopy={onCopy}
+                      onRegenerate={onRegenerate}
+                      onSwitchBranch={onSwitchBranch}
+                      onStartEdit={onStartEdit}
+                      onSaveEdit={onSaveEdit}
+                      onCancelEdit={onCancelEdit}
+                      onDraftChange={onDraftChange}
+                      onContentResize={() => rowVirtualizer.measure()}
+                    />
+                  </ChatErrorBoundary>
                 </div>
               );
             })}
@@ -1492,6 +1445,34 @@ export default function ChatInterface() {
   const hydratedFor = useRef<string | null>(null);
   const titledFor = useRef<string | null>(null);
   const finishRef = useRef<'stop' | 'abort' | 'error'>('stop');
+  const switchLockRef = useRef(false);
+  const streamGenerationRef = useRef(0);
+  const activeStreamRef = useRef<{
+    sessionId: string;
+    messageId: string;
+    streamId: string;
+    generation: number;
+  } | null>(null);
+
+  const beginStreamGeneration = useCallback((sessionId: string, messageId: string, streamId: string) => {
+    streamGenerationRef.current += 1;
+    const generation = streamGenerationRef.current;
+    activeStreamRef.current = {
+      sessionId,
+      messageId,
+      streamId,
+      generation,
+    };
+    return generation;
+  }, []);
+
+  const invalidateCurrentStreamGeneration = useCallback(() => {
+    streamGenerationRef.current += 1;
+    activeStreamRef.current = null;
+  }, []);
+
+  const [isSwitchingBranch, setIsSwitchingBranch] = useState(false);
+  const [activeStreamId, setActiveStreamId] = useState<string | null>(null);
   const [isTouchDevice, setIsTouchDevice] = useState(false);
 
   useEffect(() => {
@@ -1530,6 +1511,52 @@ export default function ChatInterface() {
     isLoadingRef.current = isLoading;
   }, [isLoading]);
 
+  const reloadTreeFromDatabase = useCallback(async () => {
+    const chatId = currentChatId;
+    if (!chatId) return;
+
+    try {
+      const [chat, rows] = await Promise.all([
+        db.chats.get(chatId),
+        db.messages.where('chatId').equals(chatId).toArray(),
+      ]);
+
+      if (!chat) return;
+
+      const nextActiveLeafId = chat.activeLeafId ?? null;
+      const recon = reconstructActiveThreadSafe(rows, nextActiveLeafId ?? undefined);
+
+      allStoredMessagesRef.current = rows;
+      activeLeafIdRef.current = nextActiveLeafId;
+      setAllStoredMessages(rows);
+      setActiveLeafId(nextActiveLeafId);
+
+      revokeObjectUrls(createdObjectUrls.current);
+      const nextMessages = recon.messages.map((row) =>
+        toChatMessage(row, createdObjectUrls.current),
+      );
+      setMessages(nextMessages);
+    } catch (err) {
+      console.error('[reloadTreeFromDatabase]', err);
+    }
+  }, [currentChatId, setMessages]);
+
+  useCrossTabChatSync({
+    sessionId: currentChatId,
+    onReload: () => {
+      void reloadTreeFromDatabase();
+    },
+    onRemoteBranchSwitch: () => {
+      void reloadTreeFromDatabase();
+    },
+  });
+
+  useStreamLease({
+    sessionId: currentChatId,
+    streamId: activeStreamId,
+    enabled: Boolean(activeStreamId && isLoading),
+  });
+
   const branchInfoByMessageId = useMemo(() => {
     const result = new Map<string, BranchInfo>();
 
@@ -1551,6 +1578,30 @@ export default function ChatInterface() {
 
     return result;
   }, [messages, allStoredMessages]);
+
+  const abortStreamForSession = useCallback(
+    async (
+      targetSessionId: string,
+      reason: 'switch-chat' | 'switch-branch' | 'manual',
+    ) => {
+      await streamController.abort(targetSessionId, reason);
+    },
+    [],
+  );
+
+  const currentChatIdRef = useRef(currentChatId);
+  useEffect(() => {
+    currentChatIdRef.current = currentChatId;
+  }, [currentChatId]);
+
+  useEffect(() => {
+    return () => {
+      const activeId = currentChatIdRef.current;
+      if (activeId && isLoadingRef.current) {
+        void abortStreamForSession(activeId, 'switch-chat');
+      }
+    };
+  }, [abortStreamForSession]);
 
   useEffect(() => {
     if (
@@ -1583,8 +1634,10 @@ export default function ChatInterface() {
         pendingAssistantForkRef.current =
           null;
 
-        if (isLoading) {
+        if (isLoading && previousChatId.current) {
           finishRef.current = 'abort';
+          void abortStreamForSession(previousChatId.current, 'switch-chat');
+          invalidateCurrentStreamGeneration();
           stop();
         }
       }
@@ -1593,6 +1646,7 @@ export default function ChatInterface() {
         currentChatId;
     }
   }, [
+    abortStreamForSession,
     currentChatId,
     isLoading,
     stop,
@@ -1678,6 +1732,8 @@ export default function ChatInterface() {
 
     (async () => {
       try {
+        await recoverInterruptedStreams(chatId);
+        const repairResult = await repairSessionIfNeeded(chatId);
         const [chat, rows] = await Promise.all([
           db.chats.get(chatId),
           db.messages
@@ -1694,29 +1750,20 @@ export default function ChatInterface() {
           return;
         }
 
-        /**
-         * activeLeafId trong ChatSession là nguồn chính.
-         * Fallback về message cuối theo createdAt nếu dữ liệu cũ
-         * chưa có activeLeafId.
-         */
-        const fallbackLeafId = rows
-          .slice()
-          .sort((a, b) => {
-            if (a.createdAt !== b.createdAt) {
-              return b.createdAt - a.createdAt;
-            }
-
-            return b.seq - a.seq;
-          })[0]?.id;
-
         const nextActiveLeafId =
-          chat?.activeLeafId ?? fallbackLeafId ?? null;
+          chat?.activeLeafId ?? repairResult.nextActiveLeafId ?? null;
 
-        const activeThread =
-          reconstructActiveThread(
+        const reconstruction =
+          reconstructActiveThreadSafe(
             rows,
             nextActiveLeafId ?? undefined,
           );
+
+        if (reconstruction.broken) {
+          showNotice('Một phần lịch sử nhánh bị lỗi. Dữ liệu hợp lệ vẫn được hiển thị và hệ thống đang tự phục hồi.');
+        }
+
+        const activeThread = reconstruction.messages;
 
         revokeObjectUrls(createdObjectUrls.current);
 
@@ -1784,6 +1831,49 @@ export default function ChatInterface() {
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const handleVisibilityChange = async () => {
+      if (document.visibilityState !== 'visible') return;
+      const chatId = currentChatId;
+      if (!chatId || isLoading) return;
+
+      try {
+        await cleanupExpiredStreamLease(chatId);
+        await repairAndBroadcastSession(chatId);
+
+        const [chat, rows] = await Promise.all([
+          db.chats.get(chatId),
+          db.messages.where('chatId').equals(chatId).toArray(),
+        ]);
+
+        if (!chat) return;
+
+        const nextActiveLeafId = chat.activeLeafId ?? null;
+        const recon = reconstructActiveThreadSafe(rows, nextActiveLeafId ?? undefined);
+
+        allStoredMessagesRef.current = rows;
+        activeLeafIdRef.current = nextActiveLeafId;
+        setAllStoredMessages(rows);
+        setActiveLeafId(nextActiveLeafId);
+
+        revokeObjectUrls(createdObjectUrls.current);
+        const nextMessages = recon.messages.map((row) =>
+          toChatMessage(row, createdObjectUrls.current),
+        );
+        setMessages(nextMessages);
+      } catch (error) {
+        console.error('[visibilitychange recovery]', error);
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [currentChatId, isLoading, setMessages]);
 
   const persistActiveProjection = useCallback(
     async (
@@ -2249,11 +2339,7 @@ export default function ChatInterface() {
       targetMessageId: string,
       direction: 'previous' | 'next',
     ) => {
-      /**
-       * Chưa xử lý stop stream trong Giai đoạn 2.
-       * Widget cũng đã disabled khi message đang stream.
-       */
-      if (isLoading) {
+      if (switchLockRef.current) {
         return;
       }
 
@@ -2305,43 +2391,48 @@ export default function ChatInterface() {
         selectedSibling.id,
       );
 
-      if (!nextLeafId) {
+      if (!nextLeafId || nextLeafId === activeLeafIdRef.current) {
         return;
       }
 
-      const nextThread = reconstructActiveThread(
-        rows,
-        nextLeafId,
-      );
+      const previousLeafId = activeLeafIdRef.current;
+      const previousMessages = messages;
 
-      if (nextThread.length === 0) {
-        return;
-      }
+      switchLockRef.current = true;
+      setIsSwitchingBranch(true);
 
-      /**
-       * Đổi URL attachment theo active thread mới.
-       */
-      revokeObjectUrls(createdObjectUrls.current);
-
-      const nextMessages = nextThread.map((row) =>
-        toChatMessage(
-          row,
-          createdObjectUrls.current,
-        ),
-      );
-
-      /**
-       * Optimistic UI update.
-       */
-      treePersistEpochRef.current += 1;
-      activeLeafIdRef.current = nextLeafId;
-      setActiveLeafId(nextLeafId);
-      setMessages(nextMessages);
-
-      /**
-       * Chỉ cập nhật pointer, không xóa message và không thay đổi cây.
-       */
       try {
+        if (isLoading) {
+          finishRef.current = 'abort';
+          await streamController.abort(chatId, 'switch-branch');
+          invalidateCurrentStreamGeneration();
+          stop();
+        }
+
+        const latestRows = allStoredMessagesRef.current;
+        const nextThread = reconstructActiveThread(
+          latestRows,
+          nextLeafId,
+        );
+
+        if (nextThread.length === 0) {
+          return;
+        }
+
+        revokeObjectUrls(createdObjectUrls.current);
+
+        const nextMessages = nextThread.map((row) =>
+          toChatMessage(
+            row,
+            createdObjectUrls.current,
+          ),
+        );
+
+        treePersistEpochRef.current += 1;
+        activeLeafIdRef.current = nextLeafId;
+        setActiveLeafId(nextLeafId);
+        setMessages(nextMessages);
+
         await db.chats.update(chatId, {
           activeLeafId: nextLeafId,
           updatedAt: Date.now(),
@@ -2353,15 +2444,72 @@ export default function ChatInterface() {
           '[handleSwitchBranch] Failed to persist active leaf:',
           error,
         );
+        activeLeafIdRef.current = previousLeafId;
+        setActiveLeafId(previousLeafId);
+        setMessages(previousMessages);
+        showNotice('Không thể chuyển nhánh. Đã khôi phục trạng thái trước.');
+      } finally {
+        switchLockRef.current = false;
+        setIsSwitchingBranch(false);
       }
     },
     [
       currentChatId,
       isLoading,
+      messages,
       notifyChatUpdated,
       setMessages,
+      showNotice,
+      stop,
     ],
   );
+
+  const branchedMessageInThread = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i];
+      const siblingInfo = getSiblings(allStoredMessages, msg.id);
+      if (siblingInfo.total > 1) {
+        return msg.id;
+      }
+    }
+    return null;
+  }, [messages, allStoredMessages]);
+
+  const handleShortcutPreviousBranch = useCallback(() => {
+    if (!branchedMessageInThread) return;
+    void handleSwitchBranch(branchedMessageInThread, 'previous');
+  }, [branchedMessageInThread, handleSwitchBranch]);
+
+  const handleShortcutNextBranch = useCallback(() => {
+    if (!branchedMessageInThread) return;
+    void handleSwitchBranch(branchedMessageInThread, 'next');
+  }, [branchedMessageInThread, handleSwitchBranch]);
+
+  useBranchKeyboardShortcuts({
+    enabled: !isLoading && !isSwitchingBranch,
+    onPrevious: handleShortcutPreviousBranch,
+    onNext: handleShortcutNextBranch,
+  });
+
+  const [swipeDirection, setSwipeDirection] = useState<'left' | 'right' | null>(null);
+
+  const showSwipeFeedback = useCallback((direction: 'left' | 'right') => {
+    setSwipeDirection(direction);
+    window.setTimeout(() => {
+      setSwipeDirection(null);
+    }, 400);
+  }, []);
+
+  const swipeHandlers = useSwipeBranch({
+    onSwipeLeft: () => {
+      showSwipeFeedback('left');
+      handleShortcutNextBranch();
+    },
+    onSwipeRight: () => {
+      showSwipeFeedback('right');
+      handleShortcutPreviousBranch();
+    },
+  });
 
   const handleRegenerate = useCallback(
     async (assistantMessageId: string) => {
@@ -2913,7 +3061,10 @@ export default function ChatInterface() {
   const hasMessages = messages.length > 0;
 
   return (
-    <div className="flex-1 flex flex-col relative h-[100dvh]">
+    <div
+      {...swipeHandlers}
+      className="flex-1 flex flex-col relative h-[100dvh] touch-pan-y"
+    >
       <ChatHeader
         hasMessages={hasMessages}
         confirmClear={confirmClear}
@@ -2921,6 +3072,20 @@ export default function ChatInterface() {
         onDeleteChat={deleteChat}
         onOpenSidebar={onOpenSidebar}
       />
+
+      {swipeDirection && (
+        <div
+          className={[
+            'pointer-events-none fixed top-1/2 z-50 -translate-y-1/2',
+            'rounded-full bg-black/80 backdrop-blur border border-white/15 px-3.5 py-1.5 text-xs text-white shadow-xl',
+            'transition-all animate-in fade-in zoom-in',
+            swipeDirection === 'left' ? 'right-4' : 'left-4',
+          ].join(' ')}
+          aria-live="polite"
+        >
+          {swipeDirection === 'left' ? 'Nhánh tiếp theo →' : '← Nhánh trước'}
+        </div>
+      )}
 
       <MessageList
         messages={messages}

@@ -63,6 +63,7 @@ export interface ChatSession {
    */
   revision?: number;
   lastWriterId?: string;
+  activeLease?: any | null;
 }
 
 /* ------------------------------------------------------------------ */
@@ -153,6 +154,16 @@ export interface StoredMessage {
    * Field này giúp Branch Switcher có thứ tự ổn định.
    */
   branchOrder?: number;
+
+  /**
+   * Tie-breaker khi hai tab cùng sinh một branchOrder.
+   */
+  branchTieBreaker?: string;
+
+  /**
+   * Id của stream phục vụ recovery và lease synchronization.
+   */
+  streamId?: string;
 }
 
 /* ------------------------------------------------------------------ */

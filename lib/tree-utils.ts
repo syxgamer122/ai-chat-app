@@ -36,7 +36,9 @@ function compareSiblingOrder(
     return a.createdAt - b.createdAt;
   }
 
-  return a.id.localeCompare(b.id);
+  return (a.branchTieBreaker ?? a.id).localeCompare(
+    b.branchTieBreaker ?? b.id,
+  );
 }
 
 function sortSiblings(
@@ -127,6 +129,68 @@ export function reconstructActiveThread(
   return reversedPath.reverse();
 }
 
+export interface SafeReconstructionResult {
+  messages: StoredMessage[];
+  broken: boolean;
+  brokenNodeId?: string;
+}
+
+export function reconstructActiveThreadSafe(
+  allMessages: StoredMessage[],
+  leafId: string | null | undefined,
+): SafeReconstructionResult {
+  if (!leafId || allMessages.length === 0) {
+    return {
+      messages: [],
+      broken: false,
+    };
+  }
+
+  const byId = new Map(
+    allMessages.map((message) => [
+      message.id,
+      message,
+    ]),
+  );
+
+  const result: StoredMessage[] = [];
+  const visited = new Set<string>();
+
+  let current = byId.get(leafId);
+
+  while (current) {
+    if (visited.has(current.id)) {
+      return {
+        messages: result.reverse(),
+        broken: true,
+        brokenNodeId: current.id,
+      };
+    }
+
+    visited.add(current.id);
+    result.push(current);
+
+    if (!current.parentId) {
+      break;
+    }
+
+    current = byId.get(current.parentId);
+
+    if (!current) {
+      return {
+        messages: result.reverse(),
+        broken: true,
+        brokenNodeId: result[0]?.id,
+      };
+    }
+  }
+
+  return {
+    messages: result.reverse(),
+    broken: false,
+  };
+}
+
 /* ------------------------------------------------------------------ */
 /* getSiblings                                                        */
 /* ------------------------------------------------------------------ */
@@ -164,6 +228,30 @@ export function getSiblings(
     currentIndex,
     total: siblings.length,
   };
+}
+
+export function findSiblingTarget(
+  allMessages: StoredMessage[],
+  currentMessageId: string,
+  direction: 'previous' | 'next',
+): string | null {
+  const result = getSiblings(
+    allMessages,
+    currentMessageId,
+  );
+
+  if (result.total <= 1) {
+    return null;
+  }
+
+  const offset = direction === 'previous' ? -1 : 1;
+  const targetIndex = result.currentIndex + offset;
+
+  if (targetIndex < 0 || targetIndex >= result.total) {
+    return null;
+  }
+
+  return result.siblings[targetIndex]?.id ?? null;
 }
 
 /* ------------------------------------------------------------------ */

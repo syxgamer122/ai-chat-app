@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { Sidebar } from '@/components/sidebar';
 import ChatInterface from '@/components/chat-interface';
+import { ChatErrorBoundary } from '@/components/chat-error-boundary';
 import { db } from '@/lib/db';
 import { useAppStore } from '@/lib/store';
 import { AVAILABLE_MODELS } from '@/lib/models';
@@ -56,7 +57,11 @@ export default function Home() {
   return (
     <main className="flex h-screen overflow-hidden">
       <Sidebar onOpenSettings={() => setShowSettings(true)} />
-      <ChatInterface />
+      <div className="flex-1 flex flex-col min-w-0 h-full">
+        <ChatErrorBoundary>
+          <ChatInterface />
+        </ChatErrorBoundary>
+      </div>
 
       {showSettings && (
         <div
