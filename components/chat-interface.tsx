@@ -926,6 +926,7 @@ export default function ChatInterface() {
               chatId,
               role: m.role as StoredMessage['role'],
               content: m.content,
+              parentId: i === 0 ? null : (messages[i - 1]?.id ?? null),
               seq: i,
               createdAt,
               attachments,
