@@ -18,7 +18,7 @@ import TextareaAutosize from 'react-textarea-autosize';
 import {
   Send, StopCircle, RefreshCcw, ArrowDown, Paperclip, X,
   Pencil, Copy, Check, Trash2, Menu,
-  ChevronLeft, ChevronRight,
+  ChevronLeft, ChevronRight, ChevronDown, ChevronUp,
 } from 'lucide-react';
 
 const attachmentCache = new WeakMap<object, StoredAttachment>();
@@ -701,6 +701,8 @@ const MessageItem = memo(
     onCancelEdit,
     onDraftChange,
   }: MessageItemProps) {
+    const [isExpanded, setIsExpanded] = useState(false);
+    const isLongUserMsg = m.role === 'user' && m.content.length > 250;
     const shouldAnimate = animations && !isStreaming;
 
     return (
@@ -774,13 +776,47 @@ const MessageItem = memo(
               </div>
             </div>
           ) : (
-            <ErrorBoundary>
-              <MarkdownRenderer
-                content={m.content}
-                isStreaming={isStreaming}
-                throttleMs={throttleMs}
-              />
-            </ErrorBoundary>
+            <div className="relative">
+              <div
+                className={
+                  isLongUserMsg && !isExpanded
+                    ? 'max-h-36 overflow-hidden relative'
+                    : ''
+                }
+              >
+                <ErrorBoundary>
+                  <MarkdownRenderer
+                    content={m.content}
+                    isStreaming={isStreaming}
+                    throttleMs={throttleMs}
+                  />
+                </ErrorBoundary>
+
+                {isLongUserMsg && !isExpanded && (
+                  <div className="absolute bottom-0 left-0 right-0 h-14 bg-gradient-to-t from-blue-600 via-blue-600/80 to-transparent pointer-events-none" />
+                )}
+              </div>
+
+              {isLongUserMsg && (
+                <button
+                  type="button"
+                  onClick={() => setIsExpanded((prev) => !prev)}
+                  className="mt-2 inline-flex items-center gap-1 text-[11px] font-medium text-blue-100 hover:text-white transition-colors bg-blue-700/60 hover:bg-blue-700 px-2 py-0.5 rounded-md"
+                >
+                  {isExpanded ? (
+                    <>
+                      <ChevronUp size={13} />
+                      <span>Thu gọn</span>
+                    </>
+                  ) : (
+                    <>
+                      <ChevronDown size={13} />
+                      <span>Xem toàn bộ ({m.content.length.toLocaleString()} ký tự)</span>
+                    </>
+                  )}
+                </button>
+              )}
+            </div>
           )}
 
           {/* Branch Switcher */}
