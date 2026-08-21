@@ -1,6 +1,7 @@
 import { createOpenAI } from '@ai-sdk/openai';
 import { convertToCoreMessages, streamText, type CoreMessage } from 'ai';
 import { z } from 'zod';
+import { getNextApiKey, markKeyRateLimited } from '@/lib/api-keys';
 
 export const runtime = 'edge';
 export const maxDuration = 60;
@@ -58,8 +59,19 @@ export async function POST(req: Request) {
 
     const { messages, model, temperature, system } = parsed.data;
 
+    // Ưu tiên custom key từ header (nếu client gửi), nếu không thì xoay vòng key từ pool
+    const customKey = req.headers.get('x-api-key')?.trim();
+    const selectedKey = customKey || getNextApiKey();
+
+    if (!selectedKey) {
+      return Response.json(
+        { error: 'Chưa cấu hình OPENAI_API_KEY hoặc danh sách OPENAI_API_KEYS trên máy chủ.' },
+        { status: 500 },
+      );
+    }
+
     const openai = createOpenAI({
-      apiKey: process.env.OPENAI_API_KEY,
+      apiKey: selectedKey,
       baseURL: process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1',
     });
 
@@ -76,7 +88,20 @@ export async function POST(req: Request) {
       system: system?.trim() ? system : undefined,
       // Người dùng bấm Stop -> hủy thật sự request tới provider (tiết kiệm token).
       abortSignal: req.signal,
-      onError: ({ error }) => console.error('[streamText]', error),
+      onError: ({ error }) => {
+        console.error(`[streamText Error with key ...${selectedKey.slice(-6)}]`, error);
+        const errMsg = error instanceof Error ? error.message : String(error);
+        if (
+          errMsg.includes('limit') ||
+          errMsg.includes('quota') ||
+          errMsg.includes('429') ||
+          errMsg.includes('401') ||
+          errMsg.includes('subscription') ||
+          errMsg.includes('exceeded')
+        ) {
+          markKeyRateLimited(selectedKey);
+        }
+      },
     });
 
     return result.toDataStreamResponse({

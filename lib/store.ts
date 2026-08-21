@@ -14,6 +14,7 @@ export interface Settings {
   systemPrompt: string;
   perf: PerfSettings;
   sendOnEnter: boolean;
+  apiKey?: string;
 }
 
 interface AppState {
@@ -33,6 +34,7 @@ const DEFAULT_SETTINGS: Settings = {
     'For inline math use $...$ and for block math use $$...$$. Do not use \\( or \\[.',
   perf: { throttleMs: 150, animations: true },
   sendOnEnter: true,
+  apiKey: '',
 };
 
 export const useAppStore = create<AppState>()(

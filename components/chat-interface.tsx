@@ -87,6 +87,7 @@ export default function ChatInterface() {
     handleSubmit, stop, reload, isLoading, error,
   } = useChat({
     id: chatKey,
+    headers: settings.apiKey ? { 'x-api-key': settings.apiKey } : undefined,
     body: {
       model: settings.model,
       temperature: settings.temperature,
