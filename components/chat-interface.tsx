@@ -1035,7 +1035,7 @@ const MessageList = memo(function MessageList({
       <div
         ref={scrollRef as any}
         onScroll={onScroll}
-        className="flex-1 overflow-y-auto p-4 md:p-8 space-y-6 pb-40 pt-14 md:pt-8"
+        className="flex-1 overflow-y-auto p-4 md:p-8 space-y-6 pb-[60vh] pt-14 md:pt-8"
       >
         {!hasMessages ? (
           <div className="flex flex-col items-center justify-center h-full pt-10 space-y-8">
@@ -2445,6 +2445,9 @@ export default function ChatInterface() {
           ),
         );
 
+        stick.current = true;
+        setAutoScroll(true);
+
         notifyChatUpdated(chatId);
 
         triggerReload();
@@ -2673,6 +2676,9 @@ export default function ChatInterface() {
 
         setMessages(nextChatMessages);
 
+        stick.current = true;
+        setAutoScroll(true);
+
         setEditingId(null);
         setDraft('');
 
@@ -2824,8 +2830,20 @@ export default function ChatInterface() {
       attachments.forEach((f) => dataTransfer.items.add(f));
       const options = attachments.length ? { experimental_attachments: dataTransfer.files } : undefined;
 
+      stick.current = true;
+      setAutoScroll(true);
+
       setAttachments([]);
       handleSubmit(undefined, options);
+
+      requestAnimationFrame(() => {
+        if (scrollRef.current) {
+          scrollRef.current.scrollTo({
+            top: scrollRef.current.scrollHeight,
+            behavior: 'smooth',
+          });
+        }
+      });
     } catch (err) {
       console.error('[onSubmit]', err);
     }
