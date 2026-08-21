@@ -8,12 +8,14 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { MarkdownRenderer } from './markdown-renderer';
 import { motion, AnimatePresence } from 'framer-motion';
 import TextareaAutosize from 'react-textarea-autosize';
-import { Send, StopCircle, RefreshCcw, ArrowDown } from 'lucide-react';
+import { Send, StopCircle, RefreshCcw, ArrowDown, Paperclip, X } from 'lucide-react';
 
 export default function ChatInterface() {
   const { currentChatId, settings, setCurrentChatId } = useAppStore();
   const [autoScroll, setAutoScroll] = useState(true);
+  const [attachments, setAttachments] = useState<File[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   
   const initialMessages = useLiveQuery(
     () => currentChatId ? db.messages.where('chatId').equals(currentChatId).sortBy('createdAt') : [],
@@ -68,7 +70,7 @@ export default function ChatInterface() {
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!input.trim() || isLoading) return;
+    if (!input.trim() && attachments.length === 0 || isLoading) return;
     
     let chatId = currentChatId;
     if (!chatId) {
@@ -77,10 +79,33 @@ export default function ChatInterface() {
       await db.chats.put({ id: chatId, title: 'New Chat', pinned: false, createdAt: Date.now(), updatedAt: Date.now() });
     }
 
+    // Convert files to base64 for local saving
+    const processedAttachments = await Promise.all(
+      attachments.map(async (file) => {
+        return new Promise<{ name: string, contentType: string, url: string }>((resolve) => {
+          const reader = new FileReader();
+          reader.onload = (e) => resolve({ name: file.name, contentType: file.type, url: e.target?.result as string });
+          reader.readAsDataURL(file);
+        });
+      })
+    );
+
     const userMsgId = crypto.randomUUID();
-    await db.messages.put({ id: userMsgId, chatId, role: 'user', content: input, createdAt: Date.now() });
+    await db.messages.put({ 
+      id: userMsgId, 
+      chatId, 
+      role: 'user', 
+      content: input, 
+      createdAt: Date.now(),
+      experimental_attachments: processedAttachments.length > 0 ? processedAttachments : undefined
+    });
     
-    handleSubmit(e);
+    // Create a FileList-like object or DataTransfer to pass to handleSubmit
+    const dataTransfer = new DataTransfer();
+    attachments.forEach(file => dataTransfer.items.add(file));
+    
+    setAttachments([]); // Clear attachments UI
+    handleSubmit(e, { experimental_attachments: dataTransfer.files });
   };
 
   return (
@@ -111,6 +136,25 @@ export default function ChatInterface() {
                 className={`flex w-full ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}
               >
                 <div className={`max-w-[720px] w-full p-5 rounded-2xl ${m.role === 'user' ? 'bg-zinc-800/80 text-zinc-100 ml-auto' : 'bg-transparent text-zinc-200'}`}>
+                  
+                  {/* Hiển thị file/ảnh đính kèm */}
+                  {m.experimental_attachments && m.experimental_attachments.length > 0 && (
+                    <div className="flex flex-wrap gap-2 mb-3">
+                      {m.experimental_attachments.map((attachment: any, i: number) => (
+                        <div key={i} className="flex items-center gap-2">
+                          {attachment.contentType?.startsWith('image/') ? (
+                            <img src={attachment.url} alt={attachment.name || 'Image'} className="w-40 rounded-xl object-contain bg-zinc-900 border border-zinc-700" />
+                          ) : (
+                            <div className="flex items-center gap-2 bg-zinc-900 border border-zinc-700 p-2.5 rounded-xl text-sm">
+                              <Paperclip size={16} />
+                              <span className="truncate max-w-[150px]">{attachment.name || 'File'}</span>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
                   {m.role === 'assistant' ? <MarkdownRenderer content={m.content} /> : <p className="whitespace-pre-wrap leading-relaxed">{m.content}</p>}
                   
                   {m.role === 'assistant' && !isLoading && (
@@ -148,7 +192,43 @@ export default function ChatInterface() {
       {/* Khu vực Input luôn luôn hiển thị ở dưới */}
       <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-zinc-950 via-zinc-950 to-transparent pt-10">
         <div className="max-w-[720px] mx-auto relative">
+          
+          {/* Preview Attachments */}
+          {attachments.length > 0 && (
+            <div className="flex flex-wrap gap-2 mb-2 p-2 bg-zinc-900/80 border border-zinc-800 rounded-xl backdrop-blur-sm">
+              {attachments.map((file, i) => (
+                <div key={i} className="relative flex items-center gap-2 bg-zinc-800 p-2 rounded-lg text-xs text-zinc-300">
+                  {file.type.startsWith('image/') ? (
+                    <img src={URL.createObjectURL(file)} alt={file.name} className="w-8 h-8 object-cover rounded" />
+                  ) : (
+                    <Paperclip size={14} className="text-zinc-500" />
+                  )}
+                  <span className="truncate max-w-[120px]">{file.name}</span>
+                  <button type="button" onClick={() => setAttachments(prev => prev.filter((_, idx) => idx !== i))} className="absolute -top-1.5 -right-1.5 bg-zinc-700 hover:bg-zinc-600 rounded-full p-0.5">
+                    <X size={12} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
           <form onSubmit={onSubmit} className="relative bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden focus-within:border-indigo-500/50 transition-colors shadow-sm">
+            
+            <input 
+              type="file" 
+              multiple 
+              className="hidden" 
+              ref={fileInputRef} 
+              onChange={(e) => {
+                if (e.target.files) setAttachments(prev => [...prev, ...Array.from(e.target.files!)]);
+                e.target.value = ''; // Reset
+              }} 
+            />
+
+            <button type="button" onClick={() => fileInputRef.current?.click()} className="absolute left-3 bottom-3 p-2 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 rounded-xl transition-colors">
+              <Paperclip size={18} />
+            </button>
+
             <TextareaAutosize
               value={input}
               onChange={handleInputChange}
@@ -159,7 +239,7 @@ export default function ChatInterface() {
                 }
               }}
               placeholder="Gửi tin nhắn..."
-              className="w-full max-h-[200px] bg-transparent text-zinc-100 placeholder:text-zinc-600 resize-none outline-none p-4 pr-16 py-5"
+              className="w-full max-h-[200px] bg-transparent text-zinc-100 placeholder:text-zinc-600 resize-none outline-none p-4 pl-14 pr-16 py-5"
               minRows={1}
               maxRows={8}
             />
@@ -169,7 +249,7 @@ export default function ChatInterface() {
                   <StopCircle size={18} />
                 </button>
               ) : (
-                <button type="submit" disabled={!input.trim()} className="p-2 bg-indigo-600 text-white rounded-xl disabled:opacity-50 disabled:bg-zinc-800 transition-colors">
+                <button type="submit" disabled={!input.trim() && attachments.length === 0} className="p-2 bg-indigo-600 text-white rounded-xl disabled:opacity-50 disabled:bg-zinc-800 transition-colors">
                   <Send size={18} />
                 </button>
               )}

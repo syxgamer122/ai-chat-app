@@ -6,9 +6,13 @@ import rehypeKatex from 'rehype-katex';
 import { Check, Copy } from 'lucide-react';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
-import 'katex/dist/katex.min.css';
 
 export const MarkdownRenderer = memo(({ content }: { content: string }) => {
+  // Tiền xử lý để đảm bảo hỗ trợ cả format \(...\) và \[...\] mà nhiều model hay xuất ra
+  const processedContent = content
+    .replace(/\\\((.*?)\\\)/g, '$$$1$$') // Convert \( ... \) to $ ... $
+    .replace(/\\\[(.*?)\\\]/gs, '$$$$$1$$$$'); // Convert \[ ... \] to $$ ... $$
+
   return (
     <ReactMarkdown
       className="prose prose-invert prose-p:leading-relaxed prose-pre:p-0 max-w-none w-full"
@@ -52,7 +56,7 @@ export const MarkdownRenderer = memo(({ content }: { content: string }) => {
         a: ({ href, children }) => <a href={href} target="_blank" rel="noreferrer" className="text-indigo-400 hover:underline">{children}</a>,
       }}
     >
-      {content}
+      {processedContent}
     </ReactMarkdown>
   );
 });

@@ -21,7 +21,7 @@ export const useAppStore = create<AppState>()(
       settings: {
         model: 'gpt-5.6-luna', // Mặc định dựa trên ảnh bạn gửi
         temperature: 0.7,
-        systemPrompt: 'You are a helpful, brilliant AI assistant. Use Markdown and LaTeX when appropriate.',
+        systemPrompt: 'You are a helpful, brilliant AI assistant. Use Markdown and LaTeX when appropriate. For inline math use $...$ and for block math use $$...$$. Do not use \\( or \\[. ',
       },
       setCurrentChatId: (id) => set({ currentChatId: id }),
       updateSettings: (newSettings) => 
