@@ -8,21 +8,70 @@ import {
   type CoreMessage,
 } from 'ai';
 import { z } from 'zod';
-import { getKeyCandidates, markKeyFailure, markKeySuccess, getKeyLabel } from '@/lib/api-keys';
-import { ALLOWED_MODEL_IDS, DEFAULT_MODEL_ID } from '@/lib/models';
-import { checkRateLimit, getClientIp } from '@/lib/rate-limit';
+import {
+  getKeyCandidates,
+  markKeyFailure,
+  markKeySuccess,
+  getKeyLabel,
+  isPermanentClientError,
+} from '@/lib/api-keys';
+import { ALLOWED_MODEL_IDS, DEFAULT_MODEL_ID, getModelConfig } from '@/lib/models';
+import {
+  checkRateLimit,
+  getClientIp,
+  verifySameOrigin,
+  verifyAccessAuth,
+} from '@/lib/security';
 
 export const runtime = 'edge';
-export const maxDuration = 60;
+export const maxDuration = 120;
+
+function combineAbortSignals(...signals: (AbortSignal | undefined)[]): AbortSignal {
+  const validSignals = signals.filter(Boolean) as AbortSignal[];
+  if (typeof (AbortSignal as any).any === 'function') {
+    return (AbortSignal as any).any(validSignals);
+  }
+
+  const controller = new AbortController();
+  const onAbort = () => {
+    if (!controller.signal.aborted) controller.abort();
+  };
+
+  for (const sig of validSignals) {
+    if (sig.aborted) {
+      onAbort();
+      break;
+    }
+    sig.addEventListener('abort', onAbort, { once: true });
+  }
+
+  return controller.signal;
+}
 
 const MAX_BODY_BYTES = 4.5 * 1024 * 1024; // 4.5MB Vercel platform limit
 
+const AttachmentSchema = z.object({
+  name: z.string().max(255).optional(),
+  contentType: z.string().max(128).optional(),
+  url: z.string().max(6_000_000).optional(),
+});
+
+const MessageSchema = z.object({
+  id: z.string().max(128).optional(),
+  role: z.enum(['user', 'assistant', 'system']),
+  content: z.union([
+    z.string().max(200_000),
+    z.array(z.record(z.string(), z.unknown())).max(100),
+  ]),
+  experimental_attachments: z.array(AttachmentSchema).max(4).optional(),
+});
+
 const BodySchema = z.object({
-  messages: z.array(z.any()).min(1).max(500),
+  messages: z.array(MessageSchema).min(1).max(100),
   model: z.string().min(1).max(64).optional(),
   temperature: z.number().min(0).max(2).optional(),
-  system: z.string().max(8000).optional(),
-});
+  system: z.string().max(8_000).optional(),
+}).strict();
 
 const REASONING_MODELS = new Set([
   'gpt-5.6-luna',
@@ -83,31 +132,100 @@ function normalize(messages: CoreMessage[]): CoreMessage[] {
   return firstUser === 0 ? cleaned : cleaned.slice(firstUser);
 }
 
-export async function POST(req: Request) {
-  try {
-    const customKey = req.headers.get('x-api-key')?.trim();
+async function readJsonWithLimit(req: Request, maxBytes: number): Promise<unknown> {
+  if (!req.body) {
+    throw new Error('Empty request body.');
+  }
 
-    if (!customKey) {
-      const clientIp = getClientIp(req);
-      const { allowed, resetInSec } = checkRateLimit(clientIp, 30, 60_000);
-      if (!allowed) {
-        return Response.json(
-          { error: `Bạn đang gửi tin nhắn quá nhanh. Vui lòng thử lại sau ${resetInSec} giây.` },
-          { status: 429, headers: { 'Retry-After': String(resetInSec) } },
+  const reader = req.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      total += value.byteLength;
+      if (total > maxBytes) {
+        throw new Response(
+          JSON.stringify({ error: 'Dữ liệu tin nhắn vượt quá giới hạn 4.5MB.' }),
+          {
+            status: 413,
+            headers: { 'Content-Type': 'application/json' },
+          },
         );
       }
+
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const body = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+
+  return JSON.parse(new TextDecoder().decode(body));
+}
+
+export async function POST(req: Request) {
+  try {
+    // 1. Kiểm tra Same-Origin chống Open Proxy / Hotlinking từ bên ngoài
+    if (!verifySameOrigin(req)) {
+      return Response.json(
+        { error: 'Truy cập bị từ chối do nguồn gốc yêu cầu (Origin) không hợp lệ.' },
+        { status: 403 },
+      );
     }
 
+    // 2. Xác thực Mật khẩu bảo vệ (nếu máy chủ có cấu hình APP_ACCESS_PASSWORD)
+    const auth = verifyAccessAuth(req);
+    if (!auth.authorized) {
+      return Response.json(
+        { error: auth.reason || 'Unauthorized' },
+        { status: 401 },
+      );
+    }
+
+    // 3. Áp dụng Rate Limiting cho TẤT CẢ request (Kể cả có Custom Key cũng không được bypass hoàn toàn)
+    const rawCustomKey = req.headers.get('x-api-key')?.trim();
+    const customKey =
+      rawCustomKey &&
+      rawCustomKey.length >= 10 &&
+      rawCustomKey.length <= 256 &&
+      /^[A-Za-z0-9_.\-]+$/.test(rawCustomKey)
+        ? rawCustomKey
+        : undefined;
+
+    const clientIp = getClientIp(req);
+    const rateLimitCap = customKey ? 60 : 20; // 20 req/phút cho system pool, 60 req/phút cho BYOK
+    const rateKey = `${customKey ? 'byok' : 'pool'}:${clientIp}`;
+
+    const { allowed, resetInSec } = await checkRateLimit(rateKey, rateLimitCap, 60_000);
+    if (!allowed) {
+      return Response.json(
+        { error: `Bạn đang gửi tin nhắn quá nhanh. Vui lòng thử lại sau ${resetInSec} giây.` },
+        { status: 429, headers: { 'Retry-After': String(resetInSec) } },
+      );
+    }
+
+    // 4. Kiểm tra và đọc stream payload có giới hạn byte nghiêm ngặt (chống chunked transfer bypass)
     const contentLength = Number(req.headers.get('content-length') || '0');
     if (contentLength > MAX_BODY_BYTES) {
-      return Response.json({ error: 'Dữ liệu tin nhắn vượt quá giới hạn 10MB.' }, { status: 413 });
+      return Response.json({ error: 'Dữ liệu tin nhắn vượt quá giới hạn 4.5MB.' }, { status: 413 });
     }
 
     let jsonBody: unknown;
     try {
-      jsonBody = await req.json();
-    } catch {
-      return Response.json({ error: 'JSON payload không hợp lệ.' }, { status: 400 });
+      jsonBody = await readJsonWithLimit(req, MAX_BODY_BYTES);
+    } catch (error) {
+      if (error instanceof Response) return error;
+      return Response.json({ error: 'JSON payload không hợp lệ hoặc vượt quá kích thước cho phép.' }, { status: 400 });
     }
 
     const parsed = BodySchema.safeParse(jsonBody);
@@ -117,17 +235,17 @@ export async function POST(req: Request) {
 
     const { messages, model, temperature, system } = parsed.data;
 
-    const targetModel = model ?? DEFAULT_MODEL_ID;
-    if (!ALLOWED_MODEL_IDS.has(targetModel)) {
+    const selectedModelId = model ?? DEFAULT_MODEL_ID;
+    if (!ALLOWED_MODEL_IDS.has(selectedModelId)) {
       return Response.json(
-        { error: `Model '${targetModel}' không được hỗ trợ. Vui lòng chọn model trong danh sách.` },
+        { error: `Model '${selectedModelId}' không được hỗ trợ. Vui lòng chọn model trong danh sách.` },
         { status: 400 },
       );
     }
 
-    const isReasoning = REASONING_MODELS.has(targetModel);
-
-    // Tự động cắt context để giữ lại 50 tin nhắn gần nhất (tránh vượt token budget)
+    const modelConfig = getModelConfig(selectedModelId);
+    const targetModel = modelConfig.providerModel;
+    const isReasoning = Boolean(modelConfig.isReasoning);
     const contextMessages = messages.slice(-50);
 
     let core: CoreMessage[];
@@ -168,12 +286,15 @@ export async function POST(req: Request) {
               baseURL: process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1',
             });
 
-            // Reasoning models không chấp nhận temperature != 1 hoặc max_tokens
+            const timeoutMs = isReasoning ? 110_000 : 55_000;
+            const timeoutSignal = typeof AbortSignal.timeout === 'function' ? AbortSignal.timeout(timeoutMs) : undefined;
+            const abortSignal = combineAbortSignals(req.signal, timeoutSignal);
+
             const result = streamText({
               model: openai(targetModel),
               messages: core,
               system: system?.trim() ? system : undefined,
-              abortSignal: req.signal,
+              abortSignal,
               ...(isReasoning
                 ? {}
                 : {
@@ -193,43 +314,98 @@ export async function POST(req: Request) {
                   return;
                 }
 
-                if (value.type === 'error') {
-                  throw value.error;
-                }
+                switch (value.type) {
+                  case 'text-delta':
+                    emitted = true;
+                    dataStream.write(formatDataStreamPart('text', value.textDelta));
+                    break;
 
-                if (value.type === 'text-delta') {
-                  emitted = true;
-                  dataStream.write(formatDataStreamPart('text', value.textDelta));
-                } else if (value.type === 'reasoning') {
-                  emitted = true;
-                  dataStream.write(formatDataStreamPart('reasoning', value.textDelta));
-                } else if (value.type === 'source') {
-                  emitted = true;
-                  dataStream.write(formatDataStreamPart('source', value.source));
+                  case 'reasoning':
+                    emitted = true;
+                    dataStream.write(formatDataStreamPart('reasoning', value.textDelta));
+                    break;
+
+                  case 'source':
+                    emitted = true;
+                    dataStream.write(formatDataStreamPart('source', value.source));
+                    break;
+
+                  case 'error':
+                    throw value.error;
+
+                  case 'finish':
+                  case 'step-finish':
+                    // Hoàn tất chu kỳ stream của step
+                    break;
+
+                  default:
+                    // Bỏ qua an toàn các event khác (tool-call, metadata...) không làm crash stream
+                    break;
                 }
               }
             } catch (streamErr) {
-              void reader.cancel();
+              try {
+                await reader.cancel();
+              } catch {
+                // Reader đã đóng hoặc provider đã abort
+              }
+
               if (isAbort(streamErr)) return;
               lastError = streamErr;
-              markKeyFailure(selectedKey, getStatusCode(streamErr));
+              const status = getStatusCode(streamErr);
+              markKeyFailure(selectedKey, status);
               console.warn(`[Failover] ${getKeyLabel(selectedKey)}:`, sanitizeErrorMessage(streamErr));
-              // Nếu đã stream một phần nội dung ra client thì không thể đổi key giữa chừng
+
               if (emitted) {
+                // Đã stream một phần nội dung: không đổi key giữa chừng.
+                // Gửi data part có cấu trúc để client kết thúc stream êm đẹp và cho phép bấm Tạo lại.
+                dataStream.write(
+                  formatDataStreamPart('data', [
+                    {
+                      type: 'generation-error',
+                      message: 'Kết nối AI bị gián đoạn giữa chừng. Bạn có thể bấm Tạo lại để sinh câu trả lời mới.',
+                      recoverable: true,
+                    },
+                  ]),
+                );
+                dataStream.write(formatDataStreamPart('error', sanitizeErrorMessage(streamErr)));
+                return;
+              }
+
+              // Nếu là lỗi vĩnh viễn từ client/params (400, 404, 422), ngắt ngay không thử key khác
+              if (isPermanentClientError(status)) {
                 throw streamErr;
+              }
+            } finally {
+              try {
+                reader.releaseLock();
+              } catch {
+                // Stream lock đã tự động được giải phóng
               }
             }
           } catch (initErr) {
             if (isAbort(initErr)) return;
             lastError = initErr;
-            markKeyFailure(selectedKey, getStatusCode(initErr));
+            const status = getStatusCode(initErr);
+            markKeyFailure(selectedKey, status);
             console.warn(`[Failover init] ${getKeyLabel(selectedKey)}:`, sanitizeErrorMessage(initErr));
+
+            // Nếu là lỗi 400/404/422, ngắt ngay không thử key khác
+            if (isPermanentClientError(status)) {
+              throw initErr;
+            }
           }
         }
 
-        throw lastError;
+        if (lastError instanceof Error) {
+          throw lastError;
+        }
+        if (typeof lastError === 'string' && lastError.trim()) {
+          throw new Error(lastError);
+        }
+        throw new Error('Toàn bộ API Key khả dụng đều không thể hoàn thành yêu cầu.');
       },
-      onError: sanitizeErrorMessage, // Đổi từ getErrorMessage -> onError để hiển thị lỗi thật từ provider ra UI
+      onError: sanitizeErrorMessage,
     });
   } catch (error: any) {
     console.error('Chat API Fatal Error:', sanitizeErrorMessage(error));

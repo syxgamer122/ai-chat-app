@@ -133,9 +133,29 @@ export default function Home() {
                 <div className="flex items-start gap-1.5 mt-1.5 text-xs text-amber-500/90">
                   <ShieldAlert size={14} className="flex-shrink-0 mt-0.5" />
                   <span>
-                    Để trống để dùng bể Key tự động. Key nhập tại đây được lưu cục bộ trên trình duyệt của bạn.
+                    Để trống để dùng bể Key tự động. Khóa API chỉ được lưu tạm thời trên bộ nhớ RAM của phiên duyệt web (không lưu vào localStorage để phòng chống XSS/đánh cắp).
                   </span>
                 </div>
+              </div>
+
+              {/* Access Code */}
+              <div>
+                <label className="text-sm font-medium text-zinc-300 mb-1.5 block">
+                  Mã truy cập (Access Code)
+                </label>
+                <form onSubmit={(e) => e.preventDefault()}>
+                  <input
+                    type="password"
+                    placeholder="Mật khẩu bảo vệ (nếu có)..."
+                    autoComplete="off"
+                    value={settings.accessCode || ''}
+                    onChange={(e) => updateSettings({ accessCode: e.target.value })}
+                    className="w-full bg-zinc-900 border border-zinc-800 rounded-xl p-2.5 text-sm text-zinc-200 outline-none focus:border-indigo-500 font-mono transition"
+                  />
+                </form>
+                <span className="text-xs text-zinc-500 mt-1 block">
+                  Chỉ cần nhập khi quản trị viên máy chủ bật biến môi trường APP_ACCESS_PASSWORD.
+                </span>
               </div>
 
               {/* System Prompt */}

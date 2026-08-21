@@ -16,6 +16,7 @@ export interface Settings {
   perf: PerfSettings;
   sendOnEnter: boolean;
   apiKey?: string;
+  accessCode?: string;
 }
 
 interface AppState {
@@ -37,6 +38,7 @@ const DEFAULT_SETTINGS: Settings = {
   perf: { throttleMs: 150, animations: true },
   sendOnEnter: true,
   apiKey: '',
+  accessCode: '',
 };
 
 export const useAppStore = create<AppState>()(
@@ -55,7 +57,15 @@ export const useAppStore = create<AppState>()(
     {
       name: 'ai-chat-settings',
       version: 2,
-      partialize: (s) => ({ settings: s.settings }),
+      partialize: (s) => ({
+        settings: {
+          model: s.settings.model,
+          temperature: s.settings.temperature,
+          systemPrompt: s.settings.systemPrompt,
+          perf: s.settings.perf,
+          sendOnEnter: s.settings.sendOnEnter,
+        },
+      }),
       merge: (persisted, current) => {
         const p = (persisted ?? {}) as Partial<AppState>;
         const rawModel = p.settings?.model;
@@ -69,6 +79,9 @@ export const useAppStore = create<AppState>()(
             ...(p.settings ?? {}),
             model: validModel,
             perf: { ...current.settings.perf, ...(p.settings?.perf ?? {}) },
+            // Tuyệt đối không phục hồi apiKey hay accessCode từ localStorage
+            apiKey: '',
+            accessCode: '',
           },
         };
       },

@@ -4,8 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 
 /**
  * Throttle giá trị stream (leading + trailing edge), luôn flush giá trị cuối.
- * Khác bản cũ: timer chỉ tạo MỘT lần cho mỗi cửa sổ và đọc `latest.current`,
- * nên không bao giờ render giá trị cũ và không tạo/hủy timer theo từng token.
+ * Đảm bảo cập nhật chính xác ngay lập tức khi delay hoặc active thay đổi.
  */
 export function useThrottledValue<T>(value: T, delay = 150, active = true): T {
   const [throttled, setThrottled] = useState<T>(value);
@@ -20,7 +19,10 @@ export function useThrottledValue<T>(value: T, delay = 150, active = true): T {
     mounted.current = true;
     return () => {
       mounted.current = false;
-      if (timer.current) clearTimeout(timer.current);
+      if (timer.current) {
+        clearTimeout(timer.current);
+        timer.current = null;
+      }
     };
   }, []);
 
@@ -36,8 +38,10 @@ export function useThrottledValue<T>(value: T, delay = 150, active = true): T {
       return;
     }
 
-    // Đã có hẹn giờ -> để nó tự đọc latest.current, không churn timer.
-    if (timer.current) return;
+    if (timer.current) {
+      clearTimeout(timer.current);
+      timer.current = null;
+    }
 
     const elapsed = Date.now() - lastRun.current;
     if (elapsed >= delay) {
@@ -49,8 +53,17 @@ export function useThrottledValue<T>(value: T, delay = 150, active = true): T {
     timer.current = setTimeout(() => {
       timer.current = null;
       lastRun.current = Date.now();
-      if (mounted.current) setThrottled(latest.current);
-    }, delay - elapsed);
+      if (mounted.current) {
+        setThrottled(latest.current);
+      }
+    }, Math.max(0, delay - elapsed));
+
+    return () => {
+      if (timer.current) {
+        clearTimeout(timer.current);
+        timer.current = null;
+      }
+    };
   }, [value, delay, active]);
 
   return active ? throttled : value;

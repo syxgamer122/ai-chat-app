@@ -1,6 +1,6 @@
 'use client';
 
-import React, { memo, useState } from 'react';
+import React, { memo, useState, useMemo } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db, type ChatSession } from '@/lib/db';
 import { useAppStore } from '@/lib/store';
@@ -27,11 +27,10 @@ const ChatItem = memo(function ChatItem({
 }: ChatItemProps) {
   return (
     <motion.div
-      layout
-      initial={{ opacity: 0, x: -10 }}
+      initial={{ opacity: 0, x: -6 }}
       animate={{ opacity: 1, x: 0 }}
-      exit={{ opacity: 0, x: -10 }}
-      transition={{ duration: 0.15 }}
+      exit={{ opacity: 0, x: -6 }}
+      transition={{ duration: 0.12 }}
       onClick={() => onSelect(chat.id)}
       role="button"
       tabIndex={0}
@@ -94,10 +93,28 @@ export function Sidebar({ onOpenSettings }: { onOpenSettings: () => void }) {
 
   const chats = useLiveQuery(() => db.chats.orderBy('updatedAt').reverse().toArray(), []);
 
-  const filteredChats =
-    chats?.filter((c) => c.title.toLowerCase().includes(search.toLowerCase())) || [];
-  const pinnedChats = filteredChats.filter((c) => Boolean(c.pinned));
-  const recentChats = filteredChats.filter((c) => !c.pinned);
+  const { pinnedChats, recentChats, isEmpty } = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    const pinned: ChatSession[] = [];
+    const recent: ChatSession[] = [];
+
+    for (const chat of chats ?? []) {
+      if (query && !chat.title.toLowerCase().includes(query)) {
+        continue;
+      }
+      if (chat.pinned) {
+        pinned.push(chat);
+      } else {
+        recent.push(chat);
+      }
+    }
+
+    return {
+      pinnedChats: pinned,
+      recentChats: recent,
+      isEmpty: pinned.length === 0 && recent.length === 0,
+    };
+  }, [chats, search]);
 
   const createNewChat = () => {
     setCurrentChatId(null);
@@ -208,7 +225,7 @@ export function Sidebar({ onOpenSettings }: { onOpenSettings: () => void }) {
                 />
               ))}
             </AnimatePresence>
-            {filteredChats.length === 0 && (
+            {isEmpty && (
               <div className="text-center py-8 text-xs text-zinc-600">
                 {search ? 'Không tìm thấy cuộc trò chuyện' : 'Chưa có lịch sử trò chuyện'}
               </div>

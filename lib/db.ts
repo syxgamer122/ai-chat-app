@@ -54,25 +54,29 @@ export class ChatDatabase extends Dexie {
           c.pinned = c.pinned ? 1 : 0;
         });
 
-        // Gán seq theo createdAt cho dữ liệu cũ.
-        const rows: any[] = await tx.table('messages').toArray();
+        // Gán seq theo createdAt cho dữ liệu cũ theo từng chat tuần tự, tránh quá tải transaction microtask
+        const table = tx.table('messages');
+        const rows: any[] = await table.toArray();
         const byChat = new Map<string, any[]>();
-        rows.forEach((r) => {
+
+        for (const r of rows) {
           const arr = byChat.get(r.chatId) ?? [];
           arr.push(r);
           byChat.set(r.chatId, arr);
-        });
+        }
+
+        const baseTime = Date.now();
         for (const arr of byChat.values()) {
           arr.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
-          await Promise.all(
-            arr.map((r, i) =>
-              tx.table('messages').update(r.id, {
-                seq: i,
-                createdAt: typeof r.createdAt === 'number' ? r.createdAt : Date.now(),
-                attachments: r.experimental_attachments ?? r.attachments,
-              }),
-            ),
-          );
+
+          for (let i = 0; i < arr.length; i++) {
+            const r = arr[i];
+            await table.update(r.id, {
+              seq: i,
+              createdAt: typeof r.createdAt === 'number' ? r.createdAt : baseTime + i,
+              attachments: r.experimental_attachments ?? r.attachments,
+            });
+          }
         }
       });
   }

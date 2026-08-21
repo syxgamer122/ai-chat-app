@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@ai-sdk/openai": "^1.0.0",
+    "@tanstack/react-virtual": "^3.14.10",
     "@types/react-syntax-highlighter": "^15.5.13",
     "ai": "^4.0.0",
     "clsx": "^2.1.1",
