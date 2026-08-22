@@ -32,6 +32,7 @@ import { cleanupExpiredStreamLease, recoverInterruptedStreams } from '@/lib/stre
 import { useCrossTabChatSync } from '@/lib/use-cross-tab-chat-sync';
 import { useStreamLease } from '@/lib/use-stream-lease';
 import { shouldAcceptStreamUpdate, type StreamGeneration } from '@/lib/stream-generation';
+import { useStickToBottom } from '@/lib/use-stick-to-bottom';
 
 const attachmentCache = new WeakMap<object, StoredAttachment>();
 
@@ -642,7 +643,6 @@ const MessageItem = memo(
         initial={shouldAnimate ? { opacity: 0, y: 10 } : false}
         animate={shouldAnimate ? { opacity: 1, y: 0 } : false}
         transition={{ duration: shouldAnimate ? 0.2 : 0 }}
-        style={{ contentVisibility: 'auto', containIntrinsicSize: '0 160px' }}
         className={`group flex w-full ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}
       >
         <div
@@ -907,7 +907,29 @@ const ChatHeader = memo(function ChatHeader({
 /* ------------------------------------------------------------------ */
 /* Subcomponent 2: Memoized MessageList with Virtualization           */
 /* ------------------------------------------------------------------ */
+
+/** Cache chiều cao thật theo chatId:messageId — sống qua unmount/đổi chat. */
+const HEIGHT_CACHE = new Map<string, number>();
+const cacheKey = (chatId: string, id: string) => `${chatId}:${id}`;
+
+/** Ước lượng sát thực tế cho hàng chưa từng render. */
+function estimateMessageHeight(m: Message): number {
+  const text = m.content ?? '';
+  const newlines = text.match(/\n/g)?.length ?? 0;
+  const wrapped = Math.ceil(text.length / 68);
+  let h = 64 + Math.max(newlines, wrapped) * 26;
+
+  h += Math.floor((text.match(/```/g)?.length ?? 0) / 2) * 150;  // code block
+  h += Math.floor((text.match(/\$\$/g)?.length ?? 0) / 2) * 58;  // math block
+  h += (text.match(/\\\[/g)?.length ?? 0) * 58;                  // \[...\]
+  h += (text.match(/^\|/gm)?.length ?? 0) * 14;                  // dòng bảng
+  if (m.experimental_attachments?.length) h += 210;
+
+  return Math.min(Math.max(h, 72), 8000);
+}
+
 interface MessageListProps {
+  chatId: string;
   messages: Message[];
 
   branchInfoByMessageId: Map<
@@ -925,7 +947,9 @@ interface MessageListProps {
   throttleMs: number;
   animations: boolean;
   error?: Error;
-  autoScroll: boolean;
+  isAtBottom: boolean;
+  isAtBottomRef: React.MutableRefObject<boolean>;
+  pin: (durationMs?: number) => void;
   scrollRef: React.RefObject<HTMLDivElement | null>;
 
   onScroll: () => void;
@@ -947,6 +971,7 @@ interface MessageListProps {
 }
 
 const MessageList = memo(function MessageList({
+  chatId,
   messages,
   branchInfoByMessageId,
   isLoading,
@@ -959,7 +984,9 @@ const MessageList = memo(function MessageList({
   throttleMs,
   animations,
   error,
-  autoScroll,
+  isAtBottom,
+  isAtBottomRef,
+  pin,
   scrollRef,
   onScroll,
   onScrollToBottom,
@@ -976,18 +1003,21 @@ const MessageList = memo(function MessageList({
   const rowVirtualizer = useVirtualizer({
     count: messages.length,
     getScrollElement: () => scrollRef.current,
-    estimateSize: () => 140,
-    overscan: 5,
-    paddingStart: 12,
-    paddingEnd: 24,
-
-    /**
-     * Message id ổn định quan trọng hơn index.
-     * Khi đổi branch, row có thể đổi nội dung và thứ tự,
-     * nhưng mỗi message vẫn có identity riêng.
-     */
-    getItemKey: (index) =>
-      messages[index]?.id ?? `row-${index}`,
+    getItemKey: (index) => messages[index]?.id ?? `row-${index}`,
+    overscan: 6,
+    paddingStart: 16,
+    paddingEnd: 96,
+    estimateSize: (index) => {
+      const m = messages[index];
+      if (!m) return 140;
+      return HEIGHT_CACHE.get(cacheKey(chatId, m.id)) ?? estimateMessageHeight(m);
+    },
+    measureElement: (el) => {
+      const h = el.getBoundingClientRect().height;
+      const id = el.getAttribute('data-message-id');
+      if (id && h > 0) HEIGHT_CACHE.set(cacheKey(chatId, id), h);
+      return h;
+    },
   });
 
   const branchLayoutSignature = useMemo(
@@ -1008,32 +1038,75 @@ const MessageList = memo(function MessageList({
     [messages, branchInfoByMessageId],
   );
 
+  const lastMsg = messages[messages.length - 1];
+  const lastRole = lastMsg?.role;
+  const lastContentLen = lastMsg?.content?.length ?? 0;
+
+  /* 1. Đổi chat: nhảy đáy TỨC THÌ rồi ghim 1s để bù các lần đo lại */
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || messages.length === 0) return;
+    el.scrollTop = el.scrollHeight;
+    pin(1000);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chatId]);
+
+  /* 2. Có tin nhắn mới */
+  useEffect(() => {
+    if (messages.length === 0) return;
+    if (lastRole === 'user') {
+      pin(1500); // user vừa gửi → LUÔN về đáy
+    } else if (isAtBottomRef.current) {
+      pin(600);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages.length, lastRole, pin]);
+
+  /* 3. Streaming: hook đã ghim vô hạn. Nhích thêm khi nội dung tăng */
+  useEffect(() => {
+    if (isLoading && isAtBottomRef.current) pin(200);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lastContentLen, isLoading, pin]);
+
+  /* 4. Font KaTeX/mono nạp xong */
+  useEffect(() => {
+    if (typeof document === 'undefined' || !document.fonts) return;
+    let cancelled = false;
+    document.fonts.ready.then(() => {
+      if (cancelled) return;
+      HEIGHT_CACHE.clear();
+      rowVirtualizer.measure();
+      if (isAtBottomRef.current) pin(700);
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rowVirtualizer, pin]);
+
+  /* 5. Ảnh trong markdown load xong */
   useEffect(() => {
     let raf = 0;
     const onImageLoaded = () => {
       cancelAnimationFrame(raf);
-      raf = requestAnimationFrame(() => rowVirtualizer.measure());
+      raf = requestAnimationFrame(() => {
+        if (isAtBottomRef.current) pin(300);
+      });
     };
     window.addEventListener('chat:image-loaded', onImageLoaded);
     return () => {
       cancelAnimationFrame(raf);
       window.removeEventListener('chat:image-loaded', onImageLoaded);
     };
-  }, [rowVirtualizer]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pin]);
 
+  /* 6. Đổi nhánh */
   useEffect(() => {
     rowVirtualizer.measure();
-    if (autoScroll && messages.length > 0) {
-      rowVirtualizer.scrollToIndex(messages.length - 1, { align: 'end' });
-    }
-  }, [branchLayoutSignature, rowVirtualizer, autoScroll, messages.length]);
-
-  const lastMsgContent = messages[messages.length - 1]?.content;
-
-  useEffect(() => {
-    if (!autoScroll || messages.length === 0) return;
-    rowVirtualizer.scrollToIndex(messages.length - 1, { align: 'end' });
-  }, [messages.length, lastMsgContent, autoScroll, rowVirtualizer]);
+    if (isAtBottomRef.current) pin(700);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [branchLayoutSignature]);
 
   const suggestions = useMemo(
     () => ['Explain quantum computing', 'Write a Python script for scraping', 'Plan a healthy meal', 'Summarize an article'],
@@ -1047,7 +1120,8 @@ const MessageList = memo(function MessageList({
       <div
         ref={scrollRef as any}
         onScroll={onScroll}
-        className="h-full overflow-y-auto overscroll-contain p-4 md:p-8 space-y-6"
+        tabIndex={0}
+        className="chat-scroll h-full overflow-y-auto px-4 md:px-8"
       >
         {!hasMessages ? (
           <div className="flex flex-col items-center justify-center h-full pt-10 space-y-8">
@@ -1070,75 +1144,68 @@ const MessageList = memo(function MessageList({
             </div>
           </div>
         ) : (
-          <div
-            style={{
-              height: `${rowVirtualizer.getTotalSize()}px`,
-              width: '100%',
-              position: 'relative',
-            }}
-          >
-            {rowVirtualizer.getVirtualItems().map((virtualRow) => {
-              const m = messages[virtualRow.index];
-              if (!m) return null;
+          <>
+            <div
+              style={{
+                height: `${rowVirtualizer.getTotalSize()}px`,
+                width: '100%',
+                position: 'relative',
+              }}
+            >
+              {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+                const m = messages[virtualRow.index];
+                if (!m) return null;
 
-              return (
-                <div
-                  key={m.id}
-                  ref={rowVirtualizer.measureElement}
-                  data-index={virtualRow.index}
-                  data-message-id={m.id}
-                  style={{
-                    position: 'absolute',
-                    top: 0,
-                    left: 0,
-                    width: '100%',
-                    transform: `translateY(${virtualRow.start}px)`,
-                    paddingBottom: '1.5rem',
-                  }}
-                >
-                  <ChatErrorBoundary onReset={() => rowVirtualizer.measure()}>
-                    <MessageItem
-                      m={m}
-                      branchInfo={branchInfoByMessageId.get(m.id)}
-                      isStreaming={isLoading && m.role === 'assistant' && m.id === lastMessageId}
-                      isEditing={editingId === m.id}
-                      isCopied={copiedId === m.id}
-                      draft={editingId === m.id ? draft : ''}
-                      isTouchDevice={isTouchDevice}
-                      sendOnEnter={sendOnEnter}
-                      throttleMs={throttleMs}
-                      animations={animations}
-                      onCopy={onCopy}
-                      onRegenerate={onRegenerate}
-                      onSwitchBranch={onSwitchBranch}
-                      onStartEdit={onStartEdit}
-                      onSaveEdit={onSaveEdit}
-                      onCancelEdit={onCancelEdit}
-                      onDraftChange={onDraftChange}
-                      onContentResize={() => rowVirtualizer.measure()}
-                    />
-                  </ChatErrorBoundary>
-                </div>
-              );
-            })}
+                return (
+                  <div
+                    key={m.id}
+                    ref={rowVirtualizer.measureElement}
+                    data-index={virtualRow.index}
+                    data-message-id={m.id}
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      width: '100%',
+                      transform: `translateY(${virtualRow.start}px)`,
+                      paddingBottom: '1.5rem',
+                    }}
+                  >
+                    <ChatErrorBoundary onReset={() => rowVirtualizer.measure()}>
+                      <MessageItem
+                        m={m}
+                        branchInfo={branchInfoByMessageId.get(m.id)}
+                        isStreaming={isLoading && m.role === 'assistant' && m.id === lastMessageId}
+                        isEditing={editingId === m.id}
+                        isCopied={copiedId === m.id}
+                        draft={editingId === m.id ? draft : ''}
+                        isTouchDevice={isTouchDevice}
+                        sendOnEnter={sendOnEnter}
+                        throttleMs={throttleMs}
+                        animations={animations}
+                        onCopy={onCopy}
+                        onRegenerate={onRegenerate}
+                        onSwitchBranch={onSwitchBranch}
+                        onStartEdit={onStartEdit}
+                        onSaveEdit={onSaveEdit}
+                        onCancelEdit={onCancelEdit}
+                        onDraftChange={onDraftChange}
+                        onContentResize={() => {
+                          if (isAtBottomRef.current) pin(300);
+                        }}
+                      />
+                    </ChatErrorBoundary>
+                  </div>
+                );
+              })}
+            </div>
 
-            {isLoading && messages[messages.length - 1]?.role === 'user' && (
-              <div
-                style={{
-                  position: 'absolute',
-                  top: 0,
-                  left: 0,
-                  width: '100%',
-                  transform: `translateY(${rowVirtualizer.getTotalSize()}px)`,
-                }}
-                className="flex justify-start"
-              >
-                <div className="max-w-[720px] p-5">
-                  <span className="inline-block w-2 h-4 bg-indigo-500 animate-pulse" />
-                </div>
+            {isLoading && lastRole === 'user' && (
+              <div className="flex justify-start px-1 pb-6">
+                <span className="inline-block h-4 w-2 animate-pulse bg-indigo-500" />
               </div>
             )}
-          </div>
+          </>
         )}
 
         {error && (
@@ -1151,12 +1218,12 @@ const MessageList = memo(function MessageList({
         )}
       </div>
 
-      {!autoScroll && (
+      {!isAtBottom && (
         <button
           type="button"
           onClick={onScrollToBottom}
           aria-label="Scroll to bottom"
-          className="absolute bottom-32 left-1/2 -translate-x-1/2 p-2 bg-zinc-800 text-zinc-300 rounded-full shadow-lg border border-zinc-700 hover:bg-zinc-700 transition"
+          className="absolute bottom-6 left-1/2 -translate-x-1/2 p-2 bg-zinc-800 text-zinc-300 rounded-full shadow-lg border border-zinc-700 hover:bg-zinc-700 transition"
         >
           <ArrowDown size={18} />
         </button>
@@ -1348,7 +1415,6 @@ export default function ChatInterface() {
     } catch {}
   }, []);
 
-  const [autoScroll, setAutoScroll] = useState(true);
   const [attachments, setAttachments] = useState<File[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -1451,9 +1517,6 @@ export default function ChatInterface() {
   }, []);
 
   const scrollRef = useRef<HTMLDivElement>(null);
-  const scrollFrame = useRef<number | null>(null);
-  const lastTop = useRef(0);
-  const stick = useRef(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const hydratedFor = useRef<string | null>(null);
   const titledFor = useRef<string | null>(null);
@@ -1516,6 +1579,10 @@ export default function ChatInterface() {
     },
     experimental_throttle: throttleMs,
     onError: (err) => console.error('[useChat]', err),
+  });
+
+  const { isAtBottom, isAtBottomRef, onScroll, pin, scrollToBottom } = useStickToBottom(scrollRef, {
+    streaming: isLoading,
   });
 
   const isLoadingRef = useRef(isLoading);
@@ -1834,12 +1901,6 @@ export default function ChatInterface() {
       if (treePersistTimerRef.current) {
         clearTimeout(
           treePersistTimerRef.current,
-        );
-      }
-
-      if (scrollFrame.current !== null) {
-        cancelAnimationFrame(
-          scrollFrame.current,
         );
       }
     };
@@ -2296,47 +2357,6 @@ export default function ChatInterface() {
     };
   }, [messages, currentChatId, isLoading, apiKey, accessCode, notifyChatUpdated]);
 
-  const onScroll = useCallback(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const up = el.scrollTop < lastTop.current - 4;
-    lastTop.current = el.scrollTop;
-    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
-    if (up) stick.current = false;
-    else if (atBottom) stick.current = true;
-    setAutoScroll(stick.current);
-  }, []);
-
-  useEffect(() => {
-    if (!stick.current) return;
-
-    if (scrollFrame.current !== null) {
-      cancelAnimationFrame(scrollFrame.current);
-    }
-
-    scrollFrame.current = requestAnimationFrame(() => {
-      const el = scrollRef.current;
-      if (el) {
-        el.scrollTop = el.scrollHeight;
-      }
-      scrollFrame.current = null;
-    });
-
-    return () => {
-      if (scrollFrame.current !== null) {
-        cancelAnimationFrame(scrollFrame.current);
-        scrollFrame.current = null;
-      }
-    };
-  }, [messages.length, messages[messages.length - 1]?.content]);
-
-  const scrollToBottom = useCallback(() => {
-    stick.current = true;
-    setAutoScroll(true);
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
-  }, []);
-
-
   const triggerReload = useCallback(() => {
     if (reloadTimer.current) {
       clearTimeout(reloadTimer.current);
@@ -2655,8 +2675,7 @@ export default function ChatInterface() {
           ),
         );
 
-        stick.current = true;
-        setAutoScroll(true);
+        pin(1000);
 
         notifyChatUpdated(chatId);
 
@@ -2679,6 +2698,7 @@ export default function ChatInterface() {
       currentChatId,
       isLoading,
       notifyChatUpdated,
+      pin,
       setMessages,
       showNotice,
       triggerReload,
@@ -2886,8 +2906,7 @@ export default function ChatInterface() {
 
         setMessages(nextChatMessages);
 
-        stick.current = true;
-        setAutoScroll(true);
+        pin(1000);
 
         setEditingId(null);
         setDraft('');
@@ -2914,6 +2933,7 @@ export default function ChatInterface() {
       draft,
       isLoading,
       notifyChatUpdated,
+      pin,
       setMessages,
       showNotice,
       triggerReload,
@@ -3040,24 +3060,14 @@ export default function ChatInterface() {
       attachments.forEach((f) => dataTransfer.items.add(f));
       const options = attachments.length ? { experimental_attachments: dataTransfer.files } : undefined;
 
-      stick.current = true;
-      setAutoScroll(true);
+      pin(1500);
 
       setAttachments([]);
       handleSubmit(undefined, options);
-
-      requestAnimationFrame(() => {
-        if (scrollRef.current) {
-          scrollRef.current.scrollTo({
-            top: scrollRef.current.scrollHeight,
-            behavior: 'smooth',
-          });
-        }
-      });
     } catch (err) {
       console.error('[onSubmit]', err);
     }
-  }, [input, attachments, isLoading, currentChatId, draftId, setCurrentChatId, handleSubmit]);
+  }, [input, attachments, isLoading, currentChatId, draftId, setCurrentChatId, handleSubmit, pin]);
 
   const onTextareaKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if ((e.nativeEvent as any).isComposing || e.keyCode === 229) return;
@@ -3102,6 +3112,7 @@ export default function ChatInterface() {
 
       <div className="relative flex-1 min-h-0">
         <MessageList
+          chatId={chatKey}
           messages={messages}
           branchInfoByMessageId={branchInfoByMessageId}
           isLoading={isLoading}
@@ -3114,7 +3125,9 @@ export default function ChatInterface() {
           throttleMs={throttleMs}
           animations={animations}
           error={error}
-          autoScroll={autoScroll}
+          isAtBottom={isAtBottom}
+          isAtBottomRef={isAtBottomRef}
+          pin={pin}
           scrollRef={scrollRef}
           onScroll={onScroll}
           onScrollToBottom={scrollToBottom}

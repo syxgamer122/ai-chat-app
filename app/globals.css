@@ -32,3 +32,32 @@
     padding-bottom: env(safe-area-inset-bottom);
   }
 }
+
+/* Vùng cuộn tin nhắn */
+.chat-scroll {
+  scroll-behavior: auto;        /* smooth ở đây sẽ phá mọi lần nhảy đáy tức thì */
+  overflow-anchor: none;        /* tắt scroll anchoring của browser: nó đánh nhau với virtualizer */
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
+}
+.chat-scroll * {
+  overflow-anchor: none;
+}
+
+/* KaTeX: cuộn ngang trong khối, không đẩy giãn layout */
+.katex-display {
+  margin: 1rem 0;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.25rem 0.125rem;
+  contain: content;            /* chiều cao ổn định, không leak reflow ra ngoài */
+}
+.katex-display > .katex {
+  white-space: nowrap;
+  text-align: initial;
+}
+.katex {
+  font-size: 1.05em;
+  line-height: 1.35;
+}
