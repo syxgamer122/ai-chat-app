@@ -1,147 +1,113 @@
-export type ProviderId = 'openai' | 'anthropic' | 'deepseek' | 'google' | 'gateway';
-
-export interface ModelOption {
+﻿export interface ModelConfig {
   id: string;
   name: string;
-  provider: ProviderId;
   providerModel: string;
+  description: string;
+  category: 'general' | 'coding' | 'reasoning' | 'fast';
+  contextWindow?: number;
+  /** Giới hạn token đầu ra. Bỏ trống = để provider tự quyết định. */
+  maxTokens?: number;
   isReasoning?: boolean;
+  /** false = không gửi tham số temperature (model reasoning kiểu o1/o3 sẽ trả 400). */
+  supportsTemperature?: boolean;
 }
 
-export const AVAILABLE_MODELS: ModelOption[] = [
-  // --- GPT & OpenAI High-Tier Models ---
-  {
-    id: 'gpt-5.6-luna',
-    name: 'GPT-5.6 Luna',
-    provider: 'gateway',
-    providerModel: 'gpt-5.6-luna',
-    isReasoning: true,
-  },
+export const AVAILABLE_MODELS: ModelConfig[] = [
   {
     id: 'gpt-5.6-sol',
-    name: 'GPT-5.6 Sol',
-    provider: 'gateway',
+    name: 'ChatGPT-5.6 Sol',
     providerModel: 'gpt-5.6-sol',
+    description: 'Bản cân bằng toàn diện, phản hồi nhanh và chính xác.',
+    category: 'general',
     isReasoning: true,
+    supportsTemperature: false,
+    contextWindow: 200_000,
+    maxTokens: 16_384,
   },
   {
     id: 'gpt-5.6-terra',
-    name: 'GPT-5.6 Terra',
-    provider: 'gateway',
+    name: 'ChatGPT-5.6 Terra',
     providerModel: 'gpt-5.6-terra',
+    description: 'Mô hình tiết kiệm tài nguyên, tốc độ phản hồi cực nhanh.',
+    category: 'fast',
+    isReasoning: true,
+    supportsTemperature: false,
+    contextWindow: 200_000,
+    maxTokens: 8_192,
+  },
+  {
+    id: 'gpt-5.6-luna',
+    name: 'ChatGPT-5.6 Luna',
+    providerModel: 'gpt-5.6-luna',
+    description: 'Mô hình suy luận chuyên sâu, giải toán, khoa học & logic phức tạp.',
+    category: 'reasoning',
+    isReasoning: true,
+    supportsTemperature: false,
+    contextWindow: 200_000,
+    // Reasoning tokens tính vào output => cần hạn mức lớn, tránh cắt giữa bài giải.
+    maxTokens: 32_768,
   },
   {
     id: 'gpt-5.5',
-    name: 'GPT-5.5',
-    provider: 'gateway',
+    name: 'ChatGPT-5.5',
     providerModel: 'gpt-5.5',
+    description: 'Mô hình cơ sở mạnh mẽ, đa năng và ổn định.',
+    category: 'general',
+    isReasoning: true,
+    supportsTemperature: false,
+    contextWindow: 200_000,
+    maxTokens: 16_384,
+  },
+  {
+    id: 'chatgpt-4o-latest',
+    name: 'ChatGPT-4o Latest',
+    providerModel: 'chatgpt-4o-latest',
+    description: 'Mô hình đa phương thức hàng đầu, xử lý xuất sắc văn bản, hình ảnh.',
+    category: 'general',
+    isReasoning: false,
+    supportsTemperature: true,
+    contextWindow: 128_000,
+    maxTokens: 16_384,
   },
   {
     id: 'gpt-4o',
     name: 'GPT-4o',
-    provider: 'openai',
     providerModel: 'gpt-4o',
+    description: 'Phiên bản tiêu chuẩn của GPT-4o, tối ưu cho xử lý đa tác vụ.',
+    category: 'general',
+    isReasoning: false,
+    supportsTemperature: true,
+    contextWindow: 128_000,
+    maxTokens: 16_384,
   },
   {
     id: 'gpt-4o-mini',
-    name: 'GPT-4o Mini (Mặc định)',
-    provider: 'openai',
+    name: 'GPT-4o Mini',
     providerModel: 'gpt-4o-mini',
-  },
-  {
-    id: 'o1',
-    name: 'OpenAI o1',
-    provider: 'openai',
-    providerModel: 'o1',
-    isReasoning: true,
-  },
-  {
-    id: 'o1-mini',
-    name: 'OpenAI o1-mini',
-    provider: 'openai',
-    providerModel: 'o1-mini',
-    isReasoning: true,
-  },
-  {
-    id: 'o3-mini',
-    name: 'OpenAI o3-mini',
-    provider: 'openai',
-    providerModel: 'o3-mini',
-    isReasoning: true,
-  },
-
-  // --- Claude Anthropic Models ---
-  {
-    id: 'claude-opus-5',
-    name: 'Claude Opus 5',
-    provider: 'gateway',
-    providerModel: 'claude-opus-5',
-    isReasoning: true,
-  },
-  {
-    id: 'claude-sonnet-5',
-    name: 'Claude Sonnet 5',
-    provider: 'gateway',
-    providerModel: 'claude-sonnet-5',
-  },
-  {
-    id: 'claude-3-5-sonnet',
-    name: 'Claude 3.5 Sonnet',
-    provider: 'gateway',
-    providerModel: 'claude-3-5-sonnet-20241022',
-  },
-  {
-    id: 'claude-3-5-haiku',
-    name: 'Claude 3.5 Haiku',
-    provider: 'gateway',
-    providerModel: 'claude-3-5-haiku-20241022',
-  },
-
-  // --- DeepSeek & Others ---
-  {
-    id: 'deepseek-v4-pro',
-    name: 'DeepSeek V4 Pro',
-    provider: 'gateway',
-    providerModel: 'deepseek-v4-pro',
-    isReasoning: true,
-  },
-  {
-    id: 'deepseek-reasoner',
-    name: 'DeepSeek R1',
-    provider: 'gateway',
-    providerModel: 'deepseek-reasoner',
-    isReasoning: true,
-  },
-  {
-    id: 'deepseek-chat',
-    name: 'DeepSeek V3',
-    provider: 'gateway',
-    providerModel: 'deepseek-chat',
-  },
-  {
-    id: 'minimax_m3',
-    name: 'MiniMax M3',
-    provider: 'gateway',
-    providerModel: 'minimax_m3',
-  },
-  {
-    id: 'gemini-2.0-flash',
-    name: 'Gemini 2.0 Flash',
-    provider: 'gateway',
-    providerModel: 'gemini-2.0-flash',
+    description: 'Bản thu nhỏ siêu nhanh và tiết kiệm chi phí, phù hợp tác vụ hàng ngày.',
+    category: 'fast',
+    isReasoning: false,
+    supportsTemperature: true,
+    contextWindow: 128_000,
+    maxTokens: 16_384,
   },
 ];
 
-export const MODEL_LOOKUP = new Map<string, ModelOption>(
-  AVAILABLE_MODELS.map((m) => [m.id, m]),
-);
+export const DEFAULT_MODEL_ID = 'gpt-5.6-sol';
 
 export const ALLOWED_MODEL_IDS = new Set(AVAILABLE_MODELS.map((m) => m.id));
-export const DEFAULT_MODEL_ID = 'gpt-4o-mini';
 
-export function getModelConfig(modelId?: string): ModelOption {
-  if (modelId && MODEL_LOOKUP.has(modelId)) {
-    return MODEL_LOOKUP.get(modelId)!;
-  }
-  return MODEL_LOOKUP.get(DEFAULT_MODEL_ID)!;
+const FALLBACK_MODEL: ModelConfig = {
+  id: DEFAULT_MODEL_ID,
+  name: 'ChatGPT-5.6 Sol',
+  providerModel: 'gpt-5.6-sol',
+  description: 'Mô hình mặc định.',
+  category: 'general',
+  isReasoning: true,
+  supportsTemperature: false,
+  maxTokens: 16_384,
+};
+
+export function getModelConfig(modelId: string): ModelConfig {
+  return AVAILABLE_MODELS.find((m) => m.id === modelId) ?? FALLBACK_MODEL;
 }

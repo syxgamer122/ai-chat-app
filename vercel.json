@@ -1,0 +1,9 @@
+﻿{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "functions": {
+    "app/api/chat/route.ts": {
+      "maxDuration": 300,
+      "supportsCancellation": true
+    }
+  }
+}

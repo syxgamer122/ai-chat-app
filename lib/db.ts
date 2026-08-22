@@ -169,6 +169,7 @@ export interface StoredMessage {
   siblingIndex?: number;
   siblingCount?: number;
   toolInvocations?: any[];
+  annotations?: any[];
 
   /** Index tìm kiếm (multiEntry) — được sinh tự động, không set thủ công. */
   tokens?: string[];

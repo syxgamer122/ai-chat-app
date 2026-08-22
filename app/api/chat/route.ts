@@ -23,32 +23,90 @@ import {
   verifyAccessAuth,
 } from '@/lib/security';
 
-export const runtime = 'edge';
-export const maxDuration = 120;
+/**
+ * QUAN TRỌNG: chuyển từ 'edge' sang 'nodejs'.
+ * - Edge KHÔNG áp dụng maxDuration, phải trả byte đầu trong 25s, stream tối đa 300s.
+ * - Node runtime (fluid compute) cho phép tới 300s trên Hobby và truyền huỷ request đúng cách.
+ */
+export const runtime = 'nodejs';
+export const maxDuration = 300;
+export const dynamic = 'force-dynamic';
+
+// Ngân sách stream phải NHỎ HƠN maxDuration để còn kịp ghi part kết thúc.
+const STREAM_BUDGET_MS = 270_000;
+// Không nhận được event nào trong khoảng này => coi như provider treo.
+const IDLE_TIMEOUT_MS = 60_000;
+// Nhịp giữ kết nối khi model đang "suy nghĩ" (chống proxy đóng connection idle).
+const HEARTBEAT_MS = 10_000;
+
+const MAX_BODY_BYTES = 4.5 * 1024 * 1024;
+
+/* ------------------------------------------------------------------ */
+/* Helpers an toàn kiểu — chốt chặn số 1 cho lỗi "undefined"           */
+/* ------------------------------------------------------------------ */
+
+/** Trích text từ mọi biến thể event của AI SDK, luôn trả về string. */
+function extractDelta(part: unknown): string {
+  if (typeof part === 'string') return part;
+  if (part === null || part === undefined) return '';
+  if (typeof part === 'object') {
+    const p = part as Record<string, unknown>;
+    for (const key of ['textDelta', 'text', 'delta', 'reasoning']) {
+      const v = p[key];
+      if (typeof v === 'string') return v;
+    }
+  }
+  return '';
+}
+
+/** Chuỗi rác mà proxy hay sinh ra khi content rỗng. */
+const SUSPECT_TOKEN = /^(?:undefined|null|NaN|\[object Object\])$/;
+
+const SECRET_REGEX = /\b(sk|sk-proj|sk-ant|Bearer)\s*[:=]?\s*[A-Za-z0-9_\-]{4,}/gi;
+
+function sanitizeErrorMessage(e: unknown): string {
+  const raw =
+    e instanceof Error
+      ? e.message
+      : typeof e === 'string'
+        ? e
+        : e && typeof e === 'object' && typeof (e as any).message === 'string'
+          ? (e as any).message
+          : '';
+  const cleaned = raw.replace(SECRET_REGEX, '[redacted]').trim().slice(0, 500);
+  // KHÔNG bao giờ trả chuỗi rỗng/undefined ra data stream.
+  return cleaned || 'Lỗi không xác định từ AI Provider.';
+}
+
+function getStatusCode(e: unknown): number | undefined {
+  if (APICallError.isInstance(e)) return e.statusCode;
+  if (typeof e === 'object' && e !== null && 'status' in e && typeof (e as any).status === 'number') {
+    return (e as any).status;
+  }
+  return undefined;
+}
 
 function combineAbortSignals(...signals: (AbortSignal | undefined)[]): AbortSignal {
-  const validSignals = signals.filter(Boolean) as AbortSignal[];
-  if (typeof (AbortSignal as any).any === 'function') {
-    return (AbortSignal as any).any(validSignals);
-  }
+  const valid = signals.filter(Boolean) as AbortSignal[];
+  if (typeof (AbortSignal as any).any === 'function') return (AbortSignal as any).any(valid);
 
   const controller = new AbortController();
   const onAbort = () => {
     if (!controller.signal.aborted) controller.abort();
   };
-
-  for (const sig of validSignals) {
+  for (const sig of valid) {
     if (sig.aborted) {
       onAbort();
       break;
     }
     sig.addEventListener('abort', onAbort, { once: true });
   }
-
   return controller.signal;
 }
 
-const MAX_BODY_BYTES = 4.5 * 1024 * 1024; // 4.5MB Vercel platform limit
+/* ------------------------------------------------------------------ */
+/* Validation                                                          */
+/* ------------------------------------------------------------------ */
 
 const AttachmentSchema = z.object({
   name: z.string().max(255).optional(),
@@ -75,32 +133,6 @@ const BodySchema = z.object({
   data: z.unknown().optional(),
 });
 
-const REASONING_MODELS = new Set([
-  'gpt-5.6-luna',
-  'gpt-5.6-sol',
-  'gpt-5.6-terra',
-  'gpt-5.5',
-  'o1',
-  'o1-mini',
-  'o1-preview',
-  'o3-mini',
-]);
-
-const SECRET_REGEX = /\b(sk|sk-proj|sk-ant|Bearer)\s*[:=]?\s*[A-Za-z0-9_\-]{4,}/gi;
-
-function sanitizeErrorMessage(e: unknown): string {
-  const raw = e instanceof Error ? e.message : String(e ?? 'Lỗi từ AI Provider.');
-  return raw.replace(SECRET_REGEX, '[redacted]').slice(0, 500);
-}
-
-function getStatusCode(e: unknown): number | undefined {
-  if (APICallError.isInstance(e)) return e.statusCode;
-  if (typeof e === 'object' && e !== null && 'status' in e && typeof (e as any).status === 'number') {
-    return (e as any).status;
-  }
-  return undefined;
-}
-
 const toParts = (content: CoreMessage['content']) =>
   typeof content === 'string' ? [{ type: 'text' as const, text: content }] : content;
 
@@ -109,12 +141,10 @@ function mergeSameRole(messages: CoreMessage[]): CoreMessage[] {
     const last = acc[acc.length - 1];
     const mergeable =
       last && last.role === cur.role && (cur.role === 'user' || cur.role === 'assistant');
-
     if (!mergeable) {
       acc.push({ ...cur });
       return acc;
     }
-
     (last as any).content = [
       ...(toParts(last.content) as any[]),
       { type: 'text', text: '\n\n' },
@@ -135,9 +165,7 @@ function normalize(messages: CoreMessage[]): CoreMessage[] {
 }
 
 async function readJsonWithLimit(req: Request, maxBytes: number): Promise<unknown> {
-  if (!req.body) {
-    throw new Error('Empty request body.');
-  }
+  if (!req.body) throw new Error('Empty request body.');
 
   const reader = req.body.getReader();
   const chunks: Uint8Array[] = [];
@@ -147,18 +175,13 @@ async function readJsonWithLimit(req: Request, maxBytes: number): Promise<unknow
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-
       total += value.byteLength;
       if (total > maxBytes) {
         throw new Response(
           JSON.stringify({ error: 'Dữ liệu tin nhắn vượt quá giới hạn 4.5MB.' }),
-          {
-            status: 413,
-            headers: { 'Content-Type': 'application/json' },
-          },
+          { status: 413, headers: { 'Content-Type': 'application/json' } },
         );
       }
-
       chunks.push(value);
     }
   } finally {
@@ -171,13 +194,15 @@ async function readJsonWithLimit(req: Request, maxBytes: number): Promise<unknow
     body.set(chunk, offset);
     offset += chunk.byteLength;
   }
-
   return JSON.parse(new TextDecoder().decode(body));
 }
 
+/* ------------------------------------------------------------------ */
+/* Handler                                                             */
+/* ------------------------------------------------------------------ */
+
 export async function POST(req: Request) {
   try {
-    // 1. Kiểm tra Same-Origin chống Open Proxy / Hotlinking từ bên ngoài
     if (!verifySameOrigin(req)) {
       return Response.json(
         { error: 'Truy cập bị từ chối do nguồn gốc yêu cầu (Origin) không hợp lệ.' },
@@ -185,16 +210,11 @@ export async function POST(req: Request) {
       );
     }
 
-    // 2. Xác thực Mật khẩu bảo vệ (nếu máy chủ có cấu hình APP_ACCESS_PASSWORD)
     const auth = verifyAccessAuth(req);
     if (!auth.authorized) {
-      return Response.json(
-        { error: auth.reason || 'Unauthorized' },
-        { status: 401 },
-      );
+      return Response.json({ error: auth.reason || 'Unauthorized' }, { status: 401 });
     }
 
-    // 3. Áp dụng Rate Limiting cho TẤT CẢ request (Kể cả có Custom Key cũng không được bypass hoàn toàn)
     const rawCustomKey = req.headers.get('x-api-key')?.trim();
     const customKey =
       rawCustomKey &&
@@ -205,7 +225,7 @@ export async function POST(req: Request) {
         : undefined;
 
     const clientIp = getClientIp(req);
-    const rateLimitCap = customKey ? 60 : 20; // 20 req/phút cho system pool, 60 req/phút cho BYOK
+    const rateLimitCap = customKey ? 60 : 20;
     const rateKey = `${customKey ? 'byok' : 'pool'}:${clientIp}`;
 
     const { allowed, resetInSec } = await checkRateLimit(rateKey, rateLimitCap, 60_000);
@@ -216,7 +236,6 @@ export async function POST(req: Request) {
       );
     }
 
-    // 4. Kiểm tra và đọc stream payload có giới hạn byte nghiêm ngặt (chống chunked transfer bypass)
     const contentLength = Number(req.headers.get('content-length') || '0');
     if (contentLength > MAX_BODY_BYTES) {
       return Response.json({ error: 'Dữ liệu tin nhắn vượt quá giới hạn 4.5MB.' }, { status: 413 });
@@ -227,12 +246,18 @@ export async function POST(req: Request) {
       jsonBody = await readJsonWithLimit(req, MAX_BODY_BYTES);
     } catch (error) {
       if (error instanceof Response) return error;
-      return Response.json({ error: 'JSON payload không hợp lệ hoặc vượt quá kích thước cho phép.' }, { status: 400 });
+      return Response.json(
+        { error: 'JSON payload không hợp lệ hoặc vượt quá kích thước cho phép.' },
+        { status: 400 },
+      );
     }
 
     const parsed = BodySchema.safeParse(jsonBody);
     if (!parsed.success) {
-      return Response.json({ error: 'Cấu trúc dữ liệu không hợp lệ.', details: parsed.error.issues }, { status: 400 });
+      return Response.json(
+        { error: 'Cấu trúc dữ liệu không hợp lệ.', details: parsed.error.issues },
+        { status: 400 },
+      );
     }
 
     const { messages, model, temperature, system } = parsed.data;
@@ -240,14 +265,13 @@ export async function POST(req: Request) {
     const selectedModelId = model ?? DEFAULT_MODEL_ID;
     if (!ALLOWED_MODEL_IDS.has(selectedModelId)) {
       return Response.json(
-        { error: `Model '${selectedModelId}' không được hỗ trợ. Vui lòng chọn model trong danh sách.` },
+        { error: `Model '${selectedModelId}' không được hỗ trợ.` },
         { status: 400 },
       );
     }
 
     const modelConfig = getModelConfig(selectedModelId);
     const targetModel = modelConfig.providerModel;
-    const isReasoning = Boolean(modelConfig.isReasoning);
     const contextMessages = messages.slice(-50);
 
     const sanitizedContextMessages = contextMessages.map((msg) => {
@@ -256,11 +280,7 @@ export async function POST(req: Request) {
         ...msg,
         experimental_attachments: msg.experimental_attachments.filter((att) => {
           const url = att.url ?? '';
-          return (
-            url.startsWith('http://') ||
-            url.startsWith('https://') ||
-            url.startsWith('data:')
-          );
+          return url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:');
         }),
       };
     });
@@ -280,83 +300,184 @@ export async function POST(req: Request) {
     }
 
     const candidateKeys = customKey ? [customKey] : getKeyCandidates().slice(0, 3);
-
     if (!candidateKeys.length) {
       return Response.json(
-        { error: 'Toàn bộ API Key của hệ thống đang tạm ngưng hoặc chưa được cấu hình. Vui lòng kiểm tra lại biến môi trường OPENAI_API_KEYS.' },
+        { error: 'Toàn bộ API Key của hệ thống đang tạm ngưng hoặc chưa được cấu hình.' },
         { status: 503, headers: { 'Retry-After': '60' } },
       );
     }
 
-    const isAbort = (e: unknown) =>
-      (e as any)?.name === 'AbortError' || (e as any)?.code === 'ERR_CANCELED' || req.signal.aborted;
-
     return createDataStreamResponse({
-      headers: { 'Cache-Control': 'no-store, no-transform' },
+      headers: {
+        'Cache-Control': 'no-store, no-transform',
+        'X-Accel-Buffering': 'no',
+        Connection: 'keep-alive',
+      },
       execute: async (dataStream) => {
         let lastError: unknown;
 
+        /* ---------- Bộ ghi text có kiểm soát ---------- */
+        let heldSuspect = '';   // giữ lại chunk nghi vấn ("undefined") tới khi có chunk sau
+        let emittedChars = 0;
+
+        const writeText = (raw: unknown, channel: 'text' | 'reasoning' = 'text') => {
+          const delta = extractDelta(raw);
+          if (!delta) return; // chặn '' | undefined | null ngay tại nguồn
+
+          if (heldSuspect) {
+            dataStream.write(formatDataStreamPart(channel, heldSuspect));
+            emittedChars += heldSuspect.length;
+            heldSuspect = '';
+          }
+
+          // Nếu chunk là đúng một token rác đứng riêng, giữ lại: chỉ ghi khi còn nội dung sau nó.
+          if (SUSPECT_TOKEN.test(delta.trim()) && delta.trim() === delta) {
+            heldSuspect = delta;
+            return;
+          }
+
+          dataStream.write(formatDataStreamPart(channel, delta));
+          emittedChars += delta.length;
+        };
+
+        const dropHeldSuspect = () => {
+          heldSuspect = ''; // token rác ở cuối stream => loại bỏ hoàn toàn
+        };
+
+        const writeAnnotation = (payload: Record<string, unknown>) => {
+          dataStream.write(formatDataStreamPart('message_annotations', [payload as any]));
+        };
+
+        const writeFinish = (
+          finishReason: 'stop' | 'length' | 'error' | 'other' | 'content-filter' | 'tool-calls',
+          usage?: { promptTokens: number; completionTokens: number },
+        ) => {
+          dataStream.write(
+            formatDataStreamPart('finish_step', {
+              finishReason,
+              usage: usage ?? { promptTokens: 0, completionTokens: 0 },
+              isContinued: false,
+            }),
+          );
+          dataStream.write(
+            formatDataStreamPart('finish_message', {
+              finishReason,
+              usage: usage ?? { promptTokens: 0, completionTokens: 0 },
+            }),
+          );
+        };
+
         for (const selectedKey of candidateKeys) {
+          // Watchdog riêng cho từng lần thử key
+          const guard = new AbortController();
+          let abortCause: 'budget' | 'idle' | null = null;
+          let lastEventAt = Date.now();
+
+          const budgetTimer = setTimeout(() => {
+            abortCause = 'budget';
+            guard.abort();
+          }, STREAM_BUDGET_MS);
+
+          const heartbeat = setInterval(() => {
+            const idleFor = Date.now() - lastEventAt;
+            if (idleFor > IDLE_TIMEOUT_MS) {
+              abortCause = 'idle';
+              guard.abort();
+              return;
+            }
+            // ping giữ kết nối; client lọc bỏ part này
+            try {
+              dataStream.write(formatDataStreamPart('data', [{ type: 'ping', t: Date.now() }]));
+            } catch {
+              /* stream đã đóng */
+            }
+          }, HEARTBEAT_MS);
+
+          const cleanup = () => {
+            clearTimeout(budgetTimer);
+            clearInterval(heartbeat);
+          };
+
           try {
             const openai = createOpenAI({
               apiKey: selectedKey,
               baseURL: process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1',
             });
 
-            const timeoutMs = 115_000;
-            const timeoutSignal = typeof AbortSignal.timeout === 'function' ? AbortSignal.timeout(timeoutMs) : undefined;
-            const abortSignal = combineAbortSignals(req.signal, timeoutSignal);
+            const abortSignal = combineAbortSignals(req.signal, guard.signal);
 
             const result = streamText({
               model: openai(targetModel),
               messages: core,
               system: system?.trim() ? system : undefined,
               abortSignal,
-              ...(isReasoning
+              maxRetries: 2,
+              // Token đầu ra lấy theo cấu hình từng model (không hard-code 4096 nữa)
+              ...(modelConfig.maxTokens ? { maxTokens: modelConfig.maxTokens } : {}),
+              ...(modelConfig.supportsTemperature === false
                 ? {}
-                : {
-                    temperature: Math.min(2, Math.max(0, temperature ?? 0.7)),
-                    maxTokens: 4096,
-                  }),
+                : { temperature: Math.min(2, Math.max(0, temperature ?? 0.7)) }),
             });
 
             const reader = result.fullStream.getReader();
-            let emitted = false;
+            let finishReason: string | undefined;
+            let usage: { promptTokens: number; completionTokens: number } | undefined;
 
             try {
               while (true) {
                 const { done, value } = await reader.read();
+                lastEventAt = Date.now();
+
                 if (done) {
+                  dropHeldSuspect();
                   markKeySuccess(selectedKey);
+
+                  if (finishReason === 'length') {
+                    writeAnnotation({
+                      type: 'finish',
+                      finishReason: 'length',
+                      truncated: true,
+                      message:
+                        'Câu trả lời đã đạt giới hạn token của model. Bấm "Viết tiếp" để AI tiếp tục.',
+                    });
+                  } else {
+                    writeAnnotation({ type: 'finish', finishReason: finishReason ?? 'stop', truncated: false });
+                  }
+                  writeFinish((finishReason as any) ?? 'stop', usage);
                   return;
                 }
 
                 switch (value.type) {
                   case 'text-delta':
-                    emitted = true;
-                    dataStream.write(formatDataStreamPart('text', value.textDelta));
+                    writeText(value, 'text');
                     break;
 
+                  // v4 dùng 'reasoning'; một số bản dùng 'reasoning-delta'
                   case 'reasoning':
-                    emitted = true;
-                    dataStream.write(formatDataStreamPart('reasoning', value.textDelta));
+                  case 'reasoning-delta' as any:
+                    writeText(value, 'reasoning');
                     break;
 
                   case 'source':
-                    emitted = true;
-                    dataStream.write(formatDataStreamPart('source', value.source));
+                    if (value.source) dataStream.write(formatDataStreamPart('source', value.source));
                     break;
 
                   case 'error':
-                    throw value.error;
+                    throw value.error ?? new Error('Provider trả về error part rỗng.');
 
                   case 'finish':
-                  case 'step-finish':
-                    // Hoàn tất chu kỳ stream của step
+                    finishReason = (value as any).finishReason;
+                    if ((value as any).usage) {
+                      usage = {
+                        promptTokens: (value as any).usage.promptTokens ?? 0,
+                        completionTokens: (value as any).usage.completionTokens ?? 0,
+                      };
+                    }
                     break;
 
+                  case 'step-finish':
+                  case 'step-start':
                   default:
-                    // Bỏ qua an toàn các event khác (tool-call, metadata...) không làm crash stream
                     break;
                 }
               }
@@ -364,71 +485,79 @@ export async function POST(req: Request) {
               try {
                 await reader.cancel();
               } catch {
-                // Reader đã đóng hoặc provider đã abort
+                /* reader đã đóng */
               }
 
-              if (isAbort(streamErr)) return;
+              dropHeldSuspect();
+
+              // Người dùng bấm Stop: kết thúc êm, KHÔNG coi là lỗi.
+              const userAborted = req.signal.aborted && !abortCause;
+              if (userAborted) {
+                writeFinish('other', usage);
+                return;
+              }
+
+              // Timeout của chúng ta: phải báo cho client, tuyệt đối không return im lặng.
+              if (abortCause) {
+                const msg =
+                  abortCause === 'budget'
+                    ? 'Phiên trả lời đã chạm giới hạn thời gian của server. Nội dung có thể chưa hoàn chỉnh — bấm "Viết tiếp".'
+                    : 'AI Provider ngừng gửi dữ liệu quá lâu. Nội dung có thể chưa hoàn chỉnh — bấm "Viết tiếp".';
+                writeAnnotation({ type: 'finish', finishReason: 'length', truncated: true, message: msg });
+                dataStream.write(
+                  formatDataStreamPart('data', [
+                    { type: 'generation-error', message: msg, recoverable: true },
+                  ]),
+                );
+                writeFinish('length', usage);
+                return;
+              }
+
               lastError = streamErr;
               const status = getStatusCode(streamErr);
               markKeyFailure(selectedKey, status);
               console.warn(`[Failover] ${getKeyLabel(selectedKey)}:`, sanitizeErrorMessage(streamErr));
 
-              if (emitted) {
-                // Đã stream một phần nội dung: không đổi key giữa chừng.
-                // Gửi data part có cấu trúc để client kết thúc stream êm đẹp và cho phép bấm Tạo lại.
+              if (emittedChars > 0) {
+                const msg = 'Kết nối AI bị gián đoạn giữa chừng. Bạn có thể bấm Tạo lại hoặc Viết tiếp.';
+                writeAnnotation({ type: 'finish', finishReason: 'error', truncated: true, message: msg });
                 dataStream.write(
                   formatDataStreamPart('data', [
-                    {
-                      type: 'generation-error',
-                      message: 'Kết nối AI bị gián đoạn giữa chừng. Bạn có thể bấm Tạo lại để sinh câu trả lời mới.',
-                      recoverable: true,
-                    },
+                    { type: 'generation-error', message: msg, recoverable: true },
                   ]),
                 );
                 dataStream.write(formatDataStreamPart('error', sanitizeErrorMessage(streamErr)));
+                writeFinish('error', usage);
                 return;
               }
 
-              // Nếu là lỗi vĩnh viễn từ client/params (400, 404, 422), ngắt ngay không thử key khác
-              if (isPermanentClientError(status)) {
-                throw streamErr;
-              }
+              if (isPermanentClientError(status)) throw streamErr;
             } finally {
               try {
                 reader.releaseLock();
               } catch {
-                // Stream lock đã tự động được giải phóng
+                /* đã tự giải phóng */
               }
             }
           } catch (initErr) {
-            if (isAbort(initErr)) return;
+            if (req.signal.aborted && !abortCause) return;
             lastError = initErr;
             const status = getStatusCode(initErr);
             markKeyFailure(selectedKey, status);
             console.warn(`[Failover init] ${getKeyLabel(selectedKey)}:`, sanitizeErrorMessage(initErr));
-
-            // Nếu là lỗi 400/404/422, ngắt ngay không thử key khác
-            if (isPermanentClientError(status)) {
-              throw initErr;
-            }
+            if (isPermanentClientError(status)) throw initErr;
+          } finally {
+            cleanup();
           }
         }
 
-        if (lastError instanceof Error) {
-          throw lastError;
-        }
-        if (typeof lastError === 'string' && lastError.trim()) {
-          throw new Error(lastError);
-        }
+        if (lastError instanceof Error) throw lastError;
         throw new Error('Toàn bộ API Key khả dụng đều không thể hoàn thành yêu cầu.');
       },
       onError: sanitizeErrorMessage,
     });
   } catch (error: any) {
     console.error('Chat API Fatal Error:', sanitizeErrorMessage(error));
-    return Response.json(
-      { error: sanitizeErrorMessage(error) },
-      { status: 500 },
-    );
+    return Response.json({ error: sanitizeErrorMessage(error) }, { status: 500 });
   }
 }

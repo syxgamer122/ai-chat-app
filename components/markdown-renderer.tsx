@@ -79,32 +79,55 @@ function outsideCode(raw: string, fn: (chunk: string) => string): string {
     .join('');
 }
 
+/** Lưới an toàn cuối: dọn token rác dính ở cuối nội dung do backend/proxy sinh ra. */
+const TRAILING_GARBAGE = /(?:\s*(?:undefined|\[object Object\]))+\s*$/;
+function stripArtifacts(s: string): string {
+  return s.replace(TRAILING_GARBAGE, '');
+}
+
 function normalizeLatex(s: string): string {
   return s
     .replace(/\\\[([\s\S]*?)\\\]/g, (_m, body: string) => `\n\n$$\n${body.trim()}\n$$\n\n`)
     .replace(/\\\(([\s\S]*?)\\\)/g, (_m, body: string) => `$$${body.trim()}$$`);
 }
 
+/** $x$ -> $$x$$ chỉ khi nội dung "trông như" toán, để không phá $20, $50. */
+const MATHY = /[\\^_]|\\frac|\\vec|\\sqrt|\\overrightarrow/;
+function promoteSingleDollar(chunk: string): string {
+  return chunk.replace(
+    /(?<![$\d\w])\$(?!\s|\$)([^\n$]{1,300}?)(?<!\s)\$(?![$\d])/g,
+    (m, body: string) => (MATHY.test(body) ? `$$${body}$$` : m),
+  );
+}
+
+/**
+ * Cắt bỏ phần công thức chưa đóng khi đang stream.
+ * Bản cũ chỉ xoá dấu $$ lẻ nên phần thân LaTeX bị lộ ra dưới dạng văn bản thô
+ * (\frac{1}{2}...). Ở đây ta cắt hẳn phần đuôi — tick sau nó sẽ xuất hiện lại đầy đủ.
+ */
 function stabilize(raw: string, isStreaming: boolean): string {
   let out = raw;
 
   if ((out.match(/```/g)?.length ?? 0) % 2 === 1) out += '\n```';
   if ((out.match(/~~~/g)?.length ?? 0) % 2 === 1) out += '\n~~~';
 
-  if (isStreaming) {
-    // $$ lẻ -> bỏ tạm để KaTeX không nhấp nháy đỏ
-    if ((out.match(/\$\$/g)?.length ?? 0) % 2 === 1) {
-      const i = out.lastIndexOf('$$');
-      out = out.slice(0, i) + out.slice(i + 2);
-    }
-  }
+  if (!isStreaming) return out;
+
+  const count = (re: RegExp) => out.match(re)?.length ?? 0;
+
+  if (count(/\\\[/g) > count(/\\\]/g)) out = out.slice(0, out.lastIndexOf('\\['));
+  if (count(/\\\(/g) > count(/\\\)/g)) out = out.slice(0, out.lastIndexOf('\\('));
+  if (count(/\$\$/g) % 2 === 1) out = out.slice(0, out.lastIndexOf('$$'));
+
+  // Backslash treo lơ lửng ở cuối chunk khiến KaTeX/remark-math nhấp nháy đỏ.
+  out = out.replace(/\\+$/, '');
 
   return out;
 }
 
 function preprocess(raw: string, isStreaming: boolean): string {
-  const stable = stabilize(raw, isStreaming);
-  return outsideCode(stable, (chunk) => normalizeLatex(chunk));
+  const stable = stabilize(stripArtifacts(raw), isStreaming);
+  return outsideCode(stable, (chunk) => promoteSingleDollar(normalizeLatex(chunk)));
 }
 
 /* ------------------------------------------------------------------ */
@@ -172,11 +195,13 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   isStreaming = false,
   throttleMs = 150,
 }: {
-  content: string;
+  content: unknown;
   isStreaming?: boolean;
   throttleMs?: number;
 }) {
-  const throttled = useThrottledValue(content ?? '', throttleMs, isStreaming);
+  // Chốt chặn cuối: content có thể là undefined/null/object nếu tầng trên rò lỗi.
+  const safeContent = typeof content === 'string' ? content : '';
+  const throttled = useThrottledValue(safeContent, throttleMs, isStreaming);
 
   const source = useMemo(() => {
     try {

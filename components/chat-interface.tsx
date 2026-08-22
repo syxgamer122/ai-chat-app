@@ -35,6 +35,23 @@ import { shouldAcceptStreamUpdate, type StreamGeneration } from '@/lib/stream-ge
 import { useStickToBottom } from '@/lib/use-stick-to-bottom';
 import { ChatExportMenu } from '@/components/chat-export-menu';
 
+const CONTINUE_PROMPT =
+  'Câu trả lời trước bị ngắt giữa chừng. Hãy viết tiếp CHÍNH XÁC từ chỗ bị cắt, ' +
+  'không lặp lại phần đã viết, không mở đầu lại, giữ nguyên định dạng LaTeX.';
+
+/** Nội dung lưu/hiển thị luôn phải là string sạch. */
+export function sanitizeContent(raw: unknown): string {
+  if (typeof raw !== 'string') return '';
+  return raw.replace(/(?:\s*(?:undefined|\[object Object\]))+\s*$/, '');
+}
+
+/** Backend gắn annotation type:'finish' — dùng để biết tin nhắn có bị cắt hay không. */
+export function getFinishInfo(m: Message): { truncated: boolean; message?: string } {
+  const ann = (m.annotations as any[] | undefined) ?? [];
+  const finish = ann.find((a) => a && a.type === 'finish');
+  return { truncated: Boolean(finish?.truncated), message: finish?.message };
+}
+
 const attachmentCache = new WeakMap<object, StoredAttachment>();
 
 async function toStoredAttachment(a: any): Promise<StoredAttachment> {
@@ -139,9 +156,10 @@ function toChatMessage(
   return {
     id: row.id,
     role: row.role as Message['role'],
-    content: row.content,
+    content: sanitizeContent(row.content),
     status: row.status,
     finishReason: row.finishReason,
+    annotations: row.annotations,
     experimental_attachments: row.attachments?.map(
       (attachment) => ({
         name: attachment.name,
@@ -405,7 +423,7 @@ async function reconcileActiveMessages(
         /**
          * Content có thể thay đổi từng token trong lúc stream.
          */
-        content: message.content,
+        content: sanitizeContent(message.content),
 
         /**
          * Không thay đổi:
@@ -415,6 +433,7 @@ async function reconcileActiveMessages(
          */
         finishReason: nextFinishReason,
         status: nextStatus,
+        annotations: (message.annotations as any[]) ?? existing.annotations,
       };
 
       if (
@@ -488,7 +507,7 @@ async function reconcileActiveMessages(
       chatId,
       role:
         message.role as StoredMessage['role'],
-      content: message.content,
+      content: sanitizeContent(message.content),
 
       parentId,
 
@@ -502,6 +521,8 @@ async function reconcileActiveMessages(
       attachments,
 
       branchOrder,
+
+      annotations: (message.annotations as any[]) ?? undefined,
 
       finishReason:
         isStreamingAssistant
@@ -610,6 +631,7 @@ interface MessageItemProps {
   onSaveEdit: (id: string) => void;
   onCancelEdit: () => void;
   onDraftChange: (text: string) => void;
+  onContinueGenerating?: () => void;
   onContentResize?: () => void;
 }
 
@@ -632,6 +654,7 @@ const MessageItem = memo(
     onSaveEdit,
     onCancelEdit,
     onDraftChange,
+    onContinueGenerating,
     onContentResize,
   }: MessageItemProps) {
     const [isExpanded, setIsExpanded] = useState(false);
@@ -721,7 +744,7 @@ const MessageItem = memo(
               >
                 <ErrorBoundary>
                   <MarkdownRenderer
-                    content={m.content}
+                    content={sanitizeContent(m.content)}
                     isStreaming={isStreaming}
                     throttleMs={throttleMs}
                   />
@@ -751,6 +774,25 @@ const MessageItem = memo(
                   )}
                 </button>
               )}
+
+              {m.role === 'assistant' && (() => {
+                const { truncated, message: note } = getFinishInfo(m);
+                if (!truncated || isStreaming) return null;
+                return (
+                  <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
+                    <span>{note ?? 'Câu trả lời có thể chưa hoàn chỉnh.'}</span>
+                    {onContinueGenerating && (
+                      <button
+                        type="button"
+                        onClick={onContinueGenerating}
+                        className="rounded-lg bg-amber-500/25 px-2.5 py-1 font-medium text-amber-100 hover:bg-amber-500/40 transition-colors shadow-sm"
+                      >
+                        Viết tiếp
+                      </button>
+                    )}
+                  </div>
+                );
+              })()}
 
               {m.role === 'assistant' && (m as any).status === 'aborted' && (
                 <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-black/5 dark:border-white/5 pt-2">
@@ -973,6 +1015,7 @@ interface MessageListProps {
   onDraftChange: (text: string) => void;
   onSelectSuggestion: (prompt: string) => void;
   onReload: () => void;
+  onContinueGenerating?: () => void;
 }
 
 const MessageList = memo(function MessageList({
@@ -1004,6 +1047,7 @@ const MessageList = memo(function MessageList({
   onDraftChange,
   onSelectSuggestion,
   onReload,
+  onContinueGenerating,
 }: MessageListProps) {
   const rowVirtualizer = useVirtualizer({
     count: messages.length,
@@ -1195,6 +1239,7 @@ const MessageList = memo(function MessageList({
                         onSaveEdit={onSaveEdit}
                         onCancelEdit={onCancelEdit}
                         onDraftChange={onDraftChange}
+                        onContinueGenerating={onContinueGenerating}
                         onContentResize={() => {
                           if (isAtBottomRef.current) pin(300);
                         }}
@@ -1570,7 +1615,7 @@ export default function ChatInterface() {
 
   const {
     messages, setMessages, input, setInput, handleInputChange,
-    handleSubmit, stop, reload, isLoading, error, data,
+    handleSubmit, stop, reload, append, isLoading, error, data,
   } = useChat({
     id: chatKey,
     headers: {
@@ -1583,8 +1628,23 @@ export default function ChatInterface() {
       system: systemPrompt,
     },
     experimental_throttle: throttleMs,
+    onFinish: (message, { finishReason }) => {
+      const clean = sanitizeContent(message.content);
+      if (clean !== message.content) {
+        setMessages((prev) =>
+          prev.map((m) => (m.id === message.id ? { ...m, content: clean } : m)),
+        );
+      }
+      if (finishReason === 'length') {
+        console.warn('[chat] câu trả lời bị cắt do giới hạn token');
+      }
+    },
     onError: (err) => console.error('[useChat]', err),
   });
+
+  const continueGenerating = useCallback(() => {
+    void append({ role: 'user', content: CONTINUE_PROMPT });
+  }, [append]);
 
   const { isAtBottom, isAtBottomRef, onScroll, pin, scrollToBottom } = useStickToBottom(scrollRef, {
     streaming: isLoading,
@@ -3146,6 +3206,7 @@ export default function ChatInterface() {
           onDraftChange={setDraft}
           onSelectSuggestion={setInput}
           onReload={reload}
+          onContinueGenerating={continueGenerating}
         />
       </div>
 
