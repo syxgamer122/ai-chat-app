@@ -1,4 +1,4 @@
-﻿import { createOpenAI } from '@ai-sdk/openai';
+import { createOpenAI } from '@ai-sdk/openai';
 import {
   convertToCoreMessages,
   streamText,
@@ -550,8 +550,11 @@ export async function POST(req: Request) {
             const openai = createOpenAI({
               apiKey: selectedKey,
               baseURL: process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1',
-              // Một số proxy đứng sau Cloudflare chặn request thiếu User-Agent.
-              headers: { 'User-Agent': 'quyettamvmo-chat/1.0 (+vercel)' },
+              headers: {
+                'User-Agent':
+                  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+                Accept: 'application/json, text/event-stream',
+              },
             });
 
             const abortSignal = combineAbortSignals(req.signal, guard.signal);

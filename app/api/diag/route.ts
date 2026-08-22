@@ -1,4 +1,4 @@
-﻿import { getAllConfiguredKeys, getKeyLabel, getKeyPoolSnapshot } from '@/lib/api-keys';
+import { getAllConfiguredKeys, getKeyLabel, getKeyPoolSnapshot } from '@/lib/api-keys';
 import { checkSameOrigin } from '@/lib/security';
 
 export const runtime = 'nodejs';
@@ -19,7 +19,12 @@ export async function GET(req: Request) {
       const started = Date.now();
       try {
         const res = await fetch(`${baseURL}/models`, {
-          headers: { Authorization: `Bearer ${key}`, 'User-Agent': 'quyettamvmo-diag/1.0' },
+          headers: {
+            Authorization: `Bearer ${key}`,
+            'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+            Accept: 'application/json',
+          },
           cache: 'no-store',
         });
         const body = (await res.text()).replace(/\s+/g, ' ').slice(0, 200);
