@@ -28,22 +28,22 @@ export const ChatHeader = memo(function ChatHeader({
   currentChatId,
 }: ChatHeaderProps) {
   return (
-    <header className="flex h-12 flex-shrink-0 items-center justify-between border-b border-zinc-800/60 bg-[#0f0f10]/90 px-3 backdrop-blur pt-safe z-20">
+    <header className="flex h-14 flex-shrink-0 items-center justify-between border-b border-zinc-800/60 bg-[#0f0f10]/90 px-3 backdrop-blur pt-safe z-20 md:px-5">
       <div className="flex min-w-0 items-center gap-2">
         <button
           type="button"
           onClick={onOpenSidebar}
           aria-label="Mở thanh bên"
-          className="flex h-8 w-8 items-center justify-center rounded-lg text-zinc-400 hover:bg-zinc-800/70 md:hidden"
+          className="flex h-9 w-9 items-center justify-center rounded-lg text-zinc-400 hover:bg-zinc-800/70 md:hidden"
         >
-          <Menu size={16} />
+          <Menu size={17} />
         </button>
-        <h1 className="truncate text-[13px] font-medium text-zinc-300">
+        <h1 className="truncate text-[14px] font-semibold tracking-tight text-zinc-200">
           {title ?? 'Cuộc trò chuyện mới'}
         </h1>
       </div>
 
-      <div className="flex items-center gap-0.5">
+      <div className="flex items-center gap-1">
         <ChatExportMenu chatId={currentChatId} />
 
         {hasMessages &&

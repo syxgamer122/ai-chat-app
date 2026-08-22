@@ -128,7 +128,9 @@ const ChatItem = memo(function ChatItem({
   return (
     <div
       className={`group relative flex w-full flex-col rounded-lg text-left ${
-        isActive ? 'bg-zinc-800/80' : 'hover:bg-zinc-800/40'
+        isActive
+          ? 'bg-zinc-800/80 before:absolute before:left-0 before:top-1/2 before:h-5 before:w-[3px] before:-translate-y-1/2 before:rounded-full before:bg-[#c96442]'
+          : 'hover:bg-zinc-800/40'
       }`}
     >
       <div className="flex w-full items-center justify-between gap-1 pr-1">
@@ -286,22 +288,40 @@ export function Sidebar() {
         isSidebarOpen ? 'translate-x-0' : '-translate-x-full'
       }`}
     >
-      <div className="flex items-center justify-between p-3">
-        <button
-          type="button"
-          onClick={handleNewChat}
-          className="flex flex-1 items-center gap-2 rounded-lg border border-zinc-800 bg-[#1e1e22] px-3 py-2 text-[13px] font-medium text-zinc-200 hover:bg-zinc-800"
-        >
-          <Plus size={15} className="text-[#c96442]" />
-          <span>Đoạn chat mới</span>
-        </button>
+      {/* Brand */}
+      <div className="flex items-center justify-between px-4 pb-1 pt-4">
+        <div className="flex items-center gap-2.5">
+          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-[#c96442] to-[#a84f33] shadow-[0_4px_12px_-4px_rgba(201,100,66,0.5)]">
+            <svg width="15" height="15" viewBox="0 0 32 32" fill="none">
+              <path d="M8 12C8 9.79086 9.79086 8 12 8H20C22.2091 8 24 9.79086 24 12V18C24 20.2091 22.2091 22 20 22H13L9 25V21.6C8.38 20.7 8 19.4 8 18V12Z" fill="white" />
+              <circle cx="12" cy="15" r="1.5" fill="#c96442" />
+              <circle cx="16" cy="15" r="1.5" fill="#c96442" />
+              <circle cx="20" cy="15" r="1.5" fill="#c96442" />
+            </svg>
+          </div>
+          <div className="leading-tight">
+            <div className="text-[13px] font-semibold text-zinc-100">AI Chat Studio</div>
+            <div className="text-[10px] text-zinc-600">cá nhân · lưu trên máy bạn</div>
+          </div>
+        </div>
         <button
           type="button"
           aria-label="Đóng thanh bên"
           onClick={() => setSidebarOpen(false)}
-          className="ml-1.5 flex h-8 w-8 items-center justify-center rounded-lg text-zinc-500 hover:bg-zinc-800 md:hidden"
+          className="flex h-8 w-8 items-center justify-center rounded-lg text-zinc-500 hover:bg-zinc-800 md:hidden"
         >
           <X size={16} />
+        </button>
+      </div>
+
+      <div className="flex items-center gap-1.5 p-3 pt-2">
+        <button
+          type="button"
+          onClick={handleNewChat}
+          className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-[#c96442] px-3 py-2 text-[13px] font-semibold text-white shadow-[0_4px_16px_-6px_rgba(201,100,66,0.6)] transition hover:bg-[#b5573a] active:scale-[0.98]"
+        >
+          <Plus size={15} />
+          <span>Đoạn chat mới</span>
         </button>
       </div>
 
@@ -316,7 +336,7 @@ export function Sidebar() {
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Tìm kiếm..."
-            className="w-full rounded-lg border border-zinc-800/80 bg-[#18181b] py-1.5 pl-8 pr-8 text-[13px] text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-zinc-700"
+            className="w-full rounded-lg border border-zinc-800/80 bg-[#18181b] py-1.5 pl-8 pr-8 text-[13px] text-zinc-200 outline-none placeholder:text-zinc-600 transition focus:border-[#c96442]/50 focus:ring-2 focus:ring-[#c96442]/15"
           />
           {isSearching ? (
             <Loader2 size={13} className="absolute right-2.5 animate-spin text-zinc-500" />

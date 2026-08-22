@@ -225,8 +225,8 @@ export function Composer({
             setDragging(false);
             acceptFiles(e.dataTransfer?.files ?? null);
           }}
-          className={`relative rounded-2xl border bg-[#1e1e22] shadow-lg transition-colors focus-within:border-zinc-600 ${
-            dragging ? 'border-[#c96442]' : 'border-zinc-700/50'
+          className={`relative rounded-2xl border bg-[#1e1e22] shadow-lg transition-all duration-150 focus-within:border-[#c96442]/50 focus-within:shadow-[0_0_0_3px_rgba(201,100,66,0.10),0_12px_32px_-16px_rgba(0,0,0,0.8)] ${
+            dragging ? 'border-[#c96442]' : 'border-zinc-700/60'
           }`}
         >
           {slashOpen && (
@@ -393,7 +393,7 @@ export function Composer({
                 type="button"
                 onClick={onStop}
                 aria-label="Dừng tạo"
-                className="flex h-8 w-8 items-center justify-center rounded-full bg-zinc-700 text-zinc-100 hover:bg-zinc-600"
+                className="flex h-9 w-9 items-center justify-center rounded-full bg-zinc-700 text-zinc-100 transition hover:bg-zinc-600"
               >
                 <Square size={13} className="fill-current" />
               </button>
@@ -402,13 +402,13 @@ export function Composer({
                 type="submit"
                 disabled={!canSubmit}
                 aria-label="Gửi tin nhắn"
-                className={`flex h-8 w-8 items-center justify-center rounded-full ${
+                className={`flex h-9 w-9 items-center justify-center rounded-full transition-all ${
                   canSubmit
-                    ? 'bg-[#c96442] text-white hover:bg-[#b5573a]'
+                    ? 'bg-[#c96442] text-white shadow-[0_4px_16px_-6px_rgba(201,100,66,0.7)] hover:bg-[#b5573a] active:scale-95'
                     : 'cursor-not-allowed bg-zinc-700/60 text-zinc-500'
                 }`}
               >
-                <ArrowUp size={16} />
+                <ArrowUp size={17} />
               </button>
             )}
           </div>

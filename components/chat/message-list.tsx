@@ -4,7 +4,7 @@
 import React, { memo, useEffect, useMemo } from 'react';
 import type { Message } from 'ai/react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { ArrowDown } from 'lucide-react';
+import { ArrowDown, ArrowUp, Sparkles } from 'lucide-react';
 import { ChatErrorBoundary } from '@/components/chat-error-boundary';
 import { MessageItem, type BranchInfo } from './message-item';
 
@@ -236,21 +236,30 @@ export const MessageList = memo(function MessageList({
         className="chat-scroll h-full overflow-y-auto px-4 md:px-8"
       >
         {!hasMessages ? (
-          <div className="flex flex-col items-center justify-center h-full pt-10 space-y-8">
-            <div className="w-16 h-16 bg-indigo-500/10 rounded-2xl flex items-center justify-center text-indigo-500 mb-4">
-              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-              </svg>
+          <div className="flex h-full flex-col items-center justify-center px-4 pb-16 pt-10">
+            <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-2xl border border-[#c96442]/25 bg-gradient-to-br from-[#c96442]/15 to-[#c96442]/5 text-[#e08a68] shadow-[0_8px_32px_-8px_rgba(201,100,66,0.35)]">
+              <Sparkles size={30} strokeWidth={1.8} />
             </div>
-            <h1 className="text-2xl font-medium text-zinc-200">How can I help you today?</h1>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 w-full max-w-2xl">
+            <h1 className="bg-gradient-to-b from-zinc-50 to-zinc-400 bg-clip-text text-center text-[28px] font-semibold leading-tight tracking-tight text-transparent">
+              Hôm nay mình giúp gì cho bạn?
+            </h1>
+            <p className="mt-2 text-center text-[13px] text-zinc-500">
+              Hỏi bất cứ điều gì — nói bằng giọng nói, hoặc gõ / để chèn prompt mẫu.
+            </p>
+            <div className="mt-8 grid w-full max-w-2xl grid-cols-1 gap-2.5 md:grid-cols-2">
               {suggestions.map((prompt) => (
                 <button
                   key={prompt}
                   onClick={() => onSelectSuggestion(prompt)}
-                  className="p-4 text-left border border-zinc-800 rounded-xl hover:bg-zinc-900 transition-all text-sm text-zinc-400 hover:text-zinc-200"
+                  className="group flex items-center justify-between gap-3 rounded-xl border border-zinc-800/80 bg-[#161619]/60 p-4 text-left transition-all duration-150 hover:-translate-y-0.5 hover:border-[#c96442]/40 hover:bg-[#1c1c20] hover:shadow-[0_8px_24px_-12px_rgba(0,0,0,0.8)]"
                 >
-                  {prompt}
+                  <span className="text-sm text-zinc-400 transition-colors group-hover:text-zinc-100">
+                    {prompt}
+                  </span>
+                  <ArrowUp
+                    size={13}
+                    className="flex-shrink-0 text-zinc-700 transition-colors group-hover:text-[#c96442]"
+                  />
                 </button>
               ))}
             </div>

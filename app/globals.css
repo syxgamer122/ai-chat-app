@@ -25,6 +25,16 @@
     -webkit-text-size-adjust: 100%;
   }
 
+  /* Ánh sáng ambient rất nhẹ phía trên — tạo chiều sâu cho nền tối. */
+  body {
+    background-image: radial-gradient(
+      900px 420px at 50% -180px,
+      rgba(201, 100, 66, 0.055),
+      transparent 70%
+    );
+    background-repeat: no-repeat;
+  }
+
   button,
   a,
   input,
