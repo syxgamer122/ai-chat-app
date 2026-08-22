@@ -1,3 +1,5 @@
+@import 'katex/dist/katex.min.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -20,9 +22,9 @@
     color: #e4e4e7;
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
+    -webkit-text-size-adjust: 100%;
   }
 
-  /* Chuyển động tối giản: chỉ màu sắc, 120ms, không transform nặng */
   button,
   a,
   input,
@@ -42,10 +44,15 @@
   *::before,
   *::after {
     animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
 }
 
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #27272a transparent;
+}
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -71,25 +78,60 @@
   .no-scrollbar::-webkit-scrollbar {
     display: none;
   }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .h-dvh-safe {
+    height: 100vh;
+    height: 100dvh;
+  }
 }
 
-/* Vùng cuộn tin nhắn — giữ nguyên hành vi chống nhảy khi streaming */
+/* ------------------------------------------------------------------ */
+/* Scroll container                                                    */
+/* ------------------------------------------------------------------ */
+
 .chat-scroll {
   scroll-behavior: auto;
   overflow-anchor: none;
   overscroll-behavior-y: contain;
   -webkit-overflow-scrolling: touch;
 }
-.chat-scroll * {
+.chat-scroll > *,
+.chat-scroll .claude-prose,
+.chat-scroll .claude-code-block {
   overflow-anchor: none;
 }
 
-/* ---------- Typography khối trả lời của Assistant ---------- */
+/* ------------------------------------------------------------------ */
+/* Hành động trên tin nhắn                                             */
+/* ------------------------------------------------------------------ */
+
+.msg-actions {
+  opacity: 0;
+  transition: opacity 120ms linear;
+}
+.group:hover .msg-actions,
+.msg-actions:focus-within {
+  opacity: 1;
+}
+@media (hover: none), (pointer: coarse) {
+  .msg-actions {
+    opacity: 1;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Typography                                                          */
+/* ------------------------------------------------------------------ */
+
 .claude-prose {
   font-size: 15px;
   line-height: 1.75;
   color: #e8e8ea;
   word-break: break-word;
+  overflow-wrap: anywhere;
 }
 .claude-prose > * + * {
   margin-top: 1rem;
@@ -126,25 +168,30 @@
   border-color: #27272a;
   margin: 1.5rem 0;
 }
+
 .claude-prose table {
   width: 100%;
   border-collapse: collapse;
   font-size: 14px;
-  display: block;
-  overflow-x: auto;
 }
 .claude-prose th,
 .claude-prose td {
   border: 1px solid #27272a;
   padding: 0.5rem 0.75rem;
   text-align: left;
+  vertical-align: top;
 }
 .claude-prose th {
   background: #18181b;
   font-weight: 600;
+  white-space: nowrap;
 }
 
-/* Inline code */
+/* ------------------------------------------------------------------ */
+/* Code                                                                */
+/* ------------------------------------------------------------------ */
+
+.claude-inline-code,
 .claude-prose :not(pre) > code {
   background: #1e1e22;
   border: 1px solid #2a2a30;
@@ -152,9 +199,21 @@
   padding: 0.12em 0.38em;
   font-size: 0.875em;
   color: #e6b8a5;
+  white-space: pre-wrap;
 }
 
-/* Code block */
+.claude-prose .claude-code-block code,
+.claude-code-block code,
+.claude-prose .claude-code-block .claude-inline-code {
+  background: none;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  font-size: 13px;
+  color: inherit;
+  white-space: inherit;
+}
+
 .claude-code-block {
   background: var(--bg-code);
   border: 1px solid #232328;
@@ -162,20 +221,19 @@
   overflow: hidden;
 }
 .claude-code-block pre {
-  margin: 0;
-  padding: 0.9rem 1rem;
+  margin: 0 !important;
+  padding: 0.9rem 1rem !important;
   overflow-x: auto;
-  font-size: 13px;
-  line-height: 1.6;
-}
-.claude-code-block pre code {
-  background: none;
-  border: 0;
-  padding: 0;
-  color: #e4e4e7;
+  font-size: 13px !important;
+  line-height: 1.6 !important;
+  background: var(--bg-code) !important;
 }
 
-/* Con trỏ streaming */
+/* ------------------------------------------------------------------ */
+/* Caret khi stream                                                    */
+/* ------------------------------------------------------------------ */
+
+.streaming-caret > div > :last-child::after,
 .streaming-caret::after {
   content: '';
   display: inline-block;
@@ -184,16 +242,27 @@
   margin-left: 2px;
   vertical-align: text-bottom;
   background: #a1a1aa;
+  animation: caret-blink 1s steps(2, start) infinite;
+}
+.streaming-caret > div > :last-child::after {
+  content: none;
+}
+@keyframes caret-blink {
+  to {
+    visibility: hidden;
+  }
 }
 
-/* KaTeX: cuộn ngang trong khối, không đẩy giãn layout */
+/* ------------------------------------------------------------------ */
+/* KaTeX                                                               */
+/* ------------------------------------------------------------------ */
+
 .katex-display {
   margin: 1rem 0;
   max-width: 100%;
   overflow-x: auto;
   overflow-y: hidden;
-  padding: 0.25rem 0.125rem;
-  contain: content;
+  padding: 0.35rem 0.125rem;
 }
 .katex-display > .katex {
   white-space: nowrap;

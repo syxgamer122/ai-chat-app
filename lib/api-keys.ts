@@ -1,14 +1,4 @@
-/**
- * Quản lý pool API key + phân loại lỗi upstream.
- *
- * Thay đổi cốt lõi so với bản cũ:
- *  - Không còn "án tử vĩnh viễn": key bị auth-fail chỉ vào quarantine có thời hạn.
- *  - 404 KHÔNG còn là permanent error (nhiều proxy trả 404 cho "model chưa được
- *    cấp quyền trên key này" -> phải failover sang key khác).
- *  - Có snapshot để debug qua endpoint chẩn đoán.
- */
-
-export type UpstreamScope = 'key' | 'request' | 'transient' | 'unknown';
+export type UpstreamScope = 'key-auth' | 'key-rate' | 'request' | 'transient' | 'unknown';
 
 interface KeyHealth {
   consecutiveFailures: number;
@@ -22,27 +12,39 @@ interface KeyHealth {
 const keyHealthMap = new Map<string, KeyHealth>();
 
 const BASE_COOLDOWN_MS = 15_000;
+const MAX_COOLDOWN_MS = 60_000;
 const RATE_LIMIT_COOLDOWN_MS = 30_000;
 const AUTH_COOLDOWN_MS = 60_000;
-const QUARANTINE_MS = 15 * 60_000; // 15 phút, KHÔNG vĩnh viễn
+const QUARANTINE_MS = 15 * 60_000;
 const AUTH_FAILURES_BEFORE_QUARANTINE = 3;
+const HEALTH_TTL_MS = 60 * 60_000;
+
+/** Round-robin cursor: chống mọi request đồng thời dồn vào cùng một key. */
+let rrCursor = 0;
+
+function jitter(ms: number): number {
+  return Math.round(ms * (0.8 + Math.random() * 0.4));
+}
 
 function parseKeysFromEnv(raw?: string): string[] {
   if (!raw) return [];
   return raw
     .split(/[\n,;]+/)
-    .map((k) => k.trim())
+    .map((k) => k.trim().replace(/^["']|["']$/g, ''))
     .filter((k) => k.length > 0 && !k.startsWith('#'));
 }
 
 export function getAllConfiguredKeys(): string[] {
-  const envKeys = process.env.OPENAI_API_KEYS || process.env.OPENAI_API_KEY;
-  return parseKeysFromEnv(envKeys);
+  const merged = [
+    ...parseKeysFromEnv(process.env.OPENAI_API_KEYS),
+    ...parseKeysFromEnv(process.env.OPENAI_API_KEY),
+  ];
+  return Array.from(new Set(merged));
 }
 
 function getHealth(key: string): KeyHealth {
   return (
-    keyHealthMap.get(key) || {
+    keyHealthMap.get(key) ?? {
       consecutiveFailures: 0,
       cooldownUntil: 0,
       authFailures: 0,
@@ -51,113 +53,146 @@ function getHealth(key: string): KeyHealth {
   );
 }
 
-/**
- * Trả về danh sách key theo thứ tự ưu tiên.
- * Nếu TẤT CẢ key đều đang cooldown/quarantine, vẫn trả về danh sách "last resort"
- * (sắp xếp theo thời điểm hết cooldown gần nhất) thay vì trả mảng rỗng -> tránh
- * việc app trả 503 chỉ vì state in-memory của một lambda instance bị bẩn.
- */
-export function getKeyCandidates(): string[] {
+function pruneStaleHealth(now: number): void {
+  for (const [key, h] of keyHealthMap) {
+    const idle = now - (h.lastFailureAt ?? 0) > HEALTH_TTL_MS;
+    if (idle && h.cooldownUntil <= now && h.quarantineUntil <= now) keyHealthMap.delete(key);
+  }
+}
+
+export interface KeyCandidateResult {
+  keys: string[];
+  /** Rỗng vì tất cả đang nghỉ: timestamp key sớm nhất sẵn sàng (cho Retry-After). */
+  retryAfterMs?: number;
+}
+
+export function getKeyCandidates(scope: UpstreamScope = 'unknown'): KeyCandidateResult {
   const allKeys = getAllConfiguredKeys();
-  if (!allKeys.length) return [];
+  if (!allKeys.length) return { keys: [] };
 
   const now = Date.now();
-  const available: { key: string; score: number }[] = [];
-  const resting: { key: string; readyAt: number }[] = [];
+  pruneStaleHealth(now);
+
+  // Lỗi do request (400/422) hoặc transient: xoay key không giúp gì, chỉ đốt quota.
+  if (scope === 'request') return { keys: allKeys.slice(0, 1) };
+
+  const available: { key: string; score: number; tie: number }[] = [];
+  let earliestReady = Number.POSITIVE_INFINITY;
+  let restingBest: string | null = null;
 
   for (const key of allKeys) {
     const health = keyHealthMap.get(key);
     if (!health) {
-      available.push({ key, score: 0 });
+      available.push({ key, score: 0, tie: Math.random() });
       continue;
     }
-    if (health.quarantineUntil > now || health.cooldownUntil > now) {
-      resting.push({ key, readyAt: Math.max(health.quarantineUntil, health.cooldownUntil) });
+    const readyAt = Math.max(health.quarantineUntil, health.cooldownUntil);
+    if (readyAt > now) {
+      if (readyAt < earliestReady) {
+        earliestReady = readyAt;
+        restingBest = key;
+      }
       continue;
     }
-    available.push({ key, score: health.consecutiveFailures });
+    available.push({ key, score: health.consecutiveFailures, tie: Math.random() });
   }
 
   if (available.length > 0) {
-    available.sort((a, b) => a.score - b.score);
-    return available.map((i) => i.key);
+    available.sort((a, b) => a.score - b.score || a.tie - b.tie);
+    const offset = rrCursor++ % available.length;
+    const rotated = [...available.slice(offset), ...available.slice(0, offset)];
+    rotated.sort((a, b) => a.score - b.score);
+    return { keys: rotated.map((i) => i.key) };
   }
 
-  resting.sort((a, b) => a.readyAt - b.readyAt);
-  return resting.map((i) => i.key);
+  return {
+    keys: restingBest ? [restingBest] : [],
+    retryAfterMs: Number.isFinite(earliestReady) ? Math.max(0, earliestReady - now) : undefined,
+  };
 }
 
 export function markKeySuccess(key: string): void {
-  keyHealthMap.delete(key);
+  const current = keyHealthMap.get(key);
+  if (!current) return;
+  const next: KeyHealth = {
+    consecutiveFailures: 0,
+    cooldownUntil: 0,
+    quarantineUntil: 0,
+    authFailures: Math.max(0, current.authFailures - 1),
+    lastFailureAt: current.lastFailureAt,
+  };
+  if (next.authFailures === 0) keyHealthMap.delete(key);
+  else keyHealthMap.set(key, next);
 }
 
-export function markKeyFailure(key: string, statusCode?: number, scope: UpstreamScope = 'unknown'): void {
+export function markKeyFailure(
+  key: string,
+  statusCode?: number,
+  scope: UpstreamScope = 'unknown',
+): void {
+  if (scope === 'request' || scope === 'transient') return;
+
   const now = Date.now();
   const current = getHealth(key);
-
-  current.consecutiveFailures += 1;
+  current.consecutiveFailures = Math.min(current.consecutiveFailures + 1, 16);
   current.lastStatus = statusCode;
   current.lastFailureAt = now;
 
-  if (statusCode === 401 || statusCode === 403 || statusCode === 402) {
+  if (statusCode === 401 || statusCode === 403) {
     current.authFailures += 1;
-    current.cooldownUntil = now + AUTH_COOLDOWN_MS * Math.min(5, current.authFailures);
     if (current.authFailures >= AUTH_FAILURES_BEFORE_QUARANTINE) {
-      current.quarantineUntil = now + QUARANTINE_MS;
+      current.quarantineUntil = now + jitter(QUARANTINE_MS);
+      current.cooldownUntil = current.quarantineUntil;
+    } else {
+      current.cooldownUntil = now + jitter(AUTH_COOLDOWN_MS);
     }
   } else if (statusCode === 429) {
-    current.cooldownUntil = now + RATE_LIMIT_COOLDOWN_MS;
-  } else if (scope === 'request') {
-    // Lỗi do payload của request, không phải lỗi của key -> không phạt key.
-    current.consecutiveFailures = Math.max(0, current.consecutiveFailures - 1);
+    current.cooldownUntil = now + jitter(RATE_LIMIT_COOLDOWN_MS);
   } else {
-    current.cooldownUntil = now + BASE_COOLDOWN_MS;
+    const backoff = Math.min(
+      BASE_COOLDOWN_MS * 2 ** (current.consecutiveFailures - 1),
+      MAX_COOLDOWN_MS,
+    );
+    current.cooldownUntil = now + jitter(backoff);
   }
 
   keyHealthMap.set(key, current);
 }
 
 export function getKeyLabel(key: string): string {
-  if (key.length <= 8) return 'key-***';
-  return `${key.slice(0, 4)}...${key.slice(-4)}`;
+  if (!key) return 'empty';
+  if (key.length < 14) return `len:${key.length}:${key.slice(-2)}`;
+  return `${key.slice(0, 7)}...${key.slice(-4)}`;
 }
 
-/** Ảnh chụp trạng thái pool để phục vụ endpoint chẩn đoán. */
-export function getKeyPoolSnapshot() {
-  const now = Date.now();
-  return getAllConfiguredKeys().map((key) => {
-    const h = keyHealthMap.get(key);
-    return {
-      label: getKeyLabel(key),
-      healthy: !h || (h.cooldownUntil <= now && h.quarantineUntil <= now),
-      lastStatus: h?.lastStatus,
-      authFailures: h?.authFailures ?? 0,
-      cooldownRemainingSec: h ? Math.max(0, Math.ceil((h.cooldownUntil - now) / 1000)) : 0,
-      quarantineRemainingSec: h ? Math.max(0, Math.ceil((h.quarantineUntil - now) / 1000)) : 0,
-    };
-  });
-}
-
-export function resetAllKeyHealth(): void {
-  keyHealthMap.clear();
-}
-
-/**
- * Phân loại status code upstream.
- *  - 'request'  : lỗi do chính payload -> đổi key cũng vô ích -> DỪNG failover.
- *  - 'key'      : lỗi gắn với key/quyền -> THỬ key tiếp theo.
- *  - 'transient': lỗi tạm thời (5xx, network, 429) -> THỬ key tiếp theo.
- */
 export function classifyUpstreamStatus(status?: number): UpstreamScope {
-  if (status === undefined) return 'transient'; // network error / timeout
-  if (status === 400 || status === 422) return 'request';
-  if (status === 401 || status === 402 || status === 403 || status === 404) return 'key';
-  if (status === 429) return 'transient';
+  if (!status) return 'transient';
+  if (status === 401 || status === 403) return 'key-auth';
+  if (status === 429) return 'key-rate';
+  if (status === 400 || status === 422 || status === 404) return 'request';
   if (status >= 500) return 'transient';
   return 'unknown';
 }
 
-/** Chỉ dừng failover khi lỗi thuộc về chính request. 404 đã được loại khỏi danh sách này. */
-export function isPermanentClientError(status?: number): boolean {
-  return classifyUpstreamStatus(status) === 'request';
+export function getKeyPoolSnapshot(): Array<{
+  label: string;
+  consecutiveFailures: number;
+  cooldownRemainingMs: number;
+  quarantineRemainingMs: number;
+  authFailures: number;
+  lastStatus?: number;
+}> {
+  const now = Date.now();
+  const allKeys = getAllConfiguredKeys();
+  return allKeys.map((key) => {
+    const h = keyHealthMap.get(key);
+    return {
+      label: getKeyLabel(key),
+      consecutiveFailures: h?.consecutiveFailures ?? 0,
+      cooldownRemainingMs: Math.max(0, (h?.cooldownUntil ?? 0) - now),
+      quarantineRemainingMs: Math.max(0, (h?.quarantineUntil ?? 0) - now),
+      authFailures: h?.authFailures ?? 0,
+      lastStatus: h?.lastStatus,
+    };
+  });
 }

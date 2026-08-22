@@ -1,18 +1,35 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
+import { Inter } from 'next/font/google';
+import { ObjectUrlGarbageCollector } from '@/components/object-url-garbage-collector';
 import './globals.css';
-import 'katex/dist/katex.min.css';
+
+const inter = Inter({
+  subsets: ['latin', 'vietnamese'],
+  display: 'swap',
+  variable: '--font-sans',
+});
 
 export const metadata: Metadata = {
   title: 'AI Chat Studio',
   description: 'Minimalist AI Chat Interface',
 };
 
-import { ObjectUrlGarbageCollector } from '@/components/object-url-garbage-collector';
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  interactiveWidget: 'resizes-content',
+  colorScheme: 'dark',
+  themeColor: '#0f0f10',
+};
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className="dark">
-      <body className="font-sans bg-zinc-950 text-zinc-50 antialiased selection:bg-indigo-500/30 selection:text-indigo-200">
+    <html
+      lang="vi"
+      className={`dark ${inter.variable}`}
+      suppressHydrationWarning
+    >
+      <body className="min-h-dvh font-sans bg-[#0f0f10] text-[#e4e4e7] antialiased overscroll-none selection:bg-[#c96442]/30 selection:text-white">
         <ObjectUrlGarbageCollector />
         {children}
       </body>

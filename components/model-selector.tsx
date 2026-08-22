@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { Check, ChevronDown, Sparkles } from 'lucide-react';
 
 export interface ModelOption {
@@ -21,31 +21,109 @@ export function ModelSelector({
   disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  const current = models.find((m) => m.id === value) ?? models[0];
+  const [cursor, setCursor] = useState(0);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const listId = useId();
+
+  const currentIndex = Math.max(
+    0,
+    models.findIndex((m) => m.id === value),
+  );
+  const current = models[currentIndex];
+
+  const close = useCallback((returnFocus = true) => {
+    setOpen(false);
+    if (returnFocus) triggerRef.current?.focus();
+  }, []);
 
   useEffect(() => {
     if (!open) return;
-    const onDocClick = (e: MouseEvent) => {
-      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+    setCursor(currentIndex);
+
+    const onPointerDown = (e: PointerEvent) => {
+      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
     };
-    const onEsc = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
-    document.addEventListener('mousedown', onDocClick);
-    document.addEventListener('keydown', onEsc);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        close();
+      }
+    };
+    document.addEventListener('pointerdown', onPointerDown, true);
+    document.addEventListener('keydown', onKey);
     return () => {
-      document.removeEventListener('mousedown', onDocClick);
-      document.removeEventListener('keydown', onEsc);
+      document.removeEventListener('pointerdown', onPointerDown, true);
+      document.removeEventListener('keydown', onKey);
     };
+  }, [open, currentIndex, close]);
+
+  useEffect(() => {
+    if (open) {
+      listRef.current?.focus();
+    }
   }, [open]);
 
+  // Đóng dropdown nếu bị disable giữa lúc đang mở (ví dụ stream bắt đầu).
+  useEffect(() => {
+    if (disabled && open) setOpen(false);
+  }, [disabled, open]);
+
+  useEffect(() => {
+    if (!open) return;
+    listRef.current
+      ?.querySelector<HTMLElement>(`[data-idx="${cursor}"]`)
+      ?.scrollIntoView({ block: 'nearest' });
+  }, [open, cursor]);
+
+  const commit = useCallback(
+    (index: number) => {
+      const target = models[index];
+      if (target) onChange(target.id);
+      close();
+    },
+    [models, onChange, close],
+  );
+
+  const onListKeyDown = (e: React.KeyboardEvent) => {
+    if (models.length === 0) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setCursor((c) => (c + 1) % models.length);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setCursor((c) => (c - 1 + models.length) % models.length);
+    } else if (e.key === 'Home') {
+      e.preventDefault();
+      setCursor(0);
+    } else if (e.key === 'End') {
+      e.preventDefault();
+      setCursor(models.length - 1);
+    } else if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      commit(cursor);
+    } else if (e.key === 'Tab') {
+      setOpen(false);
+    }
+  };
+
   return (
-    <div ref={ref} className="relative">
+    <div ref={wrapRef} className="relative">
       <button
+        ref={triggerRef}
         type="button"
-        disabled={disabled}
+        disabled={disabled || models.length === 0}
         onClick={() => setOpen((v) => !v)}
+        onKeyDown={(e) => {
+          if (!open && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+            e.preventDefault();
+            setOpen(true);
+          }
+        }}
         aria-haspopup="listbox"
         aria-expanded={open}
+        aria-controls={open ? listId : undefined}
         className="flex h-8 items-center gap-1.5 rounded-full px-2.5 text-[12px] font-medium text-zinc-400 hover:bg-zinc-800/70 hover:text-zinc-200 disabled:opacity-50"
       >
         <Sparkles size={13} className="text-[#c96442]" />
@@ -55,22 +133,29 @@ export function ModelSelector({
 
       {open && (
         <div
+          id={listId}
+          ref={listRef}
           role="listbox"
-          className="absolute bottom-full left-0 z-50 mb-2 w-64 max-h-72 overflow-y-auto rounded-xl border border-zinc-800 bg-[#1a1a1d] p-1 shadow-xl no-scrollbar"
+          tabIndex={-1}
+          aria-activedescendant={`${listId}-opt-${cursor}`}
+          onKeyDown={onListKeyDown}
+          className="no-scrollbar absolute bottom-full left-0 z-50 mb-2 max-h-72 w-64 overflow-y-auto rounded-xl border border-zinc-800 bg-[#1a1a1d] p-1 shadow-xl outline-none"
         >
-          {models.map((m) => {
+          {models.map((m, idx) => {
             const active = m.id === current?.id;
+            const focused = idx === cursor;
             return (
-              <button
+              <div
                 key={m.id}
-                type="button"
+                id={`${listId}-opt-${idx}`}
+                data-idx={idx}
                 role="option"
                 aria-selected={active}
-                onClick={() => {
-                  onChange(m.id);
-                  setOpen(false);
-                }}
-                className="flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-left hover:bg-zinc-800/80"
+                onClick={() => commit(idx)}
+                onPointerEnter={() => setCursor(idx)}
+                className={`flex w-full cursor-pointer items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-left ${
+                  focused ? 'bg-zinc-800/80' : ''
+                }`}
               >
                 <span className="flex min-w-0 flex-col">
                   <span className="truncate text-[13px] text-zinc-200">{m.label}</span>
@@ -79,7 +164,7 @@ export function ModelSelector({
                   )}
                 </span>
                 {active && <Check size={14} className="flex-shrink-0 text-[#c96442]" />}
-              </button>
+              </div>
             );
           })}
         </div>

@@ -1,8 +1,8 @@
 'use client';
 
-import React, { useRef } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import TextareaAutosize from 'react-textarea-autosize';
-import { ArrowUp, Paperclip, Square, X, CornerDownLeft } from 'lucide-react';
+import { ArrowUp, CornerDownLeft, Paperclip, Square, X } from 'lucide-react';
 import { ModelSelector, type ModelOption } from '@/components/model-selector';
 
 export interface Attachment {
@@ -19,14 +19,17 @@ interface ComposerProps {
   isStreaming: boolean;
   onStop: () => void;
   attachments: Attachment[];
-  onAddFiles: (files: FileList | null) => void;
+  onAddFiles: (files: FileList | File[] | null) => void;
   onRemoveAttachment: (id: string) => void;
   models: ModelOption[];
   model: string;
   onModelChange: (id: string) => void;
   canContinue?: boolean;
   onContinue?: () => void;
+  maxFileBytes?: number;
 }
+
+const DEFAULT_MAX_FILE_BYTES = 20 * 1024 * 1024;
 
 export function Composer({
   input,
@@ -43,12 +46,61 @@ export function Composer({
   onModelChange,
   canContinue,
   onContinue,
+  maxFileBytes = DEFAULT_MAX_FILE_BYTES,
 }: ComposerProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const composingRef = useRef(false);
+  const [dragging, setDragging] = useState(false);
+  const [fileError, setFileError] = useState<string | null>(null);
+
   const hasContent = input.trim().length > 0 || attachments.length > 0;
+  const canSubmit = hasContent && !isStreaming;
+
+  const acceptFiles = useCallback(
+    (files: FileList | File[] | null) => {
+      if (!files) return;
+      const list = Array.from(files);
+      const tooBig = list.filter((f) => f.size > maxFileBytes);
+      const ok = list.filter((f) => f.size <= maxFileBytes);
+      setFileError(
+        tooBig.length > 0
+          ? `Bỏ qua ${tooBig.length} tệp vượt ${Math.round(maxFileBytes / 1024 / 1024)}MB.`
+          : null,
+      );
+      if (ok.length > 0) onAddFiles(ok);
+    },
+    [maxFileBytes, onAddFiles],
+  );
+
+  /** Guard IME: Enter khi đang compose là xác nhận ký tự, không phải gửi. */
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      const native = e.nativeEvent as KeyboardEvent & { isComposing?: boolean };
+      if (composingRef.current || native.isComposing || native.keyCode === 229) {
+        if (e.key === 'Enter') e.stopPropagation();
+        return;
+      }
+      onKeyDown(e);
+    },
+    [onKeyDown],
+  );
+
+  const handleSubmit = useCallback(
+    (e: React.FormEvent) => {
+      if (!canSubmit) {
+        e.preventDefault();
+        return;
+      }
+      onSubmit(e);
+    },
+    [canSubmit, onSubmit],
+  );
 
   return (
-    <div className="w-full bg-gradient-to-t from-[#0f0f10] via-[#0f0f10] to-transparent px-4 pb-4 pt-2 pb-safe">
+    <div
+      className="w-full bg-gradient-to-t from-[#0f0f10] via-[#0f0f10] to-transparent px-4 pt-2"
+      style={{ paddingBottom: 'calc(1rem + env(safe-area-inset-bottom))' }}
+    >
       <div className="mx-auto w-full max-w-3xl">
         {canContinue && !isStreaming && (
           <div className="mb-2 flex justify-center">
@@ -63,9 +115,27 @@ export function Composer({
           </div>
         )}
 
+        {fileError && (
+          <div role="status" className="mb-2 text-center text-[12px] text-amber-400/90">
+            {fileError}
+          </div>
+        )}
+
         <form
-          onSubmit={onSubmit}
-          className="rounded-2xl border border-zinc-700/50 bg-[#1e1e22] shadow-lg focus-within:border-zinc-600"
+          onSubmit={handleSubmit}
+          onDragOver={(e) => {
+            e.preventDefault();
+            setDragging(true);
+          }}
+          onDragLeave={() => setDragging(false)}
+          onDrop={(e) => {
+            e.preventDefault();
+            setDragging(false);
+            acceptFiles(e.dataTransfer?.files ?? null);
+          }}
+          className={`rounded-2xl border bg-[#1e1e22] shadow-lg transition-colors focus-within:border-zinc-600 ${
+            dragging ? 'border-[#c96442]' : 'border-zinc-700/50'
+          }`}
         >
           {attachments.length > 0 && (
             <div className="flex flex-wrap gap-2 px-3 pt-3">
@@ -92,14 +162,27 @@ export function Composer({
           <TextareaAutosize
             value={input}
             onChange={onInputChange}
-            onKeyDown={onKeyDown}
+            onKeyDown={handleKeyDown}
+            onCompositionStart={() => {
+              composingRef.current = true;
+            }}
+            onCompositionEnd={() => {
+              composingRef.current = false;
+            }}
+            onPaste={(e) => {
+              const files = Array.from(e.clipboardData?.files ?? []);
+              if (files.length > 0) {
+                e.preventDefault();
+                acceptFiles(files);
+              }
+            }}
             minRows={1}
             maxRows={10}
+            aria-label="Nội dung tin nhắn"
             placeholder="Gửi tin nhắn cho AI..."
             className="w-full resize-none bg-transparent px-4 pb-2 pt-3.5 text-[15px] leading-relaxed text-zinc-100 outline-none placeholder:text-zinc-500"
           />
 
-          {/* Bottom toolbar */}
           <div className="flex items-center justify-between gap-2 px-2.5 pb-2.5">
             <div className="flex min-w-0 items-center gap-1">
               <button
@@ -117,7 +200,7 @@ export function Composer({
                 multiple
                 hidden
                 onChange={(e) => {
-                  onAddFiles(e.target.files);
+                  acceptFiles(e.target.files);
                   e.target.value = '';
                 }}
               />
@@ -141,23 +224,19 @@ export function Composer({
             ) : (
               <button
                 type="submit"
-                disabled={!hasContent}
+                disabled={!canSubmit}
                 aria-label="Gửi tin nhắn"
                 className={`flex h-8 w-8 items-center justify-center rounded-full ${
-                  hasContent
+                  canSubmit
                     ? 'bg-[#c96442] text-white hover:bg-[#b5573a]'
                     : 'cursor-not-allowed bg-zinc-700/60 text-zinc-500'
                 }`}
               >
-                <ArrowUp size={16} strokeWidth={2.5} />
+                <ArrowUp size={16} />
               </button>
             )}
           </div>
         </form>
-
-        <p className="mt-2 text-center text-[11px] text-zinc-600">
-          AI có thể mắc lỗi. Hãy kiểm chứng thông tin quan trọng.
-        </p>
       </div>
     </div>
   );

@@ -3,68 +3,96 @@
 import { useEffect, useRef, useState } from 'react';
 
 /**
- * Throttle giá trị stream (leading + trailing edge), luôn flush giá trị cuối.
- * Đảm bảo cập nhật chính xác ngay lập tức khi delay hoặc active thay đổi.
+ * Throttle giá trị render (leading + trailing). Dùng cho content stream:
+ * UI cập nhật tối đa 1 lần / interval, luôn có flush cuối.
  */
-export function useThrottledValue<T>(value: T, delay = 150, active = true): T {
-  const [throttled, setThrottled] = useState<T>(value);
-  const latest = useRef(value);
-  const lastRun = useRef(0);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const mounted = useRef(true);
+export function useThrottledValue<T>(value: T, intervalMs = 100): T {
+  const [throttled, setThrottled] = useState(value);
+  const lastEmitRef = useRef(0);
+  const timerRef = useRef<number | null>(null);
+  const latestRef = useRef(value);
 
-  latest.current = value;
+  latestRef.current = value;
 
   useEffect(() => {
-    mounted.current = true;
+    const now = Date.now();
+    const elapsed = now - lastEmitRef.current;
+
+    if (elapsed >= intervalMs) {
+      lastEmitRef.current = now;
+      setThrottled(value);
+      return;
+    }
+    if (timerRef.current !== null) return;
+
+    timerRef.current = window.setTimeout(() => {
+      timerRef.current = null;
+      lastEmitRef.current = Date.now();
+      setThrottled(latestRef.current);
+    }, intervalMs - elapsed);
+
     return () => {
-      mounted.current = false;
-      if (timer.current) {
-        clearTimeout(timer.current);
-        timer.current = null;
+      if (timerRef.current !== null) {
+        window.clearTimeout(timerRef.current);
+        timerRef.current = null;
       }
     };
+  }, [value, intervalMs]);
+
+  useEffect(() => () => {
+    if (timerRef.current !== null) window.clearTimeout(timerRef.current);
   }, []);
 
-  useEffect(() => {
-    // Stream kết thúc -> flush ngay, reset cửa sổ cho lần stream sau.
-    if (!active) {
-      if (timer.current) {
-        clearTimeout(timer.current);
-        timer.current = null;
-      }
-      lastRun.current = 0;
-      setThrottled(value);
-      return;
+  return throttled;
+}
+
+/** Persister ghi Dexie: throttle >= 250ms, CHỈ field content, flush cuối bắt buộc. */
+export function createThrottledPersister(
+  write: (content: string) => Promise<unknown>,
+  intervalMs = 250,
+) {
+  let pending: string | null = null;
+  let lastWrite = 0;
+  let timer: number | null = null;
+  let closed = false;
+
+  const doWrite = async () => {
+    if (pending === null) return;
+    const payload = pending;
+    pending = null;
+    lastWrite = Date.now();
+    try {
+      await write(payload);
+    } catch (err) {
+      console.error('[persister] write failed', err);
     }
+  };
 
-    if (timer.current) {
-      clearTimeout(timer.current);
-      timer.current = null;
-    }
-
-    const elapsed = Date.now() - lastRun.current;
-    if (elapsed >= delay) {
-      lastRun.current = Date.now();
-      setThrottled(value);
-      return;
-    }
-
-    timer.current = setTimeout(() => {
-      timer.current = null;
-      lastRun.current = Date.now();
-      if (mounted.current) {
-        setThrottled(latest.current);
+  return {
+    push(content: string) {
+      if (closed) return;
+      pending = content;
+      const elapsed = Date.now() - lastWrite;
+      if (elapsed >= intervalMs) {
+        void doWrite();
+      } else if (timer === null) {
+        timer = window.setTimeout(() => {
+          timer = null;
+          void doWrite();
+        }, intervalMs - elapsed);
       }
-    }, Math.max(0, delay - elapsed));
-
-    return () => {
-      if (timer.current) {
-        clearTimeout(timer.current);
-        timer.current = null;
+    },
+    async flush(finalContent?: string) {
+      if (timer !== null) {
+        window.clearTimeout(timer);
+        timer = null;
       }
-    };
-  }, [value, delay, active]);
-
-  return active ? throttled : value;
+      if (finalContent !== undefined) pending = finalContent;
+      await doWrite();
+    },
+    close() {
+      closed = true;
+      if (timer !== null) window.clearTimeout(timer);
+    },
+  };
 }

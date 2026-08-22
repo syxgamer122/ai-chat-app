@@ -118,8 +118,8 @@ export async function POST(req: Request) {
       .trim()
       .slice(0, 1000);
 
-    const fallbackTitle = generateFallbackTitle(cleanMessage);
-    const candidateKeys = customKey ? [customKey] : getKeyCandidates().slice(0, 3);
+    const candidateResult = customKey ? { keys: [customKey] } : getKeyCandidates();
+    const candidateKeys = candidateResult.keys.slice(0, 3);
 
     for (const key of candidateKeys) {
       try {
