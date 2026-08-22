@@ -19,8 +19,7 @@ import {
 import { ALLOWED_MODEL_IDS, DEFAULT_MODEL_ID, getModelConfig } from '@/lib/models';
 import { checkRateLimit, getClientIp, checkSameOrigin, verifyAccessAuth } from '@/lib/security';
 
-export const runtime = 'nodejs';
-export const maxDuration = 300;
+export const runtime = 'edge';
 export const dynamic = 'force-dynamic';
 
 const STREAM_BUDGET_MS = 270_000;

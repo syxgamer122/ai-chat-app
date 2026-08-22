@@ -1,7 +1,7 @@
 import { getAllConfiguredKeys, getKeyLabel, getKeyPoolSnapshot } from '@/lib/api-keys';
 import { checkSameOrigin } from '@/lib/security';
 
-export const runtime = 'nodejs';
+export const runtime = 'edge';
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: Request) {
