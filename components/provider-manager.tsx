@@ -37,7 +37,17 @@ export function ProviderManager() {
   const choose = async (id: string) => {
     setActiveProvider(id);
     await syncActiveProviderSnapshot(id);
-    setStatus(id === SERVER_PROVIDER_ID ? 'Đang dùng máy chủ mặc định.' : 'Đã chuyển nhà cung cấp.');
+    if (id === SERVER_PROVIDER_ID) {
+      setStatus('Đang dùng máy chủ mặc định.');
+      return;
+    }
+    const p = await db.providers.get(id);
+    if (p && !(p.models?.length)) {
+      // Chưa có model → tự tải luôn để dùng được ngay không cần bấm 🔄.
+      await testAndLoadModels(p);
+    } else {
+      setStatus('Đã chuyển nhà cung cấp.');
+    }
   };
 
   const save = async () => {
