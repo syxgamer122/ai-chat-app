@@ -271,7 +271,9 @@ export default function ChatInterface() {
     onFinish: (message, { finishReason, usage }) => {
       const clean = sanitizeContent(message.content);
       const promptTokens = Number(usage?.promptTokens ?? 0) || 0;
-      const completionTokens = Number(usage?.completionTokens ?? 0) || 0;
+      // Gateway không báo usage ra → ước lượng từ độ dài câu trả lời.
+      const completionTokens =
+        Number(usage?.completionTokens ?? 0) || Math.ceil(clean.length / 4);
       if (promptTokens > 0 || completionTokens > 0) {
         // Ghi usage vào annotation để thống kê token có dữ liệu trong DB.
         const anns = (message.annotations ?? []) as Array<Record<string, unknown>>;

@@ -4,7 +4,7 @@
 import React, { memo, useEffect, useMemo } from 'react';
 import type { Message } from 'ai/react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { ArrowDown, ArrowUp, Sparkles } from 'lucide-react';
+import { ArrowDown, ArrowUp } from 'lucide-react';
 import { ChatErrorBoundary } from '@/components/chat-error-boundary';
 import { MessageItem, type BranchInfo } from './message-item';
 
@@ -237,10 +237,24 @@ export const MessageList = memo(function MessageList({
       >
         {!hasMessages ? (
           <div className="flex h-full flex-col items-center justify-center px-4 pb-16 pt-10">
-            <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-2xl border border-[#0A7E8C]/25 bg-gradient-to-br from-[#0A7E8C]/15 to-[#0A7E8C]/5 text-[#086E7A] shadow-[0_8px_32px_-8px_rgba(10,126,140,0.35)]">
-              <Sparkles size={30} strokeWidth={1.8} />
+            <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-white shadow-[0_8px_32px_-8px_rgba(10,126,140,0.35)] ring-1 ring-zinc-900/5">
+              <svg width="34" height="34" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+                <defs>
+                  <linearGradient id="koda-empty" x1="8" y1="7" x2="24" y2="25" gradientUnits="userSpaceOnUse">
+                    <stop stopColor="#0A7E8C" />
+                    <stop offset="1" stopColor="#4ECB71" />
+                  </linearGradient>
+                </defs>
+                <path d="M10.5 8V24" stroke="url(#koda-empty)" strokeWidth="3.2" strokeLinecap="round" />
+                <path d="M10.5 16L22.5 8" stroke="url(#koda-empty)" strokeWidth="3.2" strokeLinecap="round" />
+                <path d="M10.5 16L22.5 24" stroke="url(#koda-empty)" strokeWidth="3.2" strokeLinecap="round" />
+                <circle cx="22.5" cy="8" r="2.4" fill="#0A7E8C" />
+                <circle cx="22.5" cy="24" r="2.4" fill="#4ECB71" />
+              </svg>
             </div>
-            <h1 className="bg-gradient-to-b from-zinc-50 to-zinc-400 bg-clip-text text-center text-[28px] font-semibold leading-tight tracking-tight text-transparent">
+            <div className="text-[15px] font-extrabold tracking-tight text-zinc-800">KODA</div>
+            <div className="mb-5 text-[9px] font-medium uppercase tracking-[0.28em] text-zinc-500">AI Innovations</div>
+            <h1 className="text-center text-[24px] font-semibold leading-tight tracking-tight text-zinc-800">
               Hôm nay mình giúp gì cho bạn?
             </h1>
             <p className="mt-2 text-center text-[13px] text-zinc-500">

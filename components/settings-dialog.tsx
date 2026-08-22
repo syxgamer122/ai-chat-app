@@ -2,8 +2,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { db, type PromptTemplate } from '@/lib/db';
-import { useAppStore } from '@/lib/store';
-import { AVAILABLE_MODELS } from '@/lib/models';
+import { useAppStore, SERVER_PROVIDER_ID } from '@/lib/store';
 import { exportJson, exportMarkdown, importBackup, type ImportMode } from '@/lib/backup';
 import { X, Download, Upload, Loader2, ShieldAlert } from 'lucide-react';
 import { useInstallPrompt } from '@/lib/use-install-prompt';
@@ -45,16 +44,36 @@ function InstallSection() {
     <div className="pt-4 border-t border-zinc-200 space-y-2">
       <h3 className="text-sm font-semibold text-zinc-700">Ứng dụng</h3>
       {installed ? (
-        <p className="text-xs text-zinc-500">Bạn đang dùng bản đã cài lên thiết bị.</p>
+        <div className="flex items-center gap-3 rounded-xl border border-zinc-200 bg-white p-3">
+          <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-zinc-100 ring-1 ring-zinc-900/5">
+            <svg width="20" height="20" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+              <defs>
+                <linearGradient id="koda-pwa" x1="8" y1="7" x2="24" y2="25" gradientUnits="userSpaceOnUse">
+                  <stop stopColor="#0A7E8C" />
+                  <stop offset="1" stopColor="#4ECB71" />
+                </linearGradient>
+              </defs>
+              <path d="M10.5 8V24" stroke="url(#koda-pwa)" strokeWidth="3.2" strokeLinecap="round" />
+              <path d="M10.5 16L22.5 8" stroke="url(#koda-pwa)" strokeWidth="3.2" strokeLinecap="round" />
+              <path d="M10.5 16L22.5 24" stroke="url(#koda-pwa)" strokeWidth="3.2" strokeLinecap="round" />
+              <circle cx="22.5" cy="8" r="2.4" fill="#0A7E8C" />
+              <circle cx="22.5" cy="24" r="2.4" fill="#4ECB71" />
+            </svg>
+          </div>
+          <p className="text-xs text-zinc-600">
+            <strong className="font-semibold">KODA</strong> đang chạy bản đã cài lên thiết bị —
+            hoạt động offline và mở như app thật.
+          </p>
+        </div>
       ) : canInstall ? (
         <button
           type="button"
           onClick={handleInstall}
           disabled={installing}
-          className="w-full flex items-center justify-center gap-2 py-2.5 px-4 bg-[#0A7E8C] hover:bg-[#086E7A] text-white rounded-xl text-sm font-medium transition disabled:opacity-50"
+          className="w-full flex items-center justify-center gap-2 py-2.5 px-4 bg-gradient-to-r from-[#0A7E8C] to-[#0E9A6B] hover:from-[#086E7A] hover:to-[#0C8A5F] text-white rounded-xl text-sm font-medium shadow-[0_6px_20px_-8px_rgba(10,126,140,0.6)] transition disabled:opacity-50"
         >
           {installing ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-          Cài đặt lên thiết bị
+          Cài KODA lên thiết bị
         </button>
       ) : isIOS ? (
         <p className="text-xs text-zinc-500 leading-relaxed">
@@ -70,6 +89,17 @@ function InstallSection() {
     </div>
   );
 }
+
+type SettingsTab = 'chung' | 'provider' | 'stats' | 'prompts' | 'data' | 'app';
+
+const SETTINGS_TABS: Array<{ id: SettingsTab; label: string }> = [
+  { id: 'chung', label: 'Chung' },
+  { id: 'provider', label: 'Nhà cung cấp' },
+  { id: 'stats', label: 'Thống kê' },
+  { id: 'prompts', label: 'Prompt' },
+  { id: 'data', label: 'Dữ liệu' },
+  { id: 'app', label: 'Ứng dụng' },
+];
 
 const FOCUSABLE_SELECTOR =
   'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
@@ -345,6 +375,9 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const settings = useAppStore((s) => s.settings);
   const updateSettings = useAppStore((s) => s.updateSettings);
   const updatePerf = useAppStore((s) => s.updatePerf);
+  const activeProviderId = useAppStore((s) => s.activeProviderId);
+  const [tab, setTab] = useState<SettingsTab>('chung');
+  const show = (t: SettingsTab) => tab === t;
 
   const [importMode, setImportMode] = useState<ImportMode>('merge');
   const [status, setStatus] = useState<Status>({ kind: 'idle' });
@@ -458,20 +491,23 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
         </div>
 
         <div className="space-y-5">
-          {/* Model */}
-          <div>
-            <label className="text-sm font-medium text-zinc-600 mb-1.5 block">AI Model</label>
-            <select
-              value={settings.model}
-              onChange={(e) => updateSettings({ model: e.target.value })}
-              className="w-full bg-white border border-zinc-200 rounded-xl p-2.5 text-sm text-zinc-700 outline-none focus:border-[#0A7E8C] transition"
-            >
-              {AVAILABLE_MODELS.map((m) => (
-                <option key={m.id} value={m.id}>{m.name}</option>
-              ))}
-            </select>
+          <div className="mb-5 flex gap-1 overflow-x-auto rounded-xl bg-white p-1 ring-1 ring-zinc-200" role="tablist">
+            {SETTINGS_TABS.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                role="tab"
+                aria-selected={tab === t.id}
+                onClick={() => setTab(t.id)}
+                className={`flex-shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium transition ${
+                  tab === t.id ? 'bg-[#0A7E8C] text-white shadow-sm' : 'text-zinc-500 hover:bg-zinc-100 hover:text-zinc-700'
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
           </div>
-
+          {show('chung') && (<>
           {/* Temperature */}
           <div>
             <div className="flex justify-between text-sm mb-1.5">
@@ -485,10 +521,12 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
             />
           </div>
 
+          </>)}
+          {show('provider') && activeProviderId === SERVER_PROVIDER_ID && (<>
           {/* API key */}
           <div>
             <label className="text-sm font-medium text-zinc-600 mb-1.5 block">
-              OpenAI API Key (Tùy chọn)
+              API Key — chỉ cho Máy chủ mặc định
             </label>
             <input
               type="password"
@@ -499,6 +537,8 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
             />
           </div>
 
+          </>)}
+          {show('provider') && (<>
           {/* Nhà cung cấp API */}
           <div>
             <label className="text-sm font-medium text-zinc-600 mb-1.5 block">
@@ -511,6 +551,8 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
             <ProviderManager />
           </div>
 
+          </>)}
+          {show('stats') && (<>
           {/* Thống kê token */}
           <div>
             <label className="text-sm font-medium text-zinc-600 mb-1.5 block">
@@ -519,6 +561,8 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
             <UsageStats />
           </div>
 
+          </>)}
+          {show('provider') && (<>
           {/* Access code */}
           <div>
             <label className="text-sm font-medium text-zinc-600 mb-1.5 block">
@@ -533,6 +577,8 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
             />
           </div>
 
+          </>)}
+          {show('chung') && (<>
           {/* System prompt */}
           <div>
             <label className="text-sm font-medium text-zinc-600 mb-1.5 block">System Prompt</label>
@@ -544,6 +590,8 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
             />
           </div>
 
+          </>)}
+          {show('chung') && (<>
           {/* Perf */}
           <div className="pt-2 border-t border-zinc-200/80 space-y-3">
             <div className="flex items-center justify-between">
@@ -557,15 +605,23 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
             </div>
           </div>
 
+          </>)}
+          {show('prompts') && (<>
           {/* ------------------ Thư viện prompt ------------------ */}
           <PromptLibrarySection />
 
+          </>)}
+          {show('app') && (<>
           {/* ------------------ Ứng dụng (PWA) ------------------ */}
           <InstallSection />
 
+          </>)}
+          {show('data') && (<>
           {/* ------------------ Tự động sao lưu ------------------ */}
           <AutoBackupSection />
 
+          </>)}
+          {show('data') && (<>
           {/* ------------------ Sao lưu & Phục hồi ------------------ */}
           <div className="pt-4 border-t border-zinc-200 space-y-3">
             <h3 className="text-sm font-semibold text-zinc-700">Sao lưu & Phục hồi</h3>
@@ -666,6 +722,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
               Xoá toàn bộ dữ liệu ứng dụng
             </button>
           </div>
+          </>)}
         </div>
       </div>
     </div>
