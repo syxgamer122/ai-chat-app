@@ -33,6 +33,7 @@ import { useCrossTabChatSync } from '@/lib/use-cross-tab-chat-sync';
 import { useStreamLease } from '@/lib/use-stream-lease';
 import { shouldAcceptStreamUpdate, type StreamGeneration } from '@/lib/stream-generation';
 import { useStickToBottom } from '@/lib/use-stick-to-bottom';
+import { ChatExportMenu } from '@/components/chat-export-menu';
 
 const attachmentCache = new WeakMap<object, StoredAttachment>();
 
@@ -851,6 +852,7 @@ interface ChatHeaderProps {
   onSetConfirmClear: (val: boolean) => void;
   onDeleteChat: () => void;
   onOpenSidebar: () => void;
+  currentChatId: string | null;
 }
 
 const ChatHeader = memo(function ChatHeader({
@@ -859,6 +861,7 @@ const ChatHeader = memo(function ChatHeader({
   onSetConfirmClear,
   onDeleteChat,
   onOpenSidebar,
+  currentChatId,
 }: ChatHeaderProps) {
   return (
     <header className="relative z-20 flex flex-shrink-0 items-center justify-between px-3 py-2 bg-zinc-950/85 backdrop-blur-md border-b border-zinc-800/60 pt-[calc(0.5rem+env(safe-area-inset-top))]">
@@ -871,9 +874,11 @@ const ChatHeader = memo(function ChatHeader({
         <Menu size={18} />
       </button>
 
-      {hasMessages && (
-        <div className="ml-auto flex items-center gap-2">
-          {confirmClear ? (
+      <div className="ml-auto flex items-center gap-1.5">
+        <ChatExportMenu chatId={currentChatId} />
+
+        {hasMessages && (
+          confirmClear ? (
             <div className="flex items-center gap-1.5 bg-zinc-900/90 border border-zinc-800 rounded-xl p-1 backdrop-blur-sm shadow-lg">
               <button
                 onClick={onDeleteChat}
@@ -897,9 +902,9 @@ const ChatHeader = memo(function ChatHeader({
             >
               <Trash2 size={18} />
             </button>
-          )}
-        </div>
-      )}
+          )
+        )}
+      </div>
     </header>
   );
 });
@@ -3094,6 +3099,7 @@ export default function ChatInterface() {
         onSetConfirmClear={setConfirmClear}
         onDeleteChat={deleteChat}
         onOpenSidebar={onOpenSidebar}
+        currentChatId={currentChatId}
       />
 
       {swipeDirection && (

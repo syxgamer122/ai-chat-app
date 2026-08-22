@@ -1,4 +1,5 @@
 import Dexie, { type Table } from 'dexie';
+import { tokenize } from '@/lib/search-utils';
 
 /* ------------------------------------------------------------------ */
 /* Domain Types                                                       */
@@ -164,6 +165,13 @@ export interface StoredMessage {
    * Id của stream phục vụ recovery và lease synchronization.
    */
   streamId?: string;
+
+  siblingIndex?: number;
+  siblingCount?: number;
+  toolInvocations?: any[];
+
+  /** Index tìm kiếm (multiEntry) — được sinh tự động, không set thủ công. */
+  tokens?: string[];
 }
 
 /* ------------------------------------------------------------------ */
@@ -608,6 +616,71 @@ export class ChatDatabase extends Dexie {
           await chatsTable.bulkPut(chatUpdates);
         }
       });
+
+    /* -------------------------------------------------------------- */
+    /* Version 4 — Search Index (*tokens)                             */
+    /* -------------------------------------------------------------- */
+
+    this.version(4)
+      .stores({
+        chats:
+          'id, title, pinned, updatedAt, activeLeafId, revision',
+        messages: [
+          'id',
+          'chatId',
+          'parentId',
+          'createdAt',
+          'seq',
+          '*tokens',
+          '[chatId+seq]',
+          '[chatId+parentId]',
+          '[chatId+createdAt]',
+        ].join(','),
+      })
+      .upgrade(async (tx) => {
+        const messagesTable = tx.table('messages');
+        const rawMessages =
+          (await messagesTable.toArray()) as StoredMessage[];
+
+        const messageUpdates: StoredMessage[] = [];
+        for (const msg of rawMessages) {
+          messageUpdates.push({
+            ...msg,
+            tokens: tokenize(msg.content ?? ''),
+          });
+        }
+
+        if (messageUpdates.length > 0) {
+          await messagesTable.bulkPut(messageUpdates);
+        }
+      });
+
+    this.registerSearchHooks();
+  }
+
+  /** Tự động đồng bộ `tokens` mỗi khi message được ghi/sửa. */
+  private registerSearchHooks() {
+    this.messages.hook('creating', (_primKey, obj) => {
+      obj.tokens = tokenize(obj.content ?? '');
+    });
+
+    this.messages.hook('updating', (modifications, _primKey, obj) => {
+      const mods = modifications as Partial<StoredMessage>;
+      const nextStatus = 'status' in mods ? mods.status : obj.status;
+
+      if (typeof mods.content === 'string') {
+        // Đang stream: hoãn tokenize để không tốn CPU theo từng chunk
+        if (nextStatus === 'streaming') return undefined;
+        return { tokens: tokenize(mods.content) };
+      }
+
+      // Vừa kết thúc stream mà content không nằm trong mods → tokenize lần cuối
+      if (obj.status === 'streaming' && nextStatus && nextStatus !== 'streaming') {
+        return { tokens: tokenize(obj.content ?? '') };
+      }
+
+      return undefined;
+    });
   }
 }
 
@@ -616,6 +689,16 @@ export class ChatDatabase extends Dexie {
 /* ------------------------------------------------------------------ */
 
 export const db = new ChatDatabase();
+
+/**
+ * Gọi tuỳ chọn sau khi stream kết thúc nếu luồng ghi của bạn KHÔNG set `status`.
+ * An toàn để gọi nhiều lần.
+ */
+export async function finalizeMessageTokens(messageId: string): Promise<void> {
+  const msg = await db.messages.get(messageId);
+  if (!msg) return;
+  await db.messages.update(messageId, { tokens: tokenize(msg.content ?? '') });
+}
 
 /**
  * Khi một tab khác nâng cấp database, tab hiện tại phải đóng database
