@@ -82,29 +82,65 @@ export function getClientIp(req: Request): string {
 export function verifySameOrigin(req: Request): boolean {
   if (process.env.NODE_ENV !== 'production') return true;
 
+  // 1. Kiểm tra header bảo mật Sec-Fetch-Site của trình duyệt hiện đại
+  const secFetchSite = req.headers.get('sec-fetch-site');
+  if (secFetchSite === 'same-origin' || secFetchSite === 'none') {
+    return true;
+  }
+  if (secFetchSite === 'cross-site') {
+    return false;
+  }
+
+  // 2. Thu thập toàn bộ danh sách Host hợp lệ từ request & môi trường
+  const candidateHosts = new Set<string>();
+
+  const rawHost = req.headers.get('host');
+  if (rawHost) candidateHosts.add(rawHost.trim().toLowerCase());
+
+  const forwardedHost = req.headers.get('x-forwarded-host');
+  if (forwardedHost) {
+    for (const h of forwardedHost.split(',')) {
+      if (h.trim()) candidateHosts.add(h.trim().toLowerCase());
+    }
+  }
+
+  if (process.env.VERCEL_URL) candidateHosts.add(process.env.VERCEL_URL.trim().toLowerCase());
+  if (process.env.VERCEL_PROJECT_PRODUCTION_URL) candidateHosts.add(process.env.VERCEL_PROJECT_PRODUCTION_URL.trim().toLowerCase());
+
   const origin = req.headers.get('origin');
   const referer = req.headers.get('referer');
-  const host = req.headers.get('host') || req.headers.get('x-forwarded-host');
 
-  if (!host) return true;
+  // Không có cả origin lẫn referer (ví dụ internal request): cho phép
+  if (!origin && !referer) return true;
 
-  if (origin) {
+  const extractHost = (urlStr: string): string | null => {
     try {
-      const originHost = new URL(origin).host;
-      if (originHost !== host) return false;
+      return new URL(urlStr).host.toLowerCase();
     } catch {
-      return false;
+      return null;
     }
+  };
+
+  const originHost = origin ? extractHost(origin) : null;
+  const refererHost = referer ? extractHost(referer) : null;
+
+  // Nếu có origin/referer và khớp với bất kỳ host candidate nào
+  if (originHost && candidateHosts.has(originHost)) return true;
+  if (refererHost && candidateHosts.has(refererHost)) return true;
+
+  // Nếu cả originHost/refererHost lẫn host của request đều thuộc đuôi .vercel.app
+  if (originHost && originHost.endsWith('.vercel.app')) {
+    const hasVercelHost = Array.from(candidateHosts).some((h) => h.endsWith('.vercel.app'));
+    if (hasVercelHost) return true;
+  }
+  if (refererHost && refererHost.endsWith('.vercel.app')) {
+    const hasVercelHost = Array.from(candidateHosts).some((h) => h.endsWith('.vercel.app'));
+    if (hasVercelHost) return true;
   }
 
-  if (referer) {
-    try {
-      const refererHost = new URL(referer).host;
-      if (refererHost !== host) return false;
-    } catch {
-      return false;
-    }
-  }
+  // Nếu không có origin/referer nào khớp được
+  if (originHost && !candidateHosts.has(originHost)) return false;
+  if (refererHost && !candidateHosts.has(refererHost)) return false;
 
   return true;
 }
