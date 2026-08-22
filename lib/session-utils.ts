@@ -1,4 +1,4 @@
-﻿import { db, type ChatSession } from "@/lib/db";
+import { db, type ChatSession } from "@/lib/db";
 import { chatBroadcast } from "@/lib/chat-broadcast";
 import {
   getClientId,

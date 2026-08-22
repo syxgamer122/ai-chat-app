@@ -1,4 +1,4 @@
-﻿export type ProviderId = 'openai' | 'anthropic' | 'deepseek' | 'google' | 'gateway';
+export type ProviderId = 'openai' | 'anthropic' | 'deepseek' | 'google' | 'gateway';
 
 export interface ModelConfig {
   id: string;

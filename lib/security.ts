@@ -1,4 +1,4 @@
-﻿interface RateLimitBucket {
+interface RateLimitBucket {
   timestamps: number[];
 }
 

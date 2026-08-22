@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import React, { Component, type ErrorInfo, type ReactNode } from "react";
 import { RefreshCcw, AlertTriangle } from "lucide-react";

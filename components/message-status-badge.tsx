@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import type { MessageStatus } from "@/lib/chat-types";
 import type { StoredMessageStatus } from "@/lib/db";

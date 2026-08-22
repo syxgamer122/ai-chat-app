@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import React, { useState } from 'react';
 import { Copy, Check, Pencil, RefreshCw, ChevronLeft, ChevronRight } from 'lucide-react';

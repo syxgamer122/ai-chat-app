@@ -1,4 +1,4 @@
-﻿export interface ChatDebugEvent {
+export interface ChatDebugEvent {
   type:
     | "stream-start"
     | "stream-progress"

@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import type { AttachmentRecord } from "@/lib/chat-types";
 import { useAttachmentUrl, type CompatibleAttachment } from "@/lib/use-attachment-url";

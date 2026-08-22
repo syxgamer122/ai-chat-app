@@ -1,4 +1,4 @@
-﻿import type { ChatSession } from '@/lib/db';
+import type { ChatSession } from '@/lib/db';
 
 export type DateGroupKey =
   | 'pinned' | 'today' | 'yesterday' | 'last7' | 'last30' | 'older';

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Quản lý pool API key + phân loại lỗi upstream.
  *
  * Thay đổi cốt lõi so với bản cũ:

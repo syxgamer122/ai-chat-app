@@ -1,4 +1,4 @@
-﻿import { db, type StoredMessage } from "@/lib/db";
+import { db, type StoredMessage } from "@/lib/db";
 import {
   getClientId,
   nextLamport,

@@ -1,4 +1,4 @@
-﻿export interface StreamGeneration {
+export interface StreamGeneration {
   streamId: string;
   generation: number;
 }

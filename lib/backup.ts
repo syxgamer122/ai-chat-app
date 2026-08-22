@@ -1,4 +1,4 @@
-﻿import { db, type ChatSession, type StoredMessage } from '@/lib/db';
+import { db, type ChatSession, type StoredMessage } from '@/lib/db';
 import { tokenize } from '@/lib/search-utils';
 
 export const BACKUP_FORMAT = 'ai-chat-backup';

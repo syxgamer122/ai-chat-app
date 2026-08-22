@@ -1,4 +1,4 @@
-﻿import type { ChatMessage } from "@/lib/chat-types";
+import type { ChatMessage } from "@/lib/chat-types";
 import type { StoredMessage } from "@/lib/db";
 
 export type TreeValidationReason =

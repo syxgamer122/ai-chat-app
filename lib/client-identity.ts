@@ -1,4 +1,4 @@
-﻿const CLIENT_ID_KEY = "ai-chat-client-id";
+const CLIENT_ID_KEY = "ai-chat-client-id";
 
 function createId(prefix: string) {
   return `${prefix}_${crypto.randomUUID()}`;

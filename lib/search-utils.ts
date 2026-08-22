@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Chuẩn hoá & tokenize phục vụ tìm kiếm tiếng Việt (bỏ dấu, lowercase),
  * giữ được bản đồ offset để highlight chính xác trên văn bản gốc.
  */

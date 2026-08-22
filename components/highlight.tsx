@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import React, { memo } from 'react';
 import type { SnippetSegment } from '@/lib/search-utils';

@@ -1,4 +1,4 @@
-﻿export interface RevisionInfo {
+export interface RevisionInfo {
   revision?: number;
   revisionOriginClientId?: string;
 }

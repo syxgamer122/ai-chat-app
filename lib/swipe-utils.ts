@@ -1,4 +1,4 @@
-﻿export function resolveSwipeDirection(
+export function resolveSwipeDirection(
   deltaX: number,
   deltaY: number,
   threshold = 64,
