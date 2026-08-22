@@ -60,8 +60,7 @@ SyntaxHighlighter.registerLanguage('java', java);
 SyntaxHighlighter.registerLanguage('csharp', csharp);
 SyntaxHighlighter.registerLanguage('cs', csharp);
 
-// Tắt singleDollarTextMath để chống xung đột với ký tự tiền tệ $20, $50
-const REMARK_PLUGINS: any[] = [remarkGfm, [remarkMath, { singleDollarTextMath: false }]];
+const REMARK_PLUGINS: any[] = [remarkGfm, [remarkMath, { singleDollarTextMath: true }]];
 const REHYPE_PLUGINS: any[] = [
   [rehypeKatex, { throwOnError: false, errorColor: '#71717a', strict: false }],
 ];
@@ -85,19 +84,19 @@ function stripArtifacts(s: string): string {
   return s.replace(TRAILING_GARBAGE, '');
 }
 
+/** Escape các ký hiệu tiền tệ $20, $50k để không bị hiểu nhầm thành công thức toán */
+function escapeCurrency(text: string): string {
+  return text.replace(
+    /(?<!\\)\$(\s*\d+(?:[.,]\d+)*(?:\s*[kKmMbBtT]|(?=[\s.,;:!?'")]|$)))/g,
+    '\\$$$1',
+  );
+}
+
+/** Chuẩn hóa ký hiệu LaTeX \[...\] thành $$...$$ (khối) và \(...\) thành $...$ (dòng) */
 function normalizeLatex(s: string): string {
   return s
     .replace(/\\\[([\s\S]*?)\\\]/g, (_m, body: string) => `\n\n$$\n${body.trim()}\n$$\n\n`)
-    .replace(/\\\(([\s\S]*?)\\\)/g, (_m, body: string) => `$$${body.trim()}$$`);
-}
-
-/** $x$ -> $$x$$ chỉ khi nội dung "trông như" toán, để không phá $20, $50. */
-const MATHY = /[\\^_]|\\frac|\\vec|\\sqrt|\\overrightarrow/;
-function promoteSingleDollar(chunk: string): string {
-  return chunk.replace(
-    /(?<![$\d\w])\$(?!\s|\$)([^\n$]{1,300}?)(?<!\s)\$(?![$\d])/g,
-    (m, body: string) => (MATHY.test(body) ? `$$${body}$$` : m),
-  );
+    .replace(/\\\(([\s\S]*?)\\\)/g, (_m, body: string) => `$${body.trim()}$`);
 }
 
 /**
@@ -127,7 +126,7 @@ function stabilize(raw: string, isStreaming: boolean): string {
 
 function preprocess(raw: string, isStreaming: boolean): string {
   const stable = stabilize(stripArtifacts(raw), isStreaming);
-  return outsideCode(stable, (chunk) => promoteSingleDollar(normalizeLatex(chunk)));
+  return outsideCode(stable, (chunk) => escapeCurrency(normalizeLatex(chunk)));
 }
 
 /* ------------------------------------------------------------------ */
