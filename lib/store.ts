@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { DEFAULT_MODEL_ID, ALLOWED_MODEL_IDS } from '@/lib/models';
+import { DEFAULT_MODEL_ID, normalizeModelId } from '@/lib/models';
 
 export interface PerfSettings {
   /** Cửa sổ gom render markdown khi stream (ms). Máy yếu: 250–300 */
@@ -69,7 +69,7 @@ export const useAppStore = create<AppState>()(
       merge: (persisted, current) => {
         const p = (persisted ?? {}) as Partial<AppState>;
         const rawModel = p.settings?.model;
-        const validModel = rawModel && ALLOWED_MODEL_IDS.has(rawModel) ? rawModel : DEFAULT_MODEL_ID;
+        const validModel = normalizeModelId(rawModel);
 
         return {
           ...current,
@@ -79,13 +79,18 @@ export const useAppStore = create<AppState>()(
             ...(p.settings ?? {}),
             model: validModel,
             perf: { ...current.settings.perf, ...(p.settings?.perf ?? {}) },
-            // Tuyệt đối không phục hồi apiKey hay accessCode từ localStorage
             apiKey: '',
             accessCode: '',
           },
         };
       },
-      migrate: (state: any) => state,
+      migrate: (state: any) => ({
+        ...state,
+        settings: {
+          ...state?.settings,
+          model: normalizeModelId(state?.settings?.model),
+        },
+      }),
     },
   ),
 );

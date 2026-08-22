@@ -1,15 +1,5 @@
-/* ============================================================================
- * lib/markdown-preprocess.ts
- * Tiền xử lý Markdown/LaTeX trước remark-math + KaTeX.
- *
- * GIỚI HẠN ĐÃ BIẾT: code block thụt lề 4 space KHÔNG được mask, vì không thể
- * phân biệt an toàn với phần tiếp nối của list item mà không parse block-level.
- * Ưu tiên: không làm hỏng công thức trong danh sách. Hãy dùng fenced code.
- * ========================================================================== */
-
 const MAX_INLINE_MATH = 400;
 const TAIL_WINDOW = 400;
-/** Trên ngưỡng này, bỏ các bước biến đổi tốn kém để giữ main thread mượt. */
 const HEAVY_PASS_LIMIT = 120_000;
 
 const STRONG_MATH_SIGNAL = /[\\^_{}]/;
@@ -139,7 +129,6 @@ export function scanMath(s: string): ScanResult {
 function isInsideSpan(spans: MathSpan[], offset: number, length: number): boolean {
   for (const sp of spans) {
     if (offset >= sp.start && offset + length <= sp.end) return true;
-    // chồng lấn một phần cũng coi là "đã thuộc math" — không bọc thêm.
     if (offset < sp.end && offset + length > sp.start) return true;
   }
   return false;
@@ -229,10 +218,6 @@ const BARE_ENV = new RegExp(
   'g',
 );
 
-/**
- * Sửa D1: chỉ bọc môi trường nằm NGOÀI mọi math span đã nhận diện,
- * thay cho heuristic cửa sổ 4 ký tự vốn bỏ sót `$$\n\n  \begin{...}`.
- */
 function wrapBareEnvironments(s: string, spans: MathSpan[]): string {
   if (!s.includes('\\begin{')) return s;
   return s.replace(BARE_ENV, (match, _name, _body, offset: number) => {
@@ -241,7 +226,6 @@ function wrapBareEnvironments(s: string, spans: MathSpan[]): string {
   });
 }
 
-/* Sửa D3: bắt cả run backtick CHƯA ĐÓNG ở cuối chuỗi (đuôi stream). */
 const CODE_MASK =
   /(```[\s\S]*?(?:```|$)|~~~[\s\S]*?(?:~~~|$)|``[\s\S]*?``|`[^`\n]*`|`[^`\n]*$)/g;
 
@@ -253,25 +237,49 @@ function balanceFences(s: string): string {
   return out;
 }
 
-/**
- * Sửa D2: `null` và `NaN` là nội dung hợp lệ (rất hay xuất hiện khi nói về
- * lập trình). Chỉ dọn artifact thực sự do serialize sai sinh ra.
- */
-const TRAILING_ARTIFACT = /(?:[ \t]*(?:\[object Object\]|\bundefined\b))+[\s]*$/;
+/* ------------------------------------------------------------------
+ * FIX BUG 3 — lớp phòng thủ artifact JS bị serialize vào text stream
+ * ---------------------------------------------------------------- */
 
-function stripStreamArtifacts(s: string): string {
-  return s.replace(/\u0000/g, '').replace(TRAILING_ARTIFACT, '');
+const ARTIFACT_TOKEN = String.raw`(?:\[object [A-Za-z]+\]|undefined|null|NaN)`;
+
+/** Artifact nằm trên DÒNG RIÊNG ở cuối chuỗi -> chắc chắn là rác. */
+const ARTIFACT_OWN_LINE = new RegExp(
+  String.raw`(?:\r?\n[ \t]*${ARTIFACT_TOKEN}[ \t]*)+[\s]*$`,
+);
+
+/** Artifact dính ngay sau delimiter toán/HTML đóng -> rác. */
+const ARTIFACT_GLUED = new RegExp(
+  String.raw`(\$\$|\\\]|\\\)|>)[ \t]*${ARTIFACT_TOKEN}(?:[ \t\r\n]*${ARTIFACT_TOKEN})*[\s]*$`,
+);
+
+/** Toàn bộ chuỗi chỉ là artifact. */
+const ARTIFACT_ONLY = new RegExp(String.raw`^[\s]*(?:${ARTIFACT_TOKEN}[\s]*)+$`);
+
+/**
+ * CHỈ gọi trên segment KHÔNG phải code fence, và chỉ ở segment cuối cùng.
+ * Không dùng regex " \bundefined\b$" trần vì sẽ xoá nhầm câu hợp lệ
+ * kiểu "biến này trả về undefined".
+ */
+function stripTrailingArtifacts(s: string): string {
+  if (!s) return s;
+  if (ARTIFACT_ONLY.test(s)) return '';
+  let out = s.replace(ARTIFACT_OWN_LINE, '');
+  out = out.replace(ARTIFACT_GLUED, '$1');
+  return out;
+}
+
+/** Ký tự điều khiển vô hình luôn phải bỏ, kể cả trong code. */
+function stripControlChars(s: string): string {
+  return s.replace(/\u0000/g, '').replace(/^\uFEFF/, '');
 }
 
 export function preprocessMarkdown(raw: string, isStreaming: boolean): string {
   if (!raw) return '';
-  const cleaned = stripStreamArtifacts(raw);
+  const cleaned = stripControlChars(raw);
 
-  /* Sửa D4: tin nhắn khổng lồ chỉ đi qua các bước rẻ, tránh nghẽn main thread
-     mỗi tick throttle. Toán học đã hoàn chỉnh vẫn render đúng vì remark-math
-     tự xử lý được `$$…$$` cân bằng. */
   if (cleaned.length > HEAVY_PASS_LIMIT) {
-    return balanceFences(cleaned);
+    return balanceFences(stripTrailingArtifacts(cleaned));
   }
 
   const parts = cleaned.split(CODE_MASK);
@@ -279,10 +287,14 @@ export function preprocessMarkdown(raw: string, isStreaming: boolean): string {
 
   const rebuilt = parts
     .map((part, i) => {
-      if (i % 2 === 1) return part; // vùng code: giữ nguyên tuyệt đối
+      if (i % 2 === 1) return part; // code fence: giữ nguyên tuyệt đối
       if (!part) return part;
 
-      let text = normalizeLatexDelimiters(part);
+      // Artifact chỉ xuất hiện ở đuôi output => chỉ xử lý segment cuối.
+      let text = i === lastIndex ? stripTrailingArtifacts(part) : part;
+      if (!text) return text;
+
+      text = normalizeLatexDelimiters(text);
       let scan = scanMath(text);
 
       const wrapped = wrapBareEnvironments(text, scan.spans);

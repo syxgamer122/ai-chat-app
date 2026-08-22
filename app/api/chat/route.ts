@@ -16,7 +16,7 @@ import {
   classifyUpstreamStatus,
   type UpstreamScope,
 } from '@/lib/api-keys';
-import { ALLOWED_MODEL_IDS, DEFAULT_MODEL_ID, getModelConfig } from '@/lib/models';
+import { ALLOWED_MODEL_IDS, DEFAULT_MODEL_ID, getModelConfig, resolveProviderModelChain } from '@/lib/models';
 import { checkRateLimit, getClientIp, checkSameOrigin, verifyAccessAuth } from '@/lib/security';
 
 export const runtime = 'edge';
@@ -477,6 +477,7 @@ export async function POST(req: Request) {
 
     /* Sửa A11: tôn trọng capability của model. */
     const modelConfig = getModelConfig(selectedModelId);
+    const modelChain = resolveProviderModelChain(modelConfig);
     const targetModel = modelConfig.providerModel;
     const contextMessages = messages.slice(-50);
 
@@ -609,132 +610,141 @@ export async function POST(req: Request) {
               baseURL: process.env.OPENAI_BASE_URL || undefined,
             });
 
-            let abortKind: AbortKind | null = null;
-            const budgetController = new AbortController();
-            const budgetTimer = setTimeout(() => {
-              abortKind = 'budget';
-              budgetController.abort(new Error('Vượt quá ngân sách thời gian stream (270s).'));
-            }, STREAM_BUDGET_MS);
+            for (const targetModel of modelChain) {
+              let abortKind: AbortKind | null = null;
+              const budgetController = new AbortController();
+              const budgetTimer = setTimeout(() => {
+                abortKind = 'budget';
+                budgetController.abort(new Error('Vượt quá ngân sách thời gian stream (270s).'));
+              }, STREAM_BUDGET_MS);
 
-            let idleTimer: ReturnType<typeof setTimeout> | null = null;
-            const clearIdle = () => {
-              if (idleTimer) clearTimeout(idleTimer);
-              idleTimer = null;
-            };
-            const resetIdleTimer = () => {
-              clearIdle();
-              idleTimer = setTimeout(() => {
-                abortKind = 'idle';
-                budgetController.abort(
-                  new Error('AI Provider không phản hồi token mới trong 60 giây.'),
-                );
-              }, IDLE_TIMEOUT_MS);
-            };
+              let idleTimer: ReturnType<typeof setTimeout> | null = null;
+              const clearIdle = () => {
+                if (idleTimer) clearTimeout(idleTimer);
+                idleTimer = null;
+              };
+              const resetIdleTimer = () => {
+                clearIdle();
+                idleTimer = setTimeout(() => {
+                  abortKind = 'idle';
+                  budgetController.abort(
+                    new Error('AI Provider không phản hồi token mới trong 60 giây.'),
+                  );
+                }, IDLE_TIMEOUT_MS);
+              };
 
-            const link = linkAbortSignals(req.signal, budgetController.signal);
+              const link = linkAbortSignals(req.signal, budgetController.signal);
 
-            try {
-              writeAnnotation({
-                attempt: attempt + 1,
-                totalAttempts: candidateKeys.length,
-                key: keyLabel,
-              });
-              startHeartbeat();
+              try {
+                writeAnnotation({
+                  attempt: attempt + 1,
+                  totalAttempts: candidateKeys.length,
+                  key: keyLabel,
+                  model: targetModel,
+                });
+                startHeartbeat();
 
-              const result = streamText({
-                model: openai(targetModel),
-                messages: core,
-                ...(modelConfig.supportsTemperature === false
-                  ? {}
-                  : { temperature: temperature ?? 0.7 }),
-                ...(modelConfig.maxOutputTokens ? { maxTokens: modelConfig.maxOutputTokens } : {}),
-                system:
-                  system ??
-                  'Bạn là một trợ lý AI thông minh, hữu ích và chính xác. Trả lời bằng tiếng Việt trừ khi được yêu cầu ngôn ngữ khác.',
-                abortSignal: link.signal,
-              });
+                const result = streamText({
+                  model: openai(targetModel),
+                  messages: core,
+                  ...(modelConfig.supportsTemperature === false
+                    ? {}
+                    : { temperature: temperature ?? 0.7 }),
+                  ...(modelConfig.maxOutputTokens ? { maxTokens: modelConfig.maxOutputTokens } : {}),
+                  system:
+                    system ??
+                    'Bạn là một trợ lý AI thông minh, hữu ích và chính xác. Trả lời bằng tiếng Việt trừ khi được yêu cầu ngôn ngữ khác.',
+                  abortSignal: link.signal,
+                });
 
-              resetIdleTimer();
-
-              let streamError: unknown = null;
-              let finishReason: string | undefined;
-
-              for await (const part of (result as any).fullStream) {
                 resetIdleTimer();
-                switch (part.type) {
-                  case 'text-delta':
-                    writeText(part.textDelta, 'text');
-                    break;
-                  case 'reasoning':
-                  case 'reasoning-delta':
-                    writeText(part.textDelta ?? part.delta, 'reasoning');
-                    break;
-                  case 'error':
-                    // Sửa A1: lỗi giữa stream không còn bị bỏ qua.
-                    streamError = part.error;
-                    break;
-                  case 'finish':
-                  case 'step-finish':
-                    // Sửa A6: lấy usage thật.
-                    if (part.usage) {
-                      usage = {
-                        promptTokens: part.usage.promptTokens ?? 0,
-                        completionTokens: part.usage.completionTokens ?? 0,
-                      };
-                    }
-                    if (typeof part.finishReason === 'string') finishReason = part.finishReason;
-                    break;
-                  default:
-                    break;
+
+                let streamError: unknown = null;
+                let finishReason: string | undefined;
+
+                for await (const part of (result as any).fullStream) {
+                  resetIdleTimer();
+                  switch (part.type) {
+                    case 'text-delta':
+                      writeText(part.textDelta, 'text');
+                      break;
+                    case 'reasoning':
+                    case 'reasoning-delta':
+                      writeText(part.textDelta ?? part.delta, 'reasoning');
+                      break;
+                    case 'error':
+                      streamError = part.error;
+                      break;
+                    case 'finish':
+                    case 'step-finish':
+                      if (part.usage) {
+                        usage = {
+                          promptTokens: part.usage.promptTokens ?? 0,
+                          completionTokens: part.usage.completionTokens ?? 0,
+                        };
+                      }
+                      if (typeof part.finishReason === 'string') finishReason = part.finishReason;
+                      break;
+                    default:
+                      break;
+                  }
+                  if (streamError) break;
                 }
-                if (streamError) break;
-              }
 
-              clearIdle();
-              clearTimeout(budgetTimer);
+                clearIdle();
+                clearTimeout(budgetTimer);
 
-              if (streamError) throw streamError;
+                if (streamError) throw streamError;
 
-              markKeySuccess(apiKey);
-              writeFinish(finishReason === 'length' ? 'length' : 'stop');
-              return;
-            } catch (e: any) {
-              clearIdle();
-              clearTimeout(budgetTimer);
-
-              /* Sửa A2: client bấm Stop → kết thúc êm, KHÔNG phạt key. */
-              if (req.signal.aborted) {
                 markKeySuccess(apiKey);
-                writeFinish(emittedChars > 0 ? 'stop' : 'other');
+                writeFinish(finishReason === 'length' ? 'length' : 'stop');
                 return;
+              } catch (e: any) {
+                clearIdle();
+                clearTimeout(budgetTimer);
+
+                if (req.signal.aborted) {
+                  markKeySuccess(apiKey);
+                  writeFinish(emittedChars > 0 ? 'stop' : 'other');
+                  return;
+                }
+
+                const status = (e as any)?.status ?? (e as any)?.statusCode;
+                const msg = String(e?.message ?? '').toLowerCase();
+                const is404 = status === 404 || msg.includes('model_not_found') || msg.includes('does not exist');
+
+                // Nếu 404 và chưa emit ký tự nào, thử model tiếp theo trong chain mà KHÔNG phạt key!
+                if (is404 && emittedChars === 0) {
+                  console.warn(`[req:${requestId}] Model "${targetModel}" 404 trên ${upstreamHost} -> thử model tiếp theo trong chain.`);
+                  continue;
+                }
+
+                if (abortKind && isAbortError(e)) {
+                  const isIdle = abortKind === 'idle';
+                  if (isIdle) markKeyFailure(apiKey, undefined);
+                  const code = isIdle ? 'STREAM_IDLE_TIMEOUT' : 'STREAM_BUDGET_EXCEEDED';
+                  const diagMsg = isIdle
+                    ? `AI Provider ${upstreamHost} ngừng gửi token trong 60 giây, phiên stream đã bị hủy.`
+                    : 'Phản hồi vượt quá ngân sách 270 giây của Edge Function và đã bị cắt.';
+                  console.error(`[req:${requestId}][${code}] key=${keyLabel} model=${targetModel}`);
+                  writeAnnotation({ error: code });
+                  throw new ChatUpstreamError(diagMsg, code, requestId);
+                }
+
+                const diagnosis = diagnoseUpstreamError(e, { requestId, model: targetModel, keyLabel });
+                console.error(diagnosis.devLog);
+
+                if (diagnosis.blameKey) markKeyFailure(apiKey, diagnosis.status);
+
+                const isLast = attempt === candidateKeys.length - 1;
+                if (emittedChars > 0 || diagnosis.stopFailover || isLast) {
+                  writeAnnotation({ error: diagnosis.code });
+                  throw new ChatUpstreamError(diagnosis.userMessage, diagnosis.code, requestId);
+                }
+                break;
+              } finally {
+                link.dispose();
               }
-
-              /* Sửa A5: timeout của chính ta, phân biệt rõ với lỗi upstream. */
-              if (abortKind && isAbortError(e)) {
-                const isIdle = abortKind === 'idle';
-                if (isIdle) markKeyFailure(apiKey, undefined);
-                const code = isIdle ? 'STREAM_IDLE_TIMEOUT' : 'STREAM_BUDGET_EXCEEDED';
-                const msg = isIdle
-                  ? `AI Provider ${upstreamHost} ngừng gửi token trong 60 giây, phiên stream đã bị hủy.`
-                  : 'Phản hồi vượt quá ngân sách 270 giây của Edge Function và đã bị cắt.';
-                console.error(`[req:${requestId}][${code}] key=${keyLabel} model=${targetModel}`);
-                writeAnnotation({ error: code });
-                throw new ChatUpstreamError(msg, code, requestId);
-              }
-
-              const diagnosis = diagnoseUpstreamError(e, { requestId, model: targetModel, keyLabel });
-              console.error(diagnosis.devLog);
-
-              if (diagnosis.blameKey) markKeyFailure(apiKey, diagnosis.status);
-
-              const isLast = attempt === candidateKeys.length - 1;
-              if (emittedChars > 0 || diagnosis.stopFailover || isLast) {
-                writeAnnotation({ error: diagnosis.code });
-                throw new ChatUpstreamError(diagnosis.userMessage, diagnosis.code, requestId);
-              }
-              // còn key → thử tiếp
-            } finally {
-              link.dispose();
             }
           }
         } finally {

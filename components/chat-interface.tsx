@@ -35,6 +35,8 @@ import { useStickToBottom } from '@/lib/use-stick-to-bottom';
 import { ChatExportMenu } from '@/components/chat-export-menu';
 import { Composer } from '@/components/composer';
 import type { ModelOption } from '@/components/model-selector';
+import { extractTextFromMessage, toPersistableText } from '@/lib/message-text';
+import { useTitleGenerator } from '@/lib/use-title-generator';
 
 const CONTINUE_PROMPT =
   'Câu trả lời trước bị ngắt giữa chừng. Hãy viết tiếp CHÍNH XÁC từ chỗ bị cắt, ' +
@@ -42,8 +44,13 @@ const CONTINUE_PROMPT =
 
 /** Nội dung lưu/hiển thị luôn phải là string sạch. */
 export function sanitizeContent(raw: unknown): string {
+  if (raw === null || raw === undefined) return '';
+  if (typeof raw === 'object') return toPersistableText(raw as any);
   if (typeof raw !== 'string') return '';
-  return raw.replace(/(?:\s*(?:undefined|\[object Object\]))+\s*$/, '');
+  return raw
+    .replace(/(?:\r?\n[ \t]*(?:\[object [A-Za-z]+\]|undefined|null|NaN)[ \t]*)+[\s]*$/g, '')
+    .replace(/(\$\$|\\\]|\\\)|>)[ \t]*(?:\[object [A-Za-z]+\]|undefined|null|NaN)+[\s]*$/g, '$1')
+    .replace(/[\s\u200B]+$/, '');
 }
 
 /** Backend gắn annotation type:'finish' — dùng để biết tin nhắn có bị cắt hay không. */
@@ -1727,6 +1734,15 @@ export default function ChatInterface() {
     isLoadingRef.current = isLoading;
   }, [isLoading]);
 
+  const { generateTitle, markTitled } = useTitleGenerator({
+    onTitle: async (chatId, title) => {
+      await db.chats.update(chatId, { title: String(title).slice(0, 60), updatedAt: Date.now() });
+      notifyChatUpdated(chatId);
+    },
+    accessCode,
+    apiKey,
+  });
+
   const reloadTreeFromDatabase = useCallback(async () => {
     const chatId = currentChatId;
     if (!chatId) return;
@@ -2441,57 +2457,13 @@ export default function ChatInterface() {
   }, [currentChatId, isLoading, setMessages]);
 
   useEffect(() => {
-    if (!currentChatId || isLoading || messages.length < 2) return;
-    const chatId = currentChatId;
-    if (titledFor.current === chatId) return;
-
-    const firstUserMsg = messages.find((m) => m.role === 'user');
-    const userPrompt = (firstUserMsg?.content || '').slice(0, 1000).trim();
-    if (!userPrompt) return;
-
-    const ctrl = new AbortController();
-    (async () => {
-      try {
-        const chat = await db.chats.get(chatId);
-        if (!chat) return;
-        if (chat.title !== 'New Chat') {
-          titledFor.current = chatId;
-          return;
-        }
-
-        titledFor.current = chatId;
-
-        const res = await fetch('/api/title', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(apiKey ? { 'x-api-key': apiKey } : {}),
-            ...(accessCode ? { 'x-access-code': accessCode } : {}),
-          },
-          body: JSON.stringify({ message: userPrompt }),
-          signal: ctrl.signal,
-        });
-
-        if (!res.ok) {
-          if (titledFor.current === chatId) titledFor.current = null;
-          return;
-        }
-
-        const data = await res.json();
-        if (data?.title) {
-          await db.chats.update(chatId, { title: String(data.title).slice(0, 60) });
-          notifyChatUpdated(chatId);
-        }
-      } catch (err: any) {
-        if (titledFor.current === chatId) titledFor.current = null;
-        if (err?.name !== 'AbortError') console.error('[title]', err);
+    if (!currentChatId) return;
+    db.chats.get(currentChatId).then((chat) => {
+      if (chat && chat.title && chat.title !== 'New Chat' && chat.title !== 'Cuộc trò chuyện mới') {
+        markTitled(currentChatId);
       }
-    })();
-
-    return () => {
-      ctrl.abort();
-    };
-  }, [messages, currentChatId, isLoading, apiKey, accessCode, notifyChatUpdated]);
+    }).catch(() => {});
+  }, [currentChatId, markTitled]);
 
   const triggerReload = useCallback(() => {
     if (reloadTimer.current) {
@@ -3192,6 +3164,9 @@ export default function ChatInterface() {
         setCurrentChatId(chatId);
       }
 
+      const isFirstMessage = messages.length === 0;
+      const userText = input.trim();
+
       const dataTransfer = new DataTransfer();
       attachments.forEach((f) => dataTransfer.items.add(f));
       const options = attachments.length ? { experimental_attachments: dataTransfer.files } : undefined;
@@ -3200,10 +3175,13 @@ export default function ChatInterface() {
 
       setAttachments([]);
       handleSubmit(undefined, options);
+      if (isFirstMessage && userText) {
+        void generateTitle(chatId, userText);
+      }
     } catch (err) {
       console.error('[onSubmit]', err);
     }
-  }, [input, attachments, isLoading, currentChatId, draftId, setCurrentChatId, handleSubmit, pin]);
+  }, [input, attachments, isLoading, currentChatId, draftId, setCurrentChatId, handleSubmit, pin, generateTitle, messages.length]);
 
   const onTextareaKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if ((e.nativeEvent as any).isComposing || e.keyCode === 229) return;
