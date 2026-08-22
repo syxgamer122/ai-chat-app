@@ -11,8 +11,6 @@ import { exportJson, exportMarkdown } from '@/lib/backup';
 import { Highlight } from '@/components/highlight';
 import type { SnippetSegment } from '@/lib/search-utils';
 import { useDebouncedValue } from '@/lib/hooks/use-debounced-value';
-import { revokeByOwner } from '@/lib/object-url-registry';
-import { abortStreamForChat } from '@/lib/stream-lease';
 import {
   Plus, MessageSquare, Pin, Trash2, Search, Settings as SettingsIcon,
   X, MoreHorizontal, FileJson, FileText, Loader2,
@@ -262,8 +260,7 @@ export function Sidebar() {
 
   const handleDelete = useCallback(async (id: string) => {
     if (!window.confirm('Bạn có chắc muốn xóa cuộc trò chuyện này?')) return;
-    await abortStreamForChat(id);
-    await deleteChatCascade(id, revokeByOwner);
+    await deleteChatCascade(id);
     if (useAppStore.getState().currentChatId === id) {
       useAppStore.getState().setCurrentChatId(null);
     }

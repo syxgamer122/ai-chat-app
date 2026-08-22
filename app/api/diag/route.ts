@@ -1,13 +1,26 @@
 import { getAllConfiguredKeys, getKeyLabel, getKeyPoolSnapshot } from '@/lib/api-keys';
-import { checkSameOrigin } from '@/lib/security';
+import { timingSafeEqual } from '@/lib/security';
 
 export const runtime = 'edge';
 export const dynamic = 'force-dynamic';
 
+/**
+ * Endpoint chẩn đoán — BỊ KHÓA mặc định.
+ * Mở bằng env DIAG_SECRET (hoặc APP_ACCESS_PASSWORD). Truyền secret qua
+ * header `x-diag-secret` (không dùng query param để tránh lọt vào access log).
+ * Ví dụ: curl -H "x-diag-secret: ..." https://.../api/diag
+ */
 export async function GET(req: Request) {
-  const secret = process.env.APP_ACCESS_PASSWORD?.trim() || process.env.DIAG_SECRET?.trim();
-  const provided = new URL(req.url).searchParams.get('secret')?.trim();
-  if (secret && provided !== secret) {
+  const secret = process.env.DIAG_SECRET?.trim() || process.env.APP_ACCESS_PASSWORD?.trim();
+  if (!secret) {
+    return Response.json(
+      { error: 'Endpoint chẩn đoán bị khóa. Đặt biến môi trường DIAG_SECRET để bật.' },
+      { status: 403 },
+    );
+  }
+
+  const provided = req.headers.get('x-diag-secret')?.trim();
+  if (!provided || !timingSafeEqual(provided, secret)) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
@@ -46,7 +59,6 @@ export async function GET(req: Request) {
   return Response.json({
     baseURL,
     keyCount: keys.length,
-    origin: checkSameOrigin(req),
     pool: getKeyPoolSnapshot(),
     probes,
     env: {

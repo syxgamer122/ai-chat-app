@@ -1,4 +1,4 @@
-import { db, type ChatSession, type StoredMessage } from "@/lib/db";
+import { db, ROOT_KEY, type ChatSession, type StoredMessage } from "@/lib/db";
 import { findDeepestLeafId } from "@/lib/tree-utils";
 import {
   getClientId,
@@ -9,11 +9,10 @@ import {
 } from "@/lib/tree-validation";
 import { chatBroadcast } from "@/lib/chat-broadcast";
 import { logChatEvent } from "@/lib/chat-logger";
-import type { ChatMessage } from "@/lib/chat-types";
 
 function compareMessagesForFallback(
-  a: ChatMessage | StoredMessage,
-  b: ChatMessage | StoredMessage,
+  a: StoredMessage,
+  b: StoredMessage,
 ): number {
   if (a.createdAt !== b.createdAt) {
     return b.createdAt - a.createdAt;
@@ -36,8 +35,9 @@ function findFallbackLeafId(
 
   /**
    * Ưu tiên deepest leaf từ root.
+   * Row trong DB luôn mang sentinel '__ROOT__' — không bao giờ là null.
    */
-  const root = sessionMessages.find((m) => m.parentId === null);
+  const root = sessionMessages.find((m) => m.parentId === ROOT_KEY);
   if (root) {
     const deepestFromRoot = findDeepestLeafId(
       sessionMessages,

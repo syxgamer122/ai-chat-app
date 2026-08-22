@@ -1,4 +1,4 @@
-import { db, type ChatSession, type StoredMessage } from '@/lib/db';
+import { db, toParentKey, type ChatSession, type StoredAttachment, type StoredMessage } from '@/lib/db';
 import { tokenize } from '@/lib/search-utils';
 
 export const BACKUP_FORMAT = 'ai-chat-backup';
@@ -35,6 +35,12 @@ export interface ImportStats {
 }
 
 const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
+
+/** Caller có thể truyền 1 id hoặc danh sách id. */
+function normalizeIds(chatIds?: string | string[]): string[] | undefined {
+  if (chatIds === undefined) return undefined;
+  return Array.isArray(chatIds) ? chatIds : [chatIds];
+}
 
 /* ------------------------------------------------------------------ */
 /* Helpers                                                            */
@@ -105,7 +111,7 @@ async function serializeMessage(
     const entry: SerializedAttachment = {
       name: att.name,
       contentType: att.contentType,
-      url: att.url,
+      url: att.remoteUrl,
     };
     if (includeAttachments && att.blob && att.blob.size <= MAX_ATTACHMENT_BYTES) {
       try {
@@ -121,17 +127,18 @@ async function serializeMessage(
 
 /** Tạo object backup cho toàn bộ DB, hoặc chỉ các chatId chỉ định. */
 export async function createBackup(
-  chatIds?: string[],
+  chatIds?: string | string[],
   options: { includeAttachments?: boolean } = {},
 ): Promise<BackupFile> {
   const includeAttachments = options.includeAttachments ?? true;
+  const ids = normalizeIds(chatIds);
 
-  const chats = chatIds?.length
-    ? ((await db.chats.bulkGet(chatIds)).filter(Boolean) as ChatSession[])
+  const chats = ids?.length
+    ? ((await db.chats.bulkGet(ids)).filter(Boolean) as ChatSession[])
     : await db.chats.orderBy('updatedAt').toArray();
 
-  const rawMessages = chatIds?.length
-    ? await db.messages.where('chatId').anyOf(chatIds).toArray()
+  const rawMessages = ids?.length
+    ? await db.messages.where('chatId').anyOf(ids).toArray()
     : await db.messages.toArray();
 
   rawMessages.sort((a, b) => a.chatId.localeCompare(b.chatId) || a.seq - b.seq);
@@ -151,9 +158,9 @@ export async function createBackup(
   };
 }
 
-export async function exportJson(chatIds?: string[]): Promise<void> {
+export async function exportJson(chatIds?: string | string[]): Promise<void> {
   const backup = await createBackup(chatIds);
-  const single = chatIds?.length === 1 ? backup.chats[0] : null;
+  const single = backup.chats.length === 1 ? backup.chats[0] : null;
   const name = single
     ? `chat-${safeFileName(single.title)}-${stamp()}.json`
     : `ai-chat-backup-${stamp()}.json`;
@@ -206,6 +213,18 @@ const ROLE_LABEL: Record<string, string> = {
   data: '📦 Data',
 };
 
+/** Đếm số biến thể (siblings) của message trong cùng parent, theo branchOrder. */
+function siblingInfo(msg: StoredMessage, messages: StoredMessage[]): { count: number; index: number } {
+  const siblings = messages
+    .filter((m) => m.parentId === msg.parentId)
+    .sort(
+      (a, b) =>
+        (a.branchOrder ?? 0) - (b.branchOrder ?? 0) ||
+        (a.branchTieBreaker ?? a.id).localeCompare(b.branchTieBreaker ?? b.id),
+    );
+  return { count: siblings.length, index: Math.max(0, siblings.findIndex((s) => s.id === msg.id)) };
+}
+
 export function chatToMarkdown(
   chat: ChatSession,
   messages: StoredMessage[],
@@ -235,9 +254,10 @@ export function chatToMarkdown(
       lines.push(`**Tệp kèm:** ${msg.attachments.map((a) => a.name).join(', ')}`);
       lines.push('');
     }
-    if ((msg.siblingCount ?? 1) > 1) {
+    const { count: siblingCount, index: siblingIndex } = siblingInfo(msg, messages);
+    if (siblingCount > 1) {
       lines.push(
-        `> _Tin nhắn này có ${msg.siblingCount} biến thể; đây là biến thể ${(msg.siblingIndex ?? 0) + 1}. Dùng bản .json để lưu đầy đủ mọi nhánh._`,
+        `> _Tin nhắn này có ${siblingCount} biến thể; đây là biến thể ${siblingIndex + 1}. Dùng bản .json để lưu đầy đủ mọi nhánh._`,
       );
       lines.push('');
     }
@@ -248,9 +268,10 @@ export function chatToMarkdown(
   return lines.join('\n');
 }
 
-export async function exportMarkdown(chatIds?: string[]): Promise<void> {
-  const chats = chatIds?.length
-    ? ((await db.chats.bulkGet(chatIds)).filter(Boolean) as ChatSession[])
+export async function exportMarkdown(chatIds?: string | string[]): Promise<void> {
+  const ids = normalizeIds(chatIds);
+  const chats = ids?.length
+    ? ((await db.chats.bulkGet(ids)).filter(Boolean) as ChatSession[])
     : await db.chats.orderBy('updatedAt').reverse().toArray();
 
   if (chats.length === 0) throw new Error('Không có cuộc trò chuyện nào để xuất.');
@@ -303,16 +324,28 @@ function deserializeMessage(msg: SerializedMessage): StoredMessage {
   const { attachments, ...rest } = msg;
   const restored: StoredMessage = {
     ...rest,
+    // Backup cũ có thể chứa parentId null — chuẩn hoá về sentinel của DB.
+    parentId: toParentKey(rest.parentId as string | null | undefined),
     tokens: tokenize(rest.content ?? ''),
   };
 
   if (attachments?.length) {
-    restored.attachments = attachments.map((att) => ({
-      name: att.name,
-      contentType: att.contentType,
-      url: att.url,
-      blob: att.data ? base64ToBlob(att.data, att.contentType) : undefined,
-    }));
+    // Bỏ attachment không dựng lại được (không có data và không có url http/s):
+    // giữ attachment "trống" sẽ làm hook sanitize của Dexie loại bỏ cả record.
+    const usable = attachments
+      .filter((att) => att.data || /^https?:\/\//i.test(att.url ?? ''))
+      .map((att): StoredAttachment => {
+        const blob = att.data ? base64ToBlob(att.data, att.contentType || 'application/octet-stream') : undefined;
+        return {
+          id: newId(),
+          name: att.name ?? 'file',
+          contentType: att.contentType ?? '',
+          size: blob?.size ?? 0,
+          ...(blob ? { blob } : {}),
+          ...(att.url ? { remoteUrl: att.url } : {}),
+        };
+      });
+    if (usable.length) restored.attachments = usable;
   }
   return restored;
 }
@@ -366,14 +399,16 @@ export async function importBackup(
         for (const msg of sourceMessages) idMap.set(msg.id, newId());
         const newChatId = newId();
 
-        const remapped = sourceMessages.map((msg) => {
+        const remapped: StoredMessage[] = sourceMessages.map((msg) => {
           const restored = deserializeMessage(msg);
           return {
             ...restored,
             id: idMap.get(msg.id)!,
             chatId: newChatId,
-            parentId: msg.parentId ? idMap.get(msg.parentId) ?? null : null,
-          } satisfies StoredMessage;
+            parentId: toParentKey(
+              msg.parentId && msg.parentId !== '__ROOT__' ? idMap.get(msg.parentId) : null,
+            ),
+          };
         });
 
         await db.chats.put({
@@ -381,7 +416,6 @@ export async function importBackup(
           id: newChatId,
           title: `${chat.title} (bản nhập)`,
           activeLeafId: chat.activeLeafId ? idMap.get(chat.activeLeafId) : undefined,
-          activeLease: null,
           updatedAt: Date.now(),
         });
         await db.messages.bulkPut(remapped);
@@ -392,7 +426,7 @@ export async function importBackup(
       }
 
       // merge (chat mới) hoặc overwrite → giữ nguyên ID
-      await db.chats.put({ ...chat, activeLease: null });
+      await db.chats.put({ ...chat });
       const restored = sourceMessages.map(deserializeMessage);
       await db.messages.bulkPut(restored);
 

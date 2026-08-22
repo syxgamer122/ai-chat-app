@@ -1,6 +1,5 @@
 import type { Metadata, Viewport } from 'next';
 import { Inter } from 'next/font/google';
-import { ObjectUrlGarbageCollector } from '@/components/object-url-garbage-collector';
 import './globals.css';
 
 const inter = Inter({
@@ -30,7 +29,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       suppressHydrationWarning
     >
       <body className="min-h-dvh font-sans bg-[#0f0f10] text-[#e4e4e7] antialiased overscroll-none selection:bg-[#c96442]/30 selection:text-white">
-        <ObjectUrlGarbageCollector />
         {children}
       </body>
     </html>

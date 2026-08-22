@@ -34,29 +34,9 @@ export type ChatBroadcastEvent =
       originClientId: string;
     }
   | {
-      type: "stream-lease-acquired";
+      type: "chat-updated";
       sessionId: string;
-      streamId: string;
-      messageId: string;
-      clientId: string;
-      heartbeatAt: number;
-      revision: number;
-      originClientId: string;
-    }
-  | {
-      type: "stream-lease-heartbeat";
-      sessionId: string;
-      streamId: string;
-      clientId: string;
-      heartbeatAt: number;
-      revision: number;
-      originClientId: string;
-    }
-  | {
-      type: "stream-lease-released";
-      sessionId: string;
-      streamId: string;
-      clientId: string;
+      mutationId: string;
       revision: number;
       originClientId: string;
     }

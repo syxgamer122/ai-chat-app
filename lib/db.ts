@@ -19,14 +19,6 @@ export type StoredMessageRole = 'user' | 'assistant' | 'system' | 'data';
 export type StoredMessageFinishReason = 'stop' | 'abort' | 'error';
 export type StoredMessageStatus = 'complete' | 'streaming' | 'aborted' | 'error';
 
-export interface StreamLease {
-  chatId: string;
-  messageId: string;
-  writerId: string;
-  acquiredAt: number;
-  expiresAt: number;
-}
-
 export interface ChatSession {
   id: string;
   title: string;
@@ -46,8 +38,10 @@ export interface StoredAttachment {
   name: string;
   contentType: string;
   size: number;
-  /** BẮT BUỘC Blob. Không data URL, không blob: URL. */
-  blob: Blob;
+  /** Blob lưu trực tiếp trong IndexedDB. Không data URL, không blob: URL. */
+  blob?: Blob;
+  /** File nằm ở remote storage (http/https) — khi đó không có blob. */
+  remoteUrl?: string;
 }
 
 export interface StoredMessage {
@@ -65,24 +59,49 @@ export interface StoredMessage {
   finishReason?: StoredMessageFinishReason;
   status?: StoredMessageStatus;
   tokens?: string[];
+  /** Annotation từ data stream (requestId, attempt, key, model...). */
+  annotations?: Array<Record<string, unknown>>;
 }
 
-/** Loại bỏ mọi URL tạm / data URL trước khi persist. */
+function newAttachmentId(): string {
+  try {
+    return globalThis.crypto.randomUUID();
+  } catch {
+    return `att-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  }
+}
+
+/**
+ * Chuẩn hoá trước khi persist: tự sinh id/size nếu thiếu.
+ * Bỏ (không throw) attachment không có Blob hay remote URL hợp lệ —
+ * một record lỗi không được làm sập toàn bộ lượt ghi.
+ */
 function sanitizeAttachments(list?: StoredAttachment[]): StoredAttachment[] | undefined {
   if (!list?.length) return list;
-  return list.map((a) => {
-    const { blob, id, name, contentType, size } = a as StoredAttachment & { url?: string };
-    if (!(blob instanceof Blob)) {
-      throw new Error(`[db] Attachment "${name}" thiếu Blob — không được persist URL/base64.`);
+  const cleaned: StoredAttachment[] = [];
+  for (const a of list) {
+    const { blob, id, name, contentType, size, remoteUrl } = a as StoredAttachment & {
+      url?: string;
+    };
+    if (!(blob instanceof Blob) && !/^https?:\/\//i.test(remoteUrl ?? '')) {
+      console.warn(`[db] Bỏ attachment "${name}" — không có Blob/remote URL hợp lệ.`);
+      continue;
     }
-    return { id, name, contentType, size: size ?? blob.size, blob };
-  });
+    cleaned.push({
+      id: id || newAttachmentId(),
+      name,
+      contentType,
+      size: size ?? blob?.size ?? 0,
+      ...(blob instanceof Blob ? { blob } : {}),
+      ...(remoteUrl ? { remoteUrl } : {}),
+    });
+  }
+  return cleaned.length ? cleaned : undefined;
 }
 
 export class ChatAppDatabase extends Dexie {
   chats!: Table<ChatSession, string>;
   messages!: Table<StoredMessage, string>;
-  leases!: Table<StreamLease, string>;
 
   constructor() {
     super('ai_chat_app_db');
@@ -113,8 +132,7 @@ export class ChatAppDatabase extends Dexie {
           '[chatId+parentId+branchOrder], *tokens',
         leases: 'chatId, expiresAt, writerId',
       })
-      .upgrade(async (tx) => {
-        const counters = new Map<string, number>();
+      .upgrade(async (tx) => {        const counters = new Map<string, number>();
         await tx
           .table<StoredMessage>('messages')
           .toCollection()
@@ -140,9 +158,19 @@ export class ChatAppDatabase extends Dexie {
             if (!Array.isArray(c.titleTokens) || c.titleTokens.length === 0) {
               c.titleTokens = tokenize(c.title || '');
             }
-            delete (c as Record<string, unknown>).activeLease;
+            delete (c as unknown as Record<string, unknown>).activeLease;
           });
       });
+
+    // v5: bỏ bảng leases (hệ thống stream lease đã được gỡ hoàn toàn).
+    // Table thiếu trong schema mới sẽ bị Dexie tự động xoá.
+    this.version(5).stores({
+      chats: 'id, createdAt, updatedAt, pinned, activeLeafId, *titleTokens',
+      messages:
+        'id, chatId, role, createdAt, seq, parentId, ' +
+        '[chatId+parentId], [chatId+createdAt], [chatId+seq], ' +
+        '[chatId+parentId+branchOrder], *tokens',
+    });
 
     this.messages.hook('creating', (_primKey, obj) => {
       obj.parentId = toParentKey(obj.parentId as string | null);
@@ -242,35 +270,10 @@ export async function appendMessage(input: AppendMessageInput): Promise<StoredMe
   });
 }
 
-/** Ghi chunk stream: CHỈ field content. Không bao giờ put cả record. */
-export function patchStreamingContent(messageId: string, content: string): Promise<number> {
-  return db.messages.update(messageId, { content });
-}
-
-export async function finalizeMessage(
-  messageId: string,
-  content: string,
-  finishReason: StoredMessageFinishReason,
-): Promise<void> {
-  await db.messages.update(messageId, {
-    content,
-    finishReason,
-    status:
-      finishReason === 'stop' ? 'complete' : finishReason === 'abort' ? 'aborted' : 'error',
-  });
-}
-
-/** Cascade delete: messages + attachments + lease + ObjectURL. */
-export async function deleteChatCascade(
-  chatId: string,
-  revokeObjectUrls?: (chatId: string) => void,
-): Promise<void> {
-  await db.transaction('rw', db.messages, db.chats, db.leases, async () => {
+/** Cascade delete: messages + attachments của cả chat. */
+export async function deleteChatCascade(chatId: string): Promise<void> {
+  await db.transaction('rw', db.messages, db.chats, async () => {
     await db.messages.where('chatId').equals(chatId).delete();
-    await db.leases.where('chatId').equals(chatId).delete();
     await db.chats.delete(chatId);
   });
-  revokeObjectUrls?.(chatId);
 }
-
-export { Dexie };

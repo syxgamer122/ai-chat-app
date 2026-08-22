@@ -9,7 +9,8 @@ import { useAppStore } from '@/lib/store';
 
 export default function Home() {
   const [isMounted, setIsMounted] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
+  const isSettingsOpen = useAppStore((s) => s.isSettingsOpen);
+  const setSettingsOpen = useAppStore((s) => s.setSettingsOpen);
   const setCurrentChatId = useAppStore((s) => s.setCurrentChatId);
 
   useEffect(() => {
@@ -20,16 +21,16 @@ export default function Home() {
         e.preventDefault();
         setCurrentChatId(null);
       }
-      if (e.key === 'Escape' && showSettings) setShowSettings(false);
+      if (e.key === 'Escape' && isSettingsOpen) setSettingsOpen(false);
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [setCurrentChatId, showSettings]);
+  }, [setCurrentChatId, isSettingsOpen, setSettingsOpen]);
 
   useEffect(() => {
-    document.body.style.overflow = showSettings ? 'hidden' : 'unset';
+    document.body.style.overflow = isSettingsOpen ? 'hidden' : 'unset';
     return () => { document.body.style.overflow = 'unset'; };
-  }, [showSettings]);
+  }, [isSettingsOpen]);
 
   if (!isMounted) {
     return (
@@ -41,14 +42,14 @@ export default function Home() {
 
   return (
     <main className="flex h-dvh overflow-hidden">
-      <Sidebar onOpenSettings={() => setShowSettings(true)} />
+      <Sidebar />
       <div className="flex-1 flex flex-col min-w-0 h-full">
         <ChatErrorBoundary>
           <ChatInterface />
         </ChatErrorBoundary>
       </div>
 
-      {showSettings && <SettingsDialog onClose={() => setShowSettings(false)} />}
+      {isSettingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
     </main>
   );
 }

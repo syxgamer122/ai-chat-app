@@ -62,18 +62,20 @@ export async function searchChats(
   assertNotAborted(signal);
 
   return ranked
-    .map(([, bucket], i) => {
+    .map(([, bucket], i): ChatSearchResult | null => {
       const chat = chats[i];
       if (!chat) return null;
-      return {
+      const result: ChatSearchResult = {
         chat,
         score: bucket.score,
-        titleSegments: buildSnippet(chat.title, terms) ?? undefined,
         snippets: bucket.hits
           .map((h) => buildSnippet(h.content, terms))
           .filter((s): s is SnippetSegment[] => s !== null),
         extraHits: Math.max(0, bucket.score - bucket.hits.length),
-      } satisfies ChatSearchResult;
+      };
+      const titleSegments = buildSnippet(chat.title, terms);
+      if (titleSegments) result.titleSegments = titleSegments;
+      return result;
     })
     .filter((r): r is ChatSearchResult => r !== null);
 }

@@ -713,8 +713,15 @@ export async function POST(req: Request) {
                 const msg = String(e?.message ?? '').toLowerCase();
                 const is404 = status === 404 || msg.includes('model_not_found') || msg.includes('does not exist');
 
-                // Nếu 404 và chưa emit ký tự nào, thử model tiếp theo trong chain mà KHÔNG phạt key!
-                if (is404 && emittedChars === 0) {
+                /**
+                 * Nếu 404 và chưa emit ký tự nào, thử model tiếp theo trong chain
+                 * mà KHÔNG phạt key. Riêng model cuối của key cuối thì rơi vào
+                 * đường chẩn đoán bên dưới để người dùng nhận được lỗi rõ ràng —
+                 * tránh kết thúc stream âm thầm với bong bóng trống.
+                 */
+                const isLastModelInChain = targetModel === modelChain[modelChain.length - 1];
+                const isLastKeyAttempt = attempt === candidateKeys.length - 1;
+                if (is404 && emittedChars === 0 && !(isLastModelInChain && isLastKeyAttempt)) {
                   console.warn(`[req:${requestId}] Model "${targetModel}" 404 trên ${upstreamHost} -> thử model tiếp theo trong chain.`);
                   continue;
                 }

@@ -5,8 +5,9 @@ import { useEffect, useRef, useState } from 'react';
 /**
  * Throttle giá trị render (leading + trailing). Dùng cho content stream:
  * UI cập nhật tối đa 1 lần / interval, luôn có flush cuối.
+ * Khi `enabled = false` (vd: message đã hoàn tất) — truyền thẳng, không throttle.
  */
-export function useThrottledValue<T>(value: T, intervalMs = 100): T {
+export function useThrottledValue<T>(value: T, intervalMs = 100, enabled = true): T {
   const [throttled, setThrottled] = useState(value);
   const lastEmitRef = useRef(0);
   const timerRef = useRef<number | null>(null);
@@ -15,6 +16,11 @@ export function useThrottledValue<T>(value: T, intervalMs = 100): T {
   latestRef.current = value;
 
   useEffect(() => {
+    if (!enabled) {
+      setThrottled(value);
+      return;
+    }
+
     const now = Date.now();
     const elapsed = now - lastEmitRef.current;
 
@@ -37,62 +43,11 @@ export function useThrottledValue<T>(value: T, intervalMs = 100): T {
         timerRef.current = null;
       }
     };
-  }, [value, intervalMs]);
+  }, [value, intervalMs, enabled]);
 
   useEffect(() => () => {
     if (timerRef.current !== null) window.clearTimeout(timerRef.current);
   }, []);
 
-  return throttled;
-}
-
-/** Persister ghi Dexie: throttle >= 250ms, CHỈ field content, flush cuối bắt buộc. */
-export function createThrottledPersister(
-  write: (content: string) => Promise<unknown>,
-  intervalMs = 250,
-) {
-  let pending: string | null = null;
-  let lastWrite = 0;
-  let timer: number | null = null;
-  let closed = false;
-
-  const doWrite = async () => {
-    if (pending === null) return;
-    const payload = pending;
-    pending = null;
-    lastWrite = Date.now();
-    try {
-      await write(payload);
-    } catch (err) {
-      console.error('[persister] write failed', err);
-    }
-  };
-
-  return {
-    push(content: string) {
-      if (closed) return;
-      pending = content;
-      const elapsed = Date.now() - lastWrite;
-      if (elapsed >= intervalMs) {
-        void doWrite();
-      } else if (timer === null) {
-        timer = window.setTimeout(() => {
-          timer = null;
-          void doWrite();
-        }, intervalMs - elapsed);
-      }
-    },
-    async flush(finalContent?: string) {
-      if (timer !== null) {
-        window.clearTimeout(timer);
-        timer = null;
-      }
-      if (finalContent !== undefined) pending = finalContent;
-      await doWrite();
-    },
-    close() {
-      closed = true;
-      if (timer !== null) window.clearTimeout(timer);
-    },
-  };
+  return enabled ? throttled : value;
 }

@@ -5,10 +5,6 @@ import {
   getClientId,
   nextLamport,
 } from "./client-identity";
-import type {
-  ChatMessage,
-  StreamTokenCheckpoint,
-} from "./chat-types";
 
 export interface ActiveStream {
   sessionId: string;

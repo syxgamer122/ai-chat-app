@@ -1,12 +1,12 @@
 import type { StoredMessage } from './db';
 
 /**
- * Khóa sentinel đại diện "cấp root" trong BranchSelection.
- * Dùng ký tự NUL để không bao giờ trùng với id thật do Dexie/crypto sinh ra.
+ * Sentinel cũ của cây (thời BranchSelection). Chấp nhận thêm khi đọc để không
+ * mất dữ liệu legacy; sentinel chính thức hiện nay là '__ROOT__' (lib/db.ts).
  */
-export const ROOT_KEY = '\u0000root';
+const LEGACY_ROOT_KEY = '\u0000root';
 
-export interface TreeIndex {
+interface TreeIndex {
   byId: Map<string, StoredMessage>;
   /** key === null nghĩa là cấp root. */
   children: Map<string | null, StoredMessage[]>;
@@ -17,7 +17,7 @@ export interface TreeIndex {
 }
 
 function rawParentId(m: StoredMessage): string | null {
-  if (m.parentId == null || m.parentId === '__ROOT__' || m.parentId === ROOT_KEY) return null;
+  if (m.parentId == null || m.parentId === '__ROOT__' || m.parentId === LEGACY_ROOT_KEY) return null;
   return m.parentId;
 }
 
@@ -38,7 +38,7 @@ function compareSiblingOrder(a: StoredMessage, b: StoredMessage): number {
   return cmpId(a.branchTieBreaker ?? a.id, b.branchTieBreaker ?? b.id);
 }
 
-export function sortSiblings(messages: StoredMessage[]): StoredMessage[] {
+function sortSiblings(messages: StoredMessage[]): StoredMessage[] {
   return [...messages].sort(compareSiblingOrder);
 }
 
@@ -46,7 +46,7 @@ function chatIdOf(m: StoredMessage): string | undefined {
   return (m.chatId ?? (m as unknown as { conversationId?: string }).conversationId) || undefined;
 }
 
-export function buildTreeIndex(
+function buildTreeIndex(
   allMessages: StoredMessage[],
   conversationId?: string,
 ): TreeIndex {
@@ -84,7 +84,7 @@ export function buildTreeIndex(
 
 const indexCache = new WeakMap<StoredMessage[], Map<string, TreeIndex>>();
 
-export function getTreeIndex(
+function getTreeIndex(
   allMessages: StoredMessage[],
   conversationId?: string,
 ): TreeIndex {
@@ -122,16 +122,13 @@ export interface ThreadResult {
   detachedRootId?: string;
 }
 
-export type BranchSelection = Record<string, string>;
-
 /**
- * Đi xuống theo selection; mặc định chọn sibling cuối cùng.
- * Đây là ĐỊNH NGHĨA DUY NHẤT của "nhánh đang hoạt động".
+ * Đi xuống từ node, luôn chọn sibling cuối cùng.
+ * Đây là ĐỊNH NGHĨA của "nhánh đang hoạt động" khi thiếu activeLeafId.
  */
-export function findLeafFrom(
+function findLeafFrom(
   indexOrMessages: TreeIndex | StoredMessage[],
   fromNodeId: string,
-  selection: BranchSelection = {},
 ): string {
   const index = resolveIndex(indexOrMessages);
   if (!index.byId.has(fromNodeId)) return fromNodeId;
@@ -144,46 +141,29 @@ export function findLeafFrom(
     const kids = index.children.get(cursor);
     if (!kids || kids.length === 0) return cursor;
 
-    const preferredId = selection[cursor];
-    const preferred = preferredId ? kids.find((k) => k.id === preferredId) : undefined;
-    const next = preferred ?? kids[kids.length - 1];
+    const next = kids[kids.length - 1];
     if (visited.has(next.id)) return cursor;
     cursor = next.id;
   }
   return cursor;
 }
 
-/** Root đang hoạt động: theo selection[ROOT_KEY], mặc định root cuối cùng. */
-export function findActiveRootId(
-  indexOrMessages: TreeIndex | StoredMessage[],
-  selection: BranchSelection = {},
-): string | undefined {
-  const index = resolveIndex(indexOrMessages);
+/** Root cuối cùng (mới nhất) — điểm xuất phát của fallback thread. */
+function findActiveRootId(index: TreeIndex): string | undefined {
   const roots = index.children.get(null) ?? [];
   if (roots.length === 0) return undefined;
-  const preferredId = selection[ROOT_KEY];
-  const preferred = preferredId ? roots.find((r) => r.id === preferredId) : undefined;
-  return (preferred ?? roots[roots.length - 1]).id;
+  return roots[roots.length - 1].id;
 }
 
-/**
- * Fallback leaf dùng CÙNG quy tắc với findLeafFrom (sửa B3):
- * root hoạt động → đi xuống con cuối/con đã chọn.
- */
-export function findFallbackLeafId(
-  indexOrMessages: TreeIndex | StoredMessage[],
-  selection: BranchSelection = {},
-): string | undefined {
-  const index = resolveIndex(indexOrMessages);
-  const rootId = findActiveRootId(index, selection);
+function findFallbackLeafId(index: TreeIndex): string | undefined {
+  const rootId = findActiveRootId(index);
   if (!rootId) return undefined;
-  return findLeafFrom(index, rootId, selection);
+  return findLeafFrom(index, rootId);
 }
 
-export function reconstructThread(
+function reconstructThread(
   indexOrMessages: TreeIndex | StoredMessage[],
   activeLeafId?: string | null,
-  selection: BranchSelection = {},
 ): ThreadResult {
   const index = resolveIndex(indexOrMessages);
   if (index.byId.size === 0) {
@@ -193,7 +173,7 @@ export function reconstructThread(
   let usedFallback = false;
   let startId = activeLeafId ?? undefined;
   if (!startId || !index.byId.has(startId)) {
-    startId = findFallbackLeafId(index, selection);
+    startId = findFallbackLeafId(index);
     usedFallback = true;
   }
   if (!startId) return { messages: [], broken: true, usedFallback: true };
@@ -240,7 +220,7 @@ export interface SiblingResult {
 
 /**
  * parentId là tùy chọn và chỉ dùng làm gợi ý — nguồn chân lý là index.parentOf,
- * nhờ vậy orphan vẫn hiện đúng badge nhánh (sửa B2).
+ * nhờ vậy orphan vẫn hiện đúng badge nhánh.
  */
 export function getSiblings(
   indexOrMessages: TreeIndex | StoredMessage[],
@@ -262,75 +242,14 @@ export function getSiblings(
   };
 }
 
-/** Tiện cho UI: chỉ số 1-based, total. */
-export function getBranchInfo(
-  indexOrMessages: TreeIndex | StoredMessage[],
-  nodeId: string,
-): { index: number; total: number } {
-  const { currentIndex, total } = getSiblings(indexOrMessages, undefined, nodeId);
-  return { index: currentIndex + 1, total };
-}
-
-/** Bỏ các key trỏ tới node không còn tồn tại (sửa B5). */
-export function pruneSelection(
-  indexOrMessages: TreeIndex | StoredMessage[],
-  selection: BranchSelection,
-): BranchSelection {
-  const index = resolveIndex(indexOrMessages);
-  const out: BranchSelection = {};
-  for (const [parent, child] of Object.entries(selection)) {
-    if (!index.byId.has(child)) continue;
-    if (parent === ROOT_KEY || index.byId.has(parent)) out[parent] = child;
-  }
-  return out;
-}
-
-export function switchBranch(
-  indexOrMessages: TreeIndex | StoredMessage[],
-  nodeId: string,
-  direction: -1 | 1,
-  selection: BranchSelection = {},
-): { leafId: string; selection: BranchSelection } | null {
-  const index = resolveIndex(indexOrMessages);
-  const node = index.byId.get(nodeId);
-  if (!node) return null;
-
-  const parentKey = index.parentOf.get(nodeId) ?? null;
-  const { siblings, currentIndex } = getSiblings(index, parentKey, nodeId);
-  if (currentIndex < 0 || siblings.length <= 1) return null;
-
-  const nextIndex = currentIndex + direction;
-  if (nextIndex < 0 || nextIndex >= siblings.length) return null;
-
-  const target = siblings[nextIndex];
-  const nextSelection: BranchSelection = { ...selection };
-  nextSelection[parentKey === null ? ROOT_KEY : parentKey] = target.id;
-
-  const pruned = pruneSelection(index, nextSelection);
-  return { leafId: findLeafFrom(index, target.id, pruned), selection: pruned };
-}
-
-/** Encode toàn bộ đường đi hiện tại, bao gồm cả lựa chọn root (sửa B1). */
-export function selectionFromThread(messages: StoredMessage[]): BranchSelection {
-  const sel: BranchSelection = {};
-  if (messages.length === 0) return sel;
-  sel[ROOT_KEY] = messages[0].id;
-  for (let i = 1; i < messages.length; i += 1) {
-    sel[messages[i - 1].id] = messages[i].id;
-  }
-  return sel;
-}
-
 export function reconstructActiveThreadSafe(
   allMessages: StoredMessage[],
   leafId: string | null | undefined,
-  selection: BranchSelection = {},
   conversationId?: string,
 ): ThreadResult {
-  return reconstructThread(getTreeIndex(allMessages, conversationId), leafId, selection);
+  return reconstructThread(getTreeIndex(allMessages, conversationId), leafId);
 }
 
-/** @deprecated dùng getTreeIndex + reconstructThread */
 export function reconstructActiveThread(
   allMessages: StoredMessage[],
   activeLeafId?: string,
@@ -338,7 +257,6 @@ export function reconstructActiveThread(
   return reconstructThread(getTreeIndex(allMessages), activeLeafId).messages;
 }
 
-/** @deprecated dùng getTreeIndex + findLeafFrom */
 export function findDeepestLeafId(allMessages: StoredMessage[], fromNodeId: string): string {
   return findLeafFrom(getTreeIndex(allMessages), fromNodeId);
 }

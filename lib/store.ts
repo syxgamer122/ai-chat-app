@@ -22,9 +22,11 @@ export interface Settings {
 interface AppState {
   currentChatId: string | null;
   isSidebarOpen: boolean;
+  isSettingsOpen: boolean;
   settings: Settings;
   setCurrentChatId: (id: string | null) => void;
   setSidebarOpen: (open: boolean) => void;
+  setSettingsOpen: (open: boolean) => void;
   updateSettings: (s: Partial<Omit<Settings, 'perf'>>) => void;
   updatePerf: (p: Partial<PerfSettings>) => void;
 }
@@ -46,9 +48,11 @@ export const useAppStore = create<AppState>()(
     (set) => ({
       currentChatId: null,
       isSidebarOpen: false,
+      isSettingsOpen: false,
       settings: DEFAULT_SETTINGS,
       setCurrentChatId: (id) => set({ currentChatId: id, isSidebarOpen: false }),
       setSidebarOpen: (open) => set({ isSidebarOpen: open }),
+      setSettingsOpen: (open) => set({ isSettingsOpen: open }),
       updateSettings: (partial) =>
         set((s) => ({ settings: { ...s.settings, ...partial } })),
       updatePerf: (partial) =>

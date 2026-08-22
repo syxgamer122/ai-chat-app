@@ -1,5 +1,4 @@
-import type { ChatMessage } from "@/lib/chat-types";
-import type { StoredMessage } from "@/lib/db";
+import { ROOT_KEY, type StoredMessage } from "@/lib/db";
 
 export type TreeValidationReason =
   | "missing-leaf"
@@ -13,8 +12,13 @@ export interface TreeValidationResult {
   brokenNodeId?: string;
 }
 
+/**
+ * Kiểm tra chuỗi từ leaf leo lên root có nguyên vẹn không.
+ * Row trong DB luôn mang parentId = '__ROOT__' ở cấp gốc (không bao giờ null)
+ * — sentinel này là điểm kết thúc hợp lệ của chuỗi.
+ */
 export function validateLeafChain(
-  allMessages: (ChatMessage | StoredMessage)[],
+  allMessages: StoredMessage[],
   sessionId: string,
   leafId: string | null | undefined,
 ): TreeValidationResult {
@@ -26,21 +30,15 @@ export function validateLeafChain(
   }
 
   const globalById = new Map(
-    allMessages.map((message) => [
-      message.id,
-      message,
-    ]),
+    allMessages.map((message) => [message.id, message]),
   );
 
   const sessionMessages = allMessages.filter(
-    (message) => (message as ChatMessage).sessionId === sessionId || (message as StoredMessage).chatId === sessionId,
+    (message) => message.chatId === sessionId,
   );
 
   const byId = new Map(
-    sessionMessages.map((message) => [
-      message.id,
-      message,
-    ]),
+    sessionMessages.map((message) => [message.id, message]),
   );
 
   const leaf = globalById.get(leafId);
@@ -53,8 +51,7 @@ export function validateLeafChain(
     };
   }
 
-  const leafSessionId = (leaf as ChatMessage).sessionId ?? (leaf as StoredMessage).chatId;
-  if (leafSessionId !== sessionId) {
+  if (leaf.chatId !== sessionId) {
     return {
       valid: false,
       reason: "wrong-session",
@@ -63,7 +60,7 @@ export function validateLeafChain(
   }
 
   const visited = new Set<string>();
-  let current: (ChatMessage | StoredMessage) | undefined = leaf;
+  let current: StoredMessage | undefined = leaf;
 
   while (current) {
     if (visited.has(current.id)) {
@@ -76,7 +73,7 @@ export function validateLeafChain(
 
     visited.add(current.id);
 
-    if (!current.parentId) {
+    if (current.parentId === ROOT_KEY || !current.parentId) {
       return {
         valid: true,
       };

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { db } from '@/lib/db';
 import { useAppStore } from '@/lib/store';
 import { AVAILABLE_MODELS } from '@/lib/models';
@@ -8,6 +8,9 @@ import { exportJson, exportMarkdown, importBackup, type ImportMode } from '@/lib
 import { X, Download, Upload, Loader2, ShieldAlert } from 'lucide-react';
 
 type Status = { kind: 'idle' | 'busy' | 'ok' | 'error'; message?: string };
+
+const FOCUSABLE_SELECTOR =
+  'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const settings = useAppStore((s) => s.settings);
@@ -17,6 +20,48 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const [importMode, setImportMode] = useState<ImportMode>('merge');
   const [status, setStatus] = useState<Status>({ kind: 'idle' });
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  /* Focus trap: focus đầu vào khi mở, giữ Tab trong dialog, trả focus khi đóng. */
+  useEffect(() => {
+    const panel = panelRef.current;
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+
+    const firstFocusable = panel?.querySelector<HTMLElement>(FOCUSABLE_SELECTOR);
+    (firstFocusable ?? panel)?.focus();
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        onClose();
+        return;
+      }
+      if (e.key !== 'Tab' || !panel) return;
+
+      const focusables = Array.from(
+        panel.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
+      ).filter((el) => el.offsetParent !== null);
+      if (focusables.length === 0) return;
+
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      const active = document.activeElement;
+
+      if (e.shiftKey && (active === first || active === panel)) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+
+    panel?.addEventListener('keydown', onKeyDown);
+    return () => {
+      panel?.removeEventListener('keydown', onKeyDown);
+      previouslyFocused?.focus();
+    };
+  }, [onClose]);
 
   const run = async (label: string, task: () => Promise<void>) => {
     setStatus({ kind: 'busy', message: label });
@@ -66,7 +111,11 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
       className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200"
     >
-      <div className="bg-zinc-950 border border-zinc-800 rounded-2xl w-full max-w-lg p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
+      <div
+        ref={panelRef}
+        tabIndex={-1}
+        className="bg-zinc-950 border border-zinc-800 rounded-2xl w-full max-w-lg p-6 shadow-2xl max-h-[90vh] overflow-y-auto focus:outline-none"
+      >
         <div className="flex items-center justify-between mb-6 pb-3 border-b border-zinc-800">
           <h2 className="text-xl font-medium text-zinc-100">Cài đặt ứng dụng</h2>
           <button

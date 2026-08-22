@@ -4,7 +4,6 @@ import React, {
   memo,
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -66,23 +65,13 @@ const KATEX_MACRO_TEMPLATE: Record<string, string> = {
 const REMARK_PLUGINS: any[] = [remarkGfm, [remarkMath, { singleDollarTextMath: true }]];
 
 /* -------------------------------------------------------------------------- */
-/* Thông báo resize — coalesce 1 event / animation frame (sửa C3)              */
+/* Thông báo ảnh load xong — MessageList lắng nghe để ghim đáy.               */
+/* Việc đo lại chiều cao dòng do ResizeObserver của chính virtualizer đảm nhiệm. */
 /* -------------------------------------------------------------------------- */
 
-let resizeRaf: number | null = null;
-
-export function notifyResize(): void {
+function emitImageLoaded(): void {
   if (typeof window === 'undefined') return;
-  if (resizeRaf !== null) return;
-  resizeRaf = window.requestAnimationFrame(() => {
-    resizeRaf = null;
-    window.dispatchEvent(new CustomEvent('chat:content-resized'));
-  });
-}
-
-/** Font KaTeX load xong sẽ làm mọi công thức đổi chiều cao — phải đo lại. */
-if (typeof document !== 'undefined' && (document as any).fonts?.ready) {
-  (document as any).fonts.ready.then(() => notifyResize()).catch(() => {});
+  window.dispatchEvent(new CustomEvent('chat:image-loaded'));
 }
 
 /* -------------------------------------------------------------------------- */
@@ -168,10 +157,6 @@ const CodeBlock = memo(function CodeBlock({
   }, [value]);
 
   const highlight = !isStreaming && value.length <= MAX_HIGHLIGHT_CHARS;
-
-  useLayoutEffect(() => {
-    if (highlight) notifyResize();
-  }, [highlight]);
 
   return (
     <div className="claude-code-block my-4">
@@ -267,22 +252,6 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
     [],
   );
 
-  const wrapperRef = useRef<HTMLDivElement | null>(null);
-
-  useLayoutEffect(() => {
-    notifyResize();
-  }, [source]);
-
-  /* Bắt cả các thay đổi chiều cao bất đồng bộ (ảnh, font, KaTeX reflow) mà
-     effect theo `source` không thấy — đây là phần drift còn sót lại. */
-  useEffect(() => {
-    const el = wrapperRef.current;
-    if (!el || typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver(() => notifyResize());
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-
   const streamingRef = useRef(isStreaming);
   streamingRef.current = isStreaming;
 
@@ -339,10 +308,10 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
             loading="lazy"
             decoding="async"
             className="my-3 max-h-72 w-auto max-w-full rounded-lg border border-zinc-800 object-contain"
-            onLoad={notifyResize}
+            onLoad={emitImageLoaded}
             onError={(e) => {
               (e.currentTarget as HTMLImageElement).style.display = 'none';
-              notifyResize();
+              emitImageLoaded();
             }}
           />
         );
@@ -352,7 +321,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   );
 
   return (
-    <div ref={wrapperRef} className="w-full break-words">
+    <div className="w-full break-words">
       <MarkdownErrorBoundary fallbackText={safeContent} resetKey={source}>
         <ReactMarkdown
           remarkPlugins={REMARK_PLUGINS}
