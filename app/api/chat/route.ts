@@ -560,7 +560,7 @@ export async function POST(req: Request) {
 
     const upstreamHost = hostOf(process.env.OPENAI_BASE_URL) ?? 'api.openai.com';
     console.info(
-      `[req:${requestId}] start model=${targetModel} upstream=${upstreamHost} keys=${candidateKeys.length}`,
+      `[req:${requestId}] start model=${targetModel} upstream=${providerBase ? hostOf(providerBase) ?? providerBase : upstreamHost} keys=${candidateKeys.length}`,
     );
 
     return createDataStreamResponse({
