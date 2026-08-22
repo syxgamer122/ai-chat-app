@@ -1,10 +1,10 @@
-'use client';
-
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useChat, type Message } from 'ai/react';
 import { useVirtualizer } from '@tanstack/react-virtual';
+import { useLiveQuery } from 'dexie-react-hooks';
 import { useAppStore } from '@/lib/store';
 import { db, Dexie, type StoredMessage, type StoredAttachment } from '@/lib/db';
+import { AVAILABLE_MODELS } from '@/lib/models';
 import {
   reconstructActiveThread,
   reconstructActiveThreadSafe,
@@ -15,7 +15,6 @@ import {
 import { MarkdownRenderer } from './markdown-renderer';
 import { ErrorBoundary } from './error-boundary';
 import { ChatErrorBoundary } from './chat-error-boundary';
-import { motion } from 'framer-motion';
 import TextareaAutosize from 'react-textarea-autosize';
 import {
   Send, StopCircle, RefreshCcw, ArrowDown, Paperclip, X,
@@ -34,6 +33,8 @@ import { useStreamLease } from '@/lib/use-stream-lease';
 import { shouldAcceptStreamUpdate, type StreamGeneration } from '@/lib/stream-generation';
 import { useStickToBottom } from '@/lib/use-stick-to-bottom';
 import { ChatExportMenu } from '@/components/chat-export-menu';
+import { Composer } from '@/components/composer';
+import type { ModelOption } from '@/components/model-selector';
 
 const CONTINUE_PROMPT =
   'Câu trả lời trước bị ngắt giữa chừng. Hãy viết tiếp CHÍNH XÁC từ chỗ bị cắt, ' +
@@ -659,28 +660,157 @@ const MessageItem = memo(
   }: MessageItemProps) {
     const [isExpanded, setIsExpanded] = useState(false);
     const isLongUserMsg = m.role === 'user' && m.content.length > 250;
-    const shouldAnimate = animations && !isStreaming;
 
+    if (m.role === 'user') {
+      return (
+        <div className="group flex w-full justify-end px-2 md:px-4">
+          <div className="flex max-w-[85%] md:max-w-[75%] flex-col items-end gap-1">
+            {/* File Attachments */}
+            {m.experimental_attachments && m.experimental_attachments.length > 0 && (
+              <div className="mb-1.5 flex flex-wrap gap-2 justify-end">
+                {m.experimental_attachments.map((att, idx) => (
+                  <div key={idx} className="relative overflow-hidden rounded-lg border border-zinc-700/60 bg-zinc-800/60">
+                    {att.contentType?.startsWith('image/') ? (
+                      <img
+                        src={att.url}
+                        alt={att.name ?? 'attachment'}
+                        className="max-h-48 max-w-xs object-cover rounded-md"
+                        loading="eager"
+                        decoding="async"
+                        onLoad={onContentResize}
+                        onError={onContentResize}
+                      />
+                    ) : (
+                      <div className="flex items-center gap-2 p-2 text-xs text-zinc-300">
+                        <Paperclip className="h-3.5 w-3.5 text-zinc-500" />
+                        <span className="truncate max-w-[150px]">{att.name}</span>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Nội dung tin nhắn / Chỉnh sửa */}
+            {isEditing ? (
+              <div className="flex flex-col gap-2 w-full min-w-[260px] bg-[#1e1e22] border border-zinc-700 p-3 rounded-2xl shadow-xl">
+                <TextareaAutosize
+                  value={draft}
+                  onChange={(e) => onDraftChange(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (sendOnEnter && e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      onSaveEdit(m.id);
+                    }
+                    if (e.key === 'Escape') onCancelEdit();
+                  }}
+                  className="w-full resize-none bg-transparent text-sm text-zinc-100 outline-none placeholder:text-zinc-500"
+                  autoFocus
+                />
+                <div className="flex justify-end gap-2 text-xs pt-1 border-t border-zinc-800">
+                  <button
+                    type="button"
+                    onClick={onCancelEdit}
+                    className="rounded-lg px-2.5 py-1 text-zinc-400 hover:bg-zinc-800"
+                  >
+                    Hủy
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onSaveEdit(m.id)}
+                    className="rounded-lg bg-[#c96442] hover:bg-[#b5573a] px-3 py-1 font-medium text-white shadow-sm"
+                  >
+                    Lưu & Gửi lại
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="relative rounded-2xl bg-[#2b2b30] px-4 py-2.5 text-[15px] leading-relaxed text-zinc-100 shadow-sm">
+                <div className={isLongUserMsg && !isExpanded ? 'max-h-36 overflow-hidden relative' : ''}>
+                  <ErrorBoundary>
+                    <MarkdownRenderer
+                      content={sanitizeContent(m.content)}
+                      isStreaming={isStreaming}
+                      throttleMs={throttleMs}
+                    />
+                  </ErrorBoundary>
+
+                  {isLongUserMsg && !isExpanded && (
+                    <div className="absolute bottom-0 left-0 right-0 h-12 bg-gradient-to-t from-[#2b2b30] via-[#2b2b30]/80 to-transparent pointer-events-none" />
+                  )}
+                </div>
+
+                {isLongUserMsg && (
+                  <button
+                    type="button"
+                    onClick={() => setIsExpanded((prev) => !prev)}
+                    className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-medium text-zinc-400 hover:text-zinc-200"
+                  >
+                    {isExpanded ? (
+                      <>
+                        <ChevronUp size={13} />
+                        <span>Thu gọn</span>
+                      </>
+                    ) : (
+                      <>
+                        <ChevronDown size={13} />
+                        <span>Xem toàn bộ ({m.content.length.toLocaleString()} ký tự)</span>
+                      </>
+                    )}
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* Action bar + Branch switcher */}
+            {!isEditing && (
+              <div className="mt-1 flex items-center gap-1 text-xs opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                {branchInfo && (
+                  <BranchSwitcher
+                    currentIndex={branchInfo.currentIndex}
+                    total={branchInfo.total}
+                    isTouchDevice={isTouchDevice}
+                    disabled={isStreaming}
+                    onPrevious={() => onSwitchBranch(m.id, 'previous')}
+                    onNext={() => onSwitchBranch(m.id, 'next')}
+                  />
+                )}
+                <button
+                  type="button"
+                  onClick={() => onCopy(m)}
+                  title="Sao chép"
+                  className="flex h-6 w-6 items-center justify-center rounded text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
+                >
+                  {isCopied ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onStartEdit(m)}
+                  title="Chỉnh sửa"
+                  className="flex h-6 w-6 items-center justify-center rounded text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    /* ---------- ASSISTANT ---------- */
     return (
-      <motion.div
-        layout={false}
-        initial={shouldAnimate ? { opacity: 0, y: 10 } : false}
-        animate={shouldAnimate ? { opacity: 1, y: 0 } : false}
-        transition={{ duration: shouldAnimate ? 0.2 : 0 }}
-        className={`group flex w-full ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}
-      >
-        <div
-          className={`relative max-w-[85%] rounded-2xl px-4 py-3 shadow-sm md:max-w-[75%] ${
-            m.role === 'user'
-              ? 'bg-blue-600 text-white rounded-br-none'
-              : 'bg-zinc-100 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100 rounded-bl-none border border-zinc-200/50 dark:border-zinc-700/50'
-          }`}
-        >
+      <div className="group flex w-full gap-3 items-start px-2 md:px-4">
+        <div className="mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-[#c96442] text-[11px] font-semibold text-white shadow-sm select-none">
+          AI
+        </div>
+
+        <div className="min-w-0 flex-1">
           {/* File Attachments */}
           {m.experimental_attachments && m.experimental_attachments.length > 0 && (
             <div className="mb-2 flex flex-wrap gap-2">
               {m.experimental_attachments.map((att, idx) => (
-                <div key={idx} className="relative overflow-hidden rounded-lg border border-black/10 dark:border-white/10 bg-black/5 dark:bg-white/5">
+                <div key={idx} className="relative overflow-hidden rounded-lg border border-zinc-800 bg-zinc-900/60">
                   {att.contentType?.startsWith('image/') ? (
                     <img
                       src={att.url}
@@ -692,8 +822,8 @@ const MessageItem = memo(
                       onError={onContentResize}
                     />
                   ) : (
-                    <div className="flex items-center gap-2 p-2 text-xs">
-                      <Paperclip className="h-4 w-4" />
+                    <div className="flex items-center gap-2 p-2 text-xs text-zinc-300">
+                      <Paperclip className="h-3.5 w-3.5 text-zinc-500" />
                       <span className="truncate max-w-[150px]">{att.name}</span>
                     </div>
                   )}
@@ -702,171 +832,85 @@ const MessageItem = memo(
             </div>
           )}
 
-          {/* Nội dung tin nhắn / Chỉnh sửa */}
-          {isEditing ? (
-            <div className="flex flex-col gap-2 min-w-[240px]">
-              <TextareaAutosize
-                value={draft}
-                onChange={(e) => onDraftChange(e.target.value)}
-                onKeyDown={(e) => {
-                  if (sendOnEnter && e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    onSaveEdit(m.id);
-                  }
-                  if (e.key === 'Escape') onCancelEdit();
-                }}
-                className="w-full resize-none rounded-lg bg-white p-2 text-sm text-zinc-900 outline-none ring-2 ring-blue-500 dark:bg-zinc-900 dark:text-zinc-100"
-                autoFocus
+          <div className={`claude-prose ${isStreaming ? 'streaming-caret' : ''}`}>
+            <ErrorBoundary>
+              <MarkdownRenderer
+                content={sanitizeContent(m.content)}
+                isStreaming={isStreaming}
+                throttleMs={throttleMs}
               />
-              <div className="flex justify-end gap-2 text-xs">
-                <button
-                  onClick={onCancelEdit}
-                  className="rounded px-2.5 py-1 text-zinc-500 hover:bg-black/5 dark:hover:bg-white/5"
-                >
-                  Hủy
-                </button>
-                <button
-                  onClick={() => onSaveEdit(m.id)}
-                  className="rounded bg-blue-600 px-2.5 py-1 font-medium text-white hover:bg-blue-700"
-                >
-                  Lưu & Gửi lại
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div className="relative">
-              <div
-                className={
-                  isLongUserMsg && !isExpanded
-                    ? 'max-h-36 overflow-hidden relative'
-                    : ''
-                }
-              >
-                <ErrorBoundary>
-                  <MarkdownRenderer
-                    content={sanitizeContent(m.content)}
-                    isStreaming={isStreaming}
-                    throttleMs={throttleMs}
-                  />
-                </ErrorBoundary>
+            </ErrorBoundary>
+          </div>
 
-                {isLongUserMsg && !isExpanded && (
-                  <div className="absolute bottom-0 left-0 right-0 h-14 bg-gradient-to-t from-blue-600 via-blue-600/80 to-transparent pointer-events-none" />
-                )}
-              </div>
-
-              {isLongUserMsg && (
-                <button
-                  type="button"
-                  onClick={() => setIsExpanded((prev) => !prev)}
-                  className="mt-2 inline-flex items-center gap-1 text-[11px] font-medium text-blue-100 hover:text-white transition-colors bg-blue-700/60 hover:bg-blue-700 px-2 py-0.5 rounded-md"
-                >
-                  {isExpanded ? (
-                    <>
-                      <ChevronUp size={13} />
-                      <span>Thu gọn</span>
-                    </>
-                  ) : (
-                    <>
-                      <ChevronDown size={13} />
-                      <span>Xem toàn bộ ({m.content.length.toLocaleString()} ký tự)</span>
-                    </>
-                  )}
-                </button>
-              )}
-
-              {m.role === 'assistant' && (() => {
-                const { truncated, message: note } = getFinishInfo(m);
-                if (!truncated || isStreaming) return null;
-                return (
-                  <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
-                    <span>{note ?? 'Câu trả lời có thể chưa hoàn chỉnh.'}</span>
-                    {onContinueGenerating && (
-                      <button
-                        type="button"
-                        onClick={onContinueGenerating}
-                        className="rounded-lg bg-amber-500/25 px-2.5 py-1 font-medium text-amber-100 hover:bg-amber-500/40 transition-colors shadow-sm"
-                      >
-                        Viết tiếp
-                      </button>
-                    )}
-                  </div>
-                );
-              })()}
-
-              {m.role === 'assistant' && (m as any).status === 'aborted' && (
-                <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-black/5 dark:border-white/5 pt-2">
-                  <div className="flex items-center gap-1.5">
-                    <MessageStatusBadge status="aborted" />
-                    <span className="text-[11px] text-zinc-400 dark:text-zinc-500">· Bạn có thể tạo lại để sinh câu trả lời mới</span>
-                  </div>
+          {(() => {
+            const { truncated, message: note } = getFinishInfo(m);
+            if (!truncated || isStreaming) return null;
+            return (
+              <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-700/40 bg-amber-950/20 px-3 py-2 text-xs text-amber-300">
+                <span>{note ?? 'Câu trả lời có thể chưa hoàn chỉnh do đạt giới hạn token.'}</span>
+                {onContinueGenerating && (
                   <button
                     type="button"
-                    onClick={() => onRegenerate(m.id)}
-                    className="inline-flex items-center gap-1 rounded bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-600 hover:bg-amber-500/20 dark:text-amber-400"
+                    onClick={onContinueGenerating}
+                    className="rounded-lg bg-amber-600/30 px-2.5 py-1 font-medium text-amber-100 hover:bg-amber-600/50 transition-colors shadow-sm"
                   >
-                    <RefreshCcw size={12} />
-                    <span>Tạo nhánh mới</span>
+                    Viết tiếp
                   </button>
-                </div>
-              )}
+                )}
+              </div>
+            );
+          })()}
+
+          {m.role === 'assistant' && (m as any).status === 'aborted' && (
+            <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-zinc-800 pt-2">
+              <div className="flex items-center gap-1.5">
+                <MessageStatusBadge status="aborted" />
+                <span className="text-[11px] text-zinc-500">· Bạn có thể tạo lại để sinh câu trả lời mới</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => onRegenerate(m.id)}
+                className="inline-flex items-center gap-1 rounded bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-400 hover:bg-amber-500/20"
+              >
+                <RefreshCcw size={12} />
+                <span>Tạo nhánh mới</span>
+              </button>
             </div>
           )}
 
-          {/* Branch Switcher */}
-          {!isEditing && branchInfo && (
-            <BranchSwitcher
-              currentIndex={branchInfo.currentIndex}
-              total={branchInfo.total}
-              isTouchDevice={isTouchDevice}
-              disabled={isStreaming}
-              onPrevious={() =>
-                onSwitchBranch(m.id, 'previous')
-              }
-              onNext={() =>
-                onSwitchBranch(m.id, 'next')
-              }
-            />
-          )}
-
-          {/* Action toolbar */}
-          {!isEditing && (
-            <div
-              className={`mt-2 flex items-center gap-1 text-xs opacity-0 transition-opacity group-hover:opacity-100 ${
-                isTouchDevice ? 'opacity-100' : ''
-              } ${m.role === 'user' ? 'justify-end text-blue-100' : 'justify-start text-zinc-400'}`}
-            >
+          {/* Action toolbar + Branch switcher */}
+          {!isStreaming && (
+            <div className="mt-2 flex items-center gap-1 text-xs opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
               <button
+                type="button"
                 onClick={() => onCopy(m)}
-                title="Sao chép nội dung"
-                className="rounded p-1 hover:bg-black/10 dark:hover:bg-white/10"
+                title="Sao chép"
+                className="flex h-6 w-6 items-center justify-center rounded text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
               >
-                {isCopied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+                {isCopied ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
               </button>
-
-              {m.role === 'user' && (
-                <button
-                  onClick={() => onStartEdit(m)}
-                  title="Chỉnh sửa và gửi lại"
-                  className="rounded p-1 hover:bg-black/10 dark:hover:bg-white/10"
-                >
-                  <Pencil className="h-3.5 w-3.5" />
-                </button>
-              )}
-
-              {m.role === 'assistant' && (
-                <button
-                  onClick={() => onRegenerate(m.id)}
-                  title="Tạo lại câu trả lời"
-                  className="rounded p-1 hover:bg-black/10 dark:hover:bg-white/10"
-                >
-                  <RefreshCcw className="h-3.5 w-3.5" />
-                </button>
+              <button
+                type="button"
+                onClick={() => onRegenerate(m.id)}
+                title="Tạo lại câu trả lời"
+                className="flex h-6 w-6 items-center justify-center rounded text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
+              >
+                <RefreshCcw className="h-3.5 w-3.5" />
+              </button>
+              {branchInfo && (
+                <BranchSwitcher
+                  currentIndex={branchInfo.currentIndex}
+                  total={branchInfo.total}
+                  isTouchDevice={isTouchDevice}
+                  disabled={isStreaming}
+                  onPrevious={() => onSwitchBranch(m.id, 'previous')}
+                  onNext={() => onSwitchBranch(m.id, 'next')}
+                />
               )}
             </div>
           )}
         </div>
-      </motion.div>
+      </div>
     );
   },
   (prev, next) =>
@@ -889,6 +933,7 @@ const MessageItem = memo(
 /* Subcomponent 1: Memoized ChatHeader                                 */
 /* ------------------------------------------------------------------ */
 interface ChatHeaderProps {
+  title?: string;
   hasMessages: boolean;
   confirmClear: boolean;
   onSetConfirmClear: (val: boolean) => void;
@@ -898,6 +943,7 @@ interface ChatHeaderProps {
 }
 
 const ChatHeader = memo(function ChatHeader({
+  title,
   hasMessages,
   confirmClear,
   onSetConfirmClear,
@@ -906,46 +952,53 @@ const ChatHeader = memo(function ChatHeader({
   currentChatId,
 }: ChatHeaderProps) {
   return (
-    <header className="relative z-20 flex flex-shrink-0 items-center justify-between px-3 py-2 bg-zinc-950/85 backdrop-blur-md border-b border-zinc-800/60 pt-[calc(0.5rem+env(safe-area-inset-top))]">
-      <button
-        type="button"
-        onClick={onOpenSidebar}
-        aria-label="Open sidebar menu"
-        className="md:hidden p-2 bg-zinc-900/80 border border-zinc-800 text-zinc-400 hover:text-zinc-200 rounded-xl backdrop-blur-sm transition-colors shadow-sm"
-      >
-        <Menu size={18} />
-      </button>
+    <header className="flex h-12 flex-shrink-0 items-center justify-between border-b border-zinc-800/60 bg-[#0f0f10]/90 px-3 backdrop-blur pt-safe z-20">
+      <div className="flex min-w-0 items-center gap-2">
+        <button
+          type="button"
+          onClick={onOpenSidebar}
+          aria-label="Mở thanh bên"
+          className="flex h-8 w-8 items-center justify-center rounded-lg text-zinc-400 hover:bg-zinc-800/70 md:hidden"
+        >
+          <Menu size={16} />
+        </button>
+        <h1 className="truncate text-[13px] font-medium text-zinc-300">
+          {title ?? 'Cuộc trò chuyện mới'}
+        </h1>
+      </div>
 
-      <div className="ml-auto flex items-center gap-1.5">
+      <div className="flex items-center gap-0.5">
         <ChatExportMenu chatId={currentChatId} />
 
-        {hasMessages && (
-          confirmClear ? (
-            <div className="flex items-center gap-1.5 bg-zinc-900/90 border border-zinc-800 rounded-xl p-1 backdrop-blur-sm shadow-lg">
+        {hasMessages &&
+          (confirmClear ? (
+            <div className="flex items-center gap-1.5 rounded-lg border border-zinc-800 bg-[#1a1a1d] p-1 shadow-lg">
               <button
+                type="button"
                 onClick={onDeleteChat}
-                className="px-2.5 py-1 text-xs text-red-400 hover:bg-red-950/50 rounded-lg transition font-medium"
+                className="rounded px-2.5 py-1 text-xs font-medium text-red-400 hover:bg-red-500/10 transition"
               >
                 Xóa hẳn
               </button>
               <button
+                type="button"
                 onClick={() => onSetConfirmClear(false)}
-                className="px-2.5 py-1 text-xs text-zinc-400 hover:bg-zinc-800 rounded-lg transition"
+                className="rounded px-2.5 py-1 text-xs text-zinc-400 hover:bg-zinc-800 transition"
               >
                 Hủy
               </button>
             </div>
           ) : (
             <button
+              type="button"
               onClick={() => onSetConfirmClear(true)}
+              aria-label="Xóa cuộc trò chuyện"
               title="Xóa cuộc trò chuyện này"
-              aria-label="Delete chat conversation"
-              className="p-2 text-zinc-500 hover:text-red-400 hover:bg-zinc-900/80 border border-transparent hover:border-zinc-800 rounded-xl transition-all"
+              className="flex h-8 w-8 items-center justify-center rounded-lg text-zinc-500 hover:bg-red-500/10 hover:text-red-400 transition"
             >
-              <Trash2 size={18} />
+              <Trash2 size={16} />
             </button>
-          )
-        )}
+          ))}
       </div>
     </header>
   );
@@ -1198,6 +1251,8 @@ const MessageList = memo(function MessageList({
               style={{
                 height: `${rowVirtualizer.getTotalSize()}px`,
                 width: '100%',
+                maxWidth: '48rem',
+                margin: '0 auto',
                 position: 'relative',
               }}
             >
@@ -1428,6 +1483,7 @@ export default function ChatInterface() {
   const currentChatId = useAppStore((s) => s.currentChatId);
   const setCurrentChatId = useAppStore((s) => s.setCurrentChatId);
   const setSidebarOpen = useAppStore((s) => s.setSidebarOpen);
+  const updateSettings = useAppStore((s) => s.updateSettings);
 
   const model = useAppStore((s) => s.settings.model);
   const temperature = useAppStore((s) => s.settings.temperature);
@@ -1437,6 +1493,21 @@ export default function ChatInterface() {
   const sendOnEnter = useAppStore((s) => s.settings.sendOnEnter);
   const throttleMs = useAppStore((s) => s.settings.perf.throttleMs);
   const animations = useAppStore((s) => s.settings.perf.animations);
+
+  const currentChat = useLiveQuery(
+    () => (currentChatId ? db.chats.get(currentChatId) : undefined),
+    [currentChatId],
+  );
+
+  const MODELS: ModelOption[] = useMemo(
+    () =>
+      AVAILABLE_MODELS.map((m) => ({
+        id: m.id,
+        label: m.name,
+        hint: m.description,
+      })),
+    [],
+  );
 
   const [draftId, setDraftId] = useState(() => crypto.randomUUID());
   const chatKey = currentChatId ?? draftId;
@@ -3148,12 +3219,48 @@ export default function ChatInterface() {
   const lastMessageId = messages[messages.length - 1]?.id;
   const hasMessages = messages.length > 0;
 
+  const canContinue = useMemo(() => {
+    const lastMsg = messages[messages.length - 1];
+    return Boolean(
+      lastMsg &&
+        lastMsg.role === 'assistant' &&
+        getFinishInfo(lastMsg).truncated &&
+        !isLoading,
+    );
+  }, [messages, isLoading]);
+
+  const composerAttachments = useMemo(
+    () =>
+      attachments.map((f, i) => ({
+        id: `${f.name}-${i}`,
+        name: f.name,
+        size: f.size,
+      })),
+    [attachments],
+  );
+
+  const handleRemoveAttachmentById = useCallback(
+    (id: string) => {
+      const idx = composerAttachments.findIndex((a) => a.id === id);
+      if (idx !== -1) removeAttachment(idx);
+    },
+    [composerAttachments, removeAttachment],
+  );
+
+  const handleModelChange = useCallback(
+    (newModelId: string) => {
+      updateSettings({ model: newModelId });
+    },
+    [updateSettings],
+  );
+
   return (
     <div
       {...swipeHandlers}
-      className="flex h-full flex-col overflow-hidden bg-zinc-950 touch-pan-y"
+      className="flex h-full flex-col overflow-hidden bg-[#0f0f10] touch-pan-y"
     >
       <ChatHeader
+        title={currentChat?.title}
         hasMessages={hasMessages}
         confirmClear={confirmClear}
         onSetConfirmClear={setConfirmClear}
@@ -3210,21 +3317,21 @@ export default function ChatInterface() {
         />
       </div>
 
-      <ChatComposer
+      <Composer
         input={input}
-        handleInputChange={handleInputChange}
-        onTextareaKeyDown={onTextareaKeyDown}
+        onInputChange={handleInputChange}
         onSubmit={onSubmit}
-        isLoading={isLoading}
-        handleStop={handleStop}
-        notice={notice}
-        onClearNotice={onClearNotice}
-        attachments={attachments}
-        addFiles={addFiles}
-        removeAttachment={removeAttachment}
-        previewMap={previewMap}
-        fileInputRef={fileInputRef}
-        isTouchDevice={isTouchDevice}
+        onKeyDown={onTextareaKeyDown}
+        isStreaming={isLoading}
+        onStop={handleStop}
+        attachments={composerAttachments}
+        onAddFiles={addFiles}
+        onRemoveAttachment={handleRemoveAttachmentById}
+        models={MODELS}
+        model={model}
+        onModelChange={handleModelChange}
+        canContinue={canContinue}
+        onContinue={continueGenerating}
       />
     </div>
   );

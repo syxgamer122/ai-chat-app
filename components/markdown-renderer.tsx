@@ -153,23 +153,29 @@ const CodeBlock = memo(function CodeBlock({
       await navigator.clipboard.writeText(value);
       setCopied(true);
       if (t.current) clearTimeout(t.current);
-      t.current = setTimeout(() => setCopied(false), 2000);
+      t.current = setTimeout(() => setCopied(false), 1500);
     } catch (err) {
       console.error('[CodeBlock] copy failed:', err);
     }
   }, [value]);
 
   return (
-    <div className="relative group/code rounded-md overflow-hidden my-4 border border-zinc-800 shadow-md">
-      <div className="flex items-center justify-between px-3 py-1.5 bg-zinc-900 border-b border-zinc-800 text-xs text-zinc-400 font-mono">
-        <span>{language || 'text'}</span>
-        <button type="button" onClick={onCopy} className="hover:text-zinc-100 transition-colors" aria-label="Copy code">
-          {copied ? <Check size={14} /> : <Copy size={14} />}
+    <div className="claude-code-block my-4">
+      <div className="flex items-center justify-between border-b border-zinc-800/80 bg-[#141417] px-3 py-1.5">
+        <span className="text-[11px] font-medium text-zinc-500 font-mono">{language || 'text'}</span>
+        <button
+          type="button"
+          onClick={onCopy}
+          className="flex items-center gap-1 text-[11px] text-zinc-500 hover:text-zinc-200 transition-colors"
+          aria-label="Copy code"
+        >
+          {copied ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
+          <span>{copied ? 'Đã chép' : 'Copy'}</span>
         </button>
       </div>
 
       {isStreaming ? (
-        <pre className="m-0 p-4 overflow-x-auto bg-[#09090b] text-[13px] leading-relaxed font-mono text-zinc-300">
+        <pre className="m-0 p-3.5 overflow-x-auto bg-[#0d0d10] text-[13px] leading-relaxed font-mono text-zinc-300">
           <code>{value}</code>
         </pre>
       ) : (
@@ -177,7 +183,7 @@ const CodeBlock = memo(function CodeBlock({
           style={vscDarkPlus}
           language={language || 'text'}
           PreTag="div"
-          customStyle={{ margin: 0, padding: '1rem', background: '#09090b', fontSize: '13px' }}
+          customStyle={{ margin: 0, padding: '0.9rem 1rem', background: '#0d0d10', fontSize: '13px', lineHeight: '1.6' }}
         >
           {value}
         </SyntaxHighlighter>
@@ -232,16 +238,16 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
 
       code({ children }: any) {
         return (
-          <code className="bg-zinc-800/50 rounded px-1.5 py-0.5 text-[13px] font-mono text-indigo-400 break-words">
+          <code className="bg-[#1e1e22] border border-[#2a2a30] rounded px-1.5 py-0.5 text-[13px] font-mono text-[#e6b8a5] break-words">
             {children}
           </code>
         );
       },
 
-      p: ({ children }: any) => <p className="mb-4 last:mb-0">{children}</p>,
+      p: ({ children }: any) => <p className="mb-3.5 last:mb-0">{children}</p>,
 
       a: ({ href, children }: any) => (
-        <a href={href} target="_blank" rel="noreferrer noopener" className="text-indigo-400 hover:underline break-words">
+        <a href={href} target="_blank" rel="noreferrer noopener" className="text-[#d98a6c] hover:underline underline-offset-2 break-words">
           {children}
         </a>
       ),
@@ -277,7 +283,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   );
 
   return (
-    <div className="prose prose-invert prose-p:leading-relaxed prose-pre:p-0 max-w-none w-full [&_.katex-display]:overflow-x-auto [&_.katex-display]:overflow-y-hidden [&_.katex-display]:py-1">
+    <div className="w-full break-words [&_.katex-display]:overflow-x-auto [&_.katex-display]:overflow-y-hidden [&_.katex-display]:py-1">
       <ReactMarkdown remarkPlugins={REMARK_PLUGINS} rehypePlugins={REHYPE_PLUGINS} components={components}>
         {source}
       </ReactMarkdown>
