@@ -1,41 +1,28 @@
-/**
- * Module Bảo mật, Xác thực & Rate Limiting đa tầng cho Next.js Edge Runtime.
- * Hỗ trợ:
- * 1. Chống Giả Mạo IP (IP Spoofing & IPv6 Subnet Rotation Defense)
- * 2. Xác thực Same-Origin chống Open Proxy / Hotlinking từ bên ngoài
- * 3. Kiểm tra Mật khẩu truy cập hệ thống (APP_ACCESS_PASSWORD)
- * 4. Distributed Sliding Window Rate Limiter qua Upstash Redis REST
- *    (Đồng bộ trên toàn bộ Edge Isolates & Multi-region) với fallback In-Memory an toàn.
- */
-
-interface RateLimitBucket {
+﻿interface RateLimitBucket {
   timestamps: number[];
 }
 
 const memoryBuckets = new Map<string, RateLimitBucket>();
-const MAX_MEMORY_BUCKETS = 5000; // Giới hạn kích thước bộ nhớ để chống OOM Attack
+const MAX_MEMORY_BUCKETS = 5000;
 const CLEANUP_INTERVAL = 60_000;
 let lastCleanup = Date.now();
 
 const FALLBACK_IP = '127.0.0.1';
+const VERCEL_SUFFIX = '.vercel.app';
 
-/**
- * Chuẩn hóa và làm sạch chuỗi IP.
- * Với IPv6: Gom nhóm theo /64 subnet để chống tấn công xoay dải IPv6.
- */
+/* ------------------------------------------------------------------ */
+/* IP helpers                                                          */
+/* ------------------------------------------------------------------ */
+
 export function normalizeIp(raw: string): string {
   const ip = raw.trim().toLowerCase();
   if (!ip || ip.length > 64) return FALLBACK_IP;
 
-  // Loại bỏ port nếu có dạng 1.2.3.4:5678 hoặc [::1]:5678
   const cleanIp = ip.replace(/^\[|\](:\d+)?$/g, '').replace(/:\d+$/, '');
-
-  // Kiểm tra ký tự hợp lệ cho IPv4 / IPv6
   if (!/^[a-f0-9:.]+$/i.test(cleanIp)) {
     return FALLBACK_IP;
   }
 
-  // Nếu là IPv6, gom 4 nhóm đầu tiên thành /64 subnet identifier
   if (cleanIp.includes(':')) {
     const parts = cleanIp.split(':');
     if (parts.length >= 4) {
@@ -46,215 +33,342 @@ export function normalizeIp(raw: string): string {
   return cleanIp;
 }
 
-/**
- * Lấy IP tin cậy nhất từ các header của hạ tầng Vercel / Cloudflare.
- * Không tin tưởng x-forwarded-for do client tùy ý gửi nếu có header của platform.
- */
 export function getClientIp(req: Request): string {
-  // 1. Header do Vercel Edge Server tự động gắn (Không thể bị client ghi đè)
   const vercelIp = req.headers.get('x-vercel-forwarded-for');
-  if (vercelIp) {
-    const first = vercelIp.split(',')[0];
-    return normalizeIp(first);
-  }
+  if (vercelIp) return normalizeIp(vercelIp.split(',')[0]);
 
-  // 2. Header do Cloudflare gắn
   const cfIp = req.headers.get('cf-connecting-ip');
   if (cfIp) return normalizeIp(cfIp);
 
-  // 3. Header từ reverse proxy đáng tin cậy
   const realIp = req.headers.get('x-real-ip');
   if (realIp) return normalizeIp(realIp);
 
-  // 4. Fallback x-forwarded-for (Được làm sạch và kiểm tra chặt chẽ)
   const forwarded = req.headers.get('x-forwarded-for');
-  if (forwarded) {
-    const first = forwarded.split(',')[0];
-    return normalizeIp(first);
-  }
+  if (forwarded) return normalizeIp(forwarded.split(',')[0]);
 
   return FALLBACK_IP;
 }
 
-/**
- * Kiểm tra Same-Origin để chống việc website khác biến endpoint của bạn thành Open Proxy.
- */
-export function verifySameOrigin(req: Request): boolean {
-  if (process.env.NODE_ENV !== 'production') return true;
+/* ------------------------------------------------------------------ */
+/* Same-Origin                                                         */
+/* ------------------------------------------------------------------ */
 
-  // 1. Kiểm tra header bảo mật Sec-Fetch-Site của trình duyệt hiện đại
-  const secFetchSite = req.headers.get('sec-fetch-site');
-  if (secFetchSite === 'same-origin' || secFetchSite === 'none') {
-    return true;
+export type OriginCheckCode =
+  | 'OK_DEV'
+  | 'OK_DISABLED'
+  | 'OK_ALLOWLIST'
+  | 'OK_SAME_VERCEL_PROJECT'
+  | 'OK_SEC_FETCH'
+  | 'OK_NO_ORIGIN'
+  | 'OK_FAIL_OPEN'
+  | 'BLOCK_CROSS_SITE'
+  | 'BLOCK_ORIGIN_MISMATCH'
+  | 'BLOCK_OPAQUE_ORIGIN';
+
+export interface OriginCheckResult {
+  allowed: boolean;
+  code: OriginCheckCode;
+  reason: string;
+  debug: {
+    origin: string | null;
+    referer: string | null;
+    host: string | null;
+    forwardedHost: string | null;
+    secFetchSite: string | null;
+    allowedHosts: string[];
+  };
+}
+
+const TRUTHY = new Set(['1', 'true', 'yes', 'on']);
+
+function envFlag(name: string): boolean {
+  return TRUTHY.has((process.env[name] ?? '').trim().toLowerCase());
+}
+
+/** Chuẩn hoá mọi dạng (URL đầy đủ, host:port, hostname) về hostname thuần, bỏ port. */
+function toHostname(value?: string | null): string | null {
+  if (!value) return null;
+  const v = value.trim().toLowerCase();
+  if (!v || v === 'null' || v === 'undefined') return null;
+  try {
+    const url = v.includes('://') ? new URL(v) : new URL(`https://${v}`);
+    return url.hostname || null;
+  } catch {
+    return null;
   }
-  if (secFetchSite === 'cross-site') {
-    return false;
-  }
+}
 
-  // 2. Thu thập toàn bộ danh sách Host hợp lệ từ request & môi trường
-  const candidateHosts = new Set<string>();
-
-  const rawHost = req.headers.get('host');
-  if (rawHost) candidateHosts.add(rawHost.trim().toLowerCase());
-
-  const forwardedHost = req.headers.get('x-forwarded-host');
-  if (forwardedHost) {
-    for (const h of forwardedHost.split(',')) {
-      if (h.trim()) candidateHosts.add(h.trim().toLowerCase());
-    }
-  }
-
-  if (process.env.VERCEL_URL) candidateHosts.add(process.env.VERCEL_URL.trim().toLowerCase());
-  if (process.env.VERCEL_PROJECT_PRODUCTION_URL) candidateHosts.add(process.env.VERCEL_PROJECT_PRODUCTION_URL.trim().toLowerCase());
-
-  const origin = req.headers.get('origin');
-  const referer = req.headers.get('referer');
-
-  // Không có cả origin lẫn referer (ví dụ internal request): cho phép
-  if (!origin && !referer) return true;
-
-  const extractHost = (urlStr: string): string | null => {
-    try {
-      return new URL(urlStr).host.toLowerCase();
-    } catch {
-      return null;
-    }
+function collectAllowedHosts(req: Request): Set<string> {
+  const hosts = new Set<string>();
+  const add = (v?: string | null) => {
+    const h = toHostname(v);
+    if (h) hosts.add(h);
   };
 
-  const originHost = origin ? extractHost(origin) : null;
-  const refererHost = referer ? extractHost(referer) : null;
+  // Domain sản xuất chính của ứng dụng
+  add('quyettamvmo.vercel.app');
 
-  // Nếu có origin/referer và khớp với bất kỳ host candidate nào
-  if (originHost && candidateHosts.has(originHost)) return true;
-  if (refererHost && candidateHosts.has(refererHost)) return true;
+  add(req.headers.get('host'));
+  for (const h of (req.headers.get('x-forwarded-host') ?? '').split(',')) add(h);
 
-  // Nếu cả originHost/refererHost lẫn host của request đều thuộc đuôi .vercel.app
-  if (originHost && originHost.endsWith('.vercel.app')) {
-    const hasVercelHost = Array.from(candidateHosts).some((h) => h.endsWith('.vercel.app'));
-    if (hasVercelHost) return true;
-  }
-  if (refererHost && refererHost.endsWith('.vercel.app')) {
-    const hasVercelHost = Array.from(candidateHosts).some((h) => h.endsWith('.vercel.app'));
-    if (hasVercelHost) return true;
-  }
+  // Các biến Vercel cung cấp sẵn cho runtime
+  add(process.env.VERCEL_URL);
+  add(process.env.VERCEL_BRANCH_URL);
+  add(process.env.VERCEL_PROJECT_PRODUCTION_URL);
 
-  // Nếu không có origin/referer nào khớp được
-  if (originHost && !candidateHosts.has(originHost)) return false;
-  if (refererHost && !candidateHosts.has(refererHost)) return false;
+  // Domain tự khai báo (custom domain, staging...) — phân tách bằng dấu phẩy/space
+  add(process.env.NEXT_PUBLIC_APP_URL);
+  for (const item of (process.env.APP_ALLOWED_ORIGINS ?? '').split(/[\s,;]+/)) add(item);
 
-  return true;
+  return hosts;
 }
 
 /**
- * Xác thực Mật khẩu bảo vệ hệ thống (nếu có cấu hình APP_ACCESS_PASSWORD trên Vercel).
+ * Lấy "project token" từ các host *.vercel.app đã tin cậy.
+ * quyettamvmo.vercel.app                  -> quyettamvmo
+ * quyettamvmo-git-main-abc.vercel.app     -> quyettamvmo
  */
-export function verifyAccessAuth(req: Request): { authorized: boolean; reason?: string } {
-  const requiredPassword = process.env.APP_ACCESS_PASSWORD?.trim();
-
-  if (!requiredPassword) {
-    return { authorized: true };
+function vercelProjectTokens(hosts: Set<string>): Set<string> {
+  const tokens = new Set<string>();
+  for (const h of hosts) {
+    if (!h.endsWith(VERCEL_SUFFIX)) continue;
+    const token = h.slice(0, -VERCEL_SUFFIX.length).split('-')[0];
+    if (token.length >= 3) tokens.add(token);
   }
+  return tokens;
+}
+
+function isSameVercelProject(candidate: string | null, tokens: Set<string>): boolean {
+  if (!candidate || !candidate.endsWith(VERCEL_SUFFIX) || tokens.size === 0) return false;
+  const label = candidate.slice(0, -VERCEL_SUFFIX.length);
+  for (const t of tokens) {
+    if (label === t || label.startsWith(`${t}-`)) return true;
+  }
+  return false;
+}
+
+/**
+ * Chống Open Proxy nhưng KHÔNG BAO GIỜ chặn nhầm domain hợp lệ.
+ */
+export function checkSameOrigin(req: Request): OriginCheckResult {
+  const origin = req.headers.get('origin');
+  const referer = req.headers.get('referer');
+  const host = req.headers.get('host');
+  const forwardedHost = req.headers.get('x-forwarded-host');
+  const secFetchSite = req.headers.get('sec-fetch-site');
+
+  const allowedHosts = collectAllowedHosts(req);
+  const debug = {
+    origin,
+    referer,
+    host,
+    forwardedHost,
+    secFetchSite,
+    allowedHosts: Array.from(allowedHosts),
+  };
+
+  if (process.env.NODE_ENV !== 'production') {
+    return { allowed: true, code: 'OK_DEV', reason: 'Non-production environment.', debug };
+  }
+
+  // Van xả khẩn cấp: bật DISABLE_ORIGIN_CHECK=1 để loại trừ tầng này khi debug.
+  if (envFlag('DISABLE_ORIGIN_CHECK')) {
+    return { allowed: true, code: 'OK_DISABLED', reason: 'DISABLE_ORIGIN_CHECK=1.', debug };
+  }
+
+  // Không xác định được host hợp lệ nào -> fail-open (vẫn còn rate limit + access code).
+  if (allowedHosts.size === 0) {
+    return {
+      allowed: true,
+      code: 'OK_FAIL_OPEN',
+      reason: 'Không xác định được host của deployment, bỏ qua kiểm tra origin.',
+      debug,
+    };
+  }
+
+  const originHost = toHostname(origin);
+  const refererHost = toHostname(referer);
+  const tokens = vercelProjectTokens(allowedHosts);
+
+  // 1) Khớp allowlist -> cho qua bất kể sec-fetch-site.
+  if (originHost && allowedHosts.has(originHost)) {
+    return { allowed: true, code: 'OK_ALLOWLIST', reason: `origin=${originHost}`, debug };
+  }
+  if (!origin && refererHost && allowedHosts.has(refererHost)) {
+    return { allowed: true, code: 'OK_ALLOWLIST', reason: `referer=${refererHost}`, debug };
+  }
+
+  // 2) Cùng project Vercel (preview deployment).
+  if (isSameVercelProject(originHost, tokens) || (!origin && isSameVercelProject(refererHost, tokens))) {
+    return { allowed: true, code: 'OK_SAME_VERCEL_PROJECT', reason: 'Cùng Vercel project.', debug };
+  }
+
+  // 3) Tín hiệu của trình duyệt hiện đại.
+  if (secFetchSite === 'same-origin' || secFetchSite === 'none') {
+    return { allowed: true, code: 'OK_SEC_FETCH', reason: `sec-fetch-site=${secFetchSite}`, debug };
+  }
+
+  // 4) Origin "null" (iframe sandbox, redirect lạ) khi không có tín hiệu nào khác.
+  if (origin && !originHost) {
+    return {
+      allowed: false,
+      code: 'BLOCK_OPAQUE_ORIGIN',
+      reason: 'Origin rỗng/opaque và không khớp tín hiệu same-origin nào.',
+      debug,
+    };
+  }
+
+  // 5) Có origin/referer nhưng không khớp gì -> chặn.
+  if (originHost || refererHost) {
+    return {
+      allowed: false,
+      code: 'BLOCK_ORIGIN_MISMATCH',
+      reason: `Origin '${originHost ?? refererHost}' không thuộc allowlist [${debug.allowedHosts.join(', ')}].`,
+      debug,
+    };
+  }
+
+  // 6) Không origin, không referer (curl, app native, một số webview).
+  if (secFetchSite === 'cross-site') {
+    return { allowed: false, code: 'BLOCK_CROSS_SITE', reason: 'sec-fetch-site=cross-site.', debug };
+  }
+
+  return {
+    allowed: true,
+    code: 'OK_NO_ORIGIN',
+    reason: 'Client không gửi origin/referer; dựa vào rate limit + access code.',
+    debug,
+  };
+}
+
+/** Giữ tương thích ngược với code cũ. */
+export function verifySameOrigin(req: Request): boolean {
+  return checkSameOrigin(req).allowed;
+}
+
+/* ------------------------------------------------------------------ */
+/* Access code                                                         */
+/* ------------------------------------------------------------------ */
+
+function safeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
+export function verifyAccessAuth(req: Request): {
+  authorized: boolean;
+  code?: 'ACCESS_CODE_MISSING' | 'ACCESS_CODE_INVALID';
+  reason?: string;
+} {
+  const requiredPassword = process.env.APP_ACCESS_PASSWORD?.trim();
+  if (!requiredPassword) return { authorized: true };
 
   const clientPassword =
     req.headers.get('x-access-code')?.trim() ||
+    req.headers.get('x-app-password')?.trim() ||
     req.headers.get('authorization')?.replace(/^Bearer\s+/i, '').trim();
 
-  if (!clientPassword || clientPassword !== requiredPassword) {
+  if (!clientPassword) {
     return {
       authorized: false,
-      reason: 'Cần cung cấp Mật khẩu truy cập (Access Code) hợp lệ để sử dụng AI Chat.',
+      code: 'ACCESS_CODE_MISSING',
+      reason: 'App đang bật Mật khẩu truy cập nhưng client chưa gửi header x-access-code.',
+    };
+  }
+
+  if (!safeEqual(clientPassword, requiredPassword)) {
+    return {
+      authorized: false,
+      code: 'ACCESS_CODE_INVALID',
+      reason: 'Mật khẩu truy cập (Access Code) không đúng.',
     };
   }
 
   return { authorized: true };
 }
 
-/**
- * Thuật toán Distributed Sliding Window Rate Limiting:
- * 1. Nếu có UPSTASH_REDIS_REST_URL & UPSTASH_REDIS_REST_TOKEN:
- *    Thực thi ZREMRANGEBYSCORE + ZADD + ZCARD + EXPIRE trên Redis REST pipeline,
- *    đảm bảo đồng bộ 100% giữa tất cả các Edge Isolates & Multi-region.
- * 2. Fallback: In-Memory Sliding Window với LRU eviction và max 5,000 buckets.
- */
+/* ------------------------------------------------------------------ */
+/* Rate limit                                                          */
+/* ------------------------------------------------------------------ */
+
 export async function checkRateLimit(
   key: string,
-  limit = 20,
-  windowMs = 60_000,
+  limit: number,
+  windowMs: number,
 ): Promise<{ allowed: boolean; remaining: number; resetInSec: number }> {
   const now = Date.now();
   const upstashUrl = process.env.UPSTASH_REDIS_REST_URL;
   const upstashToken = process.env.UPSTASH_REDIS_REST_TOKEN;
 
-  // 1. Phân tán trên Redis REST (Sliding Window Log via Sorted Set)
   if (upstashUrl && upstashToken) {
     try {
-      const redisKey = `ratelimit:${key}`;
-      const windowStart = now - windowMs;
-      const windowSeconds = Math.ceil(windowMs / 1000) * 2;
-      const member = `${now}-${Math.random().toString(36).slice(2, 7)}`;
-
-      const res = await fetch(`${upstashUrl}/pipeline`, {
+      const clearBefore = now - windowMs;
+      const pipelineReq = await fetch(`${upstashUrl}/pipeline`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${upstashToken}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify([
-          ['ZREMRANGEBYSCORE', redisKey, 0, windowStart],
-          ['ZADD', redisKey, now, member],
-          ['ZCARD', redisKey],
-          ['EXPIRE', redisKey, windowSeconds],
+          ['ZREMRANGEBYSCORE', `rl:${key}`, 0, clearBefore],
+          ['ZADD', `rl:${key}`, now, `${now}-${Math.random().toString(36).slice(2, 7)}`],
+          ['ZCARD', `rl:${key}`],
+          ['EXPIRE', `rl:${key}`, Math.ceil(windowMs / 1000) * 2],
         ]),
         cache: 'no-store',
       });
 
-      if (res.ok) {
-        const data = await res.json();
-        const currentCount = Number(data[2]?.result ?? 1);
-        const resetInSec = Math.ceil(windowMs / 1000);
-
-        if (currentCount > limit) {
-          return { allowed: false, remaining: 0, resetInSec };
-        }
-        return { allowed: true, remaining: Math.max(0, limit - currentCount), resetInSec };
+      if (pipelineReq.ok) {
+        const results = await pipelineReq.json();
+        const count = typeof results?.[2]?.result === 'number' ? results[2].result : 1;
+        return {
+          allowed: count <= limit,
+          remaining: Math.max(0, limit - count),
+          resetInSec: Math.ceil(windowMs / 1000),
+        };
       }
-    } catch (err) {
-      console.warn('[DistributedRateLimit] Upstash Redis request failed, fallback to memory:', err);
+    } catch {
+      // rơi xuống in-memory
     }
   }
 
-  // 2. In-Memory Sliding Window (Fallback)
   if (now - lastCleanup > CLEANUP_INTERVAL) {
-    for (const [k, bucket] of memoryBuckets.entries()) {
-      bucket.timestamps = bucket.timestamps.filter((t) => t > now - windowMs);
-      if (bucket.timestamps.length === 0) memoryBuckets.delete(k);
-    }
     lastCleanup = now;
-  }
-
-  if (memoryBuckets.size >= MAX_MEMORY_BUCKETS) {
-    const oldestKey = memoryBuckets.keys().next().value;
-    if (oldestKey) memoryBuckets.delete(oldestKey);
+    const threshold = now - 120_000;
+    for (const [k, b] of memoryBuckets.entries()) {
+      b.timestamps = b.timestamps.filter((t) => t > threshold);
+      if (b.timestamps.length === 0) memoryBuckets.delete(k);
+    }
   }
 
   let bucket = memoryBuckets.get(key);
   if (!bucket) {
+    if (memoryBuckets.size >= MAX_MEMORY_BUCKETS) {
+      const firstKey = memoryBuckets.keys().next().value;
+      if (firstKey) memoryBuckets.delete(firstKey);
+    }
     bucket = { timestamps: [] };
     memoryBuckets.set(key, bucket);
   }
 
-  // Lọc các timestamp nằm ngoài cửa sổ trượt
-  bucket.timestamps = bucket.timestamps.filter((t) => t > now - windowMs);
-
-  const resetInSec = Math.max(
-    1,
-    Math.ceil(((bucket.timestamps[0] ?? now) + windowMs - now) / 1000),
-  );
+  const windowStart = now - windowMs;
+  bucket.timestamps = bucket.timestamps.filter((t) => t > windowStart);
 
   if (bucket.timestamps.length >= limit) {
-    return { allowed: false, remaining: 0, resetInSec };
+    const oldest = bucket.timestamps[0] ?? now;
+    return {
+      allowed: false,
+      remaining: 0,
+      resetInSec: Math.max(1, Math.ceil((oldest + windowMs - now) / 1000)),
+    };
   }
 
   bucket.timestamps.push(now);
-  return { allowed: true, remaining: limit - bucket.timestamps.length, resetInSec };
+  return {
+    allowed: true,
+    remaining: Math.max(0, limit - bucket.timestamps.length),
+    resetInSec: Math.ceil(windowMs / 1000),
+  };
 }
