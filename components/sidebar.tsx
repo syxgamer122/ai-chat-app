@@ -284,8 +284,6 @@ export function Sidebar() {
   return (
     <aside
       aria-label="Danh sách cuộc trò chuyện"
-      aria-hidden={!isSidebarOpen ? true : undefined}
-      {...(!isSidebarOpen ? { inert: '' as unknown as boolean } : {})}
       className={`fixed inset-y-0 left-0 z-40 flex w-64 flex-col border-r border-zinc-800/80 bg-[#121214] transition-transform duration-200 md:static md:translate-x-0 md:!opacity-100 ${
         isSidebarOpen ? 'translate-x-0' : '-translate-x-full'
       }`}

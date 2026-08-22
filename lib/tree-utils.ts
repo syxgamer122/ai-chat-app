@@ -79,6 +79,36 @@ export function buildTreeIndex(
 }
 
 /* -------------------------------------------------------------------------- */
+/* Facade có cache — tránh build lại index mỗi render                          */
+/* -------------------------------------------------------------------------- */
+
+const indexCache = new WeakMap<StoredMessage[], Map<string, TreeIndex>>();
+
+export function getTreeIndex(
+  allMessages: StoredMessage[],
+  conversationId?: string,
+): TreeIndex {
+  let perScope = indexCache.get(allMessages);
+  if (!perScope) {
+    perScope = new Map();
+    indexCache.set(allMessages, perScope);
+  }
+  const key = conversationId ?? '*';
+  const hit = perScope.get(key);
+  if (hit) return hit;
+  const built = buildTreeIndex(allMessages, conversationId);
+  perScope.set(key, built);
+  return built;
+}
+
+function resolveIndex(indexOrMessages: TreeIndex | StoredMessage[], conversationId?: string): TreeIndex {
+  if (Array.isArray(indexOrMessages)) {
+    return getTreeIndex(indexOrMessages, conversationId);
+  }
+  return indexOrMessages;
+}
+
+/* -------------------------------------------------------------------------- */
 /* Thread reconstruction                                                       */
 /* -------------------------------------------------------------------------- */
 
@@ -99,10 +129,11 @@ export type BranchSelection = Record<string, string>;
  * Đây là ĐỊNH NGHĨA DUY NHẤT của "nhánh đang hoạt động".
  */
 export function findLeafFrom(
-  index: TreeIndex,
+  indexOrMessages: TreeIndex | StoredMessage[],
   fromNodeId: string,
   selection: BranchSelection = {},
 ): string {
+  const index = resolveIndex(indexOrMessages);
   if (!index.byId.has(fromNodeId)) return fromNodeId;
 
   let cursor = fromNodeId;
@@ -124,9 +155,10 @@ export function findLeafFrom(
 
 /** Root đang hoạt động: theo selection[ROOT_KEY], mặc định root cuối cùng. */
 export function findActiveRootId(
-  index: TreeIndex,
+  indexOrMessages: TreeIndex | StoredMessage[],
   selection: BranchSelection = {},
 ): string | undefined {
+  const index = resolveIndex(indexOrMessages);
   const roots = index.children.get(null) ?? [];
   if (roots.length === 0) return undefined;
   const preferredId = selection[ROOT_KEY];
@@ -139,19 +171,21 @@ export function findActiveRootId(
  * root hoạt động → đi xuống con cuối/con đã chọn.
  */
 export function findFallbackLeafId(
-  index: TreeIndex,
+  indexOrMessages: TreeIndex | StoredMessage[],
   selection: BranchSelection = {},
 ): string | undefined {
+  const index = resolveIndex(indexOrMessages);
   const rootId = findActiveRootId(index, selection);
   if (!rootId) return undefined;
   return findLeafFrom(index, rootId, selection);
 }
 
 export function reconstructThread(
-  index: TreeIndex,
+  indexOrMessages: TreeIndex | StoredMessage[],
   activeLeafId?: string | null,
   selection: BranchSelection = {},
 ): ThreadResult {
+  const index = resolveIndex(indexOrMessages);
   if (index.byId.size === 0) {
     return { messages: [], broken: false, usedFallback: false };
   }
@@ -209,10 +243,14 @@ export interface SiblingResult {
  * nhờ vậy orphan vẫn hiện đúng badge nhánh (sửa B2).
  */
 export function getSiblings(
-  index: TreeIndex,
-  _parentIdHint: string | null | undefined,
-  currentId: string,
+  indexOrMessages: TreeIndex | StoredMessage[],
+  parentIdHintOrCurrentId?: string | null,
+  currentIdOrNothing?: string,
 ): SiblingResult {
+  const index = resolveIndex(indexOrMessages);
+  const currentId = currentIdOrNothing ?? (parentIdHintOrCurrentId as string);
+  const _parentIdHint = currentIdOrNothing ? parentIdHintOrCurrentId : undefined;
+
   const key = index.parentOf.has(currentId)
     ? (index.parentOf.get(currentId) as string | null)
     : (_parentIdHint ?? null);
@@ -225,13 +263,20 @@ export function getSiblings(
 }
 
 /** Tiện cho UI: chỉ số 1-based, total. */
-export function getBranchInfo(index: TreeIndex, nodeId: string): { index: number; total: number } {
-  const { currentIndex, total } = getSiblings(index, undefined, nodeId);
+export function getBranchInfo(
+  indexOrMessages: TreeIndex | StoredMessage[],
+  nodeId: string,
+): { index: number; total: number } {
+  const { currentIndex, total } = getSiblings(indexOrMessages, undefined, nodeId);
   return { index: currentIndex + 1, total };
 }
 
 /** Bỏ các key trỏ tới node không còn tồn tại (sửa B5). */
-export function pruneSelection(index: TreeIndex, selection: BranchSelection): BranchSelection {
+export function pruneSelection(
+  indexOrMessages: TreeIndex | StoredMessage[],
+  selection: BranchSelection,
+): BranchSelection {
+  const index = resolveIndex(indexOrMessages);
   const out: BranchSelection = {};
   for (const [parent, child] of Object.entries(selection)) {
     if (!index.byId.has(child)) continue;
@@ -241,11 +286,12 @@ export function pruneSelection(index: TreeIndex, selection: BranchSelection): Br
 }
 
 export function switchBranch(
-  index: TreeIndex,
+  indexOrMessages: TreeIndex | StoredMessage[],
   nodeId: string,
   direction: -1 | 1,
   selection: BranchSelection = {},
 ): { leafId: string; selection: BranchSelection } | null {
+  const index = resolveIndex(indexOrMessages);
   const node = index.byId.get(nodeId);
   if (!node) return null;
 
@@ -258,7 +304,6 @@ export function switchBranch(
 
   const target = siblings[nextIndex];
   const nextSelection: BranchSelection = { ...selection };
-  // Sửa B1: cấp root cũng được ghi nhận qua ROOT_KEY.
   nextSelection[parentKey === null ? ROOT_KEY : parentKey] = target.id;
 
   const pruned = pruneSelection(index, nextSelection);
@@ -274,29 +319,6 @@ export function selectionFromThread(messages: StoredMessage[]): BranchSelection 
     sel[messages[i - 1].id] = messages[i].id;
   }
   return sel;
-}
-
-/* -------------------------------------------------------------------------- */
-/* Facade có cache — tránh build lại index mỗi render                          */
-/* -------------------------------------------------------------------------- */
-
-const indexCache = new WeakMap<StoredMessage[], Map<string, TreeIndex>>();
-
-export function getTreeIndex(
-  allMessages: StoredMessage[],
-  conversationId?: string,
-): TreeIndex {
-  let perScope = indexCache.get(allMessages);
-  if (!perScope) {
-    perScope = new Map();
-    indexCache.set(allMessages, perScope);
-  }
-  const key = conversationId ?? '*';
-  const hit = perScope.get(key);
-  if (hit) return hit;
-  const built = buildTreeIndex(allMessages, conversationId);
-  perScope.set(key, built);
-  return built;
 }
 
 export function reconstructActiveThreadSafe(
