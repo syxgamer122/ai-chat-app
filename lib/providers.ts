@@ -77,3 +77,43 @@ export async function syncActiveProviderSnapshot(providerId: string): Promise<vo
     models: p.models ?? [],
   });
 }
+
+/* ------------------------------------------------------------------ */
+/* Seed 2 provider mặc định (chạy 1 lần)                               */
+/* ------------------------------------------------------------------ */
+
+const PROVIDER_SEED_FLAG = 'providers-seeded-v1';
+
+const DEFAULT_PROVIDER_SEEDS: Array<Pick<ProviderConfig, 'name' | 'baseUrl' | 'apiKey'>> = [
+  {
+    name: 'crax-gpt',
+    baseUrl: 'https://gpt.crax.lol/v1',
+    apiKey: 'crax-gpt',
+  },
+  {
+    name: 'KilgoreAI',
+    baseUrl: 'https://kilgoreai.freesrv.com/v1',
+    apiKey: '',
+  },
+];
+
+/** Thêm sẵn 2 nhà cung cấp user định dùng — chỉ chạy lần đầu. */
+export async function ensureProviderSeed(): Promise<void> {
+  const flag = await db.kv.get(PROVIDER_SEED_FLAG);
+  if (flag) return;
+  const existing = await db.providers.toArray();
+  const knownBases = new Set(existing.map((p) => p.baseUrl));
+  const now = Date.now();
+  const missing = DEFAULT_PROVIDER_SEEDS.filter((s) => !knownBases.has(s.baseUrl));
+  if (missing.length) {
+    await db.providers.bulkAdd(
+      missing.map((s, i) => ({
+        id: newProviderId(),
+        ...s,
+        createdAt: now + i,
+        updatedAt: now + i,
+      })),
+    );
+  }
+  await db.kv.put({ key: PROVIDER_SEED_FLAG, value: true });
+}

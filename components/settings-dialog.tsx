@@ -8,6 +8,7 @@ import { exportJson, exportMarkdown, importBackup, type ImportMode } from '@/lib
 import { X, Download, Upload, Loader2, ShieldAlert } from 'lucide-react';
 import { useInstallPrompt } from '@/lib/use-install-prompt';
 import { ProviderManager } from '@/components/provider-manager';
+import { UsageStats } from '@/components/usage-stats';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { savePrompt, deletePrompt } from '@/lib/prompt-library';
 import {
@@ -508,6 +509,14 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
               nhanh mà không cần cấu hình lại server.
             </p>
             <ProviderManager />
+          </div>
+
+          {/* Thống kê token */}
+          <div>
+            <label className="text-sm font-medium text-zinc-600 mb-1.5 block">
+              Thống kê token sử dụng
+            </label>
+            <UsageStats />
           </div>
 
           {/* Access code */}

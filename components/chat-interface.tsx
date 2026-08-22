@@ -33,6 +33,7 @@ import { Composer } from '@/components/composer';
 import type { ModelOption } from '@/components/model-selector';
 import { useTitleGenerator } from '@/lib/use-title-generator';
 import { ensurePromptSeed, savePrompt } from '@/lib/prompt-library';
+import { ensureProviderSeed } from '@/lib/providers';
 import {
   CONTINUE_PROMPT,
   sanitizeContent,
@@ -85,6 +86,7 @@ export default function ChatInterface() {
    *  Seed mặc định chạy ngoài liveQuery (liveQuery cấm giao dịch ghi). */
   useEffect(() => {
     void ensurePromptSeed();
+    void ensureProviderSeed();
   }, []);
   const promptTemplates = useLiveQuery(
     () => db.prompts.orderBy('updatedAt').reverse().toArray(),
@@ -266,9 +268,30 @@ export default function ChatInterface() {
       system: systemPrompt,
     },
     experimental_throttle: throttleMs,
-    onFinish: (message, { finishReason }) => {
+    onFinish: (message, { finishReason, usage }) => {
       const clean = sanitizeContent(message.content);
-      if (clean !== message.content) {
+      const promptTokens = Number(usage?.promptTokens ?? 0) || 0;
+      const completionTokens = Number(usage?.completionTokens ?? 0) || 0;
+      if (promptTokens > 0 || completionTokens > 0) {
+        // Ghi usage vào annotation để thống kê token có dữ liệu trong DB.
+        const anns = (message.annotations ?? []) as Array<Record<string, unknown>>;
+        const lastModel = [...anns].reverse().find((a) => typeof a?.model === 'string')?.model;
+        const usageAnn = [
+          ...anns,
+          { usage: { promptTokens, completionTokens }, model: lastModel ?? model },
+        ];
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === message.id
+              ? {
+                  ...m,
+                  ...(clean !== message.content ? { content: clean } : {}),
+                  annotations: usageAnn as typeof m.annotations,
+                }
+              : m,
+          ),
+        );
+      } else if (clean !== message.content) {
         setMessages((prev) =>
           prev.map((m) => (m.id === message.id ? { ...m, content: clean } : m)),
         );

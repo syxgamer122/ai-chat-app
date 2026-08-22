@@ -5,6 +5,7 @@ import { Check, Loader2, Pencil, Plus, RefreshCw, Server, Trash2, X } from 'luci
 import { db } from '@/lib/db';
 import {
   deleteProvider,
+  ensureProviderSeed,
   listProviders,
   newProviderId,
   syncActiveProviderSnapshot,
@@ -25,6 +26,7 @@ export function ProviderManager() {
   const [status, setStatus] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
+    await ensureProviderSeed();
     setProviders(await listProviders());
   }, []);
 
