@@ -172,6 +172,7 @@ function timingSafeEqual(a: string, b: string): boolean {
 
 export interface AuthResult {
   ok: boolean;
+  authorized: boolean;
   status?: number;
   error?: string;
 }
@@ -180,15 +181,15 @@ export function verifyAccessAuth(req: NextRequest): AuthResult {
   const expected = (process.env.ACCESS_CODE ?? '').trim();
 
   if (!expected) {
-    return { ok: true };
+    return { ok: true, authorized: true };
   }
 
   const header = req.headers.get('authorization') ?? '';
   const token = header.replace(/^Bearer\s+/i, '').trim();
-  if (!token) return { ok: false, status: 401, error: 'Thiếu mã truy cập.' };
-  if (timingSafeEqual(token, expected)) return { ok: true };
+  if (!token) return { ok: false, authorized: false, status: 401, error: 'Thiếu mã truy cập.' };
+  if (timingSafeEqual(token, expected)) return { ok: true, authorized: true };
 
-  return { ok: false, status: 401, error: 'Mã truy cập (Access Code) không chính xác.' };
+  return { ok: false, authorized: false, status: 401, error: 'Mã truy cập (Access Code) không chính xác.' };
 }
 
 /* ========================================================================== */

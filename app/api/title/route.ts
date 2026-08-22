@@ -81,7 +81,7 @@ export async function POST(req: Request) {
     }
 
     const auth = verifyAccessAuth(req);
-    if (!auth.authorized) {
+    if (!auth.ok) {
       return Response.json({ title: 'New Chat' }, { status: 401 });
     }
 
