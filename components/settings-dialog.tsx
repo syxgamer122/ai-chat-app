@@ -6,8 +6,56 @@ import { useAppStore } from '@/lib/store';
 import { AVAILABLE_MODELS } from '@/lib/models';
 import { exportJson, exportMarkdown, importBackup, type ImportMode } from '@/lib/backup';
 import { X, Download, Upload, Loader2, ShieldAlert } from 'lucide-react';
+import { useInstallPrompt } from '@/lib/use-install-prompt';
 
 type Status = { kind: 'idle' | 'busy' | 'ok' | 'error'; message?: string };
+
+/**
+ * PWA: nút cài đặt lên thiết bị (Chrome/Edge/Android);
+ * iOS hiện hướng dẫn "Thêm vào Màn hình chính".
+ */
+function InstallSection() {
+  const { canInstall, installed, isIOS, install } = useInstallPrompt();
+
+  const [installing, setInstalling] = useState(false);
+  const handleInstall = async () => {
+    setInstalling(true);
+    try {
+      await install();
+    } finally {
+      setInstalling(false);
+    }
+  };
+
+  return (
+    <div className="pt-4 border-t border-zinc-800 space-y-2">
+      <h3 className="text-sm font-semibold text-zinc-200">Ứng dụng</h3>
+      {installed ? (
+        <p className="text-xs text-zinc-500">Bạn đang dùng bản đã cài lên thiết bị.</p>
+      ) : canInstall ? (
+        <button
+          type="button"
+          onClick={handleInstall}
+          disabled={installing}
+          className="w-full flex items-center justify-center gap-2 py-2.5 px-4 bg-[#c96442] hover:bg-[#b5573a] text-white rounded-xl text-sm font-medium transition disabled:opacity-50"
+        >
+          {installing ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+          Cài đặt lên thiết bị
+        </button>
+      ) : isIOS ? (
+        <p className="text-xs text-zinc-500 leading-relaxed">
+          Trên iPhone/iPad: bấm nút <strong>Chia sẻ</strong> trong Safari →
+          &ldquo;Thêm vào Màn hình chính&rdquo; để dùng như ứng dụng.
+        </p>
+      ) : (
+        <p className="text-xs text-zinc-500 leading-relaxed">
+          Cài app: trên Android/Chrome mở menu ⋮ → &ldquo;Cài đặt ứng dụng&rdquo;;
+          trên máy tính mở biểu tượng install trên thanh địa chỉ.
+        </p>
+      )}
+    </div>
+  );
+}
 
 const FOCUSABLE_SELECTOR =
   'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
@@ -207,6 +255,9 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
               />
             </div>
           </div>
+
+          {/* ------------------ Ứng dụng (PWA) ------------------ */}
+          <InstallSection />
 
           {/* ------------------ Sao lưu & Phục hồi ------------------ */}
           <div className="pt-4 border-t border-zinc-800 space-y-3">

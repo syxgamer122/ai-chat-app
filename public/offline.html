@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Không có kết nối — AI Chat Studio</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      min-height: 100dvh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #0f0f10;
+      color: #e4e4e7;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      text-align: center;
+      padding: 24px;
+    }
+    .bubble {
+      width: 64px;
+      height: 64px;
+      border-radius: 16px;
+      background: #4f46e5;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 20px;
+    }
+    .bubble svg { display: block; }
+    h1 { font-size: 20px; font-weight: 600; margin-bottom: 8px; }
+    p { font-size: 14px; color: #a1a1aa; line-height: 1.6; }
+    button {
+      margin-top: 24px;
+      padding: 10px 20px;
+      border: none;
+      border-radius: 12px;
+      background: #c96442;
+      color: #fff;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+    }
+    button:hover { background: #b5573a; }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="bubble" aria-hidden="true">
+      <svg width="36" height="36" viewBox="0 0 32 32" fill="none">
+        <path d="M8 12C8 9.79086 9.79086 8 12 8H20C22.2091 8 24 9.79086 24 12V18C24 20.2091 22.2091 22 20 22H13L9 25V21.6C8.38 20.7 8 19.4 8 18V12Z" fill="white"/>
+        <circle cx="12" cy="15" r="1.5" fill="#4F46E5"/>
+        <circle cx="16" cy="15" r="1.5" fill="#4F46E5"/>
+        <circle cx="20" cy="15" r="1.5" fill="#4F46E5"/>
+      </svg>
+    </div>
+    <h1>Không có kết nối mạng</h1>
+    <p>Lịch sử chat của bạn vẫn an toàn trên thiết bị.<br />Kết nối lại mạng rồi thử nhé.</p>
+    <button onclick="location.reload()">Thử lại</button>
+  </main>
+</body>
+</html>

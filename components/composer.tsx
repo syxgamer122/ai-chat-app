@@ -2,8 +2,9 @@
 
 import React, { useCallback, useRef, useState } from 'react';
 import TextareaAutosize from 'react-textarea-autosize';
-import { ArrowUp, CornerDownLeft, Paperclip, Square, X } from 'lucide-react';
+import { ArrowUp, CornerDownLeft, Mic, Paperclip, Square, X } from 'lucide-react';
 import { ModelSelector, type ModelOption } from '@/components/model-selector';
+import { useSpeechRecognition } from '@/lib/use-speech-recognition';
 
 export interface Attachment {
   id: string;
@@ -21,6 +22,8 @@ interface ComposerProps {
   attachments: Attachment[];
   onAddFiles: (files: FileList | File[] | null) => void;
   onRemoveAttachment: (id: string) => void;
+  /** Nhận đoạn text hoàn chỉnh từ voice input — nối vào cuối input hiện tại. */
+  onAppendText?: (text: string) => void;
   models: ModelOption[];
   model: string;
   onModelChange: (id: string) => void;
@@ -41,6 +44,7 @@ export function Composer({
   attachments,
   onAddFiles,
   onRemoveAttachment,
+  onAppendText,
   models,
   model,
   onModelChange,
@@ -52,6 +56,16 @@ export function Composer({
   const composingRef = useRef(false);
   const [dragging, setDragging] = useState(false);
   const [fileError, setFileError] = useState<string | null>(null);
+
+  const voice = useSpeechRecognition({
+    lang: 'vi-VN',
+    onFinalText: useCallback(
+      (text: string) => {
+        onAppendText?.(text);
+      },
+      [onAppendText],
+    ),
+  });
 
   const hasContent = input.trim().length > 0 || attachments.length > 0;
   const canSubmit = hasContent && !isStreaming;
@@ -159,6 +173,24 @@ export function Composer({
             </div>
           )}
 
+          {(voice.listening || voice.error) && (
+            <div className="flex items-center gap-2 px-4 pt-3 text-[12px] leading-relaxed">
+              {voice.listening && (
+                <span className="flex min-w-0 items-center gap-1.5 text-zinc-400">
+                  <span className="h-1.5 w-1.5 flex-shrink-0 animate-pulse rounded-full bg-[#c96442]" />
+                  <span className="truncate">
+                    {voice.interim || 'Đang nghe… nói tiếng Việt nhé'}
+                  </span>
+                </span>
+              )}
+              {voice.error && (
+                <span role="alert" className="text-amber-400/90">
+                  {voice.error}
+                </span>
+              )}
+            </div>
+          )}
+
           <TextareaAutosize
             value={input}
             onChange={onInputChange}
@@ -204,6 +236,29 @@ export function Composer({
                   e.target.value = '';
                 }}
               />
+              {voice.supported && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    voice.clearError();
+                    voice.toggle();
+                  }}
+                  aria-label={voice.listening ? 'Dừng nhận diện giọng nói' : 'Nhập bằng giọng nói'}
+                  aria-pressed={voice.listening}
+                  title={voice.listening ? 'Dừng nhận diện giọng nói' : 'Nhập bằng giọng nói'}
+                  className={`flex h-8 w-8 items-center justify-center rounded-full transition-colors ${
+                    voice.listening
+                      ? 'animate-pulse bg-[#c96442] text-white'
+                      : 'text-zinc-500 hover:bg-zinc-800/70 hover:text-zinc-200'
+                  }`}
+                >
+                  {voice.listening ? (
+                    <Square size={11} className="fill-current" />
+                  ) : (
+                    <Mic size={16} />
+                  )}
+                </button>
+              )}
               <ModelSelector
                 models={models}
                 value={model}

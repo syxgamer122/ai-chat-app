@@ -1703,6 +1703,18 @@ export default function ChatInterface() {
     }
   }, [input, attachments, isLoading, currentChatId, draftId, setCurrentChatId, handleSubmit, pin, generateTitle, messages.length, showNotice]);
 
+  /** Voice input: nối câu đã nhận diện vào cuối input hiện tại. */
+  const handleAppendVoiceText = useCallback(
+    (text: string) => {
+      setInput((prev) => {
+        const base = prev ?? '';
+        const needsSpace = base.length > 0 && !/\s$/.test(base);
+        return base + (needsSpace ? ' ' : '') + text;
+      });
+    },
+    [setInput],
+  );
+
   const onTextareaKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if ((e.nativeEvent as any).isComposing || e.keyCode === 229) return;
     if (e.key === 'Escape') { handleStop(); return; }
@@ -1824,6 +1836,7 @@ export default function ChatInterface() {
         onStop={handleStop}
         attachments={composerAttachments}
         onAddFiles={addFiles}
+        onAppendText={handleAppendVoiceText}
         onRemoveAttachment={handleRemoveAttachmentById}
         models={MODELS}
         model={model}
