@@ -2,6 +2,18 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { DEFAULT_MODEL_ID, normalizeModelId } from '@/lib/models';
 
+/** id provider "dùng cấu hình env của server" — định nghĩa ở store để tránh vòng import. */
+export const SERVER_PROVIDER_ID = '__server__';
+
+/** Snapshot nhà cung cấp đang active — nằm trong store, không persist. */
+export interface ActiveProviderSnapshot {
+  id: string;
+  name: string;
+  baseUrl: string;
+  apiKey: string;
+  models: Array<{ id: string; name?: string; contextLength?: number }>;
+}
+
 export interface PerfSettings {
   /** Cửa sổ gom render markdown khi stream (ms). Máy yếu: 250–300 */
   throttleMs: number;
@@ -24,11 +36,17 @@ interface AppState {
   isSidebarOpen: boolean;
   isSettingsOpen: boolean;
   settings: Settings;
+  /** Provider đang dùng — SERVER_PROVIDER_ID = cấu hình env của server. */
+  activeProviderId: string;
+  /** Snapshot provider active (baseUrl/key/models) — không persist. */
+  activeProvider: ActiveProviderSnapshot | null;
   setCurrentChatId: (id: string | null) => void;
   setSidebarOpen: (open: boolean) => void;
   setSettingsOpen: (open: boolean) => void;
   updateSettings: (s: Partial<Omit<Settings, 'perf'>>) => void;
   updatePerf: (p: Partial<PerfSettings>) => void;
+  setActiveProvider: (id: string) => void;
+  setActiveProviderSnapshot: (snapshot: ActiveProviderSnapshot | null) => void;
 }
 
 const DEFAULT_SETTINGS: Settings = {
@@ -50,6 +68,8 @@ export const useAppStore = create<AppState>()(
       isSidebarOpen: false,
       isSettingsOpen: false,
       settings: DEFAULT_SETTINGS,
+      activeProviderId: SERVER_PROVIDER_ID,
+      activeProvider: null,
       setCurrentChatId: (id) => set({ currentChatId: id, isSidebarOpen: false }),
       setSidebarOpen: (open) => set({ isSidebarOpen: open }),
       setSettingsOpen: (open) => set({ isSettingsOpen: open }),
@@ -57,11 +77,14 @@ export const useAppStore = create<AppState>()(
         set((s) => ({ settings: { ...s.settings, ...partial } })),
       updatePerf: (partial) =>
         set((s) => ({ settings: { ...s.settings, perf: { ...s.settings.perf, ...partial } } })),
+      setActiveProvider: (id) => set({ activeProviderId: id, activeProvider: null }),
+      setActiveProviderSnapshot: (snapshot) => set({ activeProvider: snapshot }),
     }),
     {
       name: 'ai-chat-settings',
       version: 2,
       partialize: (s) => ({
+        activeProviderId: s.activeProviderId,
         settings: {
           model: s.settings.model,
           temperature: s.settings.temperature,
@@ -73,7 +96,14 @@ export const useAppStore = create<AppState>()(
       merge: (persisted, current) => {
         const p = (persisted ?? {}) as Partial<AppState>;
         const rawModel = p.settings?.model;
-        const validModel = normalizeModelId(rawModel);
+        const usingCustomProvider =
+          !!p.activeProviderId && p.activeProviderId !== SERVER_PROVIDER_ID;
+        // Model của provider ngoài built-in không qua normalizeModelId.
+        const validModel = usingCustomProvider
+          ? typeof rawModel === 'string' && rawModel
+            ? rawModel
+            : DEFAULT_MODEL_ID
+          : normalizeModelId(rawModel);
 
         return {
           ...current,
@@ -86,6 +116,7 @@ export const useAppStore = create<AppState>()(
             apiKey: '',
             accessCode: '',
           },
+          activeProvider: null,
         };
       },
       migrate: (state: any) => ({

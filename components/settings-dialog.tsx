@@ -7,6 +7,7 @@ import { AVAILABLE_MODELS } from '@/lib/models';
 import { exportJson, exportMarkdown, importBackup, type ImportMode } from '@/lib/backup';
 import { X, Download, Upload, Loader2, ShieldAlert } from 'lucide-react';
 import { useInstallPrompt } from '@/lib/use-install-prompt';
+import { ProviderManager } from '@/components/provider-manager';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { savePrompt, deletePrompt } from '@/lib/prompt-library';
 import {
@@ -495,6 +496,18 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
               placeholder="sk-..."
               className="w-full bg-white border border-zinc-200 rounded-xl p-2.5 text-sm text-zinc-700 outline-none focus:border-[#0A7E8C] transition font-mono"
             />
+          </div>
+
+          {/* Nhà cung cấp API */}
+          <div>
+            <label className="text-sm font-medium text-zinc-600 mb-1.5 block">
+              Nhà cung cấp API
+            </label>
+            <p className="mb-2 text-[11px] text-zinc-500">
+              Lưu nhiều nhà cung cấp chuẩn OpenAI-compatible, tải danh sách model và chuyển
+              nhanh mà không cần cấu hình lại server.
+            </p>
+            <ProviderManager />
           </div>
 
           {/* Access code */}

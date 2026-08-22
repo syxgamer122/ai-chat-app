@@ -72,6 +72,18 @@ export interface PromptTemplate {
   updatedAt: number;
 }
 
+/** Nhà cung cấp API (provider preset) — chuẩn OpenAI-compatible. */
+export interface ProviderPresetRecord {
+  id: string;
+  name: string;
+  baseUrl: string;
+  apiKey: string;
+  createdAt: number;
+  updatedAt: number;
+  models?: Array<{ id: string; name?: string; contextLength?: number }>;
+  modelsFetchedAt?: number;
+}
+
 /** KV chung: directory handle auto-backup, flags seed... */
 export interface KVEntry {
   key: string;
@@ -119,6 +131,7 @@ export class ChatAppDatabase extends Dexie {
   messages!: Table<StoredMessage, string>;
   prompts!: Table<PromptTemplate, string>;
   kv!: Table<KVEntry, string>;
+  providers!: Table<ProviderPresetRecord, string>;
 
   constructor() {
     super('ai_chat_app_db');
@@ -198,6 +211,18 @@ export class ChatAppDatabase extends Dexie {
         '[chatId+parentId+branchOrder], *tokens',
       prompts: 'id, updatedAt',
       kv: 'key',
+    });
+
+    // v7: provider presets — nhiều nhà cung cấp API OpenAI-compatible.
+    this.version(7).stores({
+      chats: 'id, createdAt, updatedAt, pinned, activeLeafId, *titleTokens',
+      messages:
+        'id, chatId, role, createdAt, seq, parentId, ' +
+        '[chatId+parentId], [chatId+createdAt], [chatId+seq], ' +
+        '[chatId+parentId+branchOrder], *tokens',
+      prompts: 'id, updatedAt',
+      kv: 'key',
+      providers: 'id, updatedAt',
     });
 
     this.messages.hook('creating', (_primKey, obj) => {

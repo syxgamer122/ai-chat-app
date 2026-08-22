@@ -17,6 +17,7 @@ import {
   type UpstreamScope,
 } from '@/lib/api-keys';
 import { ALLOWED_MODEL_IDS, DEFAULT_MODEL_ID, getModelConfig, resolveProviderModelChain } from '@/lib/models';
+import { validateProviderBaseUrl } from '@/lib/provider-url';
 import { checkRateLimit, getClientIp, checkSameOrigin, verifyAccessAuth } from '@/lib/security';
 
 export const runtime = 'edge';
@@ -418,11 +419,26 @@ export async function POST(req: Request) {
 
     /* --- BYOK + rate limit --- */
     const rawCustomKey = req.headers.get('x-api-key')?.trim();
+
+    /* --- Provider preset override (x-api-base) --- */
+    const rawProviderBase = req.headers.get('x-api-base')?.trim() || undefined;
+    const providerBaseCheck = rawProviderBase
+      ? validateProviderBaseUrl(rawProviderBase)
+      : undefined;
+    if (providerBaseCheck && !providerBaseCheck.ok) {
+      return jsonError(
+        requestId,
+        400,
+        'BAD_PROVIDER_BASE',
+        `Địa chỉ nhà cung cấp không hợp lệ: ${providerBaseCheck.error}`,
+      );
+    }
+    const providerBase = providerBaseCheck?.ok ? providerBaseCheck.url : undefined;
+
     const customKey =
       rawCustomKey &&
-      rawCustomKey.length >= 10 &&
       rawCustomKey.length <= 256 &&
-      /^[A-Za-z0-9_.\-]+$/.test(rawCustomKey)
+      /^[\x21-\x7E]+$/.test(rawCustomKey)
         ? rawCustomKey
         : undefined;
 
@@ -466,7 +482,9 @@ export async function POST(req: Request) {
     const { messages, model, temperature, system } = parsed.data;
 
     const selectedModelId = model ?? DEFAULT_MODEL_ID;
-    if (!ALLOWED_MODEL_IDS.has(selectedModelId)) {
+    // Provider override: model do gateway của user định nghĩa (/v1/models),
+    // cho phép ngoài danh sách built-in.
+    if (!ALLOWED_MODEL_IDS.has(selectedModelId) && !providerBase) {
       return jsonError(
         requestId,
         400,
@@ -474,10 +492,19 @@ export async function POST(req: Request) {
         `Model '${selectedModelId}' không được hỗ trợ.`,
       );
     }
+    if (providerBase && !/^[\w.\-:]{1,120}$/.test(selectedModelId)) {
+      return jsonError(requestId, 400, 'MODEL_NOT_ALLOWED', `Model '${selectedModelId}' không hợp lệ.`);
+    }
 
-    /* Sửa A11: tôn trọng capability của model. */
-    const modelConfig = getModelConfig(selectedModelId);
-    const modelChain = resolveProviderModelChain(modelConfig);
+    /* Sửa A11: tôn trọng capability của model. Provider override dùng model
+       thẳng tới gateway của user, không chạy chuỗi fallback built-in. */
+    const baseConfig = getModelConfig(selectedModelId);
+    const modelConfig = providerBase
+      ? { ...baseConfig, providerModel: selectedModelId }
+      : baseConfig;
+    const modelChain = providerBase
+      ? [selectedModelId]
+      : resolveProviderModelChain(baseConfig);
     const targetModel = modelConfig.providerModel;
     const contextMessages = messages.slice(-50);
 
@@ -512,7 +539,12 @@ export async function POST(req: Request) {
       );
     }
 
-    const candidateResult = customKey ? { keys: [customKey] } : getKeyCandidates();
+    // Provider override: key thuộc về gateway của user, không dùng pool env.
+    const candidateResult = providerBase
+      ? { keys: [customKey ?? 'provider-no-key'] }
+      : customKey
+        ? { keys: [customKey] }
+        : getKeyCandidates();
     const candidateKeys = candidateResult.keys.slice(0, MAX_FAILOVER_KEYS);
     if (!candidateKeys.length) {
       const retrySec = Math.max(1, Math.ceil((candidateResult.retryAfterMs ?? 60_000) / 1000));
@@ -607,7 +639,7 @@ export async function POST(req: Request) {
             const keyLabel = getKeyLabel(apiKey);
             const openai = createOpenAI({
               apiKey,
-              baseURL: process.env.OPENAI_BASE_URL || undefined,
+              baseURL: providerBase ?? (process.env.OPENAI_BASE_URL || undefined),
             });
 
             for (const targetModel of modelChain) {

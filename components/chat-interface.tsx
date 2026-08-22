@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useChat, type Message } from 'ai/react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useAppStore } from '@/lib/store';
+import { syncActiveProviderSnapshot } from '@/lib/providers';
 import {
   db,
   appendMessage,
@@ -64,9 +65,16 @@ export default function ChatInterface() {
   const systemPrompt = useAppStore((s) => s.settings.systemPrompt);
   const apiKey = useAppStore((s) => s.settings.apiKey);
   const accessCode = useAppStore((s) => s.settings.accessCode);
+  const activeProviderId = useAppStore((s) => s.activeProviderId);
+  const activeProvider = useAppStore((s) => s.activeProvider);
   const sendOnEnter = useAppStore((s) => s.settings.sendOnEnter);
   const throttleMs = useAppStore((s) => s.settings.perf.throttleMs);
   const animations = useAppStore((s) => s.settings.perf.animations);
+
+  /** Nạp snapshot provider đang active từ IndexedDB vào store. */
+  useEffect(() => {
+    void syncActiveProviderSnapshot(activeProviderId);
+  }, [activeProviderId]);
 
   const currentChat = useLiveQuery(
     () => (currentChatId ? db.chats.get(currentChatId) : undefined),
@@ -84,15 +92,30 @@ export default function ChatInterface() {
     [],
   );
 
-  const MODELS: ModelOption[] = useMemo(
-    () =>
-      AVAILABLE_MODELS.map((m) => ({
+  const MODELS: ModelOption[] = useMemo(() => {
+    if (activeProvider?.models?.length) {
+      return activeProvider.models.map((m) => ({
         id: m.id,
-        label: m.name,
-        hint: m.description,
-      })),
-    [],
-  );
+        label: m.name || m.id,
+        hint: m.contextLength
+          ? `${Math.round(m.contextLength / 1000)}k ngữ cảnh`
+          : activeProvider.name,
+      }));
+    }
+    return AVAILABLE_MODELS.map((m) => ({
+      id: m.id,
+      label: m.name,
+      hint: m.description,
+    }));
+  }, [activeProvider]);
+
+  /** Đổi provider → model hiện tại không còn trong danh sách thì lấy cái đầu. */
+  useEffect(() => {
+    if (!MODELS.length) return;
+    if (!MODELS.some((m) => m.id === model)) {
+      updateSettings({ model: MODELS[0].id });
+    }
+  }, [MODELS, model, updateSettings]);
 
   const [draftId, setDraftId] = useState(() => crypto.randomUUID());
   const chatKey = currentChatId ?? draftId;
@@ -228,6 +251,14 @@ export default function ChatInterface() {
     headers: {
       ...(apiKey ? { 'x-api-key': apiKey } : {}),
       ...(accessCode ? { 'x-access-code': accessCode } : {}),
+      ...(activeProvider?.baseUrl
+        ? {
+            'x-api-base': activeProvider.baseUrl,
+            ...(activeProvider.apiKey || apiKey
+              ? { 'x-api-key': activeProvider.apiKey || apiKey }
+              : {}),
+          }
+        : {}),
     },
     body: {
       model,
@@ -270,6 +301,8 @@ export default function ChatInterface() {
     },
     accessCode,
     apiKey,
+    providerBase: activeProvider?.baseUrl,
+    providerKey: activeProvider?.apiKey,
   });
 
   const reloadTreeFromDatabase = useCallback(async () => {

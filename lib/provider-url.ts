@@ -1,0 +1,73 @@
+/**
+ * Helper thuần cho provider presets — KHÔNG import gì (dùng được cả
+ * client lẫn edge server route). Tách riêng để route không kéo Dexie.
+ */
+
+export interface ProviderModel {
+  id: string;
+  name?: string;
+  contextLength?: number;
+}
+
+export type BaseUrlCheck =
+  | { ok: true; url: string }
+  | { ok: false; error: string };
+
+const PRIVATE_HOST_PATTERNS = [
+  /^localhost$/i,
+  /^127\./,
+  /^10\./,
+  /^192\.168\./,
+  /^172\.(1[6-9]|2\d|3[01])\./,
+  /^0\.0\.0\.0$/,
+  /\.local$/i,
+  /^\[::1\]$/,
+];
+
+/**
+ * Chấp nhận https:// bất kỳ (trừ hostname nội bộ) — và http://localhost
+ * riêng cho dev. Trả về URL đã strip slash cuối để nối `/chat/completions`.
+ */
+export function validateProviderBaseUrl(input: string): BaseUrlCheck {
+  const raw = (input ?? '').trim();
+  if (!raw) return { ok: false, error: 'Thiếu địa chỉ nhà cung cấp.' };
+  if (raw.length > 300) return { ok: false, error: 'Địa chỉ quá dài.' };
+
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return { ok: false, error: 'Địa chỉ không hợp lệ (ví dụ: https://host/v1).' };
+  }
+
+  const isLocalHttp = url.protocol === 'http:' && /^localhost$/i.test(url.hostname);
+  if (url.protocol !== 'https:' && !isLocalHttp) {
+    return { ok: false, error: 'Chỉ chấp nhận https:// (http://localhost cho dev).' };
+  }
+  if (!isLocalHttp && PRIVATE_HOST_PATTERNS.some((p) => p.test(url.hostname))) {
+    return { ok: false, error: 'Không cho phép địa chỉ mạng nội bộ.' };
+  }
+
+  return { ok: true, url: url.origin + url.pathname.replace(/\/+$/, '') };
+}
+
+/** Chuẩn hoá danh sách model từ GET /v1/models (dung sai nhiều dạng). */
+export function normalizeProviderModels(json: unknown): ProviderModel[] {
+  const data = (json as { data?: unknown })?.data;
+  if (!Array.isArray(data)) return [];
+  const seen = new Set<string>();
+  const out: ProviderModel[] = [];
+  for (const item of data) {
+    const m = item as { id?: unknown; name?: unknown; context_length?: unknown; contextLength?: unknown };
+    const id = typeof m?.id === 'string' ? m.id.trim() : '';
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    const ctxRaw = (m.context_length ?? m.contextLength) as unknown;
+    out.push({
+      id,
+      ...(typeof m.name === 'string' && m.name ? { name: m.name } : {}),
+      ...(typeof ctxRaw === 'number' && ctxRaw > 0 ? { contextLength: ctxRaw } : {}),
+    });
+  }
+  return out.sort((a, b) => a.id.localeCompare(b.id));
+}

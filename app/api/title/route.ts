@@ -2,6 +2,7 @@ import { createOpenAI } from '@ai-sdk/openai';
 import { generateText, APICallError } from 'ai';
 import { z } from 'zod';
 import { getKeyCandidates, markKeyFailure, markKeySuccess, getKeyLabel } from '@/lib/api-keys';
+import { validateProviderBaseUrl } from '@/lib/provider-url';
 import {
   checkRateLimit,
   rateLimitHeaders,
@@ -117,11 +118,13 @@ export async function POST(req: Request) {
     }
 
     const rawCustomKey = req.headers.get('x-api-key')?.trim();
+    const rawProviderBase = req.headers.get('x-api-base')?.trim() || undefined;
+    const providerBaseCheck = rawProviderBase
+      ? validateProviderBaseUrl(rawProviderBase)
+      : undefined;
+    const providerBase = providerBaseCheck?.ok ? providerBaseCheck.url : undefined;
     const customKey =
-      rawCustomKey &&
-      rawCustomKey.length >= 10 &&
-      rawCustomKey.length <= 256 &&
-      /^[A-Za-z0-9_.\-]+$/.test(rawCustomKey)
+      rawCustomKey && rawCustomKey.length <= 256 && /^[\x21-\x7E]+$/.test(rawCustomKey)
         ? rawCustomKey
         : undefined;
 
@@ -161,7 +164,11 @@ export async function POST(req: Request) {
       .slice(0, 1000);
 
     const fallbackTitle = generateFallbackTitle(cleanMessage);
-    const candidateResult = customKey ? { keys: [customKey] } : getKeyCandidates();
+    const candidateResult = providerBase
+      ? { keys: [customKey ?? 'provider-no-key'] }
+      : customKey
+        ? { keys: [customKey] }
+        : getKeyCandidates();
     const candidateKeys = candidateResult.keys.slice(0, 3);
 
     const system = [
@@ -175,7 +182,7 @@ export async function POST(req: Request) {
     for (const key of candidateKeys) {
       const openai = createOpenAI({
         apiKey: key,
-        baseURL: process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1',
+        baseURL: providerBase ?? (process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1'),
       });
 
       for (const modelName of TITLE_MODEL_CHAIN) {
