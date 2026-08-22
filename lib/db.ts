@@ -63,6 +63,21 @@ export interface StoredMessage {
   annotations?: Array<Record<string, unknown>>;
 }
 
+/** Mẫu prompt cho thư viện "/" trong composer. */
+export interface PromptTemplate {
+  id: string;
+  title: string;
+  content: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** KV chung: directory handle auto-backup, flags seed... */
+export interface KVEntry {
+  key: string;
+  value: unknown;
+}
+
 function newAttachmentId(): string {
   try {
     return globalThis.crypto.randomUUID();
@@ -102,6 +117,8 @@ function sanitizeAttachments(list?: StoredAttachment[]): StoredAttachment[] | un
 export class ChatAppDatabase extends Dexie {
   chats!: Table<ChatSession, string>;
   messages!: Table<StoredMessage, string>;
+  prompts!: Table<PromptTemplate, string>;
+  kv!: Table<KVEntry, string>;
 
   constructor() {
     super('ai_chat_app_db');
@@ -170,6 +187,17 @@ export class ChatAppDatabase extends Dexie {
         'id, chatId, role, createdAt, seq, parentId, ' +
         '[chatId+parentId], [chatId+createdAt], [chatId+seq], ' +
         '[chatId+parentId+branchOrder], *tokens',
+    });
+
+    // v6: thư viện prompt ("/") + bảng KV (lưu directory handle auto-backup, flags).
+    this.version(6).stores({
+      chats: 'id, createdAt, updatedAt, pinned, activeLeafId, *titleTokens',
+      messages:
+        'id, chatId, role, createdAt, seq, parentId, ' +
+        '[chatId+parentId], [chatId+createdAt], [chatId+seq], ' +
+        '[chatId+parentId+branchOrder], *tokens',
+      prompts: 'id, updatedAt',
+      kv: 'key',
     });
 
     this.messages.hook('creating', (_primKey, obj) => {

@@ -1,12 +1,24 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import { db } from '@/lib/db';
+import { db, type PromptTemplate } from '@/lib/db';
 import { useAppStore } from '@/lib/store';
 import { AVAILABLE_MODELS } from '@/lib/models';
 import { exportJson, exportMarkdown, importBackup, type ImportMode } from '@/lib/backup';
 import { X, Download, Upload, Loader2, ShieldAlert } from 'lucide-react';
 import { useInstallPrompt } from '@/lib/use-install-prompt';
+import { useLiveQuery } from 'dexie-react-hooks';
+import { savePrompt, deletePrompt } from '@/lib/prompt-library';
+import {
+  backupNow,
+  chooseBackupDirectory,
+  clearBackupDirectory,
+  getAutoBackupDirName,
+  getBackupIntervalDays,
+  isFileSystemAccessSupported,
+  getLastBackupAt,
+  setBackupIntervalDays,
+} from '@/lib/auto-backup';
 
 type Status = { kind: 'idle' | 'busy' | 'ok' | 'error'; message?: string };
 
@@ -59,6 +71,273 @@ function InstallSection() {
 
 const FOCUSABLE_SELECTOR =
   'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+/* ------------------ Thư viện prompt ------------------ */
+
+function PromptLibrarySection() {
+  const prompts = useLiveQuery(() => db.prompts.orderBy('updatedAt').reverse().toArray(), [], []);
+
+  const [newTitle, setNewTitle] = useState('');
+  const [newContent, setNewContent] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editTitle, setEditTitle] = useState('');
+  const [editContent, setEditContent] = useState('');
+
+  const addPrompt = async () => {
+    try {
+      await savePrompt({ title: newTitle, content: newContent });
+      setNewTitle('');
+      setNewContent('');
+      setError(null);
+    } catch (err: any) {
+      setError(err?.message ?? 'Không lưu được prompt.');
+    }
+  };
+
+  const startEdit = (p: PromptTemplate) => {
+    setEditingId(p.id);
+    setEditTitle(p.title);
+    setEditContent(p.content);
+  };
+
+  const saveEdit = async () => {
+    if (!editingId) return;
+    try {
+      await savePrompt({ id: editingId, title: editTitle, content: editContent });
+      setEditingId(null);
+      setError(null);
+    } catch (err: any) {
+      setError(err?.message ?? 'Không lưu được prompt.');
+    }
+  };
+
+  return (
+    <div className="pt-4 border-t border-zinc-800 space-y-3">
+      <h3 className="text-sm font-semibold text-zinc-200">Thư viện prompt</h3>
+      <p className="text-xs text-zinc-500 leading-relaxed">
+        Gõ <code className="text-zinc-400">/</code> trong ô nhập tin nhắn để chèn nhanh.
+      </p>
+
+      {(prompts ?? []).map((p) =>
+        editingId === p.id ? (
+          <div key={p.id} className="space-y-2 rounded-xl border border-zinc-700 bg-zinc-900/60 p-2.5">
+            <input
+              value={editTitle}
+              onChange={(e) => setEditTitle(e.target.value)}
+              className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-sm text-zinc-100 outline-none focus:border-indigo-500"
+              placeholder="Tên prompt"
+            />
+            <textarea
+              value={editContent}
+              onChange={(e) => setEditContent(e.target.value)}
+              rows={4}
+              className="w-full resize-y rounded-lg border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-xs text-zinc-300 outline-none focus:border-indigo-500"
+              placeholder="Nội dung prompt"
+            />
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={saveEdit}
+                className="rounded-lg bg-indigo-600 px-3 py-1 text-xs font-medium text-white hover:bg-indigo-700"
+              >
+                Lưu
+              </button>
+              <button
+                type="button"
+                onClick={() => setEditingId(null)}
+                className="rounded-lg px-3 py-1 text-xs text-zinc-400 hover:text-zinc-200"
+              >
+                Huỷ
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div
+            key={p.id}
+            className="group flex items-start justify-between gap-2 rounded-lg border border-zinc-800 bg-zinc-900/40 px-2.5 py-2"
+          >
+            <div className="min-w-0 flex-1">
+              <div className="text-[13px] font-medium text-zinc-200">{p.title}</div>
+              <div className="mt-0.5 line-clamp-2 text-[11px] leading-relaxed text-zinc-500">
+                {p.content.replace(/\n+/g, ' ')}
+              </div>
+            </div>
+            <div className="flex flex-shrink-0 gap-1 opacity-60 transition-opacity group-hover:opacity-100">
+              <button
+                type="button"
+                onClick={() => startEdit(p)}
+                aria-label={`Sửa ${p.title}`}
+                className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (window.confirm(`Xoá prompt "${p.title}"?`)) void deletePrompt(p.id);
+                }}
+                aria-label={`Xoá ${p.title}`}
+                className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-red-400"
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>
+              </button>
+            </div>
+          </div>
+        ),
+      )}
+
+      <div className="space-y-2 rounded-xl border border-dashed border-zinc-700 p-2.5">
+        <input
+          value={newTitle}
+          onChange={(e) => setNewTitle(e.target.value)}
+          className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-sm text-zinc-100 outline-none focus:border-indigo-500"
+          placeholder="Tên prompt mới (vd: Viết email)"
+        />
+        <textarea
+          value={newContent}
+          onChange={(e) => setNewContent(e.target.value)}
+          rows={3}
+          className="w-full resize-y rounded-lg border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-xs text-zinc-300 outline-none focus:border-indigo-500"
+          placeholder="Nội dung prompt"
+        />
+        <button
+          type="button"
+          onClick={addPrompt}
+          className="w-full rounded-lg bg-zinc-800 py-1.5 text-xs font-medium text-zinc-200 transition hover:bg-zinc-700"
+        >
+          + Thêm prompt
+        </button>
+        {error && <p className="text-[11px] text-amber-400">{error}</p>}
+      </div>
+    </div>
+  );
+}
+
+/* ------------------ Tự động sao lưu ------------------ */
+
+function AutoBackupSection() {
+  const [intervalDays, setIntervalDays] = useState(() => getBackupIntervalDays());
+  const [dirName, setDirName] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [fsSupported] = useState(() => isFileSystemAccessSupported());
+
+  const refreshDir = () => {
+    void getAutoBackupDirName().then(setDirName);
+  };
+  useEffect(refreshDir, []);
+
+  const formatLast = () => {
+    const ts = getLastBackupAt();
+    return ts ? new Date(ts).toLocaleString('vi-VN') : 'chưa bao giờ';
+  };
+  const [lastBackup, setLastBackup] = useState(formatLast);
+
+  const handleChoose = async () => {
+    setBusy(true);
+    setMessage(null);
+    try {
+      const name = await chooseBackupDirectory();
+      setDirName(name);
+      setMessage(name ? `Sẽ tự động ghi file vào thư mục "${name}".` : null);
+    } catch {
+      setMessage('Không chọn được thư mục.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleBackupNow = async () => {
+    setBusy(true);
+    setMessage(null);
+    try {
+      const result = await backupNow('prefer-folder');
+      if (result.ok) {
+        setLastBackup(formatLast());
+        setMessage(result.mode === 'folder' ? 'Đã ghi file vào thư mục đã chọn.' : 'Đã xuất file .json (kiểm tra mục Tải xuống).');
+      } else {
+        setMessage(result.message ?? 'Sao lưu thất bại.');
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="pt-4 border-t border-zinc-800 space-y-3">
+      <h3 className="text-sm font-semibold text-zinc-200">Tự động sao lưu</h3>
+      <div>
+        <label className="text-xs font-medium text-zinc-400 mb-1.5 block">
+          Chu kỳ nhắc / tự động
+        </label>
+        <select
+          value={intervalDays}
+          onChange={(e) => {
+            const days = Number(e.target.value);
+            setIntervalDays(days);
+            setBackupIntervalDays(days);
+          }}
+          className="w-full bg-zinc-900 border border-zinc-800 rounded-xl p-2.5 text-sm text-zinc-200 outline-none focus:border-indigo-500 transition"
+        >
+          <option value={1}>Mỗi ngày</option>
+          <option value={3}>Mỗi 3 ngày</option>
+          <option value={7}>Mỗi tuần</option>
+          <option value={14}>Mỗi 2 tuần</option>
+          <option value={30}>Mỗi tháng</option>
+        </select>
+      </div>
+
+      {fsSupported && (
+        <div className="space-y-2">
+          {dirName ? (
+            <div className="flex items-center justify-between gap-2 rounded-xl border border-zinc-700 bg-zinc-900/60 px-3 py-2 text-xs text-zinc-300">
+              <span className="min-w-0 truncate">📁 {dirName}</span>
+              <button
+                type="button"
+                onClick={() => {
+                  void clearBackupDirectory().then(() => {
+                    setDirName(null);
+                    setMessage('Đã gỡ thư mục tự động — quay lại chế độ nhắc + tải file.');
+                  });
+                }}
+                className="flex-shrink-0 text-zinc-500 hover:text-red-400"
+              >
+                Gỡ
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={handleChoose}
+              disabled={busy}
+              className="w-full flex items-center justify-center gap-2 py-2.5 px-3 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-200 rounded-xl text-sm font-medium transition disabled:opacity-50"
+            >
+              Chọn thư mục lưu tự động…
+            </button>
+          )}
+          <p className="text-[11px] leading-relaxed text-zinc-500">
+            Desktop Chrome/Edge: đến kỳ app tự ghi file <code>.json</code> vào thư mục này,
+            không cần bấm gì.
+          </p>
+        </div>
+      )}
+
+      <button
+        type="button"
+        onClick={handleBackupNow}
+        disabled={busy}
+        className="w-full flex items-center justify-center gap-2 py-2.5 px-3 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-200 rounded-xl text-sm font-medium transition disabled:opacity-50"
+      >
+        {busy ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+        Sao lưu ngay
+      </button>
+      <p className="text-[11px] text-zinc-500">Lần sao lưu cuối: {lastBackup}</p>
+      {message && <p className="text-[11px] text-amber-400">{message}</p>}
+    </div>
+  );
+}
 
 export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const settings = useAppStore((s) => s.settings);
@@ -256,8 +535,14 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
             </div>
           </div>
 
+          {/* ------------------ Thư viện prompt ------------------ */}
+          <PromptLibrarySection />
+
           {/* ------------------ Ứng dụng (PWA) ------------------ */}
           <InstallSection />
+
+          {/* ------------------ Tự động sao lưu ------------------ */}
+          <AutoBackupSection />
 
           {/* ------------------ Sao lưu & Phục hồi ------------------ */}
           <div className="pt-4 border-t border-zinc-800 space-y-3">

@@ -1,15 +1,22 @@
 'use client';
 
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import TextareaAutosize from 'react-textarea-autosize';
-import { ArrowUp, CornerDownLeft, Mic, Paperclip, Square, X } from 'lucide-react';
+import { ArrowUp, BookmarkPlus, CornerDownLeft, Mic, Paperclip, Square, X } from 'lucide-react';
 import { ModelSelector, type ModelOption } from '@/components/model-selector';
 import { useSpeechRecognition } from '@/lib/use-speech-recognition';
+import { filterPrompts } from '@/lib/prompt-library';
 
 export interface Attachment {
   id: string;
   name: string;
   size?: number;
+}
+
+export interface SlashPrompt {
+  id: string;
+  title: string;
+  content: string;
 }
 
 interface ComposerProps {
@@ -24,6 +31,11 @@ interface ComposerProps {
   onRemoveAttachment: (id: string) => void;
   /** Nhận đoạn text hoàn chỉnh từ voice input — nối vào cuối input hiện tại. */
   onAppendText?: (text: string) => void;
+  /** Thư viện prompt: gõ "/" để mở menu, chọn sẽ thay toàn bộ input. */
+  slashPrompts?: SlashPrompt[];
+  onApplyPrompt?: (content: string) => void;
+  /** Lưu nhanh prompt mới từ nội dung đang gõ. */
+  onSavePrompt?: (title: string, content: string) => void | Promise<void>;
   models: ModelOption[];
   model: string;
   onModelChange: (id: string) => void;
@@ -45,6 +57,9 @@ export function Composer({
   onAddFiles,
   onRemoveAttachment,
   onAppendText,
+  slashPrompts,
+  onApplyPrompt,
+  onSavePrompt,
   models,
   model,
   onModelChange,
@@ -66,6 +81,42 @@ export function Composer({
       [onAppendText],
     ),
   });
+
+  /* ---------------- Slash menu "/" ---------------- */
+  const [slashIndex, setSlashIndex] = useState(0);
+  const [slashDismissed, setSlashDismissed] = useState(false);
+
+  const slashQuery =
+    input.startsWith('/') && !input.includes('\n') ? input.slice(1) : null;
+
+  const slashMatches = useMemo(
+    () => (slashQuery === null ? [] : filterPrompts(slashPrompts ?? [], slashQuery)),
+    [slashPrompts, slashQuery],
+  );
+
+  const slashOpen =
+    slashQuery !== null && !slashDismissed && slashMatches.length > 0;
+
+  // Đổi từ khoá → reset highlight + mở lại menu nếu từng đóng.
+  useEffect(() => {
+    setSlashIndex(0);
+    setSlashDismissed(false);
+  }, [slashQuery]);
+
+  const applyPrompt = useCallback(
+    (prompt: SlashPrompt) => {
+      onApplyPrompt?.(prompt.content);
+      setSlashDismissed(true);
+    },
+    [onApplyPrompt],
+  );
+
+  const quickSavePrompt = useCallback(async () => {
+    if (!onSavePrompt || input.length <= 1) return;
+    const title = (slashQuery ?? '').trim() || `Prompt ${new Date().toLocaleDateString('vi-VN')}`;
+    await onSavePrompt(title.slice(0, 80), input);
+    setSlashDismissed(true);
+  }, [input, onSavePrompt, slashQuery]);
 
   const hasContent = input.trim().length > 0 || attachments.length > 0;
   const canSubmit = hasContent && !isStreaming;
@@ -94,9 +145,36 @@ export function Composer({
         if (e.key === 'Enter') e.stopPropagation();
         return;
       }
+
+      // Slash menu: điều hướng/phím tắt ăn trước hành vi mặc định của textarea.
+      if (slashOpen && slashMatches.length > 0) {
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          setSlashIndex((i) => (i + 1) % slashMatches.length);
+          return;
+        }
+        if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          setSlashIndex((i) => (i - 1 + slashMatches.length) % slashMatches.length);
+          return;
+        }
+        if (e.key === 'Enter' || e.key === 'Tab') {
+          e.preventDefault();
+          e.stopPropagation();
+          applyPrompt(slashMatches[slashIndex]);
+          return;
+        }
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          e.stopPropagation();
+          setSlashDismissed(true);
+          return;
+        }
+      }
+
       onKeyDown(e);
     },
-    [onKeyDown],
+    [slashOpen, slashMatches, slashIndex, applyPrompt, onKeyDown],
   );
 
   const handleSubmit = useCallback(
@@ -147,10 +225,49 @@ export function Composer({
             setDragging(false);
             acceptFiles(e.dataTransfer?.files ?? null);
           }}
-          className={`rounded-2xl border bg-[#1e1e22] shadow-lg transition-colors focus-within:border-zinc-600 ${
+          className={`relative rounded-2xl border bg-[#1e1e22] shadow-lg transition-colors focus-within:border-zinc-600 ${
             dragging ? 'border-[#c96442]' : 'border-zinc-700/50'
           }`}
         >
+          {slashOpen && (
+            <div
+              role="listbox"
+              aria-label="Danh sách prompt"
+              className="absolute bottom-full left-0 right-0 z-30 mb-2 max-h-64 overflow-y-auto rounded-xl border border-zinc-700/70 bg-[#1a1a1e] py-1 shadow-2xl"
+              // Giữ focus textarea khi click vào menu
+              onMouseDown={(e) => e.preventDefault()}
+            >
+              {slashMatches.map((p, i) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  role="option"
+                  aria-selected={i === slashIndex}
+                  id={`slash-opt-${p.id}`}
+                  onClick={() => applyPrompt(p)}
+                  onMouseEnter={() => setSlashIndex(i)}
+                  className={`flex w-full flex-col items-start gap-0.5 px-3 py-2 text-left transition-colors ${
+                    i === slashIndex ? 'bg-zinc-800' : ''
+                  }`}
+                >
+                  <span className="text-[13px] font-medium text-zinc-200">{p.title}</span>
+                  <span className="line-clamp-1 w-full text-[11px] text-zinc-500">
+                    {p.content.replace(/\n+/g, ' ').trim()}
+                  </span>
+                </button>
+              ))}
+              {onSavePrompt && input.length > 1 && (
+                <button
+                  type="button"
+                  onClick={() => void quickSavePrompt()}
+                  className="flex w-full items-center gap-1.5 border-t border-zinc-800 px-3 py-2 text-left text-[12px] text-zinc-400 transition hover:text-zinc-200"
+                >
+                  <BookmarkPlus size={13} />
+                  Lưu nhanh "/{slashQuery}" làm mẫu
+                </button>
+              )}
+            </div>
+          )}
           {attachments.length > 0 && (
             <div className="flex flex-wrap gap-2 px-3 pt-3">
               {attachments.map((a) => (
@@ -211,7 +328,11 @@ export function Composer({
             minRows={1}
             maxRows={10}
             aria-label="Nội dung tin nhắn"
-            placeholder="Gửi tin nhắn cho AI..."
+            aria-autocomplete={slashOpen ? 'list' : undefined}
+            aria-activedescendant={
+              slashOpen ? `slash-opt-${slashMatches[slashIndex]?.id}` : undefined
+            }
+            placeholder="Gửi tin nhắn cho AI... (gõ / để chèn prompt mẫu)"
             className="w-full resize-none bg-transparent px-4 pb-2 pt-3.5 text-[15px] leading-relaxed text-zinc-100 outline-none placeholder:text-zinc-500"
           />
 

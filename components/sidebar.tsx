@@ -11,6 +11,7 @@ import { exportJson, exportMarkdown } from '@/lib/backup';
 import { Highlight } from '@/components/highlight';
 import type { SnippetSegment } from '@/lib/search-utils';
 import { useDebouncedValue } from '@/lib/hooks/use-debounced-value';
+import { BackupReminder } from '@/components/backup-reminder';
 import {
   Plus, MessageSquare, Pin, Trash2, Search, Settings as SettingsIcon,
   X, MoreHorizontal, FileJson, FileText, Loader2,
@@ -303,6 +304,8 @@ export function Sidebar() {
           <X size={16} />
         </button>
       </div>
+
+      <BackupReminder chatCount={chats.length} />
 
       <div className="px-3 pb-2">
         <div className="relative flex items-center">

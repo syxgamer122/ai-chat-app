@@ -31,6 +31,7 @@ import { useStickToBottom } from '@/lib/use-stick-to-bottom';
 import { Composer } from '@/components/composer';
 import type { ModelOption } from '@/components/model-selector';
 import { useTitleGenerator } from '@/lib/use-title-generator';
+import { ensurePromptSeed, savePrompt } from '@/lib/prompt-library';
 import {
   CONTINUE_PROMPT,
   sanitizeContent,
@@ -70,6 +71,17 @@ export default function ChatInterface() {
   const currentChat = useLiveQuery(
     () => (currentChatId ? db.chats.get(currentChatId) : undefined),
     [currentChatId],
+  );
+
+  /** Thư viện prompt cho slash menu "/" trong composer.
+   *  Seed mặc định chạy ngoài liveQuery (liveQuery cấm giao dịch ghi). */
+  useEffect(() => {
+    void ensurePromptSeed();
+  }, []);
+  const promptTemplates = useLiveQuery(
+    () => db.prompts.orderBy('updatedAt').reverse().toArray(),
+    [],
+    [],
   );
 
   const MODELS: ModelOption[] = useMemo(
@@ -1715,6 +1727,22 @@ export default function ChatInterface() {
     [setInput],
   );
 
+  /** Chọn prompt trong slash menu → thay toàn bộ input. */
+  const handleApplyPrompt = useCallback(
+    (content: string) => {
+      setInput(content);
+    },
+    [setInput],
+  );
+
+  const handleSaveQuickPrompt = useCallback(async (title: string, content: string) => {
+    try {
+      await savePrompt({ title, content });
+    } catch (err) {
+      console.error('[prompt] lưu nhanh thất bại:', err);
+    }
+  }, []);
+
   const onTextareaKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if ((e.nativeEvent as any).isComposing || e.keyCode === 229) return;
     if (e.key === 'Escape') { handleStop(); return; }
@@ -1837,6 +1865,9 @@ export default function ChatInterface() {
         attachments={composerAttachments}
         onAddFiles={addFiles}
         onAppendText={handleAppendVoiceText}
+        slashPrompts={promptTemplates ?? []}
+        onApplyPrompt={handleApplyPrompt}
+        onSavePrompt={handleSaveQuickPrompt}
         onRemoveAttachment={handleRemoveAttachmentById}
         models={MODELS}
         model={model}
