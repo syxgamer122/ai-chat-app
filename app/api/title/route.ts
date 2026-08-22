@@ -3,6 +3,7 @@ import { generateText, APICallError } from 'ai';
 import { z } from 'zod';
 import { getKeyCandidates, markKeyFailure, markKeySuccess, getKeyLabel } from '@/lib/api-keys';
 import { validateProviderBaseUrl } from '@/lib/provider-url';
+import { sharedFreeBudget } from '@/lib/upstream-queue';
 import {
   checkRateLimit,
   rateLimitHeaders,
@@ -164,6 +165,16 @@ export async function POST(req: Request) {
       .slice(0, 1000);
 
     const fallbackTitle = generateFallbackTitle(cleanMessage);
+
+    /* Gateway free dùng chung: không đốt ngân sách cho sinh tiêu đề —
+       dùng tiêu đề local ngay (client vẫn nhận title bình thường). */
+    if (sharedFreeBudget(providerBase ?? process.env.OPENAI_BASE_URL)) {
+      return Response.json(
+        { title: fallbackTitle, final: true, reason: 'free_provider_local_title' },
+        { headers: NO_STORE },
+      );
+    }
+
     const candidateResult = providerBase
       ? { keys: [customKey ?? 'provider-no-key'] }
       : customKey

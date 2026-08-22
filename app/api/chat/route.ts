@@ -18,6 +18,7 @@ import {
 } from '@/lib/api-keys';
 import { ALLOWED_MODEL_IDS, DEFAULT_MODEL_ID, getModelConfig, resolveProviderModelChain } from '@/lib/models';
 import { validateProviderBaseUrl } from '@/lib/provider-url';
+import { acquireUpstreamSlot, sharedFreeBudget } from '@/lib/upstream-queue';
 import { checkRateLimit, getClientIp, checkSameOrigin, verifyAccessAuth } from '@/lib/security';
 
 export const runtime = 'edge';
@@ -546,6 +547,28 @@ export async function POST(req: Request) {
         ? { keys: [customKey] }
         : getKeyCandidates();
     const candidateKeys = candidateResult.keys.slice(0, MAX_FAILOVER_KEYS);
+
+    /* Gateway free dùng chung (crax/Kilgore): ngân sách theo IP server là
+       CHUNG cho toàn bộ user — xếp hàng để tổng luôn trong ngưỡng công bố. */
+    const queueBase =
+      sharedFreeBudget(providerBase) && providerBase
+        ? providerBase
+        : sharedFreeBudget(process.env.OPENAI_BASE_URL)
+          ? (process.env.OPENAI_BASE_URL as string)
+          : null;
+    if (queueBase) {
+      const slot = await acquireUpstreamSlot(queueBase);
+      if (!slot.ok) {
+        return jsonError(
+          requestId,
+          429,
+          'PROVIDER_BUSY',
+          `Nhà cung cấp free đang đông (giới hạn chung). Thử lại sau ~${slot.retryAfterSec} giây nhé.`,
+          undefined,
+          { 'Retry-After': String(slot.retryAfterSec) },
+        );
+      }
+    }
     if (!candidateKeys.length) {
       const retrySec = Math.max(1, Math.ceil((candidateResult.retryAfterMs ?? 60_000) / 1000));
       return jsonError(
@@ -628,7 +651,15 @@ export async function POST(req: Request) {
           dataStream.write(
             formatDataStreamPart('finish_message', {
               finishReason,
-              usage: usage ?? { promptTokens: 0, completionTokens: 0 },
+              // Một số gateway (crax, Kilgore) không trả usage — ước lượng
+              // token vào từ độ dài context để thống kê vẫn có dữ liệu.
+              usage:
+                usage && (usage.promptTokens || usage.completionTokens)
+                  ? usage
+                  : {
+                      promptTokens: Math.ceil(JSON.stringify(contextMessages).length / 4),
+                      completionTokens: 0,
+                    },
             }),
           );
         };
