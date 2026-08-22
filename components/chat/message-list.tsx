@@ -237,7 +237,7 @@ export const MessageList = memo(function MessageList({
       >
         {!hasMessages ? (
           <div className="flex h-full flex-col items-center justify-center px-4 pb-16 pt-10">
-            <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-2xl border border-[#c96442]/25 bg-gradient-to-br from-[#c96442]/15 to-[#c96442]/5 text-[#e08a68] shadow-[0_8px_32px_-8px_rgba(201,100,66,0.35)]">
+            <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-2xl border border-[#0A7E8C]/25 bg-gradient-to-br from-[#0A7E8C]/15 to-[#0A7E8C]/5 text-[#086E7A] shadow-[0_8px_32px_-8px_rgba(10,126,140,0.35)]">
               <Sparkles size={30} strokeWidth={1.8} />
             </div>
             <h1 className="bg-gradient-to-b from-zinc-50 to-zinc-400 bg-clip-text text-center text-[28px] font-semibold leading-tight tracking-tight text-transparent">
@@ -251,14 +251,14 @@ export const MessageList = memo(function MessageList({
                 <button
                   key={prompt}
                   onClick={() => onSelectSuggestion(prompt)}
-                  className="group flex items-center justify-between gap-3 rounded-xl border border-zinc-800/80 bg-[#161619]/60 p-4 text-left transition-all duration-150 hover:-translate-y-0.5 hover:border-[#c96442]/40 hover:bg-[#1c1c20] hover:shadow-[0_8px_24px_-12px_rgba(0,0,0,0.8)]"
+                  className="group flex items-center justify-between gap-3 rounded-xl border border-zinc-200/80 bg-[#FFFFFF]/60 p-4 text-left transition-all duration-150 hover:-translate-y-0.5 hover:border-[#0A7E8C]/40 hover:bg-[#F1F5F9] hover:shadow-[0_8px_24px_-12px_rgba(15,23,42,0.18)]"
                 >
-                  <span className="text-sm text-zinc-400 transition-colors group-hover:text-zinc-100">
+                  <span className="text-sm text-zinc-500 transition-colors group-hover:text-zinc-800">
                     {prompt}
                   </span>
                   <ArrowUp
                     size={13}
-                    className="flex-shrink-0 text-zinc-700 transition-colors group-hover:text-[#c96442]"
+                    className="flex-shrink-0 text-zinc-700 transition-colors group-hover:text-[#0A7E8C]"
                   />
                 </button>
               ))}
@@ -326,7 +326,7 @@ export const MessageList = memo(function MessageList({
 
             {isLoading && lastRole === 'user' && (
               <div className="flex justify-start px-1 pb-6">
-                <span className="inline-block h-4 w-2 animate-pulse bg-indigo-500" />
+                <span className="inline-block h-4 w-2 animate-pulse bg-[#0A7E8C]" />
               </div>
             )}
           </>
@@ -347,7 +347,7 @@ export const MessageList = memo(function MessageList({
           type="button"
           onClick={onScrollToBottom}
           aria-label="Scroll to bottom"
-          className="absolute bottom-6 left-1/2 -translate-x-1/2 p-2 bg-zinc-800 text-zinc-300 rounded-full shadow-lg border border-zinc-700 hover:bg-zinc-700 transition"
+          className="absolute bottom-6 left-1/2 -translate-x-1/2 p-2 bg-zinc-200 text-zinc-600 rounded-full shadow-lg border border-zinc-300 hover:bg-zinc-300 transition"
         >
           <ArrowDown size={18} />
         </button>

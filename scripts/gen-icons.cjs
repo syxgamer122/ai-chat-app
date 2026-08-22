@@ -1,5 +1,6 @@
 /* eslint-disable */
 // Sinh icon PWA (192/512/maskable-512/180) — vẽ lại thiết kế app/icon.svg.
+// Logo KODA: chữ K bằng 3 nét bo tròn gradient teal→green + 2 node tròn ở đầu nét.
 // Tự encode PNG bằng zlib + CRC32 (không cần thư viện ngoài). Chạy 1 lần rồi xoá.
 const fs = require('fs');
 const path = require('path');
@@ -48,9 +49,23 @@ function encodePNG(width, height, rgba) {
   ]);
 }
 
-// ---------- Hình học ----------
-const BG = [0x4f, 0x46, 0xe5];
-const WHITE = [0xff, 0xff, 0xff];
+// ---------- Hình học (hệ viewBox 32 như icon.svg) ----------
+const BG = [0x10, 0x10, 0x13];
+const TEAL = [0x0a, 0x7e, 0x8c];
+const GREEN = [0x4e, 0xcb, 0x71];
+const STROKE_HALF = 1.6; // stroke-width 3.2
+const STROKES = [
+  [10.5, 8, 10.5, 24], // sổ dọc của K (thân trái)
+  [10.5, 16, 22.5, 8], // tay chéo: từ giữa thân kéo lên phải
+  [10.5, 16, 22.5, 24], // tay chéo: từ giữa thân kéo xuống phải
+];
+const NODES = [
+  [22.5, 8, 2.4, TEAL],
+  [22.5, 24, 2.4, GREEN],
+];
+// Trục gradient chéo từ góc trên-trái sang dưới-phải của vùng nét.
+const G0 = [8, 7];
+const G1 = [24, 25];
 const SS = 3; // supersampling 3x
 
 function sdRoundRect(px, py, cx, cy, hw, hh, r) {
@@ -60,48 +75,47 @@ function sdRoundRect(px, py, cx, cy, hw, hh, r) {
   const oy = Math.max(dy, 0);
   return Math.hypot(ox, oy) + Math.min(Math.max(dx, dy), 0) - r;
 }
-function inCircle(px, py, cx, cy, r) {
-  return Math.hypot(px - cx, py - cy) <= r;
+function distToSeg(px, py, ax, ay, bx, by) {
+  const dx = bx - ax;
+  const dy = by - ay;
+  const len2 = dx * dx + dy * dy || 1;
+  let t = ((px - ax) * dx + (py - ay) * dy) / len2;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(px - (ax + dx * t), py - (ay + dy * t));
 }
-function inTriangle(px, py, a, b, c) {
-  const s = (a, b, p) => (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0]);
-  const d1 = s(a, b, [px, py]);
-  const d2 = s(b, c, [px, py]);
-  const d3 = s(c, a, [px, py]);
-  const neg = d1 < 0 || d2 < 0 || d3 < 0;
-  const pos = d1 > 0 || d2 > 0 || d3 > 0;
-  return !(neg && pos);
+function gradColor(u, v) {
+  const dx = G1[0] - G0[0];
+  const dy = G1[1] - G0[1];
+  const len2 = dx * dx + dy * dy;
+  let t = ((u - G0[0]) * dx + (v - G0[1]) * dy) / len2;
+  t = Math.max(0, Math.min(1, t));
+  return [
+    TEAL[0] + (GREEN[0] - TEAL[0]) * t,
+    TEAL[1] + (GREEN[1] - TEAL[1]) * t,
+    TEAL[2] + (GREEN[2] - TEAL[2]) * t,
+  ];
 }
 
 /**
  * Vẽ 1 pixel (tọa độ trong [0, size)) — trả về [r,g,b] hoặc null (trong suốt).
- * contentScale: co nội dung (bong bóng + chấm) — 1.0 cho icon thường, ~0.64 cho maskable.
+ * contentScale: co logo về quanh tâm — 1.0 cho icon thường, ~0.64 cho maskable.
  */
 function pixel(x, y, size, contentScale) {
   // Nền: rounded rect rx = 25% (như rx=8 của viewBox 32)
   if (sdRoundRect(x, y, size / 2, size / 2, size / 2, size / 2, size * 0.25) > 0) return null;
 
-  // Hệ toạ độ nội dung: co về quanh tâm
-  const cs = contentScale;
   const cx = size / 2;
   const cy = size / 2;
-  const px = cx + (x - cx) / cs; // toạ độ nếu vẽ trong khung 32 "ảo"
-  const py = cy + (y - cy) / cs;
-  const u = (px / size) * 32; // sang hệ viewBox 32
-  const v = (py / size) * 32;
+  const u = ((cx + (x - cx) / contentScale) / size) * 32;
+  const v = ((cy + (y - cy) / contentScale) / size) * 32;
 
-  // Bong bóng chat: khung [8,24]x[8,22], bo góc trừ góc dưới-trái (đuôi thay chỗ)
-  const bubble =
-    sdRoundRect(u, v - 0.4, 16, 15, 8, 7, 4.4) <= 0 || // thân chính (dịch nhẹ để 4 góc tròn đều)
-    inTriangle(u, v, [9, 21.4], [9, 25.6], [14.4, 21.9]) || // đuôi trái
-    (u >= 8 && u <= 24 && v >= 20.5 && v <= 21.9); // nối đuôi với thân
-  if (bubble) {
-    // 3 chấm màu nền
-    const dots =
-      inCircle(u, v, 12, 15, 1.55) ||
-      inCircle(u, v, 16, 15, 1.55) ||
-      inCircle(u, v, 20, 15, 1.55);
-    return dots ? BG : WHITE;
+  // 2 node tròn ở đầu 2 tay chéo — màu bookend của gradient
+  for (const [nx, ny, nr, color] of NODES) {
+    if (Math.hypot(u - nx, v - ny) <= nr) return color;
+  }
+  // 3 nét K gradient
+  for (const [ax, ay, bx, by] of STROKES) {
+    if (distToSeg(u, v, ax, ay, bx, by) <= STROKE_HALF) return gradColor(u, v);
   }
   return BG;
 }
@@ -142,7 +156,7 @@ fs.mkdirSync(OUT, { recursive: true });
 const jobs = [
   ['icon-192.png', 192, 1],
   ['icon-512.png', 512, 1],
-  ['maskable-512.png', 512, 0.64], // maskable: nền full-bleed, nội dung nằm trong safe zone
+  ['maskable-512.png', 512, 0.64], // maskable: nền full-bleed, logo nằm trong safe zone
   ['icon-180.png', 180, 1], // apple-touch-icon
 ];
 

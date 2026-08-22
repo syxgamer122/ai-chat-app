@@ -48,7 +48,7 @@ export function ChatExportMenu({ chatId }: { chatId: string | null }) {
         aria-expanded={open}
         aria-label="Xuất cuộc trò chuyện này"
         title="Xuất cuộc trò chuyện này"
-        className="flex h-8 w-8 items-center justify-center rounded-lg text-zinc-500 hover:bg-zinc-800/70 hover:text-zinc-200 disabled:opacity-50"
+        className="flex h-8 w-8 items-center justify-center rounded-lg text-zinc-500 hover:bg-zinc-200/70 hover:text-zinc-700 disabled:opacity-50"
       >
         {busy ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
       </button>
@@ -56,16 +56,16 @@ export function ChatExportMenu({ chatId }: { chatId: string | null }) {
       {open && (
         <div
           role="menu"
-          className="absolute right-0 top-full z-50 mt-1.5 w-60 rounded-xl border border-zinc-800 bg-[#1a1a1d] p-1 shadow-xl"
+          className="absolute right-0 top-full z-50 mt-1.5 w-60 rounded-xl border border-zinc-200 bg-[#FFFFFF] p-1 shadow-xl"
         >
           <MenuRow
-            icon={<FileJson size={15} className="text-zinc-400" />}
+            icon={<FileJson size={15} className="text-zinc-500" />}
             title="Xuất JSON (đầy đủ nhánh)"
             desc="Bảo toàn toàn bộ cây tin nhắn"
             onClick={() => run('json')}
           />
           <MenuRow
-            icon={<FileText size={15} className="text-zinc-400" />}
+            icon={<FileText size={15} className="text-zinc-500" />}
             title="Xuất Markdown (nhánh active)"
             desc="Dành cho đọc và in ấn"
             onClick={() => run('md')}
@@ -92,11 +92,11 @@ function MenuRow({
       type="button"
       role="menuitem"
       onClick={onClick}
-      className="flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 text-left hover:bg-zinc-800/80"
+      className="flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 text-left hover:bg-zinc-200/80"
     >
       <span className="mt-0.5">{icon}</span>
       <span className="flex flex-col">
-        <span className="text-[13px] font-medium text-zinc-200">{title}</span>
+        <span className="text-[13px] font-medium text-zinc-700">{title}</span>
         <span className="text-[11px] text-zinc-500">{desc}</span>
       </span>
     </button>

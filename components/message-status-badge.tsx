@@ -12,7 +12,7 @@ export function MessageStatusBadge({
 }: MessageStatusBadgeProps) {
   if (status === "streaming") {
     return (
-      <span className="text-[11px] text-zinc-400 dark:text-zinc-500 animate-pulse">
+      <span className="text-[11px] text-zinc-500 dark:text-zinc-500 animate-pulse">
         Đang tạo…
       </span>
     );

@@ -33,7 +33,7 @@ export function BranchSwitcher({
     <div
       role="group"
       aria-label="Điều hướng giữa các nhánh"
-      className="inline-flex items-center gap-1 rounded-md border border-zinc-200/50 bg-white/80 px-1 py-0.5 shadow-sm dark:border-zinc-700/50 dark:bg-zinc-900/80 backdrop-blur-sm"
+      className="inline-flex items-center gap-1 rounded-md border border-zinc-200/50 bg-white/80 px-1 py-0.5 shadow-sm dark:border-zinc-300/50 dark:bg-zinc-100/80 backdrop-blur-sm"
     >
       <button
         type="button"
@@ -55,7 +55,7 @@ export function BranchSwitcher({
 
       <span
         aria-live="polite"
-        className="min-w-10 select-none text-center font-mono text-[11px] tabular-nums text-zinc-500 dark:text-zinc-400"
+        className="min-w-10 select-none text-center font-mono text-[11px] tabular-nums text-zinc-500 dark:text-zinc-500"
       >
         {currentIndex + 1} / {total}
       </span>

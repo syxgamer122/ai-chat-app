@@ -124,9 +124,9 @@ export function ModelSelector({
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={open ? listId : undefined}
-        className="flex h-8 items-center gap-1.5 rounded-full px-2.5 text-[12px] font-medium text-zinc-400 hover:bg-zinc-800/70 hover:text-zinc-200 disabled:opacity-50"
+        className="flex h-8 items-center gap-1.5 rounded-full px-2.5 text-[12px] font-medium text-zinc-500 hover:bg-zinc-200/70 hover:text-zinc-700 disabled:opacity-50"
       >
-        <Sparkles size={13} className="text-[#c96442]" />
+        <Sparkles size={13} className="text-[#0A7E8C]" />
         <span className="max-w-[160px] truncate">{current?.label ?? 'Model'}</span>
         <ChevronDown size={13} className="text-zinc-500" />
       </button>
@@ -139,7 +139,7 @@ export function ModelSelector({
           tabIndex={-1}
           aria-activedescendant={`${listId}-opt-${cursor}`}
           onKeyDown={onListKeyDown}
-          className="no-scrollbar absolute bottom-full left-0 z-50 mb-2 max-h-72 w-64 overflow-y-auto rounded-xl border border-zinc-800 bg-[#1a1a1d] p-1 shadow-xl outline-none"
+          className="no-scrollbar absolute bottom-full left-0 z-50 mb-2 max-h-72 w-64 overflow-y-auto rounded-xl border border-zinc-200 bg-[#FFFFFF] p-1 shadow-xl outline-none"
         >
           {models.map((m, idx) => {
             const active = m.id === current?.id;
@@ -154,16 +154,16 @@ export function ModelSelector({
                 onClick={() => commit(idx)}
                 onPointerEnter={() => setCursor(idx)}
                 className={`flex w-full cursor-pointer items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-left ${
-                  focused ? 'bg-zinc-800/80' : ''
+                  focused ? 'bg-zinc-200/80' : ''
                 }`}
               >
                 <span className="flex min-w-0 flex-col">
-                  <span className="truncate text-[13px] text-zinc-200">{m.label}</span>
+                  <span className="truncate text-[13px] text-zinc-700">{m.label}</span>
                   {m.hint && (
                     <span className="truncate text-[11px] text-zinc-500">{m.hint}</span>
                   )}
                 </span>
-                {active && <Check size={14} className="flex-shrink-0 text-[#c96442]" />}
+                {active && <Check size={14} className="flex-shrink-0 text-[#0A7E8C]" />}
               </div>
             );
           })}

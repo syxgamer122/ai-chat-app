@@ -40,8 +40,8 @@ function InstallSection() {
   };
 
   return (
-    <div className="pt-4 border-t border-zinc-800 space-y-2">
-      <h3 className="text-sm font-semibold text-zinc-200">Ứng dụng</h3>
+    <div className="pt-4 border-t border-zinc-200 space-y-2">
+      <h3 className="text-sm font-semibold text-zinc-700">Ứng dụng</h3>
       {installed ? (
         <p className="text-xs text-zinc-500">Bạn đang dùng bản đã cài lên thiết bị.</p>
       ) : canInstall ? (
@@ -49,7 +49,7 @@ function InstallSection() {
           type="button"
           onClick={handleInstall}
           disabled={installing}
-          className="w-full flex items-center justify-center gap-2 py-2.5 px-4 bg-[#c96442] hover:bg-[#b5573a] text-white rounded-xl text-sm font-medium transition disabled:opacity-50"
+          className="w-full flex items-center justify-center gap-2 py-2.5 px-4 bg-[#0A7E8C] hover:bg-[#086E7A] text-white rounded-xl text-sm font-medium transition disabled:opacity-50"
         >
           {installing ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
           Cài đặt lên thiết bị
@@ -114,40 +114,40 @@ function PromptLibrarySection() {
   };
 
   return (
-    <div className="pt-4 border-t border-zinc-800 space-y-3">
-      <h3 className="text-sm font-semibold text-zinc-200">Thư viện prompt</h3>
+    <div className="pt-4 border-t border-zinc-200 space-y-3">
+      <h3 className="text-sm font-semibold text-zinc-700">Thư viện prompt</h3>
       <p className="text-xs text-zinc-500 leading-relaxed">
-        Gõ <code className="text-zinc-400">/</code> trong ô nhập tin nhắn để chèn nhanh.
+        Gõ <code className="text-zinc-500">/</code> trong ô nhập tin nhắn để chèn nhanh.
       </p>
 
       {(prompts ?? []).map((p) =>
         editingId === p.id ? (
-          <div key={p.id} className="space-y-2 rounded-xl border border-zinc-700 bg-zinc-900/60 p-2.5">
+          <div key={p.id} className="space-y-2 rounded-xl border border-zinc-300 bg-zinc-100/60 p-2.5">
             <input
               value={editTitle}
               onChange={(e) => setEditTitle(e.target.value)}
-              className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-sm text-zinc-100 outline-none focus:border-indigo-500"
+              className="w-full rounded-lg border border-zinc-300 bg-white px-2.5 py-1.5 text-sm text-zinc-800 outline-none focus:border-[#0A7E8C]"
               placeholder="Tên prompt"
             />
             <textarea
               value={editContent}
               onChange={(e) => setEditContent(e.target.value)}
               rows={4}
-              className="w-full resize-y rounded-lg border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-xs text-zinc-300 outline-none focus:border-indigo-500"
+              className="w-full resize-y rounded-lg border border-zinc-300 bg-white px-2.5 py-1.5 text-xs text-zinc-600 outline-none focus:border-[#0A7E8C]"
               placeholder="Nội dung prompt"
             />
             <div className="flex gap-2">
               <button
                 type="button"
                 onClick={saveEdit}
-                className="rounded-lg bg-indigo-600 px-3 py-1 text-xs font-medium text-white hover:bg-indigo-700"
+                className="rounded-lg bg-[#0A7E8C] px-3 py-1 text-xs font-medium text-white hover:bg-[#086E7A]"
               >
                 Lưu
               </button>
               <button
                 type="button"
                 onClick={() => setEditingId(null)}
-                className="rounded-lg px-3 py-1 text-xs text-zinc-400 hover:text-zinc-200"
+                className="rounded-lg px-3 py-1 text-xs text-zinc-500 hover:text-zinc-700"
               >
                 Huỷ
               </button>
@@ -156,10 +156,10 @@ function PromptLibrarySection() {
         ) : (
           <div
             key={p.id}
-            className="group flex items-start justify-between gap-2 rounded-lg border border-zinc-800 bg-zinc-900/40 px-2.5 py-2"
+            className="group flex items-start justify-between gap-2 rounded-lg border border-zinc-200 bg-zinc-100/40 px-2.5 py-2"
           >
             <div className="min-w-0 flex-1">
-              <div className="text-[13px] font-medium text-zinc-200">{p.title}</div>
+              <div className="text-[13px] font-medium text-zinc-700">{p.title}</div>
               <div className="mt-0.5 line-clamp-2 text-[11px] leading-relaxed text-zinc-500">
                 {p.content.replace(/\n+/g, ' ')}
               </div>
@@ -169,7 +169,7 @@ function PromptLibrarySection() {
                 type="button"
                 onClick={() => startEdit(p)}
                 aria-label={`Sửa ${p.title}`}
-                className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
+                className="rounded p-1 text-zinc-500 hover:bg-zinc-200 hover:text-zinc-800"
               >
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
               </button>
@@ -179,7 +179,7 @@ function PromptLibrarySection() {
                   if (window.confirm(`Xoá prompt "${p.title}"?`)) void deletePrompt(p.id);
                 }}
                 aria-label={`Xoá ${p.title}`}
-                className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-red-400"
+                className="rounded p-1 text-zinc-500 hover:bg-zinc-200 hover:text-red-400"
               >
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>
               </button>
@@ -188,24 +188,24 @@ function PromptLibrarySection() {
         ),
       )}
 
-      <div className="space-y-2 rounded-xl border border-dashed border-zinc-700 p-2.5">
+      <div className="space-y-2 rounded-xl border border-dashed border-zinc-300 p-2.5">
         <input
           value={newTitle}
           onChange={(e) => setNewTitle(e.target.value)}
-          className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-sm text-zinc-100 outline-none focus:border-indigo-500"
+          className="w-full rounded-lg border border-zinc-300 bg-white px-2.5 py-1.5 text-sm text-zinc-800 outline-none focus:border-[#0A7E8C]"
           placeholder="Tên prompt mới (vd: Viết email)"
         />
         <textarea
           value={newContent}
           onChange={(e) => setNewContent(e.target.value)}
           rows={3}
-          className="w-full resize-y rounded-lg border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-xs text-zinc-300 outline-none focus:border-indigo-500"
+          className="w-full resize-y rounded-lg border border-zinc-300 bg-white px-2.5 py-1.5 text-xs text-zinc-600 outline-none focus:border-[#0A7E8C]"
           placeholder="Nội dung prompt"
         />
         <button
           type="button"
           onClick={addPrompt}
-          className="w-full rounded-lg bg-zinc-800 py-1.5 text-xs font-medium text-zinc-200 transition hover:bg-zinc-700"
+          className="w-full rounded-lg bg-zinc-200 py-1.5 text-xs font-medium text-zinc-700 transition hover:bg-zinc-300"
         >
           + Thêm prompt
         </button>
@@ -266,10 +266,10 @@ function AutoBackupSection() {
   };
 
   return (
-    <div className="pt-4 border-t border-zinc-800 space-y-3">
-      <h3 className="text-sm font-semibold text-zinc-200">Tự động sao lưu</h3>
+    <div className="pt-4 border-t border-zinc-200 space-y-3">
+      <h3 className="text-sm font-semibold text-zinc-700">Tự động sao lưu</h3>
       <div>
-        <label className="text-xs font-medium text-zinc-400 mb-1.5 block">
+        <label className="text-xs font-medium text-zinc-500 mb-1.5 block">
           Chu kỳ nhắc / tự động
         </label>
         <select
@@ -279,7 +279,7 @@ function AutoBackupSection() {
             setIntervalDays(days);
             setBackupIntervalDays(days);
           }}
-          className="w-full bg-zinc-900 border border-zinc-800 rounded-xl p-2.5 text-sm text-zinc-200 outline-none focus:border-indigo-500 transition"
+          className="w-full bg-white border border-zinc-200 rounded-xl p-2.5 text-sm text-zinc-700 outline-none focus:border-[#0A7E8C] transition"
         >
           <option value={1}>Mỗi ngày</option>
           <option value={3}>Mỗi 3 ngày</option>
@@ -292,7 +292,7 @@ function AutoBackupSection() {
       {fsSupported && (
         <div className="space-y-2">
           {dirName ? (
-            <div className="flex items-center justify-between gap-2 rounded-xl border border-zinc-700 bg-zinc-900/60 px-3 py-2 text-xs text-zinc-300">
+            <div className="flex items-center justify-between gap-2 rounded-xl border border-zinc-300 bg-zinc-100/60 px-3 py-2 text-xs text-zinc-600">
               <span className="min-w-0 truncate">📁 {dirName}</span>
               <button
                 type="button"
@@ -312,7 +312,7 @@ function AutoBackupSection() {
               type="button"
               onClick={handleChoose}
               disabled={busy}
-              className="w-full flex items-center justify-center gap-2 py-2.5 px-3 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-200 rounded-xl text-sm font-medium transition disabled:opacity-50"
+              className="w-full flex items-center justify-center gap-2 py-2.5 px-3 bg-white hover:bg-zinc-200 border border-zinc-200 text-zinc-700 rounded-xl text-sm font-medium transition disabled:opacity-50"
             >
               Chọn thư mục lưu tự động…
             </button>
@@ -328,7 +328,7 @@ function AutoBackupSection() {
         type="button"
         onClick={handleBackupNow}
         disabled={busy}
-        className="w-full flex items-center justify-center gap-2 py-2.5 px-3 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-200 rounded-xl text-sm font-medium transition disabled:opacity-50"
+        className="w-full flex items-center justify-center gap-2 py-2.5 px-3 bg-white hover:bg-zinc-200 border border-zinc-200 text-zinc-700 rounded-xl text-sm font-medium transition disabled:opacity-50"
       >
         {busy ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
         Sao lưu ngay
@@ -441,15 +441,15 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
       <div
         ref={panelRef}
         tabIndex={-1}
-        className="bg-zinc-950 border border-zinc-800 rounded-2xl w-full max-w-lg p-6 shadow-2xl max-h-[90vh] overflow-y-auto focus:outline-none"
+        className="bg-[#F7F9FC] border border-zinc-200 rounded-2xl w-full max-w-lg p-6 shadow-2xl max-h-[90vh] overflow-y-auto focus:outline-none"
       >
-        <div className="flex items-center justify-between mb-6 pb-3 border-b border-zinc-800">
-          <h2 className="text-xl font-medium text-zinc-100">Cài đặt ứng dụng</h2>
+        <div className="flex items-center justify-between mb-6 pb-3 border-b border-zinc-200">
+          <h2 className="text-xl font-medium text-zinc-800">Cài đặt ứng dụng</h2>
           <button
             type="button"
             onClick={onClose}
             aria-label="Đóng cài đặt"
-            className="p-1 text-zinc-500 hover:text-zinc-300 rounded-lg transition"
+            className="p-1 text-zinc-500 hover:text-zinc-600 rounded-lg transition"
           >
             <X size={18} />
           </button>
@@ -458,11 +458,11 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
         <div className="space-y-5">
           {/* Model */}
           <div>
-            <label className="text-sm font-medium text-zinc-300 mb-1.5 block">AI Model</label>
+            <label className="text-sm font-medium text-zinc-600 mb-1.5 block">AI Model</label>
             <select
               value={settings.model}
               onChange={(e) => updateSettings({ model: e.target.value })}
-              className="w-full bg-zinc-900 border border-zinc-800 rounded-xl p-2.5 text-sm text-zinc-200 outline-none focus:border-indigo-500 transition"
+              className="w-full bg-white border border-zinc-200 rounded-xl p-2.5 text-sm text-zinc-700 outline-none focus:border-[#0A7E8C] transition"
             >
               {AVAILABLE_MODELS.map((m) => (
                 <option key={m.id} value={m.id}>{m.name}</option>
@@ -473,19 +473,19 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
           {/* Temperature */}
           <div>
             <div className="flex justify-between text-sm mb-1.5">
-              <span className="text-zinc-300 font-medium">Temperature: {settings.temperature}</span>
+              <span className="text-zinc-600 font-medium">Temperature: {settings.temperature}</span>
             </div>
             <input
               type="range" min="0" max="1" step="0.05"
               value={settings.temperature}
               onChange={(e) => updateSettings({ temperature: parseFloat(e.target.value) })}
-              className="w-full accent-indigo-500"
+              className="w-full accent-[#0A7E8C]"
             />
           </div>
 
           {/* API key */}
           <div>
-            <label className="text-sm font-medium text-zinc-300 mb-1.5 block">
+            <label className="text-sm font-medium text-zinc-600 mb-1.5 block">
               OpenAI API Key (Tùy chọn)
             </label>
             <input
@@ -493,13 +493,13 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
               value={settings.apiKey || ''}
               onChange={(e) => updateSettings({ apiKey: e.target.value })}
               placeholder="sk-..."
-              className="w-full bg-zinc-900 border border-zinc-800 rounded-xl p-2.5 text-sm text-zinc-200 outline-none focus:border-indigo-500 transition font-mono"
+              className="w-full bg-white border border-zinc-200 rounded-xl p-2.5 text-sm text-zinc-700 outline-none focus:border-[#0A7E8C] transition font-mono"
             />
           </div>
 
           {/* Access code */}
           <div>
-            <label className="text-sm font-medium text-zinc-300 mb-1.5 block">
+            <label className="text-sm font-medium text-zinc-600 mb-1.5 block">
               Mã truy cập (Access Code)
             </label>
             <input
@@ -507,30 +507,30 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
               value={settings.accessCode || ''}
               onChange={(e) => updateSettings({ accessCode: e.target.value })}
               placeholder="Nhập mã truy cập..."
-              className="w-full bg-zinc-900 border border-zinc-800 rounded-xl p-2.5 text-sm text-zinc-200 outline-none focus:border-indigo-500 transition font-mono"
+              className="w-full bg-white border border-zinc-200 rounded-xl p-2.5 text-sm text-zinc-700 outline-none focus:border-[#0A7E8C] transition font-mono"
             />
           </div>
 
           {/* System prompt */}
           <div>
-            <label className="text-sm font-medium text-zinc-300 mb-1.5 block">System Prompt</label>
+            <label className="text-sm font-medium text-zinc-600 mb-1.5 block">System Prompt</label>
             <textarea
               value={settings.systemPrompt}
               onChange={(e) => updateSettings({ systemPrompt: e.target.value })}
               rows={3}
-              className="w-full bg-zinc-900 border border-zinc-800 rounded-xl p-2.5 text-sm text-zinc-200 outline-none focus:border-indigo-500 transition resize-none"
+              className="w-full bg-white border border-zinc-200 rounded-xl p-2.5 text-sm text-zinc-700 outline-none focus:border-[#0A7E8C] transition resize-none"
             />
           </div>
 
           {/* Perf */}
-          <div className="pt-2 border-t border-zinc-800/80 space-y-3">
+          <div className="pt-2 border-t border-zinc-200/80 space-y-3">
             <div className="flex items-center justify-between">
-              <span className="text-sm text-zinc-300 font-medium">Hiệu ứng Animation</span>
+              <span className="text-sm text-zinc-600 font-medium">Hiệu ứng Animation</span>
               <input
                 type="checkbox"
                 checked={settings.perf?.animations ?? true}
                 onChange={(e) => updatePerf({ animations: e.target.checked })}
-                className="rounded accent-indigo-500 w-4 h-4"
+                className="rounded accent-[#0A7E8C] w-4 h-4"
               />
             </div>
           </div>
@@ -545,11 +545,11 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
           <AutoBackupSection />
 
           {/* ------------------ Sao lưu & Phục hồi ------------------ */}
-          <div className="pt-4 border-t border-zinc-800 space-y-3">
-            <h3 className="text-sm font-semibold text-zinc-200">Sao lưu & Phục hồi</h3>
+          <div className="pt-4 border-t border-zinc-200 space-y-3">
+            <h3 className="text-sm font-semibold text-zinc-700">Sao lưu & Phục hồi</h3>
             <p className="text-xs text-zinc-500 leading-relaxed">
-              Bản <code className="text-zinc-400">.json</code> lưu đầy đủ cây phân nhánh và tệp kèm —
-              dùng để phục hồi. Bản <code className="text-zinc-400">.md</code> chỉ xuất nhánh đang
+              Bản <code className="text-zinc-500">.json</code> lưu đầy đủ cây phân nhánh và tệp kèm —
+              dùng để phục hồi. Bản <code className="text-zinc-500">.md</code> chỉ xuất nhánh đang
               xem, dùng để đọc hoặc in.
             </p>
 
@@ -558,7 +558,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                 type="button"
                 disabled={busy}
                 onClick={() => run('Đang xuất JSON…', () => exportJson())}
-                className="flex items-center justify-center gap-2 py-2.5 px-3 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-200 rounded-xl text-sm font-medium transition disabled:opacity-50"
+                className="flex items-center justify-center gap-2 py-2.5 px-3 bg-white hover:bg-zinc-200 border border-zinc-200 text-zinc-700 rounded-xl text-sm font-medium transition disabled:opacity-50"
               >
                 <Download size={14} /> Xuất tất cả .json
               </button>
@@ -566,20 +566,20 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                 type="button"
                 disabled={busy}
                 onClick={() => run('Đang xuất Markdown…', () => exportMarkdown())}
-                className="flex items-center justify-center gap-2 py-2.5 px-3 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-200 rounded-xl text-sm font-medium transition disabled:opacity-50"
+                className="flex items-center justify-center gap-2 py-2.5 px-3 bg-white hover:bg-zinc-200 border border-zinc-200 text-zinc-700 rounded-xl text-sm font-medium transition disabled:opacity-50"
               >
                 <Download size={14} /> Xuất tất cả .md
               </button>
             </div>
 
             <div>
-              <label className="text-xs font-medium text-zinc-400 mb-1.5 block">
+              <label className="text-xs font-medium text-zinc-500 mb-1.5 block">
                 Cách xử lý khi nạp lại
               </label>
               <select
                 value={importMode}
                 onChange={(e) => setImportMode(e.target.value as ImportMode)}
-                className="w-full bg-zinc-900 border border-zinc-800 rounded-xl p-2.5 text-sm text-zinc-200 outline-none focus:border-indigo-500 transition"
+                className="w-full bg-white border border-zinc-200 rounded-xl p-2.5 text-sm text-zinc-700 outline-none focus:border-[#0A7E8C] transition"
               >
                 <option value="merge">Gộp — bỏ qua đoạn chat đã tồn tại (an toàn)</option>
                 <option value="duplicate">Nhân bản — luôn tạo bản mới với ID mới</option>
@@ -591,7 +591,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
               type="button"
               disabled={busy}
               onClick={() => fileInputRef.current?.click()}
-              className="w-full flex items-center justify-center gap-2 py-2.5 px-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-medium transition disabled:opacity-50"
+              className="w-full flex items-center justify-center gap-2 py-2.5 px-4 bg-[#0A7E8C] hover:bg-[#086E7A] text-white rounded-xl text-sm font-medium transition disabled:opacity-50"
             >
               {busy ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
               Nạp tệp sao lưu (.json)
@@ -621,7 +621,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
           </div>
 
           {/* Danger zone */}
-          <div className="pt-4 border-t border-zinc-800">
+          <div className="pt-4 border-t border-zinc-200">
             <div className="flex items-start gap-2 mb-2 text-xs text-zinc-500">
               <ShieldAlert size={14} className="text-red-500 flex-shrink-0 mt-0.5" />
               <span>Hãy xuất bản sao lưu .json trước khi thực hiện hành động này.</span>

@@ -6,30 +6,30 @@
 
 @layer base {
   :root {
-    --bg-app: #0f0f10;
-    --bg-sidebar: #121214;
-    --bg-composer: #1e1e22;
-    --bg-user-bubble: #2b2b30;
+    --bg-app: #f7f9fc;
+    --bg-sidebar: #ffffff;
+    --bg-composer: #ffffff;
+    --bg-user-bubble: #e8f1ef;
     --bg-code: #0d0d10;
-    --accent: #c96442;
-    --accent-hover: #b5573a;
-    --border-soft: rgba(63, 63, 70, 0.5);
+    --accent: #0a7e8c;
+    --accent-hover: #086e7a;
+    --border-soft: rgba(15, 23, 42, 0.1);
   }
 
   html,
   body {
     background-color: var(--bg-app);
-    color: #e4e4e7;
+    color: #1f2937;
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
     -webkit-text-size-adjust: 100%;
   }
 
-  /* Ánh sáng ambient rất nhẹ phía trên — tạo chiều sâu cho nền tối. */
+  /* Ánh sáng ambient rất nhẹ phía trên — không khí thương hiệu KODA. */
   body {
     background-image: radial-gradient(
       900px 420px at 50% -180px,
-      rgba(201, 100, 66, 0.055),
+      rgba(10, 126, 140, 0.06),
       transparent 70%
     );
     background-repeat: no-repeat;
@@ -44,7 +44,7 @@
   }
 
   :focus-visible {
-    outline: 2px solid rgba(201, 100, 66, 0.6);
+    outline: 2px solid rgba(10, 126, 140, 0.55);
     outline-offset: 2px;
   }
 }
@@ -61,7 +61,7 @@
 
 * {
   scrollbar-width: thin;
-  scrollbar-color: #27272a transparent;
+  scrollbar-color: #c6cfda transparent;
 }
 ::-webkit-scrollbar {
   width: 6px;
@@ -71,11 +71,11 @@
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #27272a;
+  background: #c6cfda;
   border-radius: 10px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #3f3f46;
+  background: #aeb9c7;
 }
 
 @layer utilities {
@@ -139,7 +139,7 @@
 .claude-prose {
   font-size: 15px;
   line-height: 1.75;
-  color: #e8e8ea;
+  color: #27272a;
   word-break: break-word;
   overflow-wrap: anywhere;
 }
@@ -151,7 +151,7 @@
 .claude-prose h3 {
   font-weight: 600;
   line-height: 1.35;
-  color: #fafafa;
+  color: #111113;
   margin-top: 1.75rem;
 }
 .claude-prose h1 { font-size: 1.4rem; }
@@ -165,17 +165,17 @@
 .claude-prose ol { list-style: decimal; }
 .claude-prose li + li { margin-top: 0.35rem; }
 .claude-prose a {
-  color: #d98a6c;
+  color: #0a7e8c;
   text-decoration: underline;
   text-underline-offset: 2px;
 }
 .claude-prose blockquote {
-  border-left: 2px solid #3f3f46;
+  border-left: 2px solid #d6dde6;
   padding-left: 0.9rem;
-  color: #a1a1aa;
+  color: #64748b;
 }
 .claude-prose hr {
-  border-color: #27272a;
+  border-color: #e3e8ef;
   margin: 1.5rem 0;
 }
 
@@ -186,13 +186,13 @@
 }
 .claude-prose th,
 .claude-prose td {
-  border: 1px solid #27272a;
+  border: 1px solid #e3e8ef;
   padding: 0.5rem 0.75rem;
   text-align: left;
   vertical-align: top;
 }
 .claude-prose th {
-  background: #18181b;
+  background: #f1f5f9;
   font-weight: 600;
   white-space: nowrap;
 }
@@ -203,12 +203,12 @@
 
 .claude-inline-code,
 .claude-prose :not(pre) > code {
-  background: #1e1e22;
-  border: 1px solid #2a2a30;
+  background: #eaf3f5;
+  border: 1px solid #cfe3e6;
   border-radius: 5px;
   padding: 0.12em 0.38em;
   font-size: 0.875em;
-  color: #e6b8a5;
+  color: #0a7e8c;
   white-space: pre-wrap;
 }
 
@@ -251,7 +251,7 @@
   height: 1em;
   margin-left: 2px;
   vertical-align: text-bottom;
-  background: #a1a1aa;
+  background: #94a3b8;
   animation: caret-blink 1s steps(2, start) infinite;
 }
 .streaming-caret > div > :last-child::after {

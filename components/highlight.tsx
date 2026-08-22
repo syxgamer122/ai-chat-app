@@ -14,7 +14,7 @@ export const Highlight = memo(function Highlight({
         seg.match ? (
           <mark
             key={i}
-            className="bg-indigo-500/25 text-indigo-200 rounded-[3px] px-0.5"
+            className="bg-[#0A7E8C]/20 text-[#0A7E8C] rounded-[3px] px-0.5"
           >
             {seg.text}
           </mark>

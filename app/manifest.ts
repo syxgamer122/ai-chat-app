@@ -2,8 +2,8 @@ import type { MetadataRoute } from 'next';
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: 'AI Chat Studio',
-    short_name: 'AI Chat',
+    name: 'KODA — AI Innovations',
+    short_name: 'KODA',
     description:
       'Trợ lý AI hội thoại phân nhánh — dữ liệu lưu ngay trên thiết bị của bạn.',
     lang: 'vi',
@@ -11,8 +11,8 @@ export default function manifest(): MetadataRoute.Manifest {
     start_url: '/',
     scope: '/',
     display: 'standalone',
-    background_color: '#0f0f10',
-    theme_color: '#0f0f10',
+    background_color: '#F7F9FC',
+    theme_color: '#F7F9FC',
     icons: [
       {
         src: '/icons/icon-192.png',

@@ -1,12 +1,12 @@
 /*
- * Service worker cho AI Chat Studio.
+ * Service worker cho KODA — AI Innovations.
  * Chiến lược bảo toàn:
  *  - /api/*            → không can thiệp (stream phải đi thẳng mạng)
  *  - /_next/static/*   → cache-first (asset có hash, bất biến)
  *  - navigation        → network-first, fallback cache rồi /offline.html
  *  - asset tĩnh khác   → stale-while-revalidate
  */
-const VERSION = 'v1';
+const VERSION = 'v3';
 const STATIC_CACHE = `aichat-static-${VERSION}`;
 const PAGES_CACHE = `aichat-pages-${VERSION}`;
 const OFFLINE_URL = '/offline.html';

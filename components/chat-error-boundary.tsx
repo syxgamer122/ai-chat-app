@@ -56,7 +56,7 @@ export class ChatErrorBoundary extends Component<
               <p className="font-semibold text-red-700 dark:text-red-300">
                 Lỗi hiển thị nội dung tin nhắn
               </p>
-              <p className="text-zinc-600 dark:text-zinc-400">
+              <p className="text-zinc-500 dark:text-zinc-500">
                 {this.state.error?.message ||
                   "Đã xảy ra lỗi không mong muốn khi hiển thị phần này của cây tin nhắn."}
               </p>

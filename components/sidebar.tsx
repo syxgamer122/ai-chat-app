@@ -88,12 +88,12 @@ const ChatItem = memo(function ChatItem({
           ref={menuRef}
           role="menu"
           style={{ position: 'fixed', top: menuRect.top, right: menuRect.right }}
-          className="z-[100] w-48 rounded-lg border border-zinc-800 bg-[#1a1a1d] p-1 shadow-xl"
+          className="z-[100] w-48 rounded-lg border border-zinc-200 bg-[#FFFFFF] p-1 shadow-xl"
         >
           <button
             type="button" role="menuitem"
             onClick={() => { onTogglePin(chat.id, (chat.pinned ?? 0) as 0 | 1); closeMenu(); }}
-            className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-[12px] text-zinc-300 hover:bg-zinc-800"
+            className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-[12px] text-zinc-600 hover:bg-zinc-200"
           >
             <Pin size={13} className="text-zinc-500" />
             {chat.pinned ? 'Bỏ ghim' : 'Ghim lên đầu'}
@@ -101,18 +101,18 @@ const ChatItem = memo(function ChatItem({
           <button
             type="button" role="menuitem"
             onClick={() => { onExport(chat.id, 'json'); closeMenu(); }}
-            className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-[12px] text-zinc-300 hover:bg-zinc-800"
+            className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-[12px] text-zinc-600 hover:bg-zinc-200"
           >
             <FileJson size={13} className="text-zinc-500" /> Xuất JSON
           </button>
           <button
             type="button" role="menuitem"
             onClick={() => { onExport(chat.id, 'md'); closeMenu(); }}
-            className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-[12px] text-zinc-300 hover:bg-zinc-800"
+            className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-[12px] text-zinc-600 hover:bg-zinc-200"
           >
             <FileText size={13} className="text-zinc-500" /> Xuất Markdown
           </button>
-          <div className="my-1 h-px bg-zinc-800" />
+          <div className="my-1 h-px bg-zinc-200" />
           <button
             type="button" role="menuitem"
             onClick={() => { onDelete(chat.id); closeMenu(); }}
@@ -129,8 +129,8 @@ const ChatItem = memo(function ChatItem({
     <div
       className={`group relative flex w-full flex-col rounded-lg text-left ${
         isActive
-          ? 'bg-zinc-800/80 before:absolute before:left-0 before:top-1/2 before:h-5 before:w-[3px] before:-translate-y-1/2 before:rounded-full before:bg-[#c96442]'
-          : 'hover:bg-zinc-800/40'
+          ? 'bg-zinc-200/80 before:absolute before:left-0 before:top-1/2 before:h-5 before:w-[3px] before:-translate-y-1/2 before:rounded-full before:bg-[#0A7E8C]'
+          : 'hover:bg-zinc-200/40'
       }`}
     >
       <div className="flex w-full items-center justify-between gap-1 pr-1">
@@ -138,13 +138,13 @@ const ChatItem = memo(function ChatItem({
           type="button"
           onClick={() => onSelect(chat.id)}
           aria-current={isActive ? 'true' : undefined}
-          className={`flex min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2.5 py-2 text-left outline-none focus-visible:ring-1 focus-visible:ring-[#c96442] ${
-            isActive ? 'text-zinc-100' : 'text-zinc-400 group-hover:text-zinc-200'
+          className={`flex min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2.5 py-2 text-left outline-none focus-visible:ring-1 focus-visible:ring-[#0A7E8C] ${
+            isActive ? 'text-zinc-800' : 'text-zinc-500 group-hover:text-zinc-700'
           }`}
         >
           <MessageSquare
             size={14}
-            className={`flex-shrink-0 ${isActive ? 'text-[#c96442]' : 'text-zinc-600'}`}
+            className={`flex-shrink-0 ${isActive ? 'text-[#0A7E8C]' : 'text-zinc-500'}`}
           />
           <span className="truncate text-[13px] font-medium">
             {titleSegments ? <Highlight segments={titleSegments} /> : chat.title}
@@ -159,7 +159,7 @@ const ChatItem = memo(function ChatItem({
           aria-haspopup="menu"
           aria-expanded={menuOpen}
           onClick={() => (menuOpen ? closeMenu() : openMenu())}
-          className={`flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md text-zinc-500 hover:bg-zinc-700/60 hover:text-zinc-200 ${
+          className={`flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md text-zinc-500 hover:bg-zinc-300/60 hover:text-zinc-700 ${
             menuOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 focus:opacity-100'
           }`}
         >
@@ -175,7 +175,7 @@ const ChatItem = memo(function ChatItem({
             </p>
           ))}
           {extraHits ? (
-            <p className="text-[10px] text-zinc-600">+{extraHits} kết quả khác</p>
+            <p className="text-[10px] text-zinc-500">+{extraHits} kết quả khác</p>
           ) : null}
         </div>
       ) : null}
@@ -284,31 +284,38 @@ export function Sidebar() {
   return (
     <aside
       aria-label="Danh sách cuộc trò chuyện"
-      className={`fixed inset-y-0 left-0 z-40 flex w-64 flex-col border-r border-zinc-800/80 bg-[#121214] transition-transform duration-200 md:static md:translate-x-0 md:!opacity-100 ${
+      className={`fixed inset-y-0 left-0 z-40 flex w-64 flex-col border-r border-zinc-200/80 bg-[#FFFFFF] transition-transform duration-200 md:static md:translate-x-0 md:!opacity-100 ${
         isSidebarOpen ? 'translate-x-0' : '-translate-x-full'
       }`}
     >
       {/* Brand */}
       <div className="flex items-center justify-between px-4 pb-1 pt-4">
         <div className="flex items-center gap-2.5">
-          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-[#c96442] to-[#a84f33] shadow-[0_4px_12px_-4px_rgba(201,100,66,0.5)]">
-            <svg width="15" height="15" viewBox="0 0 32 32" fill="none">
-              <path d="M8 12C8 9.79086 9.79086 8 12 8H20C22.2091 8 24 9.79086 24 12V18C24 20.2091 22.2091 22 20 22H13L9 25V21.6C8.38 20.7 8 19.4 8 18V12Z" fill="white" />
-              <circle cx="12" cy="15" r="1.5" fill="#c96442" />
-              <circle cx="16" cy="15" r="1.5" fill="#c96442" />
-              <circle cx="20" cy="15" r="1.5" fill="#c96442" />
+          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-zinc-200/60 ring-1 ring-zinc-900/5 shadow-[0_4px_14px_-6px_rgba(45,170,120,0.55)]">
+            <svg width="16" height="16" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+              <defs>
+                <linearGradient id="koda-mark" x1="8" y1="7" x2="24" y2="25" gradientUnits="userSpaceOnUse">
+                  <stop stopColor="#0A7E8C" />
+                  <stop offset="1" stopColor="#4ECB71" />
+                </linearGradient>
+              </defs>
+              <path d="M10.5 8V24" stroke="url(#koda-mark)" strokeWidth="3.2" strokeLinecap="round" />
+              <path d="M10.5 16L22.5 8" stroke="url(#koda-mark)" strokeWidth="3.2" strokeLinecap="round" />
+              <path d="M10.5 16L22.5 24" stroke="url(#koda-mark)" strokeWidth="3.2" strokeLinecap="round" />
+              <circle cx="22.5" cy="8" r="2.4" fill="#0A7E8C" />
+              <circle cx="22.5" cy="24" r="2.4" fill="#4ECB71" />
             </svg>
           </div>
           <div className="leading-tight">
-            <div className="text-[13px] font-semibold text-zinc-100">AI Chat Studio</div>
-            <div className="text-[10px] text-zinc-600">cá nhân · lưu trên máy bạn</div>
+            <div className="text-[14px] font-extrabold tracking-tight text-zinc-800">KODA</div>
+            <div className="text-[9px] font-medium uppercase tracking-[0.24em] text-zinc-500">AI Innovations</div>
           </div>
         </div>
         <button
           type="button"
           aria-label="Đóng thanh bên"
           onClick={() => setSidebarOpen(false)}
-          className="flex h-8 w-8 items-center justify-center rounded-lg text-zinc-500 hover:bg-zinc-800 md:hidden"
+          className="flex h-8 w-8 items-center justify-center rounded-lg text-zinc-500 hover:bg-zinc-200 md:hidden"
         >
           <X size={16} />
         </button>
@@ -318,7 +325,7 @@ export function Sidebar() {
         <button
           type="button"
           onClick={handleNewChat}
-          className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-[#c96442] px-3 py-2 text-[13px] font-semibold text-white shadow-[0_4px_16px_-6px_rgba(201,100,66,0.6)] transition hover:bg-[#b5573a] active:scale-[0.98]"
+          className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-[#0A7E8C] px-3 py-2 text-[13px] font-semibold text-white shadow-[0_4px_16px_-6px_rgba(10,126,140,0.6)] transition hover:bg-[#086E7A] active:scale-[0.98]"
         >
           <Plus size={15} />
           <span>Đoạn chat mới</span>
@@ -336,7 +343,7 @@ export function Sidebar() {
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Tìm kiếm..."
-            className="w-full rounded-lg border border-zinc-800/80 bg-[#18181b] py-1.5 pl-8 pr-8 text-[13px] text-zinc-200 outline-none placeholder:text-zinc-600 transition focus:border-[#c96442]/50 focus:ring-2 focus:ring-[#c96442]/15"
+            className="w-full rounded-lg border border-zinc-200/80 bg-[#FFFFFF] py-1.5 pl-8 pr-8 text-[13px] text-zinc-700 outline-none placeholder:text-zinc-500 transition focus:border-[#0A7E8C]/50 focus:ring-2 focus:ring-[#0A7E8C]/15"
           />
           {isSearching ? (
             <Loader2 size={13} className="absolute right-2.5 animate-spin text-zinc-500" />
@@ -345,7 +352,7 @@ export function Sidebar() {
               type="button"
               aria-label="Xóa từ khóa"
               onClick={() => setSearchQuery('')}
-              className="absolute right-2.5 text-zinc-500 hover:text-zinc-300"
+              className="absolute right-2.5 text-zinc-500 hover:text-zinc-600"
             >
               <X size={13} />
             </button>
@@ -357,11 +364,11 @@ export function Sidebar() {
         {showingSearch ? (
           <div aria-busy={isSearching} className="flex flex-col gap-1">
             {visibleResults === null ? (
-              <div className="py-8 text-center text-[13px] text-zinc-600">
+              <div className="py-8 text-center text-[13px] text-zinc-500">
                 <Loader2 size={16} className="mx-auto animate-spin" />
               </div>
             ) : visibleResults.length === 0 ? (
-              <div className="py-8 text-center text-[13px] text-zinc-600">
+              <div className="py-8 text-center text-[13px] text-zinc-500">
                 {searchError ? 'Tìm kiếm gặp lỗi' : 'Không tìm thấy kết quả'}
               </div>
             ) : (
@@ -384,7 +391,7 @@ export function Sidebar() {
         ) : (
           groups.map((g) => (
             <div key={g.label} className="mb-4 last:mb-0">
-              <div className="px-2 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-600">
+              <div className="px-2 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
                 {g.label}
               </div>
               <div className="flex flex-col gap-0.5">
@@ -405,11 +412,11 @@ export function Sidebar() {
         )}
       </div>
 
-      <div className="border-t border-zinc-800/80 p-2">
+      <div className="border-t border-zinc-200/80 p-2">
         <button
           type="button"
           onClick={() => setSettingsOpen(true)}
-          className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200"
+          className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] text-zinc-500 hover:bg-zinc-200/50 hover:text-zinc-700"
         >
           <SettingsIcon size={15} />
           <span>Cài đặt</span>

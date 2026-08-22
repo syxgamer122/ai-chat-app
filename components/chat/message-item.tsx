@@ -91,7 +91,7 @@ export const MessageItem = memo(
             {m.experimental_attachments && m.experimental_attachments.length > 0 && (
               <div className="mb-1.5 flex flex-wrap gap-2 justify-end">
                 {m.experimental_attachments.map((att, idx) => (
-                  <div key={idx} className="relative overflow-hidden rounded-lg border border-zinc-700/60 bg-zinc-800/60">
+                  <div key={idx} className="relative overflow-hidden rounded-lg border border-zinc-300/60 bg-zinc-200/60">
                     {att.contentType?.startsWith('image/') ? (
                       <img
                         src={att.url}
@@ -103,7 +103,7 @@ export const MessageItem = memo(
                         onError={onContentResize}
                       />
                     ) : (
-                      <div className="flex items-center gap-2 p-2 text-xs text-zinc-300">
+                      <div className="flex items-center gap-2 p-2 text-xs text-zinc-600">
                         <Paperclip className="h-3.5 w-3.5 text-zinc-500" />
                         <span className="truncate max-w-[150px]">{att.name}</span>
                       </div>
@@ -115,7 +115,7 @@ export const MessageItem = memo(
 
             {/* Nội dung tin nhắn / Chỉnh sửa */}
             {isEditing ? (
-              <div className="flex flex-col gap-2 w-full min-w-[260px] bg-[#1e1e22] border border-zinc-700 p-3 rounded-2xl shadow-xl">
+              <div className="flex flex-col gap-2 w-full min-w-[260px] bg-[#FFFFFF] border border-zinc-300 p-3 rounded-2xl shadow-xl">
                 <TextareaAutosize
                   value={draft}
                   onChange={(e) => onDraftChange(e.target.value)}
@@ -126,28 +126,28 @@ export const MessageItem = memo(
                     }
                     if (e.key === 'Escape') onCancelEdit();
                   }}
-                  className="w-full resize-none bg-transparent text-sm text-zinc-100 outline-none placeholder:text-zinc-500"
+                  className="w-full resize-none bg-transparent text-sm text-zinc-800 outline-none placeholder:text-zinc-500"
                   autoFocus
                 />
-                <div className="flex justify-end gap-2 text-xs pt-1 border-t border-zinc-800">
+                <div className="flex justify-end gap-2 text-xs pt-1 border-t border-zinc-200">
                   <button
                     type="button"
                     onClick={onCancelEdit}
-                    className="rounded-lg px-2.5 py-1 text-zinc-400 hover:bg-zinc-800"
+                    className="rounded-lg px-2.5 py-1 text-zinc-500 hover:bg-zinc-200"
                   >
                     Hủy
                   </button>
                   <button
                     type="button"
                     onClick={() => onSaveEdit(m.id)}
-                    className="rounded-lg bg-[#c96442] hover:bg-[#b5573a] px-3 py-1 font-medium text-white shadow-sm"
+                    className="rounded-lg bg-[#0A7E8C] hover:bg-[#086E7A] px-3 py-1 font-medium text-white shadow-sm"
                   >
                     Lưu & Gửi lại
                   </button>
                 </div>
               </div>
             ) : (
-              <div className="relative rounded-2xl rounded-br-md border border-[#3a3a41]/70 bg-[#26262c] px-4 py-2.5 text-[15px] leading-relaxed text-zinc-100 shadow-sm">
+              <div className="relative rounded-2xl rounded-br-md border border-[#8FBFB7]/70 bg-[#E8F1EF] px-4 py-2.5 text-[15px] leading-relaxed text-zinc-800 shadow-sm">
                 <div className={isLongUserMsg && !isExpanded ? 'max-h-36 overflow-hidden relative' : ''}>
                   <ErrorBoundary>
                     <MarkdownRenderer
@@ -158,7 +158,7 @@ export const MessageItem = memo(
                   </ErrorBoundary>
 
                   {isLongUserMsg && !isExpanded && (
-                    <div className="absolute bottom-0 left-0 right-0 h-12 bg-gradient-to-t from-[#26262c] via-[#26262c]/80 to-transparent pointer-events-none" />
+                    <div className="absolute bottom-0 left-0 right-0 h-12 bg-gradient-to-t from-[#E8F1EF] via-[#E8F1EF]/80 to-transparent pointer-events-none" />
                   )}
                 </div>
 
@@ -166,7 +166,7 @@ export const MessageItem = memo(
                   <button
                     type="button"
                     onClick={() => setIsExpanded((prev) => !prev)}
-                    className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-medium text-zinc-400 hover:text-zinc-200"
+                    className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-medium text-zinc-500 hover:text-zinc-700"
                   >
                     {isExpanded ? (
                       <>
@@ -201,7 +201,7 @@ export const MessageItem = memo(
                   type="button"
                   onClick={() => onCopy(m)}
                   title="Sao chép"
-                  className="flex h-6 w-6 items-center justify-center rounded text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
+                  className="flex h-6 w-6 items-center justify-center rounded text-zinc-500 hover:bg-zinc-200 hover:text-zinc-700"
                 >
                   {isCopied ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
                 </button>
@@ -209,7 +209,7 @@ export const MessageItem = memo(
                   type="button"
                   onClick={() => onStartEdit(m)}
                   title="Chỉnh sửa"
-                  className="flex h-6 w-6 items-center justify-center rounded text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
+                  className="flex h-6 w-6 items-center justify-center rounded text-zinc-500 hover:bg-zinc-200 hover:text-zinc-700"
                 >
                   <Pencil className="h-3.5 w-3.5" />
                 </button>
@@ -223,7 +223,7 @@ export const MessageItem = memo(
     /* ---------- ASSISTANT ---------- */
     return (
       <div className="group flex w-full gap-3 items-start px-2 md:px-4">
-        <div className="mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-[#c96442] text-[11px] font-semibold text-white shadow-sm select-none">
+        <div className="mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-[#0A7E8C] text-[11px] font-semibold text-white shadow-sm select-none">
           AI
         </div>
 
@@ -232,7 +232,7 @@ export const MessageItem = memo(
           {m.experimental_attachments && m.experimental_attachments.length > 0 && (
             <div className="mb-2 flex flex-wrap gap-2">
               {m.experimental_attachments.map((att, idx) => (
-                <div key={idx} className="relative overflow-hidden rounded-lg border border-zinc-800 bg-zinc-900/60">
+                <div key={idx} className="relative overflow-hidden rounded-lg border border-zinc-200 bg-zinc-100/60">
                   {att.contentType?.startsWith('image/') ? (
                     <img
                       src={att.url}
@@ -244,7 +244,7 @@ export const MessageItem = memo(
                       onError={onContentResize}
                     />
                   ) : (
-                    <div className="flex items-center gap-2 p-2 text-xs text-zinc-300">
+                    <div className="flex items-center gap-2 p-2 text-xs text-zinc-600">
                       <Paperclip className="h-3.5 w-3.5 text-zinc-500" />
                       <span className="truncate max-w-[150px]">{att.name}</span>
                     </div>
@@ -287,7 +287,7 @@ export const MessageItem = memo(
           })()}
 
           {m.role === 'assistant' && (m as any).status === 'aborted' && (
-            <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-zinc-800 pt-2">
+            <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-zinc-200 pt-2">
               <div className="flex items-center gap-1.5">
                 <MessageStatusBadge status="aborted" />
                 <span className="text-[11px] text-zinc-500">· Bạn có thể tạo lại để sinh câu trả lời mới</span>
@@ -310,7 +310,7 @@ export const MessageItem = memo(
                 type="button"
                 onClick={() => onCopy(m)}
                 title="Sao chép"
-                className="flex h-6 w-6 items-center justify-center rounded text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
+                className="flex h-6 w-6 items-center justify-center rounded text-zinc-500 hover:bg-zinc-200 hover:text-zinc-700"
               >
                 {isCopied ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
               </button>
@@ -318,7 +318,7 @@ export const MessageItem = memo(
                 type="button"
                 onClick={() => onRegenerate(m.id)}
                 title="Tạo lại câu trả lời"
-                className="flex h-6 w-6 items-center justify-center rounded text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
+                className="flex h-6 w-6 items-center justify-center rounded text-zinc-500 hover:bg-zinc-200 hover:text-zinc-700"
               >
                 <RefreshCcw className="h-3.5 w-3.5" />
               </button>

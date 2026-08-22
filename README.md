@@ -1,4 +1,4 @@
-# AI Chat Studio
+# KODA — AI Innovations
 
 Ứng dụng chat AI local-first với cây hội thoại phân nhánh (branching), chạy hoàn toàn phía client — lịch sử chat lưu trong **IndexedDB** của trình duyệt, không cần server database.
 

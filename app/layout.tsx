@@ -10,12 +10,12 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: 'AI Chat Studio',
-  description: 'Minimalist AI Chat Interface',
+  title: 'KODA — AI Innovations',
+  description: 'Trợ lý AI cá nhân với hội thoại phân nhánh — dữ liệu lưu ngay trên thiết bị của bạn.',
   appleWebApp: {
     capable: true,
-    statusBarStyle: 'black-translucent',
-    title: 'AI Chat',
+    statusBarStyle: 'default',
+    title: 'KODA',
   },
   icons: {
     apple: '/icons/icon-180.png',
@@ -26,18 +26,18 @@ export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
   interactiveWidget: 'resizes-content',
-  colorScheme: 'dark',
-  themeColor: '#0f0f10',
+  colorScheme: 'light',
+  themeColor: '#F7F9FC',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html
       lang="vi"
-      className={`dark ${inter.variable}`}
+      className={inter.variable}
       suppressHydrationWarning
     >
-      <body className="min-h-dvh font-sans bg-[#0f0f10] text-[#e4e4e7] antialiased overscroll-none selection:bg-[#c96442]/30 selection:text-white">
+      <body className="min-h-dvh font-sans bg-[#F7F9FC] text-zinc-800 antialiased overscroll-none selection:bg-[#0A7E8C]/20 selection:text-[#0F172A]">
         <PWARegister />
         {children}
       </body>

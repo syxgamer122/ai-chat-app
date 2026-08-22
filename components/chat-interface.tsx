@@ -1795,7 +1795,7 @@ export default function ChatInterface() {
   return (
     <div
       {...swipeHandlers}
-      className="flex h-full flex-col overflow-hidden bg-[#0f0f10] touch-pan-y"
+      className="flex h-full flex-col overflow-hidden bg-[#F7F9FC] touch-pan-y"
     >
       <ChatHeader
         title={currentChat?.title}
@@ -1811,7 +1811,7 @@ export default function ChatInterface() {
         <div
           className={[
             'pointer-events-none fixed top-1/2 z-50 -translate-y-1/2',
-            'rounded-full bg-black/80 backdrop-blur border border-white/15 px-3.5 py-1.5 text-xs text-white shadow-xl',
+            'rounded-full bg-white/90 backdrop-blur border border-zinc-200 px-3.5 py-1.5 text-xs text-zinc-700 shadow-lg',
             'transition-all animate-in fade-in zoom-in',
             swipeDirection === 'left' ? 'right-4' : 'left-4',
           ].join(' ')}

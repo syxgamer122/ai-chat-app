@@ -116,7 +116,7 @@ class MarkdownErrorBoundary extends React.Component<BoundaryProps, BoundaryState
   render() {
     if (this.state.failed) {
       return (
-        <pre className="whitespace-pre-wrap break-words text-[15px] leading-relaxed text-zinc-300">
+        <pre className="whitespace-pre-wrap break-words text-[15px] leading-relaxed text-zinc-600">
           {this.props.fallbackText}
         </pre>
       );
@@ -160,14 +160,14 @@ const CodeBlock = memo(function CodeBlock({
 
   return (
     <div className="claude-code-block my-4">
-      <div className="flex items-center justify-between border-b border-zinc-800/80 bg-[#141417] px-3 py-1.5">
+      <div className="flex items-center justify-between border-b border-zinc-200/80 bg-[#141417] px-3 py-1.5">
         <span className="font-mono text-[11px] font-medium text-zinc-500">
           {language || 'text'}
         </span>
         <button
           type="button"
           onClick={onCopy}
-          className="flex items-center gap-1 text-[11px] text-zinc-500 transition-colors hover:text-zinc-200"
+          className="flex items-center gap-1 text-[11px] text-zinc-500 transition-colors hover:text-zinc-700"
           aria-label="Copy code"
         >
           {copied ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
@@ -287,7 +287,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
           href={href}
           target="_blank"
           rel="noreferrer noopener nofollow"
-          className="break-words text-[#d98a6c] underline-offset-2 hover:underline"
+          className="break-words text-[#0A7E8C] underline-offset-2 hover:underline"
         >
           {children}
         </a>
@@ -307,7 +307,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
             alt={alt ?? ''}
             loading="lazy"
             decoding="async"
-            className="my-3 max-h-72 w-auto max-w-full rounded-lg border border-zinc-800 object-contain"
+            className="my-3 max-h-72 w-auto max-w-full rounded-lg border border-zinc-200 object-contain"
             onLoad={emitImageLoaded}
             onError={(e) => {
               (e.currentTarget as HTMLImageElement).style.display = 'none';

@@ -34,7 +34,7 @@ export default function Home() {
 
   if (!isMounted) {
     return (
-      <div className="h-dvh bg-zinc-950 flex items-center justify-center text-zinc-500 font-mono text-sm">
+      <div className="h-dvh bg-[#F7F9FC] flex items-center justify-center text-zinc-500 font-mono text-sm">
         Loading workspace...
       </div>
     );

@@ -28,17 +28,17 @@ export const ChatHeader = memo(function ChatHeader({
   currentChatId,
 }: ChatHeaderProps) {
   return (
-    <header className="flex h-14 flex-shrink-0 items-center justify-between border-b border-zinc-800/60 bg-[#0f0f10]/90 px-3 backdrop-blur pt-safe z-20 md:px-5">
+    <header className="flex h-14 flex-shrink-0 items-center justify-between border-b border-zinc-200/60 bg-[#F7F9FC]/90 px-3 backdrop-blur pt-safe z-20 md:px-5">
       <div className="flex min-w-0 items-center gap-2">
         <button
           type="button"
           onClick={onOpenSidebar}
           aria-label="Mở thanh bên"
-          className="flex h-9 w-9 items-center justify-center rounded-lg text-zinc-400 hover:bg-zinc-800/70 md:hidden"
+          className="flex h-9 w-9 items-center justify-center rounded-lg text-zinc-500 hover:bg-zinc-200/70 md:hidden"
         >
           <Menu size={17} />
         </button>
-        <h1 className="truncate text-[14px] font-semibold tracking-tight text-zinc-200">
+        <h1 className="truncate text-[14px] font-semibold tracking-tight text-zinc-700">
           {title ?? 'Cuộc trò chuyện mới'}
         </h1>
       </div>
@@ -48,7 +48,7 @@ export const ChatHeader = memo(function ChatHeader({
 
         {hasMessages &&
           (confirmClear ? (
-            <div className="flex items-center gap-1.5 rounded-lg border border-zinc-800 bg-[#1a1a1d] p-1 shadow-lg">
+            <div className="flex items-center gap-1.5 rounded-lg border border-zinc-200 bg-[#FFFFFF] p-1 shadow-lg">
               <button
                 type="button"
                 onClick={onDeleteChat}
@@ -59,7 +59,7 @@ export const ChatHeader = memo(function ChatHeader({
               <button
                 type="button"
                 onClick={() => onSetConfirmClear(false)}
-                className="rounded px-2.5 py-1 text-xs text-zinc-400 hover:bg-zinc-800 transition"
+                className="rounded px-2.5 py-1 text-xs text-zinc-500 hover:bg-zinc-200 transition"
               >
                 Hủy
               </button>
