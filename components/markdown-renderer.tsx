@@ -227,9 +227,26 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
         </div>
       ),
 
-      img: ({ src, alt }: any) => (
-        <img src={src} alt={alt ?? ''} loading="lazy" className="rounded-xl max-w-full h-auto" />
-      ),
+      img({ src, alt }: any) {
+        return (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={src}
+            alt={alt ?? ''}
+            loading="eager"
+            decoding="async"
+            className="my-3 max-h-72 w-auto max-w-full rounded-lg border border-zinc-800 object-contain"
+            onLoad={() => {
+              if (typeof window !== 'undefined') {
+                window.dispatchEvent(new CustomEvent('chat:image-loaded'));
+              }
+            }}
+            onError={(e) => {
+              (e.currentTarget as HTMLImageElement).style.display = 'none';
+            }}
+          />
+        );
+      },
     }),
     [isStreaming],
   );

@@ -48,14 +48,14 @@ export default function Home() {
 
   if (!isMounted) {
     return (
-      <div className="h-screen bg-zinc-950 flex items-center justify-center text-zinc-500 font-mono text-sm">
+      <div className="h-dvh bg-zinc-950 flex items-center justify-center text-zinc-500 font-mono text-sm">
         Loading workspace...
       </div>
     );
   }
 
   return (
-    <main className="flex h-screen overflow-hidden">
+    <main className="flex h-dvh overflow-hidden">
       <Sidebar onOpenSettings={() => setShowSettings(true)} />
       <div className="flex-1 flex flex-col min-w-0 h-full">
         <ChatErrorBoundary>

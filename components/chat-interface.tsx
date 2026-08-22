@@ -662,7 +662,8 @@ const MessageItem = memo(
                       src={att.url}
                       alt={att.name ?? 'attachment'}
                       className="max-h-48 max-w-xs object-cover rounded-md"
-                      loading="lazy"
+                      loading="eager"
+                      decoding="async"
                       onLoad={onContentResize}
                       onError={onContentResize}
                     />
@@ -860,18 +861,18 @@ const ChatHeader = memo(function ChatHeader({
   onOpenSidebar,
 }: ChatHeaderProps) {
   return (
-    <div className="absolute top-0 left-0 right-0 z-20 p-3 flex items-center justify-between pointer-events-none">
+    <header className="relative z-20 flex flex-shrink-0 items-center justify-between px-3 py-2 bg-zinc-950/85 backdrop-blur-md border-b border-zinc-800/60 pt-[calc(0.5rem+env(safe-area-inset-top))]">
       <button
         type="button"
         onClick={onOpenSidebar}
         aria-label="Open sidebar menu"
-        className="md:hidden pointer-events-auto p-2 bg-zinc-900/80 border border-zinc-800 text-zinc-400 hover:text-zinc-200 rounded-xl backdrop-blur-sm transition-colors shadow-sm"
+        className="md:hidden p-2 bg-zinc-900/80 border border-zinc-800 text-zinc-400 hover:text-zinc-200 rounded-xl backdrop-blur-sm transition-colors shadow-sm"
       >
         <Menu size={18} />
       </button>
 
       {hasMessages && (
-        <div className="ml-auto pointer-events-auto flex items-center gap-2">
+        <div className="ml-auto flex items-center gap-2">
           {confirmClear ? (
             <div className="flex items-center gap-1.5 bg-zinc-900/90 border border-zinc-800 rounded-xl p-1 backdrop-blur-sm shadow-lg">
               <button
@@ -899,7 +900,7 @@ const ChatHeader = memo(function ChatHeader({
           )}
         </div>
       )}
-    </div>
+    </header>
   );
 });
 
@@ -977,6 +978,8 @@ const MessageList = memo(function MessageList({
     getScrollElement: () => scrollRef.current,
     estimateSize: () => 140,
     overscan: 5,
+    paddingStart: 12,
+    paddingEnd: 24,
 
     /**
      * Message id ổn định quan trọng hơn index.
@@ -1006,21 +1009,31 @@ const MessageList = memo(function MessageList({
   );
 
   useEffect(() => {
+    let raf = 0;
+    const onImageLoaded = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => rowVirtualizer.measure());
+    };
+    window.addEventListener('chat:image-loaded', onImageLoaded);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener('chat:image-loaded', onImageLoaded);
+    };
+  }, [rowVirtualizer]);
+
+  useEffect(() => {
     rowVirtualizer.measure();
-    if (autoScroll && scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    if (autoScroll && messages.length > 0) {
+      rowVirtualizer.scrollToIndex(messages.length - 1, { align: 'end' });
     }
-  }, [branchLayoutSignature, rowVirtualizer, autoScroll, scrollRef]);
+  }, [branchLayoutSignature, rowVirtualizer, autoScroll, messages.length]);
 
   const lastMsgContent = messages[messages.length - 1]?.content;
 
   useEffect(() => {
     if (!autoScroll || messages.length === 0) return;
-    const el = scrollRef.current;
-    if (el) {
-      el.scrollTop = el.scrollHeight;
-    }
-  }, [messages.length, lastMsgContent, autoScroll, scrollRef]);
+    rowVirtualizer.scrollToIndex(messages.length - 1, { align: 'end' });
+  }, [messages.length, lastMsgContent, autoScroll, rowVirtualizer]);
 
   const suggestions = useMemo(
     () => ['Explain quantum computing', 'Write a Python script for scraping', 'Plan a healthy meal', 'Summarize an article'],
@@ -1034,7 +1047,7 @@ const MessageList = memo(function MessageList({
       <div
         ref={scrollRef as any}
         onScroll={onScroll}
-        className="flex-1 overflow-y-auto p-4 md:p-8 space-y-6 pb-[60vh] pt-14 md:pt-8"
+        className="h-full overflow-y-auto overscroll-contain p-4 md:p-8 space-y-6"
       >
         {!hasMessages ? (
           <div className="flex flex-col items-center justify-center h-full pt-10 space-y-8">
@@ -1189,7 +1202,7 @@ const ChatComposer = memo(function ChatComposer({
   isTouchDevice,
 }: ChatComposerProps) {
   return (
-    <div className="absolute bottom-0 left-0 right-0 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] bg-gradient-to-t from-zinc-950 via-zinc-950 to-transparent pt-10">
+    <div className="relative z-20 flex-shrink-0 px-3 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] bg-zinc-950 border-t border-zinc-800/60">
       <div className="max-w-[720px] mx-auto relative">
         {notice && (
           <div className="mb-2 p-2.5 bg-amber-950/80 border border-amber-800/80 rounded-xl text-xs text-amber-300 flex items-center justify-between shadow-lg">
@@ -3063,7 +3076,7 @@ export default function ChatInterface() {
   return (
     <div
       {...swipeHandlers}
-      className="flex-1 flex flex-col relative h-[100dvh] touch-pan-y"
+      className="flex h-full flex-col overflow-hidden bg-zinc-950 touch-pan-y"
     >
       <ChatHeader
         hasMessages={hasMessages}
@@ -3087,33 +3100,35 @@ export default function ChatInterface() {
         </div>
       )}
 
-      <MessageList
-        messages={messages}
-        branchInfoByMessageId={branchInfoByMessageId}
-        isLoading={isLoading}
-        lastMessageId={lastMessageId}
-        editingId={editingId}
-        copiedId={copiedId}
-        draft={draft}
-        isTouchDevice={isTouchDevice}
-        sendOnEnter={sendOnEnter}
-        throttleMs={throttleMs}
-        animations={animations}
-        error={error}
-        autoScroll={autoScroll}
-        scrollRef={scrollRef}
-        onScroll={onScroll}
-        onScrollToBottom={scrollToBottom}
-        onCopy={copyMessage}
-        onRegenerate={handleRegenerate}
-        onSwitchBranch={handleSwitchBranch}
-        onStartEdit={startEdit}
-        onSaveEdit={saveEdit}
-        onCancelEdit={cancelEdit}
-        onDraftChange={setDraft}
-        onSelectSuggestion={setInput}
-        onReload={reload}
-      />
+      <div className="relative flex-1 min-h-0">
+        <MessageList
+          messages={messages}
+          branchInfoByMessageId={branchInfoByMessageId}
+          isLoading={isLoading}
+          lastMessageId={lastMessageId}
+          editingId={editingId}
+          copiedId={copiedId}
+          draft={draft}
+          isTouchDevice={isTouchDevice}
+          sendOnEnter={sendOnEnter}
+          throttleMs={throttleMs}
+          animations={animations}
+          error={error}
+          autoScroll={autoScroll}
+          scrollRef={scrollRef}
+          onScroll={onScroll}
+          onScrollToBottom={scrollToBottom}
+          onCopy={copyMessage}
+          onRegenerate={handleRegenerate}
+          onSwitchBranch={handleSwitchBranch}
+          onStartEdit={startEdit}
+          onSaveEdit={saveEdit}
+          onCancelEdit={cancelEdit}
+          onDraftChange={setDraft}
+          onSelectSuggestion={setInput}
+          onReload={reload}
+        />
+      </div>
 
       <ChatComposer
         input={input}

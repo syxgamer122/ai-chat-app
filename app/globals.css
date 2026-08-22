@@ -23,3 +23,12 @@
 ::-webkit-scrollbar-thumb:hover {
   background: #3f3f46;
 }
+
+@layer utilities {
+  .pt-safe {
+    padding-top: env(safe-area-inset-top);
+  }
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
