@@ -2,6 +2,18 @@ const MAX_INLINE_MATH = 400;
 const TAIL_WINDOW = 400;
 const HEAVY_PASS_LIMIT = 120_000;
 
+/**
+ * Gateway sinh ảnh (qwen-image, flux...) trả link ảnh trơn trong text —
+ * nâng thành markdown image để hiển thị trực tiếp. Bỏ qua URL đã nằm trong
+ * cú pháp markdown (bắt đầu bằng "(" hoặc "]").
+ */
+const BARE_IMAGE_URL =
+  /(^|[\s>])(https?:\/\/[^\s<>()]+\.(?:png|jpe?g|webp|gif|avif)(?:\?[^\s<>()]*)?)(?=[)\s.,!?]|$)/gi;
+
+export function linkifyImages(text: string): string {
+  return text.replace(BARE_IMAGE_URL, (_m, pre: string, url: string) => `${pre}![](${url})`);
+}
+
 const STRONG_MATH_SIGNAL = /[\\^_{}]/;
 const MATH_SIGNAL = /[\\^_{}=<>+\-*/|~]/;
 
@@ -274,9 +286,33 @@ function stripControlChars(s: string): string {
   return s.replace(/\u0000/g, '').replace(/^\uFEFF/, '');
 }
 
+const IMAGE_EXT_RE = /\.(?:png|jpe?g|webp|gif|svg)(?:[?#][^\s<>)]*)?$/i;
+const IMAGE_HOST_RE =
+  /^https?:\/\/(?:cdn\.qwenlm\.ai|media\.pollinations\.ai|image\.pollinations\.ai)\//i;
+
+/**
+ * Model sinh ảnh (qwen-image, flux...) thường trả về URL ảnh trần trong text.
+ * Biến thành cú pháp markdown ảnh để render trực tiếp trong bubble.
+ * Bỏ qua URL đã nằm trong cú pháp link/image sẵn — không đụng code fence
+ * vì hàm này chỉ chạy trên segment text.
+ */
+function embedBareImageUrls(s: string): string {
+  if (!s.includes('http')) return s;
+  return s.replace(
+    /(^|[\s(])(https?:\/\/[^\s<>)"']+)/g,
+    (match, lead: string, url: string) => {
+      const clean = url.replace(/[.,!?;]+$/, '');
+      const punct = url.slice(clean.length);
+      const isImage = IMAGE_EXT_RE.test(clean) || IMAGE_HOST_RE.test(clean);
+      if (!isImage || s.includes(`](${clean}`)) return match;
+      return `${lead}![${clean}](${clean})${punct}`;
+    },
+  );
+}
+
 export function preprocessMarkdown(raw: string, isStreaming: boolean): string {
   if (!raw) return '';
-  const cleaned = stripControlChars(raw);
+  const cleaned = linkifyImages(stripControlChars(raw));
 
   if (cleaned.length > HEAVY_PASS_LIMIT) {
     return balanceFences(stripTrailingArtifacts(cleaned));
@@ -293,6 +329,8 @@ export function preprocessMarkdown(raw: string, isStreaming: boolean): string {
       // Artifact chỉ xuất hiện ở đuôi output => chỉ xử lý segment cuối.
       let text = i === lastIndex ? stripTrailingArtifacts(part) : part;
       if (!text) return text;
+
+      text = embedBareImageUrls(text);
 
       text = normalizeLatexDelimiters(text);
       let scan = scanMath(text);

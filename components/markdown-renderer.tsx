@@ -301,19 +301,27 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
 
       img({ src, alt }: any) {
         return (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={typeof src === 'string' ? src : ''}
-            alt={alt ?? ''}
-            loading="lazy"
-            decoding="async"
-            className="my-3 max-h-72 w-auto max-w-full rounded-lg border border-zinc-200 object-contain"
-            onLoad={emitImageLoaded}
-            onError={(e) => {
-              (e.currentTarget as HTMLImageElement).style.display = 'none';
-              emitImageLoaded();
-            }}
-          />
+          <a
+            href={typeof src === 'string' ? src : '#'}
+            target="_blank"
+            rel="noreferrer noopener nofollow"
+            className="my-2 block w-fit max-w-full"
+            title="Mở ảnh gốc"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={typeof src === 'string' ? src : ''}
+              alt={alt ?? 'Ảnh do AI tạo'}
+              loading="lazy"
+              decoding="async"
+              className="max-h-[420px] w-auto max-w-full rounded-xl border border-zinc-200 bg-white object-contain shadow-sm"
+              onLoad={emitImageLoaded}
+              onError={(e) => {
+                (e.currentTarget as HTMLImageElement).style.display = 'none';
+                emitImageLoaded();
+              }}
+            />
+          </a>
         );
       },
     }),
