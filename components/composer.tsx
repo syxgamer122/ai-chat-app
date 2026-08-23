@@ -341,6 +341,7 @@ export function Composer({
           />
 
           <div className="flex items-center justify-between gap-2 px-2.5 pb-2.5">
+            {/* Trái: đính kèm / voice / thinking */}
             <div className="flex min-w-0 items-center gap-1">
               <button
                 type="button"
@@ -384,6 +385,10 @@ export function Composer({
                   )}
                 </button>
               )}
+            </div>
+
+            {/* Giữa: chọn model — đặt giữa để panel mở lên không đè vào sidebar. */}
+            <div className="flex min-w-0 items-center justify-center">
               {thinkingLevel && onThinkingLevelChange && (
                 <ThinkingSlider
                   value={thinkingLevel}
@@ -399,29 +404,31 @@ export function Composer({
               />
             </div>
 
-            {isStreaming ? (
-              <button
-                type="button"
-                onClick={onStop}
-                aria-label="Dừng tạo"
-                className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-zinc-800 text-white transition hover:bg-zinc-900"
-              >
-                <Square size={13} className="fill-current" />
-              </button>
-            ) : (
-              <button
-                type="submit"
-                disabled={!canSubmit}
-                aria-label="Gửi tin nhắn"
-                className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full transition-all ${
-                  canSubmit
-                    ? 'bg-brand text-white shadow-brand hover:bg-brand-hover active:scale-95'
-                    : 'cursor-not-allowed bg-zinc-200 text-zinc-400'
-                }`}
-              >
-                <ArrowUp size={17} />
-              </button>
-            )}
+            <div className="flex items-center justify-end gap-1">
+              {isStreaming ? (
+                <button
+                  type="button"
+                  onClick={onStop}
+                  aria-label="Dừng tạo"
+                  className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-zinc-800 text-white transition hover:bg-zinc-900"
+                >
+                  <Square size={13} className="fill-current" />
+                </button>
+              ) : (
+                <button
+                  type="submit"
+                  disabled={!canSubmit}
+                  aria-label="Gửi tin nhắn"
+                  className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full transition-all ${
+                    canSubmit
+                      ? 'bg-brand text-white shadow-brand hover:bg-brand-hover active:scale-95'
+                      : 'cursor-not-allowed bg-zinc-200 text-zinc-400'
+                  }`}
+                >
+                  <ArrowUp size={17} />
+                </button>
+              )}
+            </div>
           </div>
         </form>
       </div>

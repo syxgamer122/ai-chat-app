@@ -1828,7 +1828,16 @@ export default function ChatInterface() {
     void onSubmit();
   }, [handleStop, isTouchDevice, sendOnEnter, onSubmit]);
 
-  const onOpenSidebar = useCallback(() => setSidebarOpen(true), [setSidebarOpen]);
+  const onOpenSidebar = useCallback(() => {
+    // Mobile: mở drawer. Desktop đang thu gọn: mở rộng sidebar.
+    if (window.matchMedia('(min-width: 768px)').matches) {
+      useAppStore.getState().setSidebarCollapsed(false);
+    } else {
+      setSidebarOpen(true);
+    }
+  }, [setSidebarOpen]);
+
+  const isSidebarCollapsed = useAppStore((s) => s.isSidebarCollapsed);
 
   const lastMessageId = messages[messages.length - 1]?.id;
   const hasMessages = messages.length > 0;
@@ -1887,6 +1896,7 @@ export default function ChatInterface() {
         onSetConfirmClear={setConfirmClear}
         onDeleteChat={deleteChat}
         onOpenSidebar={onOpenSidebar}
+        sidebarCollapsed={isSidebarCollapsed}
         currentChatId={currentChatId}
       />
 

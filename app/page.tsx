@@ -12,6 +12,8 @@ export default function Home() {
   const isSettingsOpen = useAppStore((s) => s.isSettingsOpen);
   const setSettingsOpen = useAppStore((s) => s.setSettingsOpen);
   const setCurrentChatId = useAppStore((s) => s.setCurrentChatId);
+  const setSidebarCollapsed = useAppStore((s) => s.setSidebarCollapsed);
+  const isSidebarCollapsed = useAppStore((s) => s.isSidebarCollapsed);
   const animations = useAppStore((s) => s.settings.perf.animations);
 
   useEffect(() => {
@@ -22,11 +24,16 @@ export default function Home() {
         e.preventDefault();
         setCurrentChatId(null);
       }
+      // Ctrl+\ — thu gọn/mở rộng sidebar trên desktop.
+      if (mod && e.key === '\\') {
+        e.preventDefault();
+        setSidebarCollapsed(!isSidebarCollapsed);
+      }
       if (e.key === 'Escape' && isSettingsOpen) setSettingsOpen(false);
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [setCurrentChatId, isSettingsOpen, setSettingsOpen]);
+  }, [setCurrentChatId, isSettingsOpen, setSettingsOpen, setSidebarCollapsed, isSidebarCollapsed]);
 
   /* Cờ tắt hiệu ứng — CSS trong globals.css đọc qua html[data-animations]. */
   useEffect(() => {

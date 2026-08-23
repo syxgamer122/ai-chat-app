@@ -41,6 +41,8 @@ export interface Settings {
 interface AppState {
   currentChatId: string | null;
   isSidebarOpen: boolean;
+  /** Desktop: sidebar thu gọn thành thanh icon (rail). Mobile: bỏ qua. */
+  isSidebarCollapsed: boolean;
   isSettingsOpen: boolean;
   settings: Settings;
   /** Provider đang dùng — SERVER_PROVIDER_ID = cấu hình env của server. */
@@ -49,6 +51,7 @@ interface AppState {
   activeProvider: ActiveProviderSnapshot | null;
   setCurrentChatId: (id: string | null) => void;
   setSidebarOpen: (open: boolean) => void;
+  setSidebarCollapsed: (collapsed: boolean) => void;
   setSettingsOpen: (open: boolean) => void;
   updateSettings: (s: Partial<Omit<Settings, 'perf'>>) => void;
   updatePerf: (p: Partial<PerfSettings>) => void;
@@ -74,12 +77,14 @@ export const useAppStore = create<AppState>()(
     (set) => ({
       currentChatId: null,
       isSidebarOpen: false,
+      isSidebarCollapsed: false,
       isSettingsOpen: false,
       settings: DEFAULT_SETTINGS,
       activeProviderId: SERVER_PROVIDER_ID,
       activeProvider: null,
       setCurrentChatId: (id) => set({ currentChatId: id, isSidebarOpen: false }),
       setSidebarOpen: (open) => set({ isSidebarOpen: open }),
+      setSidebarCollapsed: (collapsed) => set({ isSidebarCollapsed: collapsed }),
       setSettingsOpen: (open) => set({ isSettingsOpen: open }),
       updateSettings: (partial) =>
         set((s) => ({ settings: { ...s.settings, ...partial } })),
@@ -93,6 +98,7 @@ export const useAppStore = create<AppState>()(
       version: 2,
       partialize: (s) => ({
         activeProviderId: s.activeProviderId,
+        isSidebarCollapsed: s.isSidebarCollapsed,
         settings: {
           model: s.settings.model,
           temperature: s.settings.temperature,

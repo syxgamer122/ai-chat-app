@@ -242,12 +242,12 @@ export function ModelSelector({
         <div
           onKeyDown={onPanelKeyDown}
           /*
-           * `right-0` neo theo nút; nút nằm sát mép phải composer nên panel
-           * 620px không tràn ra ngoài, nhưng trên khung hẹp thì phải kẹp lại
-           * theo viewport. `max-w-[calc(100vw-1.5rem)]` + `-translate-x-0`
-           * giữ panel luôn trong màn hình.
+           * Neo theo TRUNG TÂM nút (left-1/2 -translate-x-1/2): nút nằm giữa
+           * composer nên panel mở cân đối, không tràn sang trái đè lên
+           * sidebar lịch sử chat. `max-w-[calc(100vw-1.5rem)]` kẹp panel
+           * luôn nằm trong màn hình kể cả khung hẹp.
            */
-          className="surface-panel absolute bottom-full right-0 z-50 mb-2 w-[min(620px,calc(100vw-1.5rem))] max-w-[calc(100vw-1.5rem)] animate-slide-up overflow-hidden rounded-2xl"
+          className="surface-panel absolute bottom-full left-1/2 z-50 mb-2 w-[min(620px,calc(100vw-1.5rem))] max-w-[calc(100vw-1.5rem)] -translate-x-1/2 animate-slide-up overflow-hidden rounded-2xl"
         >
 
           {/* Ô tìm kiếm — lọc nhanh khi danh sách dài (OrcaRouter 190+ model). */}

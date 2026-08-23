@@ -16,7 +16,7 @@ import { BackupReminder } from '@/components/backup-reminder';
 import { KodaLogo } from '@/components/koda-logo';
 import {
   Plus, MessageSquare, Pin, Trash2, Search, Settings as SettingsIcon,
-  X, MoreHorizontal, FileJson, FileText, Loader2,
+  X, MoreHorizontal, FileJson, FileText, Loader2, PanelLeftClose, PanelLeftOpen,
 } from 'lucide-react';
 
 const EMPTY_CHATS: ChatSession[] = [];
@@ -196,6 +196,8 @@ export function Sidebar() {
   const currentChatId = useAppStore((s) => s.currentChatId);
   const isSidebarOpen = useAppStore((s) => s.isSidebarOpen);
   const setSidebarOpen = useAppStore((s) => s.setSidebarOpen);
+  const isSidebarCollapsed = useAppStore((s) => s.isSidebarCollapsed);
+  const setSidebarCollapsed = useAppStore((s) => s.setSidebarCollapsed);
   const setSettingsOpen = useAppStore((s) => s.setSettingsOpen);
 
   /*
@@ -206,6 +208,8 @@ export function Sidebar() {
    */
   const isDesktop = useMediaQuery(MD_QUERY);
   const isDrawerHidden = !isDesktop && !isSidebarOpen;
+  /** Rail thu gọn chỉ áp dụng trên desktop — mobile luôn là drawer đầy đủ. */
+  const collapsed = isDesktop && isSidebarCollapsed;
 
   const [searchQuery, setSearchQuery] = useState('');
   const [search, setSearch] = useState<SearchState | null>(null);
@@ -313,26 +317,38 @@ export function Sidebar() {
         />
       )}
 
-      <aside
-        aria-label="Danh sách cuộc trò chuyện"
-        aria-hidden={isDrawerHidden ? true : undefined}
-        // Drawer đóng vẫn nằm trong DOM: chặn tab/chuột để không focus "ẩn".
-        inert={isDrawerHidden ? true : undefined}
-        className={`fixed inset-y-0 left-0 z-40 flex w-[17rem] max-w-[85vw] flex-col border-r border-zinc-200/80 bg-surface-raised pt-safe transition-transform duration-200 ease-out md:static md:w-64 md:max-w-none md:translate-x-0 ${
-          isSidebarOpen ? 'translate-x-0 shadow-panel md:shadow-none' : '-translate-x-full'
-        }`}
-      >
+      {!collapsed && (
+        <aside
+          aria-label="Danh sách cuộc trò chuyện"
+          aria-hidden={isDrawerHidden ? true : undefined}
+          // Drawer đóng vẫn nằm trong DOM: chặn tab/chuột để không focus "ẩn".
+          inert={isDrawerHidden ? true : undefined}
+          className={`fixed inset-y-0 left-0 z-40 flex w-[17rem] max-w-[85vw] flex-col border-r border-zinc-200/80 bg-surface-raised pt-safe transition-transform duration-200 ease-out md:static md:w-64 md:max-w-none md:translate-x-0 ${
+            isSidebarOpen ? 'translate-x-0 shadow-panel md:shadow-none' : '-translate-x-full'
+          }`}
+        >
         {/* Brand */}
         <div className="flex items-center justify-between px-4 pb-1 pt-4">
           <KodaLogo size="sm" />
-          <button
-            type="button"
-            aria-label="Đóng thanh bên"
-            onClick={() => setSidebarOpen(false)}
-            className="icon-btn-sm md:hidden"
-          >
-            <X size={16} />
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              aria-label="Thu gọn thanh bên"
+              title="Thu gọn (Ctrl+\\)"
+              onClick={() => setSidebarCollapsed(true)}
+              className="icon-btn-sm hidden md:inline-flex"
+            >
+              <PanelLeftClose size={15} />
+            </button>
+            <button
+              type="button"
+              aria-label="Đóng thanh bên"
+              onClick={() => setSidebarOpen(false)}
+              className="icon-btn-sm md:hidden"
+            >
+              <X size={16} />
+            </button>
+          </div>
         </div>
 
         <div className="p-3 pt-2">
@@ -438,6 +454,48 @@ export function Sidebar() {
           </button>
         </div>
       </aside>
+      )}
+
+      {/* Rail thu gọn (desktop): chỉ còn các hành động icon, ẩn danh sách chat. */}
+      {collapsed && (
+        <aside
+          aria-label="Thanh bên thu gọn"
+          className="fixed inset-y-0 left-0 z-40 hidden w-14 flex-col items-center border-r border-zinc-200/80 bg-surface-raised pt-safe transition-colors duration-200 md:flex"
+        >
+          <div className="flex flex-col items-center gap-1 py-3">
+            <button
+              type="button"
+              aria-label="Mở rộng thanh bên"
+              title="Mở rộng (Ctrl+\\)"
+              onClick={() => setSidebarCollapsed(false)}
+              className="icon-btn-sm"
+            >
+              <PanelLeftOpen size={15} />
+            </button>
+            <button
+              type="button"
+              aria-label="Đoạn chat mới"
+              title="Đoạn chat mới (Ctrl+N)"
+              onClick={() => void handleNewChat()}
+              className="icon-btn-sm mt-2"
+            >
+              <Plus size={16} />
+            </button>
+          </div>
+          <div className="flex-1" />
+          <div className="flex flex-col items-center gap-1 py-3 pb-safe-2">
+            <button
+              type="button"
+              aria-label="Cài đặt"
+              title="Cài đặt"
+              onClick={() => setSettingsOpen(true)}
+              className="icon-btn-sm"
+            >
+              <SettingsIcon size={15} />
+            </button>
+          </div>
+        </aside>
+      )}
     </>
   );
 }

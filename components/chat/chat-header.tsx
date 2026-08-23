@@ -15,6 +15,8 @@ interface ChatHeaderProps {
   onSetConfirmClear: (val: boolean) => void;
   onDeleteChat: () => void;
   onOpenSidebar: () => void;
+  /** Desktop: sidebar đang thu gọn → hiện nút mở rộng bên trái header. */
+  sidebarCollapsed: boolean;
   currentChatId: string | null;
 }
 
@@ -25,6 +27,7 @@ export const ChatHeader = memo(function ChatHeader({
   onSetConfirmClear,
   onDeleteChat,
   onOpenSidebar,
+  sidebarCollapsed,
   currentChatId,
 }: ChatHeaderProps) {
   return (
@@ -37,8 +40,8 @@ export const ChatHeader = memo(function ChatHeader({
         <button
           type="button"
           onClick={onOpenSidebar}
-          aria-label="Mở thanh bên"
-          className="icon-btn-md md:hidden"
+          aria-label={sidebarCollapsed ? 'Mở rộng thanh bên' : 'Mở thanh bên'}
+          className={`icon-btn-md ${sidebarCollapsed ? '' : 'md:hidden'}`}
         >
           <Menu size={17} />
         </button>
