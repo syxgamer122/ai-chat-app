@@ -1,7 +1,9 @@
 'use client';
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { Check, Loader2, Pencil, Plus, RefreshCw, Server, Trash2, X } from 'lucide-react';
+import {
+  Check, ExternalLink, KeyRound, Loader2, Pencil, Plus, RefreshCw, Server, Trash2, X,
+} from 'lucide-react';
 import { db } from '@/lib/db';
 import {
   deleteProvider,
@@ -14,6 +16,42 @@ import {
 } from '@/lib/providers';
 import { useAppStore, SERVER_PROVIDER_ID } from '@/lib/store';
 
+/**
+ * Trang lấy API key theo hostname — hiển thị link trực tiếp cạnh ô nhập key
+ * để user không phải tự mò. Không chứa key nào trong code.
+ */
+const KEY_GUIDES: Array<{ test: RegExp; url: string; note: string }> = [
+  {
+    test: /(^|\.)openrouter\.ai$/i,
+    url: 'https://openrouter.ai/keys',
+    note: 'Chọn model đuôi :free để dùng miễn phí.',
+  },
+  {
+    test: /(^|\.)orcarouter\.ai$/i,
+    url: 'https://orcarouter.ai',
+    note: 'Model orcarouter/free chạy miễn phí; model khác cần credit.',
+  },
+  {
+    test: /(^|\.)airforce$/i,
+    url: 'https://api.airforce/signup',
+    note: '1.000 lượt/ngày, 1 lượt/phút.',
+  },
+  {
+    test: /(^|\.)tokenin\.my\.id$/i,
+    url: 'https://tokenin.my.id',
+    note: 'Nhiều model myt/*-free miễn phí, có cả API tạo video.',
+  },
+];
+
+function keyGuideFor(baseUrl: string): { url: string; note: string } | null {
+  try {
+    const host = new URL(baseUrl).hostname;
+    return KEY_GUIDES.find((g) => g.test.test(host)) ?? null;
+  } catch {
+    return null;
+  }
+}
+
 /** Quản lý nhà cung cấp API (provider presets) trong Settings. */
 export function ProviderManager() {
   const activeProviderId = useAppStore((s) => s.activeProviderId);
@@ -24,6 +62,8 @@ export function ProviderManager() {
   const [editing, setEditing] = useState<ProviderConfig | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
+  /** Ô nhập key nhanh ngay trên card provider đang chọn (id -> giá trị đang gõ). */
+  const [keyDraft, setKeyDraft] = useState<Record<string, string>>({});
 
   const refresh = useCallback(async () => {
     await ensureProviderSeed();
@@ -42,11 +82,18 @@ export function ProviderManager() {
       return;
     }
     const p = await db.providers.get(id);
-    if (p && !(p.models?.length)) {
-      // Chưa có model → tự tải luôn để dùng được ngay không cần bấm 🔄.
+    if (!p) return;
+    if (!p.apiKey && !p.models?.length) {
+      // Gateway key cá nhân (OpenRouter, OrcaRouter…) trả 401 khi chưa có key —
+      // nói rõ để user dán key thay vì thấy "lỗi kết nối" không hiểu vì sao.
+      setStatus(`"${p.name}" cần API key cá nhân — dán key vào ô bên dưới rồi bấm "Lưu & test".`);
+      return;
+    }
+    if (!p.models?.length) {
+      // Có key nhưng chưa có model → tự tải luôn để dùng được ngay.
       await testAndLoadModels(p);
     } else {
-      setStatus('Đã chuyển nhà cung cấp.');
+      setStatus(`Đã chuyển sang "${p.name}" (${p.models.length} model).`);
     }
   };
 
@@ -83,7 +130,15 @@ export function ProviderManager() {
       });
       const data = await res.json();
       if (!res.ok) {
-        setStatus(`${p.name}: ${data?.error ?? 'lỗi kết nối'}`);
+        // 401/403 do thiếu hoặc sai key là ca phổ biến nhất — nói rõ cách sửa.
+        const needsKey = !p.apiKey && /40[13]|unauthor|forbidden|key/i.test(
+          `${res.status} ${data?.error ?? ''}`,
+        );
+        setStatus(
+          needsKey
+            ? `${p.name}: cần API key cá nhân. Dán key vào ô "API key cá nhân" rồi bấm "Lưu & test".`
+            : `${p.name}: ${data?.error ?? 'lỗi kết nối'}`,
+        );
         return;
       }
       const models = (data.models ?? []) as ProviderConfig['models'];
@@ -107,6 +162,27 @@ export function ProviderManager() {
     await deleteProvider(p.id);
     await refresh();
     setStatus(`Đã xóa "${p.name}".`);
+  };
+
+  /**
+   * Lưu key gõ trực tiếp trên card provider rồi thử tải model luôn. Trước đây
+   * ô nhập key chỉ nằm trong form "Sửa" (phải bấm bút chì mới thấy), nên chọn
+   * OpenRouter/OrcaRouter là bế tắc: không có chỗ nào để dán key cá nhân.
+   */
+  const saveKeyInline = async (p: ProviderConfig) => {
+    const next = (keyDraft[p.id] ?? '').trim();
+    const record: ProviderConfig = { ...p, apiKey: next, updatedAt: Date.now() };
+    await upsertProvider(record);
+    setKeyDraft((d) => {
+      const { [p.id]: _drop, ...rest } = d;
+      return rest;
+    });
+    await refresh();
+    if (useAppStore.getState().activeProviderId === p.id) {
+      await syncActiveProviderSnapshot(p.id);
+    }
+    // Có key mới → test luôn để nạp danh sách model, khỏi bắt user bấm 🔄.
+    await testAndLoadModels(record);
   };
 
   const startNew = () =>
@@ -149,6 +225,8 @@ export function ProviderManager() {
 
       {providers.map((p) => {
         const active = activeProviderId === p.id;
+        const guide = keyGuideFor(p.baseUrl);
+        const draft = keyDraft[p.id];
         return (
           <div
             key={p.id}
@@ -166,7 +244,24 @@ export function ProviderManager() {
                   onChange={() => void choose(p.id)}
                 />
                 <span className="min-w-0">
-                  <span className="block truncate text-sm font-medium text-zinc-800">{p.name}</span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="truncate text-sm font-medium text-zinc-800">{p.name}</span>
+                    {p.apiKey ? (
+                      <span
+                        title="Đã lưu API key"
+                        className="flex items-center gap-0.5 rounded bg-emerald-50 px-1 py-0.5 text-[10px] font-medium text-emerald-700"
+                      >
+                        <KeyRound size={9} /> có key
+                      </span>
+                    ) : (
+                      <span
+                        title="Chưa có API key"
+                        className="flex items-center gap-0.5 rounded bg-amber-50 px-1 py-0.5 text-[10px] font-medium text-amber-800"
+                      >
+                        <KeyRound size={9} /> chưa key
+                      </span>
+                    )}
+                  </span>
                   <span className="block truncate text-[11px] text-zinc-600">
                     {p.baseUrl} · {p.models?.length ?? 0} model
                   </span>
@@ -207,6 +302,62 @@ export function ProviderManager() {
                 </button>
               </span>
             </div>
+
+            {/*
+              * Ô dán key cá nhân ngay tại chỗ — hiện khi provider đang được chọn
+              * hoặc khi chưa có key. Không phải mở form "Sửa" mới nhập được.
+              */}
+            {(active || !p.apiKey) && (
+              <div className="mt-2 border-t border-zinc-200/70 pt-2">
+                <label
+                  htmlFor={`pv-key-${p.id}`}
+                  className="mb-1 block text-[11px] font-medium text-zinc-700"
+                >
+                  API key cá nhân {p.apiKey ? '(đã lưu — nhập mới để thay)' : '(dán vào đây)'}
+                </label>
+                <div className="flex gap-1.5">
+                  <input
+                    id={`pv-key-${p.id}`}
+                    type="password"
+                    autoComplete="off"
+                    className="field-sm flex-1 font-mono"
+                    placeholder={p.apiKey ? '••••••••  (nhập key mới)' : 'sk-... / dán key tại đây'}
+                    value={draft ?? ''}
+                    onChange={(e) => setKeyDraft((d) => ({ ...d, [p.id]: e.target.value }))}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        void saveKeyInline(p);
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void saveKeyInline(p)}
+                    disabled={busyId === p.id || draft === undefined || draft.trim() === p.apiKey}
+                    className="flex flex-shrink-0 items-center gap-1 rounded-lg bg-brand px-2.5 py-1.5 text-xs font-medium text-white transition-colors hover:bg-brand-hover disabled:opacity-40"
+                  >
+                    {busyId === p.id ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
+                    Lưu &amp; test
+                  </button>
+                </div>
+                {guide && (
+                  <p className="mt-1 text-[11px] leading-relaxed text-zinc-600">
+                    Lấy key tại{' '}
+                    <a
+                      href={guide.url}
+                      target="_blank"
+                      rel="noreferrer noopener nofollow"
+                      className="inline-flex items-center gap-0.5 text-brand underline-offset-2 hover:underline"
+                    >
+                      {new URL(guide.url).hostname}
+                      <ExternalLink size={9} />
+                    </a>{' '}
+                    — {guide.note}
+                  </p>
+                )}
+              </div>
+            )}
           </div>
         );
       })}
