@@ -47,6 +47,18 @@ export async function POST(req: Request) {
       );
     }
     const models = normalizeProviderModels(await res.json());
+    // crax có alias `qwen-video` (tạo video ~5s qua chat SSE) không được liệt kê
+    // trong /v1/models — tiêm sẵn để user chọn được trong model selector.
+    let host = '';
+    try {
+      host = new URL(check.url).hostname.toLowerCase();
+    } catch {
+      host = '';
+    }
+    if (/(^|\.)crax\.lol$/.test(host) && !models.some((m) => m.id === 'qwen-video')) {
+      models.push({ id: 'qwen-video', name: 'Qwen Video (5s)' });
+      models.sort((a, b) => a.id.localeCompare(b.id));
+    }
     return Response.json({ models, fetchedAt: Date.now() });
   } catch {
     return Response.json(

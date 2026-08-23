@@ -17,7 +17,7 @@ import {
   type UpstreamScope,
 } from '@/lib/api-keys';
 import { ALLOWED_MODEL_IDS, DEFAULT_MODEL_ID, getModelConfig, resolveProviderModelChain } from '@/lib/models';
-import { validateProviderBaseUrl } from '@/lib/provider-url';
+import { validateProviderBaseUrl, THINKING_LEVELS, supportsThinkingLevel } from '@/lib/provider-url';
 import { acquireUpstreamSlot, sharedFreeBudget } from '@/lib/upstream-queue';
 import { checkRateLimit, getClientIp, checkSameOrigin, verifyAccessAuth } from '@/lib/security';
 
@@ -72,6 +72,66 @@ function extractDelta(part: unknown): string {
     }
   }
   return '';
+}
+
+/* ------------------------------------------------------------------ */
+/* Model tạo ảnh (qwen-image của crax v.v.)                            */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Gateway trả ảnh qua SSE đặc thù: event `{"type":"status"}` / `{"type":"image","url":...}`
+ * không có `choices` — parser của AI SDK v4 reject (`Type validation failed`).
+ * Với model ảnh, tự fetch và bóc tách tay rồi ghi URL ảnh vào stream dạng
+ * markdown để client render inline.
+ */
+const IMAGE_MODEL_RE = /image|seedream|t2i|dall-e|dalle|flux|stable-diffusion|imggen|imagen|sdxl/i;
+
+function isImageModel(modelId: string): boolean {
+  return IMAGE_MODEL_RE.test(modelId);
+}
+
+/** Model tạo video — crax lộ alias `qwen-video` qua chat SSE (event type:video). */
+const VIDEO_MODEL_RE = /video|kling|seedance|sora|veo|hailuo|vidu|jimeng/i;
+
+function isVideoModel(modelId: string): boolean {
+  return VIDEO_MODEL_RE.test(modelId);
+}
+
+function coreToOpenAiMessages(core: CoreMessage[]): Array<{ role: string; content: string }> {
+  return core.map((m) => {
+    let text = '';
+    if (typeof m.content === 'string') text = m.content;
+    else if (Array.isArray(m.content)) {
+      text = m.content
+        .map((p) => (p && typeof p === 'object' && 'text' in p ? String((p as { text?: unknown }).text ?? '') : ''))
+        .join('');
+    }
+    return { role: m.role, content: text };
+  });
+}
+
+/** Đọc từng payload `data:` từ một SSE stream. */
+async function pumpSseData(
+  body: ReadableStream<Uint8Array>,
+  onData: (raw: string) => void,
+): Promise<void> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buf = '';
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let nl: number;
+    while ((nl = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, nl).replace(/\r$/, '');
+      buf = buf.slice(nl + 1);
+      if (line.startsWith('data:')) {
+        const raw = line.slice(5).trim();
+        if (raw) onData(raw);
+      }
+    }
+  }
 }
 
 /**
@@ -183,7 +243,7 @@ interface UpstreamDiagnosis {
 
 function diagnoseUpstreamError(
   e: unknown,
-  ctx: { requestId: string; model: string; keyLabel: string },
+  ctx: { requestId: string; model: string; keyLabel: string; providerBase?: string },
 ): UpstreamDiagnosis {
   const status = getStatusCode(e);
   const scope = classifyUpstreamStatus(status);
@@ -201,7 +261,10 @@ function diagnoseUpstreamError(
     upstreamServer = headers['server'];
   }
 
-  const upstreamHost = hostOf(url) ?? hostOf(process.env.OPENAI_BASE_URL) ?? 'api.openai.com';
+  // Lỗi network/timeout không có url phản hồi — dùng provider thật của request
+  // thay vì env, tránh báo sai địa chỉ khi user đang gọi provider riêng.
+  const upstreamHost =
+    hostOf(url) ?? hostOf(ctx.providerBase) ?? hostOf(process.env.OPENAI_BASE_URL) ?? 'api.openai.com';
   const bodySnippet = body ? redact(body).replace(/\s+/g, ' ').trim().slice(0, 300) : '';
   const looksLikeCloudflare =
     Boolean(cfRay) ||
@@ -218,7 +281,9 @@ function diagnoseUpstreamError(
       code = 'UPSTREAM_AUTH_401';
       userMessage =
         `AI Provider từ chối API Key (401 Unauthorized) tại ${upstreamHost}. ` +
-        'Key sai, đã bị thu hồi, hoặc không hợp lệ với OPENAI_BASE_URL đang cấu hình.';
+        (ctx.providerBase
+          ? 'Key sai hoặc đã bị thu hồi — kiểm tra lại API Key của nhà cung cấp này.'
+          : 'Key sai, đã bị thu hồi, hoặc không hợp lệ với OPENAI_BASE_URL đang cấu hình.');
       break;
     case 402:
       code = 'UPSTREAM_PAYMENT_402';
@@ -281,7 +346,9 @@ function diagnoseUpstreamError(
     .join(' ');
 
   // 403-WAF và 5xx: vẫn nên thử key khác (có thể route khác IP / retry may mắn).
-  const stopFailover = scope === 'request' || status === 404;
+  // 400 "Unknown model" (kiểu crax trả thay vì 404) vẫn cho thử model kế tiếp.
+  const unknownModel400 = status === 400 && /unknown model/i.test(bodySnippet);
+  const stopFailover = (scope === 'request' && !unknownModel400) || status === 404;
 
   return { status, scope, code, userMessage, devLog, stopFailover, blameKey };
 }
@@ -324,6 +391,7 @@ const BodySchema = z.object({
   messages: z.array(MessageSchema).min(1).max(100),
   model: z.string().min(1).max(64).optional(),
   temperature: z.number().min(0).max(2).optional(),
+  thinkingLevel: z.enum(THINKING_LEVELS).optional(),
   system: z.string().max(8_000).optional(),
   data: z.unknown().optional(),
 });
@@ -480,7 +548,12 @@ export async function POST(req: Request) {
       });
     }
 
-    const { messages, model, temperature, system } = parsed.data;
+    const { messages, model, temperature, system, thinkingLevel } = parsed.data;
+
+    /* Mức suy luận chỉ có tác dụng trên gateway crax — gateway khác sẽ bỏ qua. */
+    const effortBase = providerBase ?? process.env.OPENAI_BASE_URL ?? null;
+    const reasoningEffort =
+      thinkingLevel && supportsThinkingLevel(effortBase) ? thinkingLevel : null;
 
     const selectedModelId = model ?? DEFAULT_MODEL_ID;
     // Provider override: model do gateway của user định nghĩa (/v1/models),
@@ -493,7 +566,8 @@ export async function POST(req: Request) {
         `Model '${selectedModelId}' không được hỗ trợ.`,
       );
     }
-    if (providerBase && !/^[\w.\-:]{1,120}$/.test(selectedModelId)) {
+    // Chấp nhận id dạng `vendor/model` (OpenRouter: `openai/gpt-4o`, `~anthropic/...`).
+    if (providerBase && !/^[\w.\-:~/]{1,120}$/.test(selectedModelId)) {
       return jsonError(requestId, 400, 'MODEL_NOT_ALLOWED', `Model '${selectedModelId}' không hợp lệ.`);
     }
 
@@ -581,7 +655,8 @@ export async function POST(req: Request) {
       );
     }
 
-    const upstreamHost = hostOf(process.env.OPENAI_BASE_URL) ?? 'api.openai.com';
+    const upstreamHost =
+      hostOf(providerBase) ?? hostOf(process.env.OPENAI_BASE_URL) ?? 'api.openai.com';
     console.info(
       `[req:${requestId}] start model=${targetModel} upstream=${providerBase ? hostOf(providerBase) ?? providerBase : upstreamHost} keys=${candidateKeys.length}`,
     );
@@ -673,13 +748,18 @@ export async function POST(req: Request) {
               baseURL: providerBase ?? (process.env.OPENAI_BASE_URL || undefined),
             });
 
-            for (const targetModel of modelChain) {
+            for (let modelIndex = 0; modelIndex < modelChain.length; modelIndex++) {
+              const targetModel = modelChain[modelIndex];
               let abortKind: AbortKind | null = null;
+              // Tạo video cần vài phút — nới ngân sách riêng cho model video.
+              const budgetMs = isVideoModel(targetModel) ? 600_000 : STREAM_BUDGET_MS;
               const budgetController = new AbortController();
               const budgetTimer = setTimeout(() => {
                 abortKind = 'budget';
-                budgetController.abort(new Error('Vượt quá ngân sách thời gian stream (270s).'));
-              }, STREAM_BUDGET_MS);
+                budgetController.abort(
+                  new Error(`Vượt quá ngân sách thời gian stream (${Math.round(budgetMs / 1000)}s).`),
+                );
+              }, budgetMs);
 
               let idleTimer: ReturnType<typeof setTimeout> | null = null;
               const clearIdle = () => {
@@ -707,6 +787,131 @@ export async function POST(req: Request) {
                 });
                 startHeartbeat();
 
+                /* Model media:
+                   - Ảnh: ưu tiên /v1/images/generations chuẩn OpenAI (crax,
+                     Kilgore đều hỗ trợ, trả URL); nếu gateway không có endpoint
+                     này thì fallback qua chat SSE như trước.
+                   - Video: chat SSE (crax `qwen-video` — event type:video). */
+                if (isImageModel(targetModel) || isVideoModel(targetModel)) {
+                  const base =
+                    providerBase ?? process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1';
+                  const lastUser =
+                    [...coreToOpenAiMessages(core)].reverse().find((m) => m.role === 'user')
+                      ?.content ?? '';
+
+                  const emitMedia = (kind: 'image' | 'video', url: string) => {
+                    // Ảnh: markdown img (renderer có component riêng).
+                    // Video: URL trần trên dòng riêng — renderer nhận diện .mp4.
+                    if (kind === 'image') writeText(`\n\n![${targetModel}](${url})\n`);
+                    else writeText(`\n\n${url}\n`);
+                  };
+
+                  if (isImageModel(targetModel)) {
+                    try {
+                      const imgRes = await fetch(`${base}/images/generations`, {
+                        method: 'POST',
+                        headers: {
+                          'Content-Type': 'application/json',
+                          Authorization: `Bearer ${apiKey}`,
+                        },
+                        body: JSON.stringify({
+                          model: targetModel,
+                          prompt: lastUser.slice(0, 4000),
+                          n: 1,
+                        }),
+                        signal: link.signal,
+                      });
+                      resetIdleTimer();
+                      if (imgRes.ok) {
+                        const j = (await imgRes.json().catch(() => null)) as {
+                          data?: Array<{ url?: unknown; b64_json?: unknown }>;
+                        } | null;
+                        const item = j?.data?.[0];
+                        const url =
+                          typeof item?.url === 'string'
+                            ? item.url
+                            : typeof item?.b64_json === 'string'
+                              ? `data:image/png;base64,${item.b64_json}`
+                              : null;
+                        if (url) {
+                          emitMedia('image', url);
+                          markKeySuccess(apiKey);
+                          writeFinish('stop');
+                          return;
+                        }
+                      }
+                      // 404/501 (endpoint chưa có) hoặc data rỗng → fallback SSE.
+                    } catch (e) {
+                      if (e instanceof ChatUpstreamError || isAbortError(e)) throw e;
+                      // lỗi mạng images API → thử đường chat SSE bên dưới.
+                    }
+                  }
+
+                  const res = await fetch(`${base}/chat/completions`, {
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json',
+                      Authorization: `Bearer ${apiKey}`,
+                    },
+                    body: JSON.stringify({
+                      model: targetModel,
+                      messages: coreToOpenAiMessages(core),
+                      stream: true,
+                    }),
+                    signal: link.signal,
+                  });
+                  if (!res.ok || !res.body) {
+                    const bodyText = await res.text().catch(() => '');
+                    // Trang lỗi HTML của gateway/CDN — không đem HTML vào message.
+                    const detail = /^\s*(!doctype|<html)/i.test(bodyText)
+                      ? 'gateway đang quá tải, thử lại sau.'
+                      : redact(bodyText).slice(0, 200);
+                    throw new ChatUpstreamError(
+                      `Không tạo được media tại ${hostOf(base) ?? base} (${res.status}): ${detail}`,
+                      `MEDIA_UPSTREAM_${res.status ?? 'ERROR'}`,
+                      requestId,
+                    );
+                  }
+                  resetIdleTimer();
+                  let got = false;
+                  await pumpSseData(res.body, (raw) => {
+                    if (raw === '[DONE]') return;
+                    let j: unknown;
+                    try {
+                      j = JSON.parse(raw);
+                    } catch {
+                      return;
+                    }
+                    resetIdleTimer();
+                    const p = j as {
+                      type?: string;
+                      url?: unknown;
+                      text?: unknown;
+                      choices?: Array<{ delta?: { content?: unknown }; message?: { content?: unknown } }>;
+                    };
+                    if (p.type === 'image' && typeof p.url === 'string') {
+                      got = true;
+                      emitMedia('image', p.url);
+                    } else if (p.type === 'video' && typeof p.url === 'string') {
+                      got = true;
+                      emitMedia('video', p.url);
+                    } else if (p.type === 'status' && typeof p.text === 'string') {
+                      // tiến trình tạo media — hiển thị như dòng suy luận.
+                      writeText(`${p.text}\n`, 'reasoning');
+                    } else {
+                      const c = p.choices?.[0]?.delta?.content ?? p.choices?.[0]?.message?.content;
+                      if (typeof c === 'string' && c) {
+                        got = true;
+                        writeText(c);
+                      }
+                    }
+                  });
+                  if (!got) writeText('_(Nhà cung cấp không trả về media nào)_');
+                  markKeySuccess(apiKey);
+                  writeFinish('stop');
+                  return;
+                }
+
                 const result = streamText({
                   model: openai(targetModel),
                   messages: core,
@@ -714,6 +919,9 @@ export async function POST(req: Request) {
                     ? {}
                     : { temperature: temperature ?? 0.7 }),
                   ...(modelConfig.maxOutputTokens ? { maxTokens: modelConfig.maxOutputTokens } : {}),
+                  ...(reasoningEffort
+                    ? { providerOptions: { openai: { reasoningEffort } } }
+                    : {}),
                   system:
                     system ??
                     'Bạn là một trợ lý AI thông minh, hữu ích và chính xác. Trả lời bằng tiếng Việt trừ khi được yêu cầu ngôn ngữ khác.',
@@ -801,12 +1009,19 @@ export async function POST(req: Request) {
                   throw new ChatUpstreamError(diagMsg, code, requestId);
                 }
 
-                const diagnosis = diagnoseUpstreamError(e, { requestId, model: targetModel, keyLabel });
+                const diagnosis = diagnoseUpstreamError(e, {
+                  requestId,
+                  model: targetModel,
+                  keyLabel,
+                  providerBase,
+                });
                 console.error(diagnosis.devLog);
 
                 if (diagnosis.blameKey) markKeyFailure(apiKey, diagnosis.status);
 
-                const isLast = attempt === candidateKeys.length - 1;
+                // Chỉ dừng hẳn khi đã hết cả model lẫn key để thử.
+                const isLast =
+                  attempt === candidateKeys.length - 1 && modelIndex === modelChain.length - 1;
                 if (emittedChars > 0 || diagnosis.stopFailover || isLast) {
                   writeAnnotation({ error: diagnosis.code });
                   throw new ChatUpstreamError(diagnosis.userMessage, diagnosis.code, requestId);

@@ -1,6 +1,11 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { DEFAULT_MODEL_ID, normalizeModelId } from '@/lib/models';
+import {
+  DEFAULT_THINKING_LEVEL,
+  isThinkingLevel,
+  type ThinkingLevel,
+} from '@/lib/provider-url';
 
 /** id provider "dùng cấu hình env của server" — định nghĩa ở store để tránh vòng import. */
 export const SERVER_PROVIDER_ID = '__server__';
@@ -24,6 +29,8 @@ export interface PerfSettings {
 export interface Settings {
   model: string;
   temperature: number;
+  /** Mức suy luận gửi kèm request — chỉ gateway crax dịch được giá trị này. */
+  thinkingLevel: ThinkingLevel;
   systemPrompt: string;
   perf: PerfSettings;
   sendOnEnter: boolean;
@@ -52,6 +59,7 @@ interface AppState {
 const DEFAULT_SETTINGS: Settings = {
   model: DEFAULT_MODEL_ID,
   temperature: 0.7,
+  thinkingLevel: DEFAULT_THINKING_LEVEL,
   systemPrompt:
     'You are a helpful, brilliant AI assistant. Use Markdown and LaTeX when appropriate. ' +
     'For LaTeX math, always use $$...$$ for block math and \\(...\\) for inline math.',
@@ -88,6 +96,7 @@ export const useAppStore = create<AppState>()(
         settings: {
           model: s.settings.model,
           temperature: s.settings.temperature,
+          thinkingLevel: s.settings.thinkingLevel,
           systemPrompt: s.settings.systemPrompt,
           perf: s.settings.perf,
           sendOnEnter: s.settings.sendOnEnter,
@@ -112,6 +121,9 @@ export const useAppStore = create<AppState>()(
             ...current.settings,
             ...(p.settings ?? {}),
             model: validModel,
+            thinkingLevel: isThinkingLevel(p.settings?.thinkingLevel)
+              ? p.settings.thinkingLevel
+              : DEFAULT_THINKING_LEVEL,
             perf: { ...current.settings.perf, ...(p.settings?.perf ?? {}) },
             apiKey: '',
             accessCode: '',

@@ -392,7 +392,12 @@ export function resolveProviderModelChain(model: ModelConfig): readonly string[]
   const chain: string[] = [];
   const push = (v?: string) => {
     const t = v?.trim();
-    if (t && !chain.includes(t)) chain.push(t);
+    if (!t || chain.includes(t)) return;
+    chain.push(t);
+    // Gateway crax đặt tên model bằng gạch (`gpt-5-6-sol`) — thử biến thể
+    // thay `.` bằng `-` ngay sau id gốc để tự fallback khi gateway đổi kiểu.
+    const dashed = t.replace(/\./g, '-');
+    if (dashed !== t && !chain.includes(dashed)) chain.push(dashed);
   };
 
   push(aliasOverrides()[model.id]);

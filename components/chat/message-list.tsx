@@ -17,8 +17,7 @@ const HEIGHT_CACHE = new Map<string, number>();
 const cacheKey = (chatId: string, id: string) => `${chatId}:${id}`;
 
 /** Ước lượng sát thực tế cho hàng chưa từng render. */
-function estimateMessageHeight(m: Message): number {
-  const text = m.content ?? '';
+function estimateMessageHeight(m: Message): number {  const text = m.content ?? '';
   const newlines = text.match(/\n/g)?.length ?? 0;
   const wrapped = Math.ceil(text.length / 68);
   let h = 64 + Math.max(newlines, wrapped) * 26;
@@ -30,6 +29,20 @@ function estimateMessageHeight(m: Message): number {
   if (m.experimental_attachments?.length) h += 210;
 
   return Math.min(Math.max(h, 72), 8000);
+}
+
+/** Lỗi từ API về dạng JSON thô (`{"error":...}`) → rút ra câu thông báo. */
+function friendlyErrorMessage(raw?: string): string {
+  if (!raw) return 'Đã xảy ra lỗi.';
+  try {
+    const parsed = JSON.parse(raw) as { error?: unknown; message?: unknown };
+    const text = [parsed.error, parsed.message].find((v) => typeof v === 'string') as
+      | string
+      | undefined;
+    return text || raw;
+  } catch {
+    return raw;
+  }
 }
 
 interface MessageListProps {
@@ -348,7 +361,7 @@ export const MessageList = memo(function MessageList({
 
         {error && (
           <div className="max-w-[720px] p-4 bg-red-950/50 border border-red-900 text-red-400 rounded-xl mx-auto flex items-center justify-between">
-            <span>{error.message || 'An error occurred.'}</span>
+            <span>{friendlyErrorMessage(error.message)}</span>
             <button onClick={onReload} className="px-3 py-1 bg-red-900/50 rounded hover:bg-red-800 transition">
               Thử lại
             </button>

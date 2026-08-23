@@ -4,6 +4,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import TextareaAutosize from 'react-textarea-autosize';
 import { ArrowUp, BookmarkPlus, CornerDownLeft, Mic, Paperclip, Square, X } from 'lucide-react';
 import { ModelSelector, type ModelOption } from '@/components/model-selector';
+import { ThinkingSlider } from '@/components/thinking-slider';
+import type { ThinkingLevel } from '@/lib/provider-url';
 import { useSpeechRecognition } from '@/lib/use-speech-recognition';
 import { filterPrompts } from '@/lib/prompt-library';
 
@@ -39,6 +41,9 @@ interface ComposerProps {
   models: ModelOption[];
   model: string;
   onModelChange: (id: string) => void;
+  /** Mức suy luận — chỉ hiển thị khi provider hiện tại hỗ trợ (crax). */
+  thinkingLevel?: ThinkingLevel;
+  onThinkingLevelChange?: (level: ThinkingLevel) => void;
   canContinue?: boolean;
   onContinue?: () => void;
   maxFileBytes?: number;
@@ -63,6 +68,8 @@ export function Composer({
   models,
   model,
   onModelChange,
+  thinkingLevel,
+  onThinkingLevelChange,
   canContinue,
   onContinue,
   maxFileBytes = DEFAULT_MAX_FILE_BYTES,
@@ -263,7 +270,7 @@ export function Composer({
                   className="flex w-full items-center gap-1.5 border-t border-zinc-200 px-3 py-2 text-left text-[12px] text-zinc-500 transition hover:text-zinc-700"
                 >
                   <BookmarkPlus size={13} />
-                  Lưu nhanh "/{slashQuery}" làm mẫu
+                  Lưu nhanh &quot;/{slashQuery}&quot; làm mẫu
                 </button>
               )}
             </div>
@@ -379,6 +386,13 @@ export function Composer({
                     <Mic size={16} />
                   )}
                 </button>
+              )}
+              {thinkingLevel && onThinkingLevelChange && (
+                <ThinkingSlider
+                  value={thinkingLevel}
+                  onChange={onThinkingLevelChange}
+                  disabled={isStreaming}
+                />
               )}
               <ModelSelector
                 models={models}

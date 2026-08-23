@@ -303,7 +303,11 @@ function embedBareImageUrls(s: string): string {
     (match, lead: string, url: string) => {
       const clean = url.replace(/[.,!?;]+$/, '');
       const punct = url.slice(clean.length);
-      const isImage = IMAGE_EXT_RE.test(clean) || IMAGE_HOST_RE.test(clean);
+      // Video (qwen-video trả mp4 từ chính các host ảnh) — để nguyên URL trần,
+      // GFM autolink + component `a` sẽ render <video> thay vì <img>.
+      const isVideo = /\.(?:mp4|webm)(?:[?#][^\s<>)]*)?$/i.test(clean);
+      const isImage =
+        !isVideo && (IMAGE_EXT_RE.test(clean) || IMAGE_HOST_RE.test(clean));
       if (!isImage || s.includes(`](${clean}`)) return match;
       return `${lead}![${clean}](${clean})${punct}`;
     },

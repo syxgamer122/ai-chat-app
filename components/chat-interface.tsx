@@ -34,6 +34,7 @@ import type { ModelOption } from '@/components/model-selector';
 import { useTitleGenerator } from '@/lib/use-title-generator';
 import { ensurePromptSeed, savePrompt } from '@/lib/prompt-library';
 import { ensureProviderSeed } from '@/lib/providers';
+import { supportsThinkingLevel, type ThinkingLevel } from '@/lib/provider-url';
 import {
   CONTINUE_PROMPT,
   sanitizeContent,
@@ -63,6 +64,7 @@ export default function ChatInterface() {
 
   const model = useAppStore((s) => s.settings.model);
   const temperature = useAppStore((s) => s.settings.temperature);
+  const thinkingLevel = useAppStore((s) => s.settings.thinkingLevel);
   const systemPrompt = useAppStore((s) => s.settings.systemPrompt);
   const apiKey = useAppStore((s) => s.settings.apiKey);
   const accessCode = useAppStore((s) => s.settings.accessCode);
@@ -76,6 +78,21 @@ export default function ChatInterface() {
   useEffect(() => {
     void syncActiveProviderSnapshot(activeProviderId);
   }, [activeProviderId]);
+
+  /** Provider mặc định của server (env) có hỗ trợ mức suy luận không. */
+  const [serverThinking, setServerThinking] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/server-config')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j: { thinkingLevel?: boolean } | null) => {
+        if (!cancelled && j?.thinkingLevel) setServerThinking(true);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const currentChat = useLiveQuery(
     () => (currentChatId ? db.chats.get(currentChatId) : undefined),
@@ -265,6 +282,7 @@ export default function ChatInterface() {
     body: {
       model,
       temperature,
+      thinkingLevel,
       system: systemPrompt,
     },
     experimental_throttle: throttleMs,
@@ -1850,6 +1868,13 @@ export default function ChatInterface() {
     [updateSettings],
   );
 
+  const handleThinkingLevelChange = useCallback(
+    (level: ThinkingLevel) => {
+      updateSettings({ thinkingLevel: level });
+    },
+    [updateSettings],
+  );
+
   return (
     <div
       {...swipeHandlers}
@@ -1932,6 +1957,12 @@ export default function ChatInterface() {
         onModelChange={handleModelChange}
         canContinue={canContinue}
         onContinue={continueGenerating}
+        thinkingLevel={
+          (activeProvider ? supportsThinkingLevel(activeProvider.baseUrl) : serverThinking)
+            ? thinkingLevel
+            : undefined
+        }
+        onThinkingLevelChange={handleThinkingLevelChange}
       />
     </div>
   );

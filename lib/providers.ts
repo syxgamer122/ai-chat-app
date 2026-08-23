@@ -82,8 +82,12 @@ export async function syncActiveProviderSnapshot(providerId: string): Promise<vo
 /* Seed 2 provider mặc định (chạy 1 lần)                               */
 /* ------------------------------------------------------------------ */
 
-// v3: thêm OpenRouter + airforce (dự phòng khi crax/kilgore chết).
-const PROVIDER_SEED_FLAG = 'providers-seeded-v3';
+// v5: thêm OrcaRouter + Tokenin (không kèm key — user tự dán API key cá nhân
+// qua nút Sửa, key không bao giờ nằm trong code/repo).
+const PROVIDER_SEED_FLAG = 'providers-seeded-v5';
+
+/** Khoá module: chống 2 effect chạy song song cùng lúc (StrictMode / 2 tab). */
+let seedPromise: Promise<void> | null = null;
 
 const DEFAULT_PROVIDER_SEEDS: Array<Pick<ProviderConfig, 'name' | 'baseUrl' | 'apiKey'>> = [
   {
@@ -108,25 +112,66 @@ const DEFAULT_PROVIDER_SEEDS: Array<Pick<ProviderConfig, 'name' | 'baseUrl' | 'a
     baseUrl: 'https://api.airforce/v1',
     apiKey: '',
   },
+  {
+    // Key cá nhân tại https://orcarouter.ai — 191 model mọi hãng, có model
+    // `orcarouter/free` chạy miễn phí; model trả phí cần nạp credit.
+    name: 'OrcaRouter (key cá nhân)',
+    baseUrl: 'https://api.orcarouter.ai/v1',
+    apiKey: '',
+  },
+  {
+    // Key cá nhân tại dashboard tokenin.my.id — 82 model `myt/*`, nhiều model
+    // free (-free) + API tạo video (Kling/Seedance/Grok Imagine).
+    name: 'Tokenin (key cá nhân)',
+    baseUrl: 'https://tokenin.my.id/v1',
+    apiKey: '',
+  },
 ];
 
-/** Thêm sẵn 2 nhà cung cấp user định dùng — chỉ chạy lần đầu. */
+/** Thêm sẵn các nhà cung cấp user định dùng + dọn trùng lặp — chỉ chạy lần đầu. */
 export async function ensureProviderSeed(): Promise<void> {
+  if (!seedPromise) {
+    seedPromise = seedOnce().catch((err) => {
+      seedPromise = null; // lỗi (vd 2 tab write-conflict) → cho phép thử lại lần sau
+      throw err;
+    });
+  }
+  return seedPromise;
+}
+
+async function seedOnce(): Promise<void> {
   const flag = await db.kv.get(PROVIDER_SEED_FLAG);
   if (flag) return;
-  const existing = await db.providers.toArray();
-  const knownBases = new Set(existing.map((p) => p.baseUrl));
-  const now = Date.now();
-  const missing = DEFAULT_PROVIDER_SEEDS.filter((s) => !knownBases.has(s.baseUrl));
-  if (missing.length) {
-    await db.providers.bulkAdd(
-      missing.map((s, i) => ({
-        id: newProviderId(),
-        ...s,
-        createdAt: now + i,
-        updatedAt: now + i,
-      })),
-    );
-  }
-  await db.kv.put({ key: PROVIDER_SEED_FLAG, value: true });
+  await db.transaction('rw', [db.providers, db.kv], async () => {
+    const existing = await db.providers.toArray();
+
+    // Dọn bản trùng baseUrl (giữ bản mới nhất, ưu tiên bản đã tải được models).
+    const byBase = new Map<string, ProviderConfig>();
+    for (const p of [...existing].sort((a, b) => a.updatedAt - b.updatedAt)) {
+      const cur = byBase.get(p.baseUrl);
+      if (!cur) {
+        byBase.set(p.baseUrl, p);
+        continue;
+      }
+      const keepNewer = (cur.models?.length ?? 0) >= (p.models?.length ?? 0) ? cur : p;
+      const drop = keepNewer === cur ? p : cur;
+      await db.providers.delete(drop.id);
+      byBase.set(p.baseUrl, keepNewer);
+    }
+
+    const knownBases = new Set([...byBase.keys()]);
+    const now = Date.now();
+    const missing = DEFAULT_PROVIDER_SEEDS.filter((s) => !knownBases.has(s.baseUrl));
+    if (missing.length) {
+      await db.providers.bulkAdd(
+        missing.map((s, i) => ({
+          id: newProviderId(),
+          ...s,
+          createdAt: now + i,
+          updatedAt: now + i,
+        })),
+      );
+    }
+    await db.kv.put({ key: PROVIDER_SEED_FLAG, value: true });
+  });
 }

@@ -76,6 +76,12 @@ export async function acquireUpstreamSlot(
     if (now + wait > deadline) {
       return { ok: false, retryAfterSec: Math.ceil(wait / 1000) };
     }
+    const before = now;
     await sleep(wait + 20);
+    // Đồng hồ không tiến sau sleep (clock giả / hệ thống treo) — thoát bằng
+    // retry-after thay vì quay vô hạn trong giới hạn cũ.
+    if (nowFn() <= before) {
+      return { ok: false, retryAfterSec: Math.ceil(wait / 1000) };
+    }
   }
 }

@@ -51,6 +51,31 @@ export function validateProviderBaseUrl(input: string): BaseUrlCheck {
   return { ok: true, url: url.origin + url.pathname.replace(/\/+$/, '') };
 }
 
+/**
+ * Mức suy luận crax nhận qua `reasoning_effort` (alias `thinking_level`).
+ * Chỉ crax dịch giá trị này xuống backend; gateway khác bỏ qua hoặc trả 400.
+ */
+export const THINKING_LEVELS = ['low', 'medium', 'high', 'max'] as const;
+
+export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
+
+/** Model Notion-backed của crax mặc định 'high' khi request không gửi gì. */
+export const DEFAULT_THINKING_LEVEL: ThinkingLevel = 'high';
+
+export function isThinkingLevel(value: unknown): value is ThinkingLevel {
+  return typeof value === 'string' && (THINKING_LEVELS as readonly string[]).includes(value);
+}
+
+/** true khi baseUrl trỏ tới gateway crax — nơi duy nhất đổi được mức suy luận. */
+export function supportsThinkingLevel(baseUrl: string | null | undefined): boolean {
+  if (!baseUrl) return false;
+  try {
+    return /(^|\.)crax\.lol$/i.test(new URL(baseUrl).hostname);
+  } catch {
+    return false;
+  }
+}
+
 /** Chuẩn hoá danh sách model từ GET /v1/models (dung sai nhiều dạng). */
 export function normalizeProviderModels(json: unknown): ProviderModel[] {
   const data = (json as { data?: unknown })?.data;

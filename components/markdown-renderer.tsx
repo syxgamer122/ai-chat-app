@@ -282,16 +282,30 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
 
       p: ({ children }: any) => <p className="mb-3.5 last:mb-0">{children}</p>,
 
-      a: ({ href, children }: any) => (
-        <a
-          href={href}
-          target="_blank"
-          rel="noreferrer noopener nofollow"
-          className="break-words text-[#0A7E8C] underline-offset-2 hover:underline"
-        >
-          {children}
-        </a>
-      ),
+      a: ({ href, children }: any) => {
+        // Link video do AI tạo (qwen-video...) — phát trực tiếp trong chat.
+        if (typeof href === 'string' && /\.(?:mp4|webm)(?:[?#]|$)/i.test(href)) {
+          return (
+            <video
+              src={href}
+              controls
+              preload="metadata"
+              className="my-2 max-h-[480px] w-auto max-w-full rounded-xl border border-zinc-200 bg-black shadow-sm"
+              onLoadedMetadata={emitImageLoaded}
+            />
+          );
+        }
+        return (
+          <a
+            href={href}
+            target="_blank"
+            rel="noreferrer noopener nofollow"
+            className="break-words text-[#0A7E8C] underline-offset-2 hover:underline"
+          >
+            {children}
+          </a>
+        );
+      },
 
       table: ({ children }: any) => (
         <div className="my-4 w-full overflow-x-auto">
@@ -300,6 +314,18 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
       ),
 
       img({ src, alt }: any) {
+        // Một số nguồn/model trả video dưới dạng markdown img ![](…mp4) — phát thẳng.
+        if (typeof src === 'string' && /\.(?:mp4|webm)(?:[?#]|$)/i.test(src)) {
+          return (
+            <video
+              src={src}
+              controls
+              preload="metadata"
+              className="my-2 max-h-[480px] w-auto max-w-full rounded-xl border border-zinc-200 bg-black shadow-sm"
+              onLoadedMetadata={emitImageLoaded}
+            />
+          );
+        }
         return (
           <a
             href={typeof src === 'string' ? src : '#'}
@@ -308,7 +334,6 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
             className="my-2 block w-fit max-w-full"
             title="Mở ảnh gốc"
           >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={typeof src === 'string' ? src : ''}
               alt={alt ?? 'Ảnh do AI tạo'}

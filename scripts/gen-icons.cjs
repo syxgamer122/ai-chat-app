@@ -1,4 +1,3 @@
-/* eslint-disable */
 // Sinh icon PWA (192/512/maskable-512/180) — vẽ lại thiết kế app/icon.svg.
 // Logo KODA: chữ K bằng 3 nét bo tròn gradient teal→green + 2 node tròn ở đầu nét.
 // Tự encode PNG bằng zlib + CRC32 (không cần thư viện ngoài). Chạy 1 lần rồi xoá.
