@@ -544,10 +544,37 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
             <label className="text-sm font-medium text-zinc-600 mb-1.5 block">
               Nhà cung cấp API
             </label>
-            <p className="mb-2 text-[11px] text-zinc-500">
+            <p className="mb-2 text-[11px] text-zinc-500 leading-relaxed">
               Lưu nhiều nhà cung cấp chuẩn OpenAI-compatible, tải danh sách model và chuyển
               nhanh mà không cần cấu hình lại server.
             </p>
+            <ul className="mb-2 list-disc space-y-1 pl-4 text-[11px] text-zinc-500 leading-relaxed">
+              <li>
+                <strong className="font-medium text-zinc-600">OpenRouter:</strong> key free tại{' '}
+                <a
+                  href="https://openrouter.ai/keys"
+                  target="_blank"
+                  rel="noreferrer noopener nofollow"
+                  className="text-[#0A7E8C] underline-offset-2 hover:underline"
+                >
+                  openrouter.ai/keys
+                </a>{' '}
+                — chọn model đuôi <code className="text-zinc-600">:free</code> (50 lượt/ngày;
+                nạp $10 một lần duy nhất → 1.000 lượt/ngày free vĩnh viễn).
+              </li>
+              <li>
+                <strong className="font-medium text-zinc-600">airforce:</strong> key free tại{' '}
+                <a
+                  href="https://api.airforce/signup"
+                  target="_blank"
+                  rel="noreferrer noopener nofollow"
+                  className="text-[#0A7E8C] underline-offset-2 hover:underline"
+                >
+                  api.airforce/signup
+                </a>{' '}
+                — 1.000 lượt/ngày, 1 lượt/phút, model cơ bản.
+              </li>
+            </ul>
             <ProviderManager />
           </div>
 

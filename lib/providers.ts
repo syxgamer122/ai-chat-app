@@ -82,7 +82,8 @@ export async function syncActiveProviderSnapshot(providerId: string): Promise<vo
 /* Seed 2 provider mặc định (chạy 1 lần)                               */
 /* ------------------------------------------------------------------ */
 
-const PROVIDER_SEED_FLAG = 'providers-seeded-v1';
+// v3: thêm OpenRouter + airforce (dự phòng khi crax/kilgore chết).
+const PROVIDER_SEED_FLAG = 'providers-seeded-v3';
 
 const DEFAULT_PROVIDER_SEEDS: Array<Pick<ProviderConfig, 'name' | 'baseUrl' | 'apiKey'>> = [
   {
@@ -93,6 +94,18 @@ const DEFAULT_PROVIDER_SEEDS: Array<Pick<ProviderConfig, 'name' | 'baseUrl' | 'a
   {
     name: 'KilgoreAI',
     baseUrl: 'https://kilgoreai.freesrv.com/v1',
+    apiKey: '',
+  },
+  {
+    // Key free tại https://openrouter.ai/keys — model free có đuôi ":free".
+    name: 'OpenRouter (dự phòng)',
+    baseUrl: 'https://openrouter.ai/api/v1',
+    apiKey: '',
+  },
+  {
+    // Key free tại https://api.airforce/signup — 1.000 lượt/ngày, model cơ bản.
+    name: 'airforce (dự phòng)',
+    baseUrl: 'https://api.airforce/v1',
     apiKey: '',
   },
 ];
