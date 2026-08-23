@@ -5,21 +5,36 @@
 @tailwind utilities;
 
 @layer base {
+  /*
+   * Token màu dạng channel RGB để dùng được cả trong Tailwind
+   * (`bg-brand/20`) và CSS thuần (`rgb(var(--brand))`).
+   */
   :root {
-    --bg-app: #f7f9fc;
-    --bg-sidebar: #ffffff;
-    --bg-composer: #ffffff;
-    --bg-user-bubble: #e8f1ef;
-    --bg-code: #0d0d10;
-    --accent: #0a7e8c;
-    --accent-hover: #086e7a;
-    --border-soft: rgba(15, 23, 42, 0.1);
+    --surface: 247 249 252; /* #F7F9FC — canvas */
+    --surface-raised: 255 255 255; /* #FFFFFF — sidebar, composer, panel */
+    --surface-bubble: 232 241 239; /* #E8F1EF — bong bóng người dùng */
+    --surface-muted: 241 245 249; /* #F1F5F9 — hover nhẹ */
+    --surface-code: 13 13 16; /* #0D0D10 — khối code */
+    --surface-code-header: 23 23 27; /* #17171B — thanh công cụ khối code */
+    --brand: 10 126 140; /* #0A7E8C */
+    --brand-hover: 8 110 122; /* #086E7A */
+    --brand-accent: 78 203 113; /* #4ECB71 */
+    --brand-border: 143 191 183; /* #8FBFB7 */
+    --foreground: 39 39 42; /* zinc-800 */
+    --foreground-strong: 17 17 19; /* tiêu đề trong prose */
+    --muted-foreground: 100 116 139; /* slate-500 — blockquote, caption */
+    --line: 227 232 239; /* #E3E8EF — kẻ bảng, hr */
+    --line-strong: 214 221 230; /* #D6DDE6 — vạch blockquote */
+    --scrollbar: 198 207 218; /* #C6CFDA */
+    --scrollbar-hover: 174 185 199; /* #AEB9C7 */
+    --code-inline-bg: 234 243 245; /* #EAF3F5 */
+    --code-inline-border: 207 227 230; /* #CFE3E6 */
   }
 
   html,
   body {
-    background-color: var(--bg-app);
-    color: #1f2937;
+    background-color: rgb(var(--surface));
+    color: rgb(var(--foreground));
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
     -webkit-text-size-adjust: 100%;
@@ -29,7 +44,7 @@
   body {
     background-image: radial-gradient(
       900px 420px at 50% -180px,
-      rgba(10, 126, 140, 0.06),
+      rgb(var(--brand) / 0.06),
       transparent 70%
     );
     background-repeat: no-repeat;
@@ -44,7 +59,7 @@
   }
 
   :focus-visible {
-    outline: 2px solid rgba(10, 126, 140, 0.55);
+    outline: 2px solid rgb(var(--brand) / 0.55);
     outline-offset: 2px;
   }
 }
@@ -59,9 +74,23 @@
   }
 }
 
+/*
+ * Toggle "Hiệu ứng chuyển động" trong Cài đặt gắn `data-animations="off"` lên
+ * <html>. Trước đây cờ này chỉ được truyền xuống props rồi bỏ không dùng, nên
+ * tắt đi không có tác dụng gì.
+ */
+html[data-animations='off'] *,
+html[data-animations='off'] *::before,
+html[data-animations='off'] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+
 * {
   scrollbar-width: thin;
-  scrollbar-color: #c6cfda transparent;
+  scrollbar-color: rgb(var(--scrollbar)) transparent;
 }
 ::-webkit-scrollbar {
   width: 6px;
@@ -71,11 +100,11 @@
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #c6cfda;
+  background: rgb(var(--scrollbar));
   border-radius: 10px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #aeb9c7;
+  background: rgb(var(--scrollbar-hover));
 }
 
 @layer utilities {
@@ -85,6 +114,21 @@
   .pb-safe {
     padding-bottom: env(safe-area-inset-bottom);
   }
+  /*
+   * Biến thể "cộng thêm": `pt-safe` ghi đè hẳn padding-top của các lớp như
+   * `py-2`, làm nội dung dính mép. Hai lớp dưới giữ đúng 0.5rem đệm rồi mới
+   * cộng vùng an toàn của thiết bị.
+   */
+  .pt-safe-2 {
+    padding-top: calc(0.5rem + env(safe-area-inset-top));
+  }
+  .pb-safe-2 {
+    padding-bottom: calc(0.5rem + env(safe-area-inset-bottom));
+  }
+  /* Composer: 1rem đệm cộng thêm vùng an toàn của thiết bị. */
+  .pb-composer {
+    padding-bottom: calc(1rem + env(safe-area-inset-bottom));
+  }
   .no-scrollbar::-webkit-scrollbar {
     display: none;
   }
@@ -92,9 +136,87 @@
     -ms-overflow-style: none;
     scrollbar-width: none;
   }
-  .h-dvh-safe {
-    height: 100vh;
-    height: 100dvh;
+}
+
+/* ------------------------------------------------------------------ */
+/* Component recipes — giữ các "công thức" lặp lại ở một chỗ           */
+/* ------------------------------------------------------------------ */
+
+@layer components {
+  /** Nút chỉ có icon trong header/composer/menu. */
+  .icon-btn {
+    @apply flex flex-shrink-0 items-center justify-center rounded-lg text-zinc-500
+      transition-colors hover:bg-zinc-200/70 hover:text-zinc-700
+      disabled:pointer-events-none disabled:opacity-50;
+  }
+  .icon-btn-sm {
+    @apply icon-btn h-8 w-8;
+  }
+  .icon-btn-md {
+    @apply icon-btn h-9 w-9;
+  }
+  .icon-btn-danger {
+    @apply hover:bg-red-50 hover:text-red-600;
+  }
+
+  /** Mặt phẳng nổi cho dropdown/menu/popover. */
+  .surface-panel {
+    @apply rounded-xl border border-zinc-200 bg-surface-raised shadow-panel;
+  }
+
+  /** Dòng lệnh trong menu. */
+  .menu-item {
+    @apply flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-[12px]
+      text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-800;
+  }
+  .menu-item-danger {
+    @apply text-red-600 hover:bg-red-50 hover:text-red-700;
+  }
+
+  /** Input/select/textarea trong form cài đặt. */
+  .field {
+    @apply w-full rounded-xl border border-zinc-200 bg-surface-raised p-2.5 text-sm
+      text-zinc-700 outline-none transition placeholder:text-zinc-400
+      focus:border-brand/60 focus:ring-2 focus:ring-brand/15;
+  }
+  .field-sm {
+    @apply w-full rounded-lg border border-zinc-300 bg-surface-raised px-2.5 py-1.5
+      text-sm text-zinc-800 outline-none transition placeholder:text-zinc-400
+      focus:border-brand/60 focus:ring-2 focus:ring-brand/15;
+  }
+
+  /** Nút hành động chính. */
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-brand px-4
+      py-2.5 text-sm font-medium text-white shadow-brand transition
+      hover:bg-brand-hover active:scale-[0.99] disabled:pointer-events-none
+      disabled:opacity-50;
+  }
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl border
+      border-zinc-200 bg-surface-raised px-3 py-2.5 text-sm font-medium
+      text-zinc-700 transition hover:bg-zinc-100 disabled:pointer-events-none
+      disabled:opacity-50;
+  }
+
+  /** Banner thông báo — nền sáng, chữ đậm, đạt tương phản AA. */
+  .notice {
+    @apply rounded-xl border px-3 py-2 text-xs leading-relaxed;
+  }
+  .notice-warn {
+    @apply notice border-amber-300 bg-amber-50 text-amber-800;
+  }
+  .notice-error {
+    @apply notice border-red-300 bg-red-50 text-red-700;
+  }
+
+  /**
+   * Thân hộp thoại cài đặt: vạch phân cách nằm GIỮA các nhóm, không phải
+   * `border-t` cứng trong từng nhóm — nhóm đứng đầu tab sẽ không còn vạch
+   * mồ côi ngay dưới thanh tab.
+   */
+  .settings-panel > * + * {
+    @apply mt-5 border-t border-zinc-200 pt-5;
   }
 }
 
@@ -118,6 +240,10 @@
 /* Hành động trên tin nhắn                                             */
 /* ------------------------------------------------------------------ */
 
+/*
+ * Ẩn thanh hành động cho tới khi hover/focus. Trên thiết bị cảm ứng
+ * (không có hover) thì hiện thường trực, vì không có cách nào hover.
+ */
 .msg-actions {
   opacity: 0;
   transition: opacity 120ms linear;
@@ -139,24 +265,39 @@
 .claude-prose {
   font-size: 15px;
   line-height: 1.75;
-  color: #27272a;
+  color: rgb(var(--foreground));
   word-break: break-word;
   overflow-wrap: anywhere;
 }
-.claude-prose > * + * {
+/*
+ * `MarkdownRenderer` bọc nội dung trong một div (`.claude-md-root`), nên các
+ * quy tắc khoảng cách phải nhắm vào con của div đó — nhắm `.claude-prose > *`
+ * chỉ chạm đúng cái wrapper và không có tác dụng gì.
+ */
+.claude-md-root > * + * {
   margin-top: 1rem;
+}
+.claude-md-root > :first-child {
+  margin-top: 0;
+}
+.claude-md-root > :last-child {
+  margin-bottom: 0;
 }
 .claude-prose h1,
 .claude-prose h2,
 .claude-prose h3 {
   font-weight: 600;
   line-height: 1.35;
-  color: #111113;
+  color: rgb(var(--foreground-strong));
   margin-top: 1.75rem;
 }
 .claude-prose h1 { font-size: 1.4rem; }
 .claude-prose h2 { font-size: 1.2rem; }
 .claude-prose h3 { font-size: 1.05rem; }
+/* Tiêu đề mở đầu tin nhắn không cần khoảng trên — tránh lệch mép bong bóng. */
+.claude-md-root > :first-child:is(h1, h2, h3) {
+  margin-top: 0;
+}
 .claude-prose ul,
 .claude-prose ol {
   padding-left: 1.35rem;
@@ -165,36 +306,58 @@
 .claude-prose ol { list-style: decimal; }
 .claude-prose li + li { margin-top: 0.35rem; }
 .claude-prose a {
-  color: #0a7e8c;
+  color: rgb(var(--brand));
   text-decoration: underline;
   text-underline-offset: 2px;
 }
 .claude-prose blockquote {
-  border-left: 2px solid #d6dde6;
+  border-left: 2px solid rgb(var(--line-strong));
   padding-left: 0.9rem;
-  color: #64748b;
+  color: rgb(var(--muted-foreground));
 }
 .claude-prose hr {
-  border-color: #e3e8ef;
+  border-color: rgb(var(--line));
   margin: 1.5rem 0;
 }
 
-.claude-prose table {
+.claude-prose table,
+.claude-table {
   width: 100%;
   border-collapse: collapse;
   font-size: 14px;
 }
 .claude-prose th,
-.claude-prose td {
-  border: 1px solid #e3e8ef;
+.claude-prose td,
+.claude-table th,
+.claude-table td {
+  border: 1px solid rgb(var(--line));
   padding: 0.5rem 0.75rem;
   text-align: left;
   vertical-align: top;
 }
-.claude-prose th {
-  background: #f1f5f9;
+.claude-prose th,
+.claude-table th {
+  background: rgb(var(--surface-muted));
   font-weight: 600;
   white-space: nowrap;
+}
+
+/*
+ * Biến thể trong bong bóng người dùng: cùng công thức typography nhưng chữ
+ * theo cỡ bong bóng và khoảng cách gọn hơn.
+ */
+.claude-prose-bubble {
+  font-size: inherit;
+  line-height: inherit;
+}
+.claude-prose-bubble .claude-md-root > * + * {
+  margin-top: 0.65rem;
+}
+.claude-prose-bubble h1,
+.claude-prose-bubble h2,
+.claude-prose-bubble h3 {
+  margin-top: 0.9rem;
+  font-size: 1.05em;
 }
 
 /* ------------------------------------------------------------------ */
@@ -203,12 +366,12 @@
 
 .claude-inline-code,
 .claude-prose :not(pre) > code {
-  background: #eaf3f5;
-  border: 1px solid #cfe3e6;
+  background: rgb(var(--code-inline-bg));
+  border: 1px solid rgb(var(--code-inline-border));
   border-radius: 5px;
   padding: 0.12em 0.38em;
   font-size: 0.875em;
-  color: #0a7e8c;
+  color: rgb(var(--brand));
   white-space: pre-wrap;
 }
 
@@ -225,8 +388,8 @@
 }
 
 .claude-code-block {
-  background: var(--bg-code);
-  border: 1px solid #232328;
+  background: rgb(var(--surface-code));
+  border: 1px solid rgb(var(--surface-code-header));
   border-radius: 10px;
   overflow: hidden;
 }
@@ -236,7 +399,7 @@
   overflow-x: auto;
   font-size: 13px !important;
   line-height: 1.6 !important;
-  background: var(--bg-code) !important;
+  background: rgb(var(--surface-code)) !important;
 }
 
 /* ------------------------------------------------------------------ */
@@ -251,7 +414,7 @@
   height: 1em;
   margin-left: 2px;
   vertical-align: text-bottom;
-  background: #94a3b8;
+  background: rgb(var(--muted-foreground));
   animation: caret-blink 1s steps(2, start) infinite;
 }
 .streaming-caret > div > :last-child::after {

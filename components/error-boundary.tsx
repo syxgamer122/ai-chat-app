@@ -30,7 +30,7 @@ export class ErrorBoundary extends Component<Props, State> {
     if (this.state.hasError) {
       return (
         this.props.fallback || (
-          <div className="p-3 bg-red-950/40 border border-red-900/60 text-red-300 rounded-xl text-xs">
+          <div className="notice-error">
             Lỗi hiển thị nội dung. Vui lòng tải lại hoặc thử lại tin nhắn.
           </div>
         )

@@ -4,8 +4,9 @@ import React, { useEffect, useRef, useState } from 'react';
 import { db, type PromptTemplate } from '@/lib/db';
 import { useAppStore, SERVER_PROVIDER_ID } from '@/lib/store';
 import { exportJson, exportMarkdown, importBackup, type ImportMode } from '@/lib/backup';
-import { X, Download, Upload, Loader2, ShieldAlert } from 'lucide-react';
+import { X, Download, Upload, Loader2, ShieldAlert, Pencil, Trash2 } from 'lucide-react';
 import { useInstallPrompt } from '@/lib/use-install-prompt';
+import { KodaMark } from '@/components/koda-logo';
 import { ProviderManager } from '@/components/provider-manager';
 import { UsageStats } from '@/components/usage-stats';
 import { useLiveQuery } from 'dexie-react-hooks';
@@ -41,24 +42,12 @@ function InstallSection() {
   };
 
   return (
-    <div className="pt-4 border-t border-zinc-200 space-y-2">
-      <h3 className="text-sm font-semibold text-zinc-700">Ứng dụng</h3>
+    <div className="space-y-2">
+      <h3 className="text-sm font-semibold text-zinc-800">Ứng dụng</h3>
       {installed ? (
-        <div className="flex items-center gap-3 rounded-xl border border-zinc-200 bg-white p-3">
-          <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-zinc-100 ring-1 ring-zinc-900/5">
-            <svg width="20" height="20" viewBox="0 0 32 32" fill="none" aria-hidden="true">
-              <defs>
-                <linearGradient id="koda-pwa" x1="8" y1="7" x2="24" y2="25" gradientUnits="userSpaceOnUse">
-                  <stop stopColor="#0A7E8C" />
-                  <stop offset="1" stopColor="#4ECB71" />
-                </linearGradient>
-              </defs>
-              <path d="M10.5 8V24" stroke="url(#koda-pwa)" strokeWidth="3.2" strokeLinecap="round" />
-              <path d="M10.5 16L22.5 8" stroke="url(#koda-pwa)" strokeWidth="3.2" strokeLinecap="round" />
-              <path d="M10.5 16L22.5 24" stroke="url(#koda-pwa)" strokeWidth="3.2" strokeLinecap="round" />
-              <circle cx="22.5" cy="8" r="2.4" fill="#0A7E8C" />
-              <circle cx="22.5" cy="24" r="2.4" fill="#4ECB71" />
-            </svg>
+        <div className="flex items-center gap-3 rounded-xl border border-zinc-200 bg-surface-raised p-3">
+          <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-surface-muted ring-1 ring-zinc-900/5">
+            <KodaMark size={20} />
           </div>
           <p className="text-xs text-zinc-600">
             <strong className="font-semibold">KODA</strong> đang chạy bản đã cài lên thiết bị —
@@ -70,18 +59,18 @@ function InstallSection() {
           type="button"
           onClick={handleInstall}
           disabled={installing}
-          className="w-full flex items-center justify-center gap-2 py-2.5 px-4 bg-gradient-to-r from-[#0A7E8C] to-[#0E9A6B] hover:from-[#086E7A] hover:to-[#0C8A5F] text-white rounded-xl text-sm font-medium shadow-[0_6px_20px_-8px_rgba(10,126,140,0.6)] transition disabled:opacity-50"
+          className="btn-primary w-full bg-gradient-to-r from-brand to-brand-accent hover:from-brand-hover hover:to-brand-accent"
         >
           {installing ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
           Cài KODA lên thiết bị
         </button>
       ) : isIOS ? (
-        <p className="text-xs text-zinc-500 leading-relaxed">
+        <p className="text-xs leading-relaxed text-zinc-600">
           Trên iPhone/iPad: bấm nút <strong>Chia sẻ</strong> trong Safari →
           &ldquo;Thêm vào Màn hình chính&rdquo; để dùng như ứng dụng.
         </p>
       ) : (
-        <p className="text-xs text-zinc-500 leading-relaxed">
+        <p className="text-xs leading-relaxed text-zinc-600">
           Cài app: trên Android/Chrome mở menu ⋮ → &ldquo;Cài đặt ứng dụng&rdquo;;
           trên máy tính mở biểu tượng install trên thanh địa chỉ.
         </p>
@@ -146,74 +135,76 @@ function PromptLibrarySection() {
   };
 
   return (
-    <div className="pt-4 border-t border-zinc-200 space-y-3">
-      <h3 className="text-sm font-semibold text-zinc-700">Thư viện prompt</h3>
-      <p className="text-xs text-zinc-500 leading-relaxed">
-        Gõ <code className="text-zinc-500">/</code> trong ô nhập tin nhắn để chèn nhanh.
+    <div className="space-y-3">
+      <h3 className="text-sm font-semibold text-zinc-800">Thư viện prompt</h3>
+      <p className="text-xs leading-relaxed text-zinc-600">
+        Gõ <code className="claude-inline-code">/</code> trong ô nhập tin nhắn để chèn nhanh.
       </p>
 
       {(prompts ?? []).map((p) =>
         editingId === p.id ? (
-          <div key={p.id} className="space-y-2 rounded-xl border border-zinc-300 bg-zinc-100/60 p-2.5">
+          <div key={p.id} className="space-y-2 rounded-xl border border-zinc-300 bg-surface-muted p-2.5">
             <input
               value={editTitle}
               onChange={(e) => setEditTitle(e.target.value)}
-              className="w-full rounded-lg border border-zinc-300 bg-white px-2.5 py-1.5 text-sm text-zinc-800 outline-none focus:border-[#0A7E8C]"
+              className="field-sm"
               placeholder="Tên prompt"
+              aria-label="Tên prompt"
             />
             <textarea
               value={editContent}
               onChange={(e) => setEditContent(e.target.value)}
               rows={4}
-              className="w-full resize-y rounded-lg border border-zinc-300 bg-white px-2.5 py-1.5 text-xs text-zinc-600 outline-none focus:border-[#0A7E8C]"
+              className="field-sm resize-y text-xs"
               placeholder="Nội dung prompt"
+              aria-label="Nội dung prompt"
             />
             <div className="flex gap-2">
               <button
                 type="button"
                 onClick={saveEdit}
-                className="rounded-lg bg-[#0A7E8C] px-3 py-1 text-xs font-medium text-white hover:bg-[#086E7A]"
+                className="rounded-lg bg-brand px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-brand-hover"
               >
                 Lưu
               </button>
               <button
                 type="button"
                 onClick={() => setEditingId(null)}
-                className="rounded-lg px-3 py-1 text-xs text-zinc-500 hover:text-zinc-700"
+                className="rounded-lg px-3 py-1 text-xs text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900"
               >
-                Huỷ
+                Hủy
               </button>
             </div>
           </div>
         ) : (
           <div
             key={p.id}
-            className="group flex items-start justify-between gap-2 rounded-lg border border-zinc-200 bg-zinc-100/40 px-2.5 py-2"
+            className="group flex items-start justify-between gap-2 rounded-lg border border-zinc-200 bg-surface-muted/60 px-2.5 py-2"
           >
             <div className="min-w-0 flex-1">
-              <div className="text-[13px] font-medium text-zinc-700">{p.title}</div>
-              <div className="mt-0.5 line-clamp-2 text-[11px] leading-relaxed text-zinc-500">
+              <div className="text-[13px] font-medium text-zinc-800">{p.title}</div>
+              <div className="mt-0.5 line-clamp-2 text-[11px] leading-relaxed text-zinc-600">
                 {p.content.replace(/\n+/g, ' ')}
               </div>
             </div>
-            <div className="flex flex-shrink-0 gap-1 opacity-60 transition-opacity group-hover:opacity-100">
+            <div className="flex flex-shrink-0 gap-1 opacity-70 transition-opacity group-hover:opacity-100">
               <button
                 type="button"
                 onClick={() => startEdit(p)}
                 aria-label={`Sửa ${p.title}`}
-                className="rounded p-1 text-zinc-500 hover:bg-zinc-200 hover:text-zinc-800"
+                className="rounded p-1 text-zinc-500 transition-colors hover:bg-zinc-200 hover:text-zinc-900"
               >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+                <Pencil size={12} />
               </button>
               <button
                 type="button"
                 onClick={() => {
-                  if (window.confirm(`Xoá prompt "${p.title}"?`)) void deletePrompt(p.id);
+                  if (window.confirm(`Xóa prompt "${p.title}"?`)) void deletePrompt(p.id);
                 }}
-                aria-label={`Xoá ${p.title}`}
-                className="rounded p-1 text-zinc-500 hover:bg-zinc-200 hover:text-red-400"
+                aria-label={`Xóa ${p.title}`}
+                className="rounded p-1 text-zinc-500 transition-colors hover:bg-red-50 hover:text-red-600"
               >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>
+                <Trash2 size={12} />
               </button>
             </div>
           </div>
@@ -224,24 +215,26 @@ function PromptLibrarySection() {
         <input
           value={newTitle}
           onChange={(e) => setNewTitle(e.target.value)}
-          className="w-full rounded-lg border border-zinc-300 bg-white px-2.5 py-1.5 text-sm text-zinc-800 outline-none focus:border-[#0A7E8C]"
+          className="field-sm"
           placeholder="Tên prompt mới (vd: Viết email)"
+          aria-label="Tên prompt mới"
         />
         <textarea
           value={newContent}
           onChange={(e) => setNewContent(e.target.value)}
           rows={3}
-          className="w-full resize-y rounded-lg border border-zinc-300 bg-white px-2.5 py-1.5 text-xs text-zinc-600 outline-none focus:border-[#0A7E8C]"
+          className="field-sm resize-y text-xs"
           placeholder="Nội dung prompt"
+          aria-label="Nội dung prompt mới"
         />
         <button
           type="button"
           onClick={addPrompt}
-          className="w-full rounded-lg bg-zinc-200 py-1.5 text-xs font-medium text-zinc-700 transition hover:bg-zinc-300"
+          className="w-full rounded-lg bg-zinc-100 py-1.5 text-xs font-medium text-zinc-700 transition hover:bg-zinc-200"
         >
           + Thêm prompt
         </button>
-        {error && <p className="text-[11px] text-amber-400">{error}</p>}
+        {error && <p className="notice-error">{error}</p>}
       </div>
     </div>
   );
@@ -298,20 +291,21 @@ function AutoBackupSection() {
   };
 
   return (
-    <div className="pt-4 border-t border-zinc-200 space-y-3">
-      <h3 className="text-sm font-semibold text-zinc-700">Tự động sao lưu</h3>
+    <div className="space-y-3">
+      <h3 className="text-sm font-semibold text-zinc-800">Tự động sao lưu</h3>
       <div>
-        <label className="text-xs font-medium text-zinc-500 mb-1.5 block">
+        <label htmlFor="backup-interval" className="mb-1.5 block text-xs font-medium text-zinc-600">
           Chu kỳ nhắc / tự động
         </label>
         <select
+          id="backup-interval"
           value={intervalDays}
           onChange={(e) => {
             const days = Number(e.target.value);
             setIntervalDays(days);
             setBackupIntervalDays(days);
           }}
-          className="w-full bg-white border border-zinc-200 rounded-xl p-2.5 text-sm text-zinc-700 outline-none focus:border-[#0A7E8C] transition"
+          className="field"
         >
           <option value={1}>Mỗi ngày</option>
           <option value={3}>Mỗi 3 ngày</option>
@@ -324,7 +318,7 @@ function AutoBackupSection() {
       {fsSupported && (
         <div className="space-y-2">
           {dirName ? (
-            <div className="flex items-center justify-between gap-2 rounded-xl border border-zinc-300 bg-zinc-100/60 px-3 py-2 text-xs text-zinc-600">
+            <div className="flex items-center justify-between gap-2 rounded-xl border border-zinc-300 bg-surface-muted px-3 py-2 text-xs text-zinc-700">
               <span className="min-w-0 truncate">📁 {dirName}</span>
               <button
                 type="button"
@@ -334,7 +328,7 @@ function AutoBackupSection() {
                     setMessage('Đã gỡ thư mục tự động — quay lại chế độ nhắc + tải file.');
                   });
                 }}
-                className="flex-shrink-0 text-zinc-500 hover:text-red-400"
+                className="flex-shrink-0 rounded px-1.5 py-0.5 text-zinc-600 transition-colors hover:bg-red-50 hover:text-red-600"
               >
                 Gỡ
               </button>
@@ -344,14 +338,14 @@ function AutoBackupSection() {
               type="button"
               onClick={handleChoose}
               disabled={busy}
-              className="w-full flex items-center justify-center gap-2 py-2.5 px-3 bg-white hover:bg-zinc-200 border border-zinc-200 text-zinc-700 rounded-xl text-sm font-medium transition disabled:opacity-50"
+              className="btn-secondary w-full"
             >
               Chọn thư mục lưu tự động…
             </button>
           )}
-          <p className="text-[11px] leading-relaxed text-zinc-500">
-            Desktop Chrome/Edge: đến kỳ app tự ghi file <code>.json</code> vào thư mục này,
-            không cần bấm gì.
+          <p className="text-[11px] leading-relaxed text-zinc-600">
+            Desktop Chrome/Edge: đến kỳ app tự ghi file <code className="claude-inline-code">.json</code> vào
+            thư mục này, không cần bấm gì.
           </p>
         </div>
       )}
@@ -360,13 +354,13 @@ function AutoBackupSection() {
         type="button"
         onClick={handleBackupNow}
         disabled={busy}
-        className="w-full flex items-center justify-center gap-2 py-2.5 px-3 bg-white hover:bg-zinc-200 border border-zinc-200 text-zinc-700 rounded-xl text-sm font-medium transition disabled:opacity-50"
+        className="btn-secondary w-full"
       >
         {busy ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
         Sao lưu ngay
       </button>
-      <p className="text-[11px] text-zinc-500">Lần sao lưu cuối: {lastBackup}</p>
-      {message && <p className="text-[11px] text-amber-400">{message}</p>}
+      <p className="text-[11px] text-zinc-600">Lần sao lưu cuối: {lastBackup}</p>
+      {message && <p className="notice-warn" role="status">{message}</p>}
     </div>
   );
 }
@@ -443,7 +437,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
 
     if (importMode === 'overwrite') {
       const ok = window.confirm(
-        'Chế độ GHI ĐÈ sẽ xoá toàn bộ lịch sử chat hiện tại trước khi nạp tệp. Tiếp tục?',
+        'Chế độ GHI ĐÈ sẽ xóa toàn bộ lịch sử chat hiện tại trước khi nạp tệp. Tiếp tục?',
       );
       if (!ok) return;
     }
@@ -465,291 +459,371 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
 
   const busy = status.kind === 'busy';
 
+  /** Tablist: mũi trái/phải để đổi tab theo khuyến nghị WAI-ARIA. */
+  const onTabKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+    e.preventDefault();
+    const i = SETTINGS_TABS.findIndex((t) => t.id === tab);
+    const next =
+      e.key === 'ArrowRight'
+        ? (i + 1) % SETTINGS_TABS.length
+        : (i - 1 + SETTINGS_TABS.length) % SETTINGS_TABS.length;
+    setTab(SETTINGS_TABS[next].id);
+    (e.currentTarget.parentElement?.children[next] as HTMLElement | undefined)?.focus();
+  };
+
   return (
     <div
-      role="dialog"
-      aria-modal="true"
-      aria-label="Cài đặt hệ thống"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
-      className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200"
+      className="fixed inset-0 z-50 flex animate-fade-in items-center justify-center bg-zinc-900/50 p-4 backdrop-blur-sm"
     >
+      {/*
+        role="dialog" phải nằm trên chính hộp thoại, không phải lớp phủ: nếu đặt
+        ở lớp phủ thì screen reader coi cả nền mờ là nội dung dialog.
+      */}
       <div
         ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="settings-dialog-title"
         tabIndex={-1}
-        className="bg-[#F7F9FC] border border-zinc-200 rounded-2xl w-full max-w-lg p-6 shadow-2xl max-h-[90vh] overflow-y-auto focus:outline-none"
+        className="flex max-h-[90dvh] w-full max-w-lg animate-pop-in flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-surface shadow-2xl focus:outline-none"
       >
-        <div className="flex items-center justify-between mb-6 pb-3 border-b border-zinc-200">
-          <h2 className="text-xl font-medium text-zinc-800">Cài đặt ứng dụng</h2>
+        <div className="flex flex-shrink-0 items-center justify-between gap-3 border-b border-zinc-200 px-5 py-3.5 sm:px-6">
+          <h2 id="settings-dialog-title" className="text-base font-semibold text-zinc-900">
+            Cài đặt ứng dụng
+          </h2>
           <button
             type="button"
             onClick={onClose}
             aria-label="Đóng cài đặt"
-            className="p-1 text-zinc-500 hover:text-zinc-600 rounded-lg transition"
+            className="icon-btn-sm"
           >
             <X size={18} />
           </button>
         </div>
 
-        <div className="space-y-5">
-          <div className="mb-5 flex gap-1 overflow-x-auto rounded-xl bg-white p-1 ring-1 ring-zinc-200" role="tablist">
+        <div className="flex-shrink-0 px-5 pt-4 sm:px-6">
+          <div
+            className="no-scrollbar flex gap-1 overflow-x-auto rounded-xl bg-surface-raised p-1 ring-1 ring-zinc-200"
+            role="tablist"
+            aria-label="Nhóm cài đặt"
+          >
             {SETTINGS_TABS.map((t) => (
               <button
                 key={t.id}
                 type="button"
                 role="tab"
+                id={`settings-tab-${t.id}`}
                 aria-selected={tab === t.id}
+                aria-controls={`settings-panel-${t.id}`}
+                tabIndex={tab === t.id ? 0 : -1}
                 onClick={() => setTab(t.id)}
+                onKeyDown={onTabKeyDown}
                 className={`flex-shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium transition ${
-                  tab === t.id ? 'bg-[#0A7E8C] text-white shadow-sm' : 'text-zinc-500 hover:bg-zinc-100 hover:text-zinc-700'
+                  tab === t.id
+                    ? 'bg-brand text-white shadow-sm'
+                    : 'text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900'
                 }`}
               >
                 {t.label}
               </button>
             ))}
           </div>
-          {show('chung') && (<>
-          {/* Temperature */}
-          <div>
-            <div className="flex justify-between text-sm mb-1.5">
-              <span className="text-zinc-600 font-medium">Temperature: {settings.temperature}</span>
-            </div>
-            <input
-              type="range" min="0" max="1" step="0.05"
-              value={settings.temperature}
-              onChange={(e) => updateSettings({ temperature: parseFloat(e.target.value) })}
-              className="w-full accent-[#0A7E8C]"
-            />
-          </div>
+        </div>
 
-          </>)}
-          {show('provider') && activeProviderId === SERVER_PROVIDER_ID && (<>
-          {/* API key */}
-          <div>
-            <label className="text-sm font-medium text-zinc-600 mb-1.5 block">
-              API Key — chỉ cho Máy chủ mặc định
-            </label>
-            <input
-              type="password"
-              value={settings.apiKey || ''}
-              onChange={(e) => updateSettings({ apiKey: e.target.value })}
-              placeholder="sk-..."
-              className="w-full bg-white border border-zinc-200 rounded-xl p-2.5 text-sm text-zinc-700 outline-none focus:border-[#0A7E8C] transition font-mono"
-            />
-          </div>
+        <div
+          role="tabpanel"
+          id={`settings-panel-${tab}`}
+          aria-labelledby={`settings-tab-${tab}`}
+          className="settings-panel min-h-0 flex-1 overflow-y-auto px-5 py-5 sm:px-6"
+        >
+          {show('chung') && (
+            <>
+              <div className="space-y-4">
+                <div>
+                  <label htmlFor="temperature" className="mb-1.5 flex items-baseline justify-between gap-2 text-sm">
+                    <span className="font-medium text-zinc-700">Temperature</span>
+                    <span className="font-mono text-xs tabular-nums text-zinc-600">
+                      {settings.temperature.toFixed(2)}
+                    </span>
+                  </label>
+                  <input
+                    id="temperature"
+                    type="range" min="0" max="1" step="0.05"
+                    value={settings.temperature}
+                    onChange={(e) => updateSettings({ temperature: parseFloat(e.target.value) })}
+                    className="w-full accent-brand"
+                  />
+                  <p className="mt-1 text-[11px] leading-relaxed text-zinc-600">
+                    Thấp = trả lời ổn định, sát dữ kiện. Cao = sáng tạo, biến thiên nhiều hơn.
+                  </p>
+                </div>
 
-          </>)}
-          {show('provider') && (<>
-          {/* Nhà cung cấp API */}
-          <div>
-            <label className="text-sm font-medium text-zinc-600 mb-1.5 block">
-              Nhà cung cấp API
-            </label>
-            <p className="mb-2 text-[11px] text-zinc-500 leading-relaxed">
-              Lưu nhiều nhà cung cấp chuẩn OpenAI-compatible, tải danh sách model và chuyển
-              nhanh mà không cần cấu hình lại server.
-            </p>
-            <ul className="mb-2 list-disc space-y-1 pl-4 text-[11px] text-zinc-500 leading-relaxed">
-              <li>
-                <strong className="font-medium text-zinc-600">OpenRouter:</strong> key free tại{' '}
-                <a
-                  href="https://openrouter.ai/keys"
-                  target="_blank"
-                  rel="noreferrer noopener nofollow"
-                  className="text-[#0A7E8C] underline-offset-2 hover:underline"
-                >
-                  openrouter.ai/keys
-                </a>{' '}
-                — chọn model đuôi <code className="text-zinc-600">:free</code> (50 lượt/ngày;
-                nạp $10 một lần duy nhất → 1.000 lượt/ngày free vĩnh viễn).
-              </li>
-              <li>
-                <strong className="font-medium text-zinc-600">airforce:</strong> key free tại{' '}
-                <a
-                  href="https://api.airforce/signup"
-                  target="_blank"
-                  rel="noreferrer noopener nofollow"
-                  className="text-[#0A7E8C] underline-offset-2 hover:underline"
-                >
-                  api.airforce/signup
-                </a>{' '}
-                — 1.000 lượt/ngày, 1 lượt/phút, model cơ bản.
-              </li>
-            </ul>
-            <ProviderManager />
-          </div>
+                <div>
+                  <label htmlFor="system-prompt" className="mb-1.5 block text-sm font-medium text-zinc-700">
+                    System Prompt
+                  </label>
+                  <textarea
+                    id="system-prompt"
+                    value={settings.systemPrompt}
+                    onChange={(e) => updateSettings({ systemPrompt: e.target.value })}
+                    rows={4}
+                    className="field resize-y"
+                  />
+                </div>
+              </div>
 
-          </>)}
-          {show('stats') && (<>
-          {/* Thống kê token */}
-          <div>
-            <label className="text-sm font-medium text-zinc-600 mb-1.5 block">
-              Thống kê token sử dụng
-            </label>
-            <UsageStats />
-          </div>
+              <div className="space-y-3">
+                <h3 className="text-sm font-semibold text-zinc-800">Nhập &amp; hiệu năng</h3>
 
-          </>)}
-          {show('provider') && (<>
-          {/* Access code */}
-          <div>
-            <label className="text-sm font-medium text-zinc-600 mb-1.5 block">
-              Mã truy cập (Access Code)
-            </label>
-            <input
-              type="password"
-              value={settings.accessCode || ''}
-              onChange={(e) => updateSettings({ accessCode: e.target.value })}
-              placeholder="Nhập mã truy cập..."
-              className="w-full bg-white border border-zinc-200 rounded-xl p-2.5 text-sm text-zinc-700 outline-none focus:border-[#0A7E8C] transition font-mono"
-            />
-          </div>
+                <label htmlFor="send-on-enter" className="flex items-start justify-between gap-3">
+                  <span className="min-w-0">
+                    <span className="block text-sm font-medium text-zinc-700">
+                      Enter để gửi tin nhắn
+                    </span>
+                    <span className="mt-0.5 block text-[11px] leading-relaxed text-zinc-600">
+                      Tắt thì Enter xuống dòng, gửi bằng Ctrl/⌘ + Enter.
+                    </span>
+                  </span>
+                  <input
+                    id="send-on-enter"
+                    type="checkbox"
+                    checked={settings.sendOnEnter}
+                    onChange={(e) => updateSettings({ sendOnEnter: e.target.checked })}
+                    className="mt-0.5 h-4 w-4 flex-shrink-0 rounded accent-brand"
+                  />
+                </label>
 
-          </>)}
-          {show('chung') && (<>
-          {/* System prompt */}
-          <div>
-            <label className="text-sm font-medium text-zinc-600 mb-1.5 block">System Prompt</label>
-            <textarea
-              value={settings.systemPrompt}
-              onChange={(e) => updateSettings({ systemPrompt: e.target.value })}
-              rows={3}
-              className="w-full bg-white border border-zinc-200 rounded-xl p-2.5 text-sm text-zinc-700 outline-none focus:border-[#0A7E8C] transition resize-none"
-            />
-          </div>
+                <label htmlFor="anim-toggle" className="flex items-start justify-between gap-3">
+                  <span className="min-w-0">
+                    <span className="block text-sm font-medium text-zinc-700">
+                      Hiệu ứng chuyển động
+                    </span>
+                    <span className="mt-0.5 block text-[11px] leading-relaxed text-zinc-600">
+                      Tắt để giảm chuyển động trên máy yếu. Hệ thống cũng tự tôn trọng thiết lập
+                      &ldquo;giảm chuyển động&rdquo; của thiết bị.
+                    </span>
+                  </span>
+                  <input
+                    id="anim-toggle"
+                    type="checkbox"
+                    checked={settings.perf?.animations ?? true}
+                    onChange={(e) => updatePerf({ animations: e.target.checked })}
+                    className="mt-0.5 h-4 w-4 flex-shrink-0 rounded accent-brand"
+                  />
+                </label>
 
-          </>)}
-          {show('chung') && (<>
-          {/* Perf */}
-          <div className="pt-2 border-t border-zinc-200/80 space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-zinc-600 font-medium">Hiệu ứng Animation</span>
-              <input
-                type="checkbox"
-                checked={settings.perf?.animations ?? true}
-                onChange={(e) => updatePerf({ animations: e.target.checked })}
-                className="rounded accent-[#0A7E8C] w-4 h-4"
-              />
-            </div>
-          </div>
+                <div>
+                  <label htmlFor="throttle-ms" className="mb-1.5 block text-sm font-medium text-zinc-700">
+                    Tần suất vẽ lại khi AI đang trả lời
+                  </label>
+                  <select
+                    id="throttle-ms"
+                    value={settings.perf?.throttleMs ?? 150}
+                    onChange={(e) => updatePerf({ throttleMs: Number(e.target.value) })}
+                    className="field"
+                  >
+                    <option value={80}>Mượt nhất — 80ms (máy khỏe)</option>
+                    <option value={150}>Cân bằng — 150ms (mặc định)</option>
+                    <option value={250}>Tiết kiệm — 250ms</option>
+                    <option value={400}>Nhẹ nhất — 400ms (máy yếu)</option>
+                  </select>
+                </div>
+              </div>
+            </>
+          )}
 
-          </>)}
-          {show('prompts') && (<>
-          {/* ------------------ Thư viện prompt ------------------ */}
-          <PromptLibrarySection />
+          {show('provider') && (
+            <>
+              {activeProviderId === SERVER_PROVIDER_ID && (
+                <div>
+                  <label htmlFor="server-api-key" className="mb-1.5 block text-sm font-medium text-zinc-700">
+                    API Key — chỉ cho Máy chủ mặc định
+                  </label>
+                  <input
+                    id="server-api-key"
+                    type="password"
+                    value={settings.apiKey || ''}
+                    onChange={(e) => updateSettings({ apiKey: e.target.value })}
+                    placeholder="sk-..."
+                    className="field font-mono"
+                  />
+                  <p className="mt-1 text-[11px] leading-relaxed text-zinc-600">
+                    Chỉ lưu trong phiên này, không ghi vào bộ nhớ máy.
+                  </p>
+                </div>
+              )}
 
-          </>)}
-          {show('app') && (<>
-          {/* ------------------ Ứng dụng (PWA) ------------------ */}
-          <InstallSection />
+              <div>
+                <h3 className="mb-1.5 text-sm font-semibold text-zinc-800">Nhà cung cấp API</h3>
+                <p className="mb-2 text-[11px] leading-relaxed text-zinc-600">
+                  Lưu nhiều nhà cung cấp chuẩn OpenAI-compatible, tải danh sách model và chuyển
+                  nhanh mà không cần cấu hình lại server.
+                </p>
+                <ul className="mb-2.5 list-disc space-y-1 pl-4 text-[11px] leading-relaxed text-zinc-600">
+                  <li>
+                    <strong className="font-medium text-zinc-800">OpenRouter:</strong> key free tại{' '}
+                    <a
+                      href="https://openrouter.ai/keys"
+                      target="_blank"
+                      rel="noreferrer noopener nofollow"
+                      className="text-brand underline-offset-2 hover:underline"
+                    >
+                      openrouter.ai/keys
+                    </a>{' '}
+                    — chọn model đuôi <code className="claude-inline-code">:free</code> (50 lượt/ngày;
+                    nạp $10 một lần duy nhất → 1.000 lượt/ngày free vĩnh viễn).
+                  </li>
+                  <li>
+                    <strong className="font-medium text-zinc-800">airforce:</strong> key free tại{' '}
+                    <a
+                      href="https://api.airforce/signup"
+                      target="_blank"
+                      rel="noreferrer noopener nofollow"
+                      className="text-brand underline-offset-2 hover:underline"
+                    >
+                      api.airforce/signup
+                    </a>{' '}
+                    — 1.000 lượt/ngày, 1 lượt/phút, model cơ bản.
+                  </li>
+                </ul>
+                <ProviderManager />
+              </div>
 
-          </>)}
-          {show('data') && (<>
-          {/* ------------------ Tự động sao lưu ------------------ */}
-          <AutoBackupSection />
+              <div>
+                <label htmlFor="access-code" className="mb-1.5 block text-sm font-medium text-zinc-700">
+                  Mã truy cập (Access Code)
+                </label>
+                <input
+                  id="access-code"
+                  type="password"
+                  value={settings.accessCode || ''}
+                  onChange={(e) => updateSettings({ accessCode: e.target.value })}
+                  placeholder="Nhập mã truy cập..."
+                  className="field font-mono"
+                />
+              </div>
+            </>
+          )}
 
-          </>)}
-          {show('data') && (<>
-          {/* ------------------ Sao lưu & Phục hồi ------------------ */}
-          <div className="pt-4 border-t border-zinc-200 space-y-3">
-            <h3 className="text-sm font-semibold text-zinc-700">Sao lưu & Phục hồi</h3>
-            <p className="text-xs text-zinc-500 leading-relaxed">
-              Bản <code className="text-zinc-500">.json</code> lưu đầy đủ cây phân nhánh và tệp kèm —
-              dùng để phục hồi. Bản <code className="text-zinc-500">.md</code> chỉ xuất nhánh đang
-              xem, dùng để đọc hoặc in.
-            </p>
-
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => run('Đang xuất JSON…', () => exportJson())}
-                className="flex items-center justify-center gap-2 py-2.5 px-3 bg-white hover:bg-zinc-200 border border-zinc-200 text-zinc-700 rounded-xl text-sm font-medium transition disabled:opacity-50"
-              >
-                <Download size={14} /> Xuất tất cả .json
-              </button>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => run('Đang xuất Markdown…', () => exportMarkdown())}
-                className="flex items-center justify-center gap-2 py-2.5 px-3 bg-white hover:bg-zinc-200 border border-zinc-200 text-zinc-700 rounded-xl text-sm font-medium transition disabled:opacity-50"
-              >
-                <Download size={14} /> Xuất tất cả .md
-              </button>
-            </div>
-
+          {show('stats') && (
             <div>
-              <label className="text-xs font-medium text-zinc-500 mb-1.5 block">
-                Cách xử lý khi nạp lại
-              </label>
-              <select
-                value={importMode}
-                onChange={(e) => setImportMode(e.target.value as ImportMode)}
-                className="w-full bg-white border border-zinc-200 rounded-xl p-2.5 text-sm text-zinc-700 outline-none focus:border-[#0A7E8C] transition"
-              >
-                <option value="merge">Gộp — bỏ qua đoạn chat đã tồn tại (an toàn)</option>
-                <option value="duplicate">Nhân bản — luôn tạo bản mới với ID mới</option>
-                <option value="overwrite">Ghi đè — xoá sạch rồi nạp lại</option>
-              </select>
+              <h3 className="mb-2 text-sm font-semibold text-zinc-800">Thống kê token sử dụng</h3>
+              <UsageStats />
             </div>
+          )}
 
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => fileInputRef.current?.click()}
-              className="w-full flex items-center justify-center gap-2 py-2.5 px-4 bg-[#0A7E8C] hover:bg-[#086E7A] text-white rounded-xl text-sm font-medium transition disabled:opacity-50"
-            >
-              {busy ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
-              Nạp tệp sao lưu (.json)
-            </button>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="application/json,.json"
-              onChange={handleFile}
-              className="hidden"
-            />
+          {show('prompts') && <PromptLibrarySection />}
 
-            {status.kind !== 'idle' && status.message && (
-              <p
-                className={`text-xs leading-relaxed ${
-                  status.kind === 'error'
-                    ? 'text-red-400'
-                    : status.kind === 'ok'
-                      ? 'text-emerald-400'
-                      : 'text-zinc-500'
-                }`}
-                role="status"
-              >
-                {status.message}
-              </p>
-            )}
-          </div>
+          {show('app') && <InstallSection />}
 
-          {/* Danger zone */}
-          <div className="pt-4 border-t border-zinc-200">
-            <div className="flex items-start gap-2 mb-2 text-xs text-zinc-500">
-              <ShieldAlert size={14} className="text-red-500 flex-shrink-0 mt-0.5" />
-              <span>Hãy xuất bản sao lưu .json trước khi thực hiện hành động này.</span>
-            </div>
-            <button
-              type="button"
-              onClick={async () => {
-                if (
-                  window.confirm(
-                    'CẢNH BÁO: Hành động này sẽ xoá toàn bộ lịch sử chat và cài đặt. Bạn có chắc chắn không?',
-                  )
-                ) {
-                  await db.delete();
-                  localStorage.clear();
-                  window.location.reload();
-                }
-              }}
-              className="w-full py-2.5 px-4 bg-red-950/40 hover:bg-red-900/60 text-red-400 border border-red-900/50 rounded-xl text-sm font-medium transition"
-            >
-              Xoá toàn bộ dữ liệu ứng dụng
-            </button>
-          </div>
-          </>)}
+          {show('data') && (
+            <>
+              <AutoBackupSection />
+
+              <div className="space-y-3">
+                <h3 className="text-sm font-semibold text-zinc-800">Sao lưu &amp; Phục hồi</h3>
+                <p className="text-xs leading-relaxed text-zinc-600">
+                  Bản <code className="claude-inline-code">.json</code> lưu đầy đủ cây phân nhánh và tệp kèm —
+                  dùng để phục hồi. Bản <code className="claude-inline-code">.md</code> chỉ xuất nhánh đang
+                  xem, dùng để đọc hoặc in.
+                </p>
+
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => run('Đang xuất JSON…', () => exportJson())}
+                    className="btn-secondary"
+                  >
+                    <Download size={14} /> Xuất tất cả .json
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => run('Đang xuất Markdown…', () => exportMarkdown())}
+                    className="btn-secondary"
+                  >
+                    <Download size={14} /> Xuất tất cả .md
+                  </button>
+                </div>
+
+                <div>
+                  <label htmlFor="import-mode" className="mb-1.5 block text-xs font-medium text-zinc-600">
+                    Cách xử lý khi nạp lại
+                  </label>
+                  <select
+                    id="import-mode"
+                    value={importMode}
+                    onChange={(e) => setImportMode(e.target.value as ImportMode)}
+                    className="field"
+                  >
+                    <option value="merge">Gộp — bỏ qua đoạn chat đã tồn tại (an toàn)</option>
+                    <option value="duplicate">Nhân bản — luôn tạo bản mới với ID mới</option>
+                    <option value="overwrite">Ghi đè — xóa sạch rồi nạp lại</option>
+                  </select>
+                </div>
+
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => fileInputRef.current?.click()}
+                  className="btn-primary w-full"
+                >
+                  {busy ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+                  Nạp tệp sao lưu (.json)
+                </button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="application/json,.json"
+                  onChange={handleFile}
+                  className="hidden"
+                />
+
+                {status.kind !== 'idle' && status.message && (
+                  <p
+                    className={`text-xs leading-relaxed ${
+                      status.kind === 'error'
+                        ? 'text-red-700'
+                        : status.kind === 'ok'
+                          ? 'text-emerald-700'
+                          : 'text-zinc-600'
+                    }`}
+                    role="status"
+                  >
+                    {status.message}
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <h3 className="mb-2 text-sm font-semibold text-red-700">Vùng nguy hiểm</h3>
+                <div className="mb-2 flex items-start gap-2 text-xs text-zinc-600">
+                  <ShieldAlert size={14} className="mt-0.5 flex-shrink-0 text-red-600" />
+                  <span>Hãy xuất bản sao lưu .json trước khi thực hiện hành động này.</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (
+                      window.confirm(
+                        'CẢNH BÁO: Hành động này sẽ xóa toàn bộ lịch sử chat và cài đặt. Bạn có chắc chắn không?',
+                      )
+                    ) {
+                      await db.delete();
+                      localStorage.clear();
+                      window.location.reload();
+                    }
+                  }}
+                  className="w-full rounded-xl border border-red-300 bg-red-50 px-4 py-2.5 text-sm font-medium text-red-700 transition hover:bg-red-100"
+                >
+                  Xóa toàn bộ dữ liệu ứng dụng
+                </button>
+              </div>
+            </>
+          )}
         </div>
       </div>
     </div>

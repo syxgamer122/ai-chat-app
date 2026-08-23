@@ -28,19 +28,24 @@ export const ChatHeader = memo(function ChatHeader({
   currentChatId,
 }: ChatHeaderProps) {
   return (
-    <header className="flex h-14 flex-shrink-0 items-center justify-between border-b border-zinc-200/60 bg-[#F7F9FC]/90 px-3 backdrop-blur pt-safe z-20 md:px-5">
+    /*
+     * `h-14` + `pt-safe` khiến notch ăn vào chiều cao cố định làm bóp nội dung
+     * header. Dùng min-height + padding để header tự cao thêm đúng phần an toàn.
+     */
+    <header className="sticky top-0 z-20 flex min-h-14 flex-shrink-0 items-center justify-between gap-2 border-b border-zinc-200/60 bg-surface/90 px-3 pb-2 pt-safe-2 backdrop-blur md:px-5">
       <div className="flex min-w-0 items-center gap-2">
         <button
           type="button"
           onClick={onOpenSidebar}
           aria-label="Mở thanh bên"
-          className="flex h-9 w-9 items-center justify-center rounded-lg text-zinc-500 hover:bg-zinc-200/70 md:hidden"
+          className="icon-btn-md md:hidden"
         >
           <Menu size={17} />
         </button>
-        <h1 className="truncate text-[14px] font-semibold tracking-tight text-zinc-700">
+        {/* h2 (không phải h1): h1 thuộc trạng thái rỗng / nội dung trang. */}
+        <h2 className="truncate text-[14px] font-semibold tracking-tight text-zinc-700">
           {title ?? 'Cuộc trò chuyện mới'}
-        </h1>
+        </h2>
       </div>
 
       <div className="flex items-center gap-1">
@@ -48,18 +53,18 @@ export const ChatHeader = memo(function ChatHeader({
 
         {hasMessages &&
           (confirmClear ? (
-            <div className="flex items-center gap-1.5 rounded-lg border border-zinc-200 bg-[#FFFFFF] p-1 shadow-lg">
+            <div className="surface-panel flex animate-pop-in items-center gap-1.5 p-1">
               <button
                 type="button"
                 onClick={onDeleteChat}
-                className="rounded px-2.5 py-1 text-xs font-medium text-red-400 hover:bg-red-500/10 transition"
+                className="rounded-md px-2.5 py-1 text-xs font-medium text-red-600 transition-colors hover:bg-red-50"
               >
                 Xóa hẳn
               </button>
               <button
                 type="button"
                 onClick={() => onSetConfirmClear(false)}
-                className="rounded px-2.5 py-1 text-xs text-zinc-500 hover:bg-zinc-200 transition"
+                className="rounded-md px-2.5 py-1 text-xs text-zinc-600 transition-colors hover:bg-zinc-100"
               >
                 Hủy
               </button>
@@ -70,7 +75,7 @@ export const ChatHeader = memo(function ChatHeader({
               onClick={() => onSetConfirmClear(true)}
               aria-label="Xóa cuộc trò chuyện"
               title="Xóa cuộc trò chuyện này"
-              className="flex h-8 w-8 items-center justify-center rounded-lg text-zinc-500 hover:bg-red-500/10 hover:text-red-400 transition"
+              className="icon-btn-sm icon-btn-danger"
             >
               <Trash2 size={16} />
             </button>

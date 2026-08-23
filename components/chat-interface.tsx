@@ -30,6 +30,7 @@ import { chatBroadcast } from '@/lib/chat-broadcast';
 import { createMutationId } from '@/lib/client-identity';
 import { useStickToBottom } from '@/lib/use-stick-to-bottom';
 import { Composer } from '@/components/composer';
+import { Toast } from '@/components/toast';
 import type { ModelOption } from '@/components/model-selector';
 import { useTitleGenerator } from '@/lib/use-title-generator';
 import { ensurePromptSeed, savePrompt } from '@/lib/prompt-library';
@@ -72,7 +73,6 @@ export default function ChatInterface() {
   const activeProvider = useAppStore((s) => s.activeProvider);
   const sendOnEnter = useAppStore((s) => s.settings.sendOnEnter);
   const throttleMs = useAppStore((s) => s.settings.perf.throttleMs);
-  const animations = useAppStore((s) => s.settings.perf.animations);
 
   /** Nạp snapshot provider đang active từ IndexedDB vào store. */
   useEffect(() => {
@@ -1878,7 +1878,7 @@ export default function ChatInterface() {
   return (
     <div
       {...swipeHandlers}
-      className="flex h-full flex-col overflow-hidden bg-[#F7F9FC] touch-pan-y"
+      className="flex h-full flex-col overflow-hidden bg-surface touch-pan-y"
     >
       <ChatHeader
         title={currentChat?.title}
@@ -1894,8 +1894,8 @@ export default function ChatInterface() {
         <div
           className={[
             'pointer-events-none fixed top-1/2 z-50 -translate-y-1/2',
-            'rounded-full bg-white/90 backdrop-blur border border-zinc-200 px-3.5 py-1.5 text-xs text-zinc-700 shadow-lg',
-            'transition-all animate-in fade-in zoom-in',
+            'rounded-full border border-zinc-200 bg-surface-raised/90 px-3.5 py-1.5 text-xs text-zinc-700 shadow-card backdrop-blur',
+            'animate-pop-in',
             swipeDirection === 'left' ? 'right-4' : 'left-4',
           ].join(' ')}
           aria-live="polite"
@@ -1917,7 +1917,6 @@ export default function ChatInterface() {
           isTouchDevice={isTouchDevice}
           sendOnEnter={sendOnEnter}
           throttleMs={throttleMs}
-          animations={animations}
           error={error}
           isAtBottom={isAtBottom}
           isAtBottomRef={isAtBottomRef}
@@ -1964,6 +1963,9 @@ export default function ChatInterface() {
         }
         onThinkingLevelChange={handleThinkingLevelChange}
       />
+
+      {/* Thông báo lỗi/cảnh báo từ showNotice() — trước đây không hề được render. */}
+      <Toast message={notice} onClose={onClearNotice} />
     </div>
   );
 }

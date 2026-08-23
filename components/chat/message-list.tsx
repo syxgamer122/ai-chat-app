@@ -6,6 +6,7 @@ import type { Message } from 'ai/react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { ArrowDown, ArrowUp } from 'lucide-react';
 import { ChatErrorBoundary } from '@/components/chat-error-boundary';
+import { KodaLogo } from '@/components/koda-logo';
 import { MessageItem, type BranchInfo } from './message-item';
 
 /* ------------------------------------------------------------------ */
@@ -62,7 +63,6 @@ interface MessageListProps {
   isTouchDevice: boolean;
   sendOnEnter: boolean;
   throttleMs: number;
-  animations: boolean;
   error?: Error;
   isAtBottom: boolean;
   isAtBottomRef: React.MutableRefObject<boolean>;
@@ -100,7 +100,6 @@ export const MessageList = memo(function MessageList({
   isTouchDevice,
   sendOnEnter,
   throttleMs,
-  animations,
   error,
   isAtBottom,
   isAtBottomRef,
@@ -232,7 +231,12 @@ export const MessageList = memo(function MessageList({
   }, [branchLayoutSignature]);
 
   const suggestions = useMemo(
-    () => ['Explain quantum computing', 'Write a Python script for scraping', 'Plan a healthy meal', 'Summarize an article'],
+    () => [
+      'Giải thích máy tính lượng tử một cách dễ hiểu',
+      'Viết script Python để thu thập dữ liệu web',
+      'Lên thực đơn ăn uống lành mạnh cho một tuần',
+      'Tóm tắt bài viết tôi sắp dán vào đây',
+    ],
     [],
   );
 
@@ -249,43 +253,29 @@ export const MessageList = memo(function MessageList({
         className="chat-scroll h-full overflow-y-auto px-4 md:px-8"
       >
         {!hasMessages ? (
-          <div className="flex h-full flex-col items-center justify-center px-4 pb-16 pt-10">
-            <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-white shadow-[0_8px_32px_-8px_rgba(10,126,140,0.35)] ring-1 ring-zinc-900/5">
-              <svg width="34" height="34" viewBox="0 0 32 32" fill="none" aria-hidden="true">
-                <defs>
-                  <linearGradient id="koda-empty" x1="8" y1="7" x2="24" y2="25" gradientUnits="userSpaceOnUse">
-                    <stop stopColor="#0A7E8C" />
-                    <stop offset="1" stopColor="#4ECB71" />
-                  </linearGradient>
-                </defs>
-                <path d="M10.5 8V24" stroke="url(#koda-empty)" strokeWidth="3.2" strokeLinecap="round" />
-                <path d="M10.5 16L22.5 8" stroke="url(#koda-empty)" strokeWidth="3.2" strokeLinecap="round" />
-                <path d="M10.5 16L22.5 24" stroke="url(#koda-empty)" strokeWidth="3.2" strokeLinecap="round" />
-                <circle cx="22.5" cy="8" r="2.4" fill="#0A7E8C" />
-                <circle cx="22.5" cy="24" r="2.4" fill="#4ECB71" />
-              </svg>
-            </div>
-            <div className="text-[15px] font-extrabold tracking-tight text-zinc-800">KODA</div>
-            <div className="mb-5 text-[9px] font-medium uppercase tracking-[0.28em] text-zinc-500">AI Innovations</div>
-            <h1 className="text-center text-[24px] font-semibold leading-tight tracking-tight text-zinc-800">
+          <div className="mx-auto flex h-full max-w-thread flex-col items-center justify-center px-4 pb-16 pt-10">
+            <KodaLogo size="lg" className="mb-5" />
+            <h1 className="text-center text-[22px] font-semibold leading-tight tracking-tight text-zinc-800 md:text-[26px]">
               Hôm nay mình giúp gì cho bạn?
             </h1>
             <p className="mt-2 text-center text-[13px] text-zinc-500">
               Hỏi bất cứ điều gì — nói bằng giọng nói, hoặc gõ / để chèn prompt mẫu.
             </p>
-            <div className="mt-8 grid w-full max-w-2xl grid-cols-1 gap-2.5 md:grid-cols-2">
+            <div className="mt-8 grid w-full grid-cols-1 gap-2.5 sm:grid-cols-2">
               {suggestions.map((prompt) => (
                 <button
                   key={prompt}
+                  type="button"
                   onClick={() => onSelectSuggestion(prompt)}
-                  className="group flex items-center justify-between gap-3 rounded-xl border border-zinc-200/80 bg-[#FFFFFF]/60 p-4 text-left transition-all duration-150 hover:-translate-y-0.5 hover:border-[#0A7E8C]/40 hover:bg-[#F1F5F9] hover:shadow-[0_8px_24px_-12px_rgba(15,23,42,0.18)]"
+                  className="group flex items-center justify-between gap-3 rounded-xl border border-zinc-200/80 bg-surface-raised/70 p-4 text-left transition-all duration-150 hover:-translate-y-0.5 hover:border-brand/40 hover:bg-surface-muted hover:shadow-card"
                 >
-                  <span className="text-sm text-zinc-500 transition-colors group-hover:text-zinc-800">
+                  <span className="text-sm text-zinc-600 transition-colors group-hover:text-zinc-900">
                     {prompt}
                   </span>
                   <ArrowUp
                     size={13}
-                    className="flex-shrink-0 text-zinc-700 transition-colors group-hover:text-[#0A7E8C]"
+                    aria-hidden="true"
+                    className="flex-shrink-0 text-zinc-400 transition-colors group-hover:text-brand"
                   />
                 </button>
               ))}
@@ -297,10 +287,10 @@ export const MessageList = memo(function MessageList({
               style={{
                 height: `${rowVirtualizer.getTotalSize()}px`,
                 width: '100%',
-                maxWidth: '48rem',
                 margin: '0 auto',
                 position: 'relative',
               }}
+              className="max-w-thread"
             >
               {rowVirtualizer.getVirtualItems().map((virtualRow) => {
                 const m = messages[virtualRow.index];
@@ -332,7 +322,6 @@ export const MessageList = memo(function MessageList({
                         isTouchDevice={isTouchDevice}
                         sendOnEnter={sendOnEnter}
                         throttleMs={throttleMs}
-                        animations={animations}
                         onCopy={onCopy}
                         onRegenerate={onRegenerate}
                         onSwitchBranch={onSwitchBranch}
@@ -352,17 +341,22 @@ export const MessageList = memo(function MessageList({
             </div>
 
             {isLoading && lastRole === 'user' && (
-              <div className="flex justify-start px-1 pb-6">
-                <span className="inline-block h-4 w-2 animate-pulse bg-[#0A7E8C]" />
+              <div className="mx-auto flex max-w-thread justify-start px-1 pb-6">
+                <span className="inline-block h-4 w-2 animate-pulse bg-brand" />
+                <span className="sr-only">AI đang trả lời…</span>
               </div>
             )}
           </>
         )}
 
         {error && (
-          <div className="max-w-[720px] p-4 bg-red-950/50 border border-red-900 text-red-400 rounded-xl mx-auto flex items-center justify-between">
-            <span>{friendlyErrorMessage(error.message)}</span>
-            <button onClick={onReload} className="px-3 py-1 bg-red-900/50 rounded hover:bg-red-800 transition">
+          <div className="notice-error mx-auto mb-4 flex max-w-thread flex-wrap items-center justify-between gap-2 px-3 py-2.5 text-sm">
+            <span className="min-w-0">{friendlyErrorMessage(error.message)}</span>
+            <button
+              type="button"
+              onClick={onReload}
+              className="flex-shrink-0 rounded-lg bg-red-600 px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-red-700"
+            >
               Thử lại
             </button>
           </div>
@@ -373,8 +367,8 @@ export const MessageList = memo(function MessageList({
         <button
           type="button"
           onClick={onScrollToBottom}
-          aria-label="Scroll to bottom"
-          className="absolute bottom-6 left-1/2 -translate-x-1/2 p-2 bg-zinc-200 text-zinc-600 rounded-full shadow-lg border border-zinc-300 hover:bg-zinc-300 transition"
+          aria-label="Xuống tin nhắn mới nhất"
+          className="absolute bottom-6 left-1/2 -translate-x-1/2 rounded-full border border-zinc-200 bg-surface-raised p-2 text-zinc-600 shadow-card transition-colors hover:bg-zinc-100 hover:text-zinc-900"
         >
           <ArrowDown size={18} />
         </button>

@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Check, ChevronDown, Search, Sparkles } from 'lucide-react';
+import { useMediaQuery } from '@/lib/hooks/use-media-query';
 
 export interface ModelOption {
   id: string;
@@ -150,12 +151,20 @@ export function ModelSelector({
       ?.scrollIntoView({ block: 'nearest' });
   }, [open, cursor]);
 
-  /** Chia các nhóm thành 2 cột cân đối theo số model (luôn 2 cột, kể cả mobile). */
+  /**
+   * Chia nhóm thành 2 cột cân đối theo số model. Trên mobile chỉ render 1 cột
+   * (grid-cols-1) nên dồn hết vào cột đầu để thứ tự đọc không bị nhảy.
+   */
+  const isNarrow = !useMediaQuery('(min-width: 640px)');
+
   const { columns, ordered, renderIndex } = useMemo(() => {
-    const cols: Array<typeof grouped> = [[], []];
-    let counts = [0, 0];
+    const colCount = isNarrow ? 1 : 2;
+    const cols: Array<typeof grouped> = Array.from({ length: colCount }, () => []);
+    const counts = new Array(colCount).fill(0);
     for (const g of grouped) {
-      const target = counts[0] <= counts[1] ? 0 : 1;
+      // Đưa vào cột đang "nhẹ" nhất để hai bên cao xấp xỉ nhau.
+      let target = 0;
+      for (let i = 1; i < colCount; i++) if (counts[i] < counts[target]) target = i;
       cols[target].push(g);
       counts[target] += g.items.length;
     }
@@ -167,7 +176,7 @@ export function ModelSelector({
       order.push(m);
     }
     return { columns: cols, ordered: order, renderIndex: index };
-  }, [grouped]);
+  }, [grouped, isNarrow]);
 
   const commit = useCallback(
     (index: number) => {
@@ -178,21 +187,26 @@ export function ModelSelector({
     [ordered, onChange, close],
   );
 
-  const onListKeyDown = (e: React.KeyboardEvent) => {
-    if (visible.length === 0) return;
+  /**
+   * Điều hướng bàn phím. Handler đặt trên wrapper của cả panel (không phải chỉ
+   * riêng list) vì focus nằm ở ô tìm kiếm — là node em của list, nên keydown
+   * trên list không bao giờ bắt được.
+   */
+  const onPanelKeyDown = (e: React.KeyboardEvent) => {
+    if (ordered.length === 0) return;
     if (e.key === 'ArrowDown') {
       e.preventDefault();
-      setCursor((c) => (c + 1) % visible.length);
+      setCursor((c) => (c + 1) % ordered.length);
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
-      setCursor((c) => (c - 1 + visible.length) % visible.length);
+      setCursor((c) => (c - 1 + ordered.length) % ordered.length);
     } else if (e.key === 'Home') {
       e.preventDefault();
       setCursor(0);
     } else if (e.key === 'End') {
       e.preventDefault();
-      setCursor(visible.length - 1);
-    } else if (e.key === 'Enter' || e.key === ' ') {
+      setCursor(ordered.length - 1);
+    } else if (e.key === 'Enter') {
       e.preventDefault();
       commit(cursor);
     } else if (e.key === 'Tab') {
@@ -216,21 +230,30 @@ export function ModelSelector({
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={open ? listId : undefined}
-        className="flex h-8 items-center gap-1.5 rounded-full px-2.5 text-[12px] font-medium text-zinc-500 hover:bg-zinc-200/70 hover:text-zinc-700 disabled:opacity-50"
+        aria-label={`Model: ${current?.label ?? 'chưa chọn'}`}
+        className="flex h-8 items-center gap-1.5 rounded-full px-2.5 text-[12px] font-medium text-zinc-600 transition-colors hover:bg-zinc-200/70 hover:text-zinc-900 disabled:opacity-50"
       >
-        <Sparkles size={13} className="text-[#0A7E8C]" />
-        <span className="max-w-[160px] truncate">{current?.label ?? 'Model'}</span>
-        <ChevronDown size={13} className="text-zinc-500" />
+        <Sparkles size={13} className="text-brand" />
+        <span className="max-w-[110px] truncate sm:max-w-[160px]">{current?.label ?? 'Model'}</span>
+        <ChevronDown size={13} className="text-zinc-400" />
       </button>
 
       {open && (
         <div
-          className="absolute bottom-full right-0 z-50 mb-2 w-[min(620px,calc(100vw-24px))] overflow-hidden rounded-2xl border border-zinc-200 bg-[#FFFFFF] shadow-2xl"
+          onKeyDown={onPanelKeyDown}
+          /*
+           * `right-0` neo theo nút; nút nằm sát mép phải composer nên panel
+           * 620px không tràn ra ngoài, nhưng trên khung hẹp thì phải kẹp lại
+           * theo viewport. `max-w-[calc(100vw-1.5rem)]` + `-translate-x-0`
+           * giữ panel luôn trong màn hình.
+           */
+          className="surface-panel absolute bottom-full right-0 z-50 mb-2 w-[min(620px,calc(100vw-1.5rem))] max-w-[calc(100vw-1.5rem)] animate-slide-up overflow-hidden rounded-2xl"
         >
+
           {/* Ô tìm kiếm — lọc nhanh khi danh sách dài (OrcaRouter 190+ model). */}
           <div className="border-b border-zinc-100 p-2">
             <div className="flex items-center gap-2 rounded-lg bg-zinc-100/80 px-2.5 py-1.5">
-              <Search size={13} className="shrink-0 text-zinc-400" />
+              <Search size={13} aria-hidden="true" className="shrink-0 text-zinc-500" />
               <input
                 ref={searchRef}
                 value={query}
@@ -238,8 +261,9 @@ export function ModelSelector({
                   setQuery(e.target.value);
                   setCursor(0);
                 }}
-                placeholder={`Tìm trong ${models.length} model… (vd: claude, gpt, qwen)`}
-                className="w-full bg-transparent text-[13px] text-zinc-700 outline-none placeholder:text-zinc-400"
+                aria-label="Tìm model"
+                placeholder={`Tìm trong ${models.length} model…`}
+                className="w-full bg-transparent text-[13px] text-zinc-800 outline-none placeholder:text-zinc-500"
               />
             </div>
           </div>
@@ -249,21 +273,21 @@ export function ModelSelector({
             ref={listRef}
             role="listbox"
             tabIndex={-1}
+            aria-label="Danh sách model"
             aria-activedescendant={`${listId}-opt-${cursor}`}
-            onKeyDown={onListKeyDown}
-            className="max-h-[min(480px,70vh)] overflow-y-auto overscroll-contain p-1.5 outline-none"
+            className="max-h-[min(480px,60vh)] overflow-y-auto overscroll-contain p-1.5 outline-none"
           >
             {visible.length === 0 && (
-              <p className="px-2.5 py-4 text-center text-[13px] text-zinc-400">
+              <p className="px-2.5 py-4 text-center text-[13px] text-zinc-500">
                 Không có model nào khớp “{query}”.
               </p>
             )}
-            <div className="grid grid-cols-2 gap-x-2">
+            <div className="grid grid-cols-1 gap-x-2 sm:grid-cols-2">
               {columns.map((col, ci) => (
                 <div key={ci} className="min-w-0">
                   {col.map((g) => (
                     <div key={g.key} className="mb-1.5">
-                      <p className="sticky top-0 z-10 bg-[#FFFFFF]/95 px-2 pb-1 pt-1.5 text-[10px] font-semibold uppercase tracking-wide text-zinc-400">
+                      <p className="sticky top-0 z-10 bg-surface-raised/95 px-2 pb-1 pt-1.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">
                         {g.label}
                       </p>
                       {g.items.map((m) => {
@@ -284,12 +308,12 @@ export function ModelSelector({
                             }`}
                           >
                             <span className="flex min-w-0 flex-col">
-                              <span className="truncate text-[13px] text-zinc-700">{m.label}</span>
+                              <span className="truncate text-[13px] text-zinc-800">{m.label}</span>
                               {m.hint && (
-                                <span className="truncate text-[11px] text-zinc-400">{m.hint}</span>
+                                <span className="truncate text-[11px] text-zinc-500">{m.hint}</span>
                               )}
                             </span>
-                            {active && <Check size={14} className="flex-shrink-0 text-[#0A7E8C]" />}
+                            {active && <Check size={14} className="flex-shrink-0 text-brand" />}
                           </div>
                         );
                       })}

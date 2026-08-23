@@ -49,14 +49,14 @@ export class ChatErrorBoundary extends Component<
       }
 
       return (
-        <div className="mx-auto my-4 max-w-xl rounded-xl border border-red-500/20 bg-red-500/10 p-4 text-xs text-red-600 dark:text-red-400 shadow-sm backdrop-blur-sm">
+        <div role="alert" className="mx-auto my-4 max-w-xl rounded-xl border border-red-300 bg-red-50 p-4 text-xs shadow-sm">
           <div className="flex items-start gap-3">
-            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-red-500" />
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-red-600" />
             <div className="flex-1 space-y-1.5">
-              <p className="font-semibold text-red-700 dark:text-red-300">
+              <p className="font-semibold text-red-800">
                 Lỗi hiển thị nội dung tin nhắn
               </p>
-              <p className="text-zinc-500 dark:text-zinc-500">
+              <p className="text-zinc-700">
                 {this.state.error?.message ||
                   "Đã xảy ra lỗi không mong muốn khi hiển thị phần này của cây tin nhắn."}
               </p>
@@ -64,7 +64,7 @@ export class ChatErrorBoundary extends Component<
                 <button
                   type="button"
                   onClick={this.handleRetry}
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-red-600 px-3 py-1.5 font-medium text-white hover:bg-red-700 transition shadow-sm"
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-red-600 px-3 py-1.5 font-medium text-white shadow-sm transition hover:bg-red-700"
                 >
                   <RefreshCcw className="h-3.5 w-3.5" />
                   <span>Thử lại</span>

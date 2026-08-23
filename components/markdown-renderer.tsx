@@ -160,18 +160,19 @@ const CodeBlock = memo(function CodeBlock({
 
   return (
     <div className="claude-code-block my-4">
-      <div className="flex items-center justify-between border-b border-zinc-200/80 bg-[#141417] px-3 py-1.5">
-        <span className="font-mono text-[11px] font-medium text-zinc-500">
+      {/* Thanh công cụ nằm trên nền tối → dùng border/chữ sáng cho đủ tương phản. */}
+      <div className="flex items-center justify-between border-b border-white/10 bg-surface-code-header px-3 py-1.5">
+        <span className="font-mono text-[11px] font-medium text-zinc-400">
           {language || 'text'}
         </span>
         <button
           type="button"
           onClick={onCopy}
-          className="flex items-center gap-1 text-[11px] text-zinc-500 transition-colors hover:text-zinc-700"
-          aria-label="Copy code"
+          className="flex items-center gap-1 rounded px-1 py-0.5 text-[11px] text-zinc-400 transition-colors hover:bg-white/10 hover:text-zinc-100"
+          aria-label={copied ? 'Đã chép đoạn mã' : 'Chép đoạn mã'}
         >
           {copied ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
-          <span>{copied ? 'Đã chép' : 'Copy'}</span>
+          <span>{copied ? 'Đã chép' : 'Chép'}</span>
         </button>
       </div>
 
@@ -184,7 +185,7 @@ const CodeBlock = memo(function CodeBlock({
           customStyle={{
             margin: 0,
             padding: '0.9rem 1rem',
-            background: '#0d0d10',
+            background: 'rgb(var(--surface-code))',
             fontSize: '13px',
             lineHeight: '1.6',
           }}
@@ -193,7 +194,7 @@ const CodeBlock = memo(function CodeBlock({
           {value}
         </SyntaxHighlighter>
       ) : (
-        <pre className="m-0 overflow-x-auto bg-[#0d0d10] px-4 py-[0.9rem] font-mono text-[13px] leading-[1.6] text-zinc-300">
+        <pre className="m-0 overflow-x-auto bg-surface-code px-4 py-[0.9rem] font-mono text-[13px] leading-[1.6] text-zinc-300">
           <code>{value}</code>
         </pre>
       )}
@@ -300,7 +301,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
             href={href}
             target="_blank"
             rel="noreferrer noopener nofollow"
-            className="break-words text-[#0A7E8C] underline-offset-2 hover:underline"
+            className="break-words text-brand underline-offset-2 hover:underline"
           >
             {children}
           </a>
@@ -354,7 +355,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   );
 
   return (
-    <div className="w-full break-words">
+    <div className="claude-md-root w-full break-words">
       <MarkdownErrorBoundary fallbackText={safeContent} resetKey={source}>
         <ReactMarkdown
           remarkPlugins={REMARK_PLUGINS}

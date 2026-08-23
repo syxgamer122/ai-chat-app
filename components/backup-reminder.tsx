@@ -48,22 +48,19 @@ export function BackupReminder({ chatCount }: { chatCount: number }) {
   };
 
   return (
-    <div
-      role="status"
-      className="mx-2 mt-2 rounded-xl border border-amber-700/40 bg-amber-950/30 p-2.5 text-[12px] text-amber-300"
-    >
+    <div role="status" className="notice-warn mx-2 mt-2">
       <div className="flex items-start gap-2">
-        <HardDriveDownload size={14} className="mt-0.5 flex-shrink-0" />
+        <HardDriveDownload size={14} aria-hidden="true" className="mt-0.5 flex-shrink-0" />
         <div className="min-w-0 flex-1">
           <p className="leading-relaxed">
-            Đã lâu chưa sao cứu dữ liệu — chat đang lưu trên thiết bị này thôi.
+            Đã lâu chưa sao lưu dữ liệu — chat đang lưu trên thiết bị này thôi.
           </p>
           <div className="mt-2 flex items-center gap-2">
             <button
               type="button"
               onClick={handleBackup}
               disabled={busy}
-              className="rounded-lg bg-amber-600/40 px-2.5 py-1 font-medium text-amber-100 transition hover:bg-amber-600/60 disabled:opacity-50"
+              className="rounded-lg bg-amber-600 px-2.5 py-1 font-medium text-white transition hover:bg-amber-700 disabled:opacity-50"
             >
               {busy ? 'Đang sao lưu…' : 'Sao lưu ngay'}
             </button>
@@ -73,7 +70,7 @@ export function BackupReminder({ chatCount }: { chatCount: number }) {
                 snoozeBackupReminder();
                 setVisible(false);
               }}
-              className="rounded-lg px-2 py-1 text-amber-400/80 transition hover:text-amber-200"
+              className="rounded-lg px-2 py-1 text-amber-800 transition hover:bg-amber-100"
             >
               Để sau
             </button>
@@ -86,7 +83,7 @@ export function BackupReminder({ chatCount }: { chatCount: number }) {
             snoozeBackupReminder();
             setVisible(false);
           }}
-          className="text-amber-500/70 transition hover:text-amber-200"
+          className="-mr-1 -mt-0.5 flex-shrink-0 rounded p-0.5 text-amber-700/70 transition hover:bg-amber-100 hover:text-amber-900"
         >
           <X size={13} />
         </button>

@@ -37,7 +37,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       className={inter.variable}
       suppressHydrationWarning
     >
-      <body className="min-h-dvh font-sans bg-[#F7F9FC] text-zinc-800 antialiased overscroll-none selection:bg-[#0A7E8C]/20 selection:text-[#0F172A]">
+      <body className="min-h-dvh bg-surface font-sans text-foreground antialiased overscroll-none selection:bg-brand/20 selection:text-foreground-strong">
         <PWARegister />
         {children}
       </body>

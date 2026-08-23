@@ -196,17 +196,14 @@ export function Composer({
   );
 
   return (
-    <div
-      className="w-full bg-gradient-to-t from-[#F7F9FC] via-[#F7F9FC] to-transparent px-4 pt-2"
-      style={{ paddingBottom: 'calc(1rem + env(safe-area-inset-bottom))' }}
-    >
-      <div className="mx-auto w-full max-w-3xl">
+    <div className="pb-composer w-full bg-gradient-to-t from-surface via-surface to-transparent px-4 pt-2">
+      <div className="mx-auto w-full max-w-thread">
         {canContinue && !isStreaming && (
           <div className="mb-2 flex justify-center">
             <button
               type="button"
               onClick={onContinue}
-              className="flex items-center gap-1.5 rounded-full border border-zinc-300/60 bg-[#FFFFFF] px-3 py-1.5 text-[12px] text-zinc-600 hover:bg-zinc-200"
+              className="flex items-center gap-1.5 rounded-full border border-zinc-300/60 bg-surface-raised px-3 py-1.5 text-[12px] text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900"
             >
               <CornerDownLeft size={12} />
               Viết tiếp
@@ -215,7 +212,7 @@ export function Composer({
         )}
 
         {fileError && (
-          <div role="status" className="mb-2 text-center text-[12px] text-amber-400/90">
+          <div role="status" className="notice-warn mb-2 text-center">
             {fileError}
           </div>
         )}
@@ -232,15 +229,15 @@ export function Composer({
             setDragging(false);
             acceptFiles(e.dataTransfer?.files ?? null);
           }}
-          className={`relative rounded-2xl border bg-[#FFFFFF] shadow-lg transition-all duration-150 focus-within:border-[#0A7E8C]/50 focus-within:shadow-[0_0_0_3px_rgba(10,126,140,0.10),0_12px_32px_-16px_rgba(15,23,42,0.18)] ${
-            dragging ? 'border-[#0A7E8C]' : 'border-zinc-300/60'
+          className={`relative rounded-2xl border bg-surface-raised shadow-panel transition-all duration-150 focus-within:border-brand/50 focus-within:shadow-[0_0_0_3px_rgb(var(--brand)/0.10),0_12px_32px_-16px_rgb(15_23_42/0.18)] ${
+            dragging ? 'border-brand' : 'border-zinc-300/60'
           }`}
         >
           {slashOpen && (
             <div
               role="listbox"
               aria-label="Danh sách prompt"
-              className="absolute bottom-full left-0 right-0 z-30 mb-2 max-h-64 overflow-y-auto rounded-xl border border-zinc-300/70 bg-[#FFFFFF] py-1 shadow-2xl"
+              className="surface-panel absolute bottom-full left-0 right-0 z-30 mb-2 max-h-64 animate-slide-up overflow-y-auto py-1"
               // Giữ focus textarea khi click vào menu
               onMouseDown={(e) => e.preventDefault()}
             >
@@ -254,10 +251,10 @@ export function Composer({
                   onClick={() => applyPrompt(p)}
                   onMouseEnter={() => setSlashIndex(i)}
                   className={`flex w-full flex-col items-start gap-0.5 px-3 py-2 text-left transition-colors ${
-                    i === slashIndex ? 'bg-zinc-200' : ''
+                    i === slashIndex ? 'bg-zinc-100' : ''
                   }`}
                 >
-                  <span className="text-[13px] font-medium text-zinc-700">{p.title}</span>
+                  <span className="text-[13px] font-medium text-zinc-800">{p.title}</span>
                   <span className="line-clamp-1 w-full text-[11px] text-zinc-500">
                     {p.content.replace(/\n+/g, ' ').trim()}
                   </span>
@@ -267,7 +264,7 @@ export function Composer({
                 <button
                   type="button"
                   onClick={() => void quickSavePrompt()}
-                  className="flex w-full items-center gap-1.5 border-t border-zinc-200 px-3 py-2 text-left text-[12px] text-zinc-500 transition hover:text-zinc-700"
+                  className="flex w-full items-center gap-1.5 border-t border-zinc-200 px-3 py-2 text-left text-[12px] text-zinc-600 transition hover:text-zinc-900"
                 >
                   <BookmarkPlus size={13} />
                   Lưu nhanh &quot;/{slashQuery}&quot; làm mẫu
@@ -280,7 +277,7 @@ export function Composer({
               {attachments.map((a) => (
                 <span
                   key={a.id}
-                  className="flex max-w-[220px] items-center gap-1.5 rounded-lg border border-zinc-300/60 bg-zinc-200/60 px-2 py-1 text-[11px] text-zinc-600"
+                  className="flex max-w-[220px] items-center gap-1.5 rounded-lg border border-zinc-300/60 bg-surface-muted px-2 py-1 text-[11px] text-zinc-700"
                 >
                   <Paperclip size={11} className="flex-shrink-0 text-zinc-500" />
                   <span className="truncate">{a.name}</span>
@@ -288,7 +285,7 @@ export function Composer({
                     type="button"
                     onClick={() => onRemoveAttachment(a.id)}
                     aria-label={`Gỡ ${a.name}`}
-                    className="text-zinc-500 hover:text-zinc-700"
+                    className="text-zinc-500 transition-colors hover:text-zinc-900"
                   >
                     <X size={11} />
                   </button>
@@ -300,15 +297,15 @@ export function Composer({
           {(voice.listening || voice.error) && (
             <div className="flex items-center gap-2 px-4 pt-3 text-[12px] leading-relaxed">
               {voice.listening && (
-                <span className="flex min-w-0 items-center gap-1.5 text-zinc-500">
-                  <span className="h-1.5 w-1.5 flex-shrink-0 animate-pulse rounded-full bg-[#0A7E8C]" />
+                <span className="flex min-w-0 items-center gap-1.5 text-zinc-600">
+                  <span className="h-1.5 w-1.5 flex-shrink-0 animate-pulse rounded-full bg-brand" />
                   <span className="truncate">
                     {voice.interim || 'Đang nghe… nói tiếng Việt nhé'}
                   </span>
                 </span>
               )}
               {voice.error && (
-                <span role="alert" className="text-amber-400/90">
+                <span role="alert" className="text-amber-700">
                   {voice.error}
                 </span>
               )}
@@ -340,7 +337,7 @@ export function Composer({
               slashOpen ? `slash-opt-${slashMatches[slashIndex]?.id}` : undefined
             }
             placeholder="Gửi tin nhắn cho AI... (gõ / để chèn prompt mẫu)"
-            className="w-full resize-none bg-transparent px-4 pb-2 pt-3.5 text-[15px] leading-relaxed text-zinc-800 outline-none placeholder:text-zinc-500"
+            className="w-full resize-none bg-transparent px-4 pb-2 pt-3.5 text-[15px] leading-relaxed text-zinc-800 outline-none placeholder:text-zinc-400"
           />
 
           <div className="flex items-center justify-between gap-2 px-2.5 pb-2.5">
@@ -350,7 +347,7 @@ export function Composer({
                 onClick={() => fileInputRef.current?.click()}
                 aria-label="Đính kèm tệp"
                 title="Đính kèm tệp"
-                className="flex h-8 w-8 items-center justify-center rounded-full text-zinc-500 hover:bg-zinc-200/70 hover:text-zinc-700"
+                className="icon-btn h-9 w-9 rounded-full"
               >
                 <Paperclip size={16} />
               </button>
@@ -374,14 +371,14 @@ export function Composer({
                   aria-label={voice.listening ? 'Dừng nhận diện giọng nói' : 'Nhập bằng giọng nói'}
                   aria-pressed={voice.listening}
                   title={voice.listening ? 'Dừng nhận diện giọng nói' : 'Nhập bằng giọng nói'}
-                  className={`flex h-8 w-8 items-center justify-center rounded-full transition-colors ${
+                  className={
                     voice.listening
-                      ? 'animate-pulse bg-[#0A7E8C] text-white'
-                      : 'text-zinc-500 hover:bg-zinc-200/70 hover:text-zinc-700'
-                  }`}
+                      ? 'flex h-9 w-9 items-center justify-center rounded-full bg-brand text-white transition-colors'
+                      : 'icon-btn h-9 w-9 rounded-full'
+                  }
                 >
                   {voice.listening ? (
-                    <Square size={11} className="fill-current" />
+                    <Square size={11} className="animate-pulse fill-current" />
                   ) : (
                     <Mic size={16} />
                   )}
@@ -407,7 +404,7 @@ export function Composer({
                 type="button"
                 onClick={onStop}
                 aria-label="Dừng tạo"
-                className="flex h-9 w-9 items-center justify-center rounded-full bg-zinc-300 text-zinc-800 transition hover:bg-zinc-400"
+                className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-zinc-800 text-white transition hover:bg-zinc-900"
               >
                 <Square size={13} className="fill-current" />
               </button>
@@ -416,10 +413,10 @@ export function Composer({
                 type="submit"
                 disabled={!canSubmit}
                 aria-label="Gửi tin nhắn"
-                className={`flex h-9 w-9 items-center justify-center rounded-full transition-all ${
+                className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full transition-all ${
                   canSubmit
-                    ? 'bg-[#0A7E8C] text-white shadow-[0_4px_16px_-6px_rgba(10,126,140,0.7)] hover:bg-[#086E7A] active:scale-95'
-                    : 'cursor-not-allowed bg-zinc-300/60 text-zinc-500'
+                    ? 'bg-brand text-white shadow-brand hover:bg-brand-hover active:scale-95'
+                    : 'cursor-not-allowed bg-zinc-200 text-zinc-400'
                 }`}
               >
                 <ArrowUp size={17} />

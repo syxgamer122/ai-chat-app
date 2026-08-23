@@ -12,6 +12,7 @@ export default function Home() {
   const isSettingsOpen = useAppStore((s) => s.isSettingsOpen);
   const setSettingsOpen = useAppStore((s) => s.setSettingsOpen);
   const setCurrentChatId = useAppStore((s) => s.setCurrentChatId);
+  const animations = useAppStore((s) => s.settings.perf.animations);
 
   useEffect(() => {
     setIsMounted(true);
@@ -27,6 +28,13 @@ export default function Home() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [setCurrentChatId, isSettingsOpen, setSettingsOpen]);
 
+  /* Cờ tắt hiệu ứng — CSS trong globals.css đọc qua html[data-animations]. */
+  useEffect(() => {
+    const root = document.documentElement;
+    if (animations) root.removeAttribute('data-animations');
+    else root.setAttribute('data-animations', 'off');
+  }, [animations]);
+
   useEffect(() => {
     document.body.style.overflow = isSettingsOpen ? 'hidden' : 'unset';
     return () => { document.body.style.overflow = 'unset'; };
@@ -34,8 +42,12 @@ export default function Home() {
 
   if (!isMounted) {
     return (
-      <div className="h-dvh bg-[#F7F9FC] flex items-center justify-center text-zinc-500 font-mono text-sm">
-        Loading workspace...
+      <div
+        role="status"
+        aria-live="polite"
+        className="flex h-dvh items-center justify-center bg-surface text-sm text-zinc-500"
+      >
+        Đang mở không gian làm việc…
       </div>
     );
   }
