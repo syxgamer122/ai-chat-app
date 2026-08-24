@@ -3,7 +3,6 @@ import {
   sanitizeContent,
   getNextBranchOrder,
   getNextSequence,
-  upsertStoredMessages,
   getFinalStoredStatus,
 } from '@/lib/chat-tree-persistence';
 import type { StoredMessage } from '@/lib/db';
@@ -48,17 +47,6 @@ describe('cấp số cây', () => {
   it('getNextSequence lấy seq lớn nhất + 1', () => {
     expect(getNextSequence(rows)).toBe(3);
     expect(getNextSequence([])).toBe(0);
-  });
-
-  it('upsertStoredMessages thay row cũ, thêm row mới, giữ thứ tự', () => {
-    const updated = { ...rows[1], content: 'đã sửa' };
-    const result = upsertStoredMessages(rows, [updated]);
-    expect(result.map((r) => r.content)).toEqual(['a', 'đã sửa', 'c']);
-
-    const added: StoredMessage = { id: 'new', chatId: 'c1', role: 'user', content: 'mới', parentId: ROOT, seq: 3, branchOrder: 2, branchTieBreaker: 'new', createdAt: 9 };
-    const result2 = upsertStoredMessages(rows, [added]);
-    expect(result2).toHaveLength(4);
-    expect(result2[3].id).toBe('new');
   });
 });
 

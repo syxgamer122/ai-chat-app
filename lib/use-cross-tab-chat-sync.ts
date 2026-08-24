@@ -2,25 +2,30 @@
 
 import { useEffect, useRef } from "react";
 import { chatBroadcast } from "@/lib/chat-broadcast";
-import { db } from "@/lib/db";
-import { streamController } from "@/lib/stream-controller";
 
 interface UseCrossTabChatSyncOptions {
   sessionId: string | null;
   onReload: () => void;
-  onRemoteBranchSwitch?: (activeLeafId: string) => void;
 }
 
+/**
+ * Lắng nghe broadcast đa-tab. Sự kiện thực tế được publish trong app chỉ có
+ * "session-invalidated" (tree-repair) — tab nhận sẽ đọc lại Dexie, không tin
+ * payload của event.
+ */
 export function useCrossTabChatSync({
   sessionId,
   onReload,
-  onRemoteBranchSwitch,
 }: UseCrossTabChatSyncOptions) {
   const lastRevisionRef = useRef(0);
 
   useEffect(() => {
     const unsubscribe = chatBroadcast.subscribe(async (event) => {
       if (!sessionId || event.sessionId !== sessionId) {
+        return;
+      }
+
+      if (event.type !== "session-invalidated") {
         return;
       }
 
@@ -33,45 +38,13 @@ export function useCrossTabChatSync({
 
       lastRevisionRef.current = event.revision;
 
-      if (event.type === "session-invalidated") {
-        /**
-         * Không lấy payload event làm source of truth.
-         * onReload phải đọc lại Dexie.
-         */
-        onReload();
-        return;
-      }
-
-      if (event.type === "branch-switched") {
-        const latestSession = await db.chats.get(sessionId);
-
-        if (!latestSession) {
-          onReload();
-          return;
-        }
-
-        onRemoteBranchSwitch?.(latestSession.activeLeafId ?? "");
-        onReload();
-        return;
-      }
-
-      if (event.type === "stream-abort-request") {
-        const activeStream = streamController.get(sessionId);
-
-        /**
-         * Chỉ abort nếu streamId trùng.
-         * Tab B không được abort nhầm stream mới của Tab A.
-         */
-        if (activeStream?.streamId === event.streamId) {
-          await streamController.abort(sessionId, "remote");
-        }
-      }
+      /**
+       * Không lấy payload event làm source of truth.
+       * onReload phải đọc lại Dexie.
+       */
+      onReload();
     });
 
     return unsubscribe;
-  }, [
-    onReload,
-    onRemoteBranchSwitch,
-    sessionId,
-  ]);
+  }, [onReload, sessionId]);
 }

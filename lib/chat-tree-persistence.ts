@@ -210,39 +210,6 @@ export function getNextSequence(
   return maxSequence + 1;
 }
 
-export function upsertStoredMessages(
-  current: StoredMessage[],
-  updates: StoredMessage[],
-): StoredMessage[] {
-  if (updates.length === 0) {
-    return current;
-  }
-
-  const updateById = new Map(
-    updates.map((message) => [
-      message.id,
-      message,
-    ]),
-  );
-
-  const result = current.map(
-    (message) =>
-      updateById.get(message.id) ?? message,
-  );
-
-  const existingIds = new Set(
-    current.map((message) => message.id),
-  );
-
-  for (const update of updates) {
-    if (!existingIds.has(update.id)) {
-      result.push(update);
-    }
-  }
-
-  return result;
-}
-
 export function reconstructParentPath(
   allMessages: StoredMessage[],
   parentId: string | null,

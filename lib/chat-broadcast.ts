@@ -7,31 +7,7 @@ export type ChatBroadcastEvent =
       mutationId: string;
       revision: number;
       originClientId: string;
-      reason:
-        | "message-created"
-        | "message-updated"
-        | "branch-switched"
-        | "stream-started"
-        | "stream-progress"
-        | "stream-finished"
-        | "stream-aborted"
-        | "repair";
-    }
-  | {
-      type: "branch-switched";
-      sessionId: string;
-      activeLeafId: string;
-      mutationId: string;
-      revision: number;
-      originClientId: string;
-    }
-  | {
-      type: "branch-switch-request";
-      sessionId: string;
-      activeLeafId: string;
-      mutationId: string;
-      revision: number;
-      originClientId: string;
+      reason: "repair";
     }
   | {
       type: "chat-updated";
@@ -39,15 +15,6 @@ export type ChatBroadcastEvent =
       mutationId: string;
       revision: number;
       originClientId: string;
-    }
-  | {
-      type: "stream-abort-request";
-      sessionId: string;
-      streamId: string;
-      requestedBy?: string;
-      originClientId: string;
-      mutationId: string;
-      revision: number;
     };
 
 const CHANNEL_NAME = "ai-chat-tree";

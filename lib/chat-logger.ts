@@ -1,16 +1,7 @@
 export interface ChatDebugEvent {
-  type:
-    | "stream-start"
-    | "stream-progress"
-    | "stream-abort"
-    | "branch-switch"
-    | "tree-repair"
-    | "cross-tab-event"
-    | "persistence-error";
+  type: "tree-repair";
 
   sessionId?: string;
-  messageId?: string;
-  streamId?: string;
   revision?: number;
   clientId?: string;
   details?: Record<string, unknown>;

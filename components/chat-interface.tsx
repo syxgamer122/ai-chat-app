@@ -21,7 +21,6 @@ import {
   Send, StopCircle, RefreshCcw, ArrowDown, Paperclip, X, Menu,
   ChevronLeft, ChevronRight,
 } from 'lucide-react';
-import { streamController } from '@/lib/stream-controller';
 import { useBranchKeyboardShortcuts } from '@/lib/use-branch-keyboard-shortcuts';
 import { useSwipeBranch } from '@/lib/use-swipe-branch';
 import { repairSessionIfNeeded, repairAndBroadcastSession } from '@/lib/tree-repair';
@@ -50,7 +49,6 @@ import {
   toChatMessage,
   getNextBranchOrder,
   getNextSequence,
-  upsertStoredMessages,
   reconstructParentPath,
   getFinalStoredStatus,
   reconcileActiveMessages,
@@ -467,9 +465,6 @@ export default function ChatInterface() {
     onReload: () => {
       void reloadTreeFromDatabase();
     },
-    onRemoteBranchSwitch: () => {
-      void reloadTreeFromDatabase();
-    },
   });
 
   const branchInfoByMessageId = useMemo(() => {
@@ -494,29 +489,10 @@ export default function ChatInterface() {
     return result;
   }, [messages, allStoredMessages]);
 
-  const abortStreamForSession = useCallback(
-    async (
-      targetSessionId: string,
-      reason: 'switch-chat' | 'switch-branch' | 'manual',
-    ) => {
-      await streamController.abort(targetSessionId, reason);
-    },
-    [],
-  );
-
   const currentChatIdRef = useRef(currentChatId);
   useEffect(() => {
     currentChatIdRef.current = currentChatId;
   }, [currentChatId]);
-
-  useEffect(() => {
-    return () => {
-      const activeId = currentChatIdRef.current;
-      if (activeId && isLoadingRef.current) {
-        void abortStreamForSession(activeId, 'switch-chat');
-      }
-    };
-  }, [abortStreamForSession]);
 
   useEffect(() => {
     if (
@@ -560,7 +536,6 @@ export default function ChatInterface() {
 
         if (isLoading && previousChatId.current) {
           finishRef.current = 'abort';
-          void abortStreamForSession(previousChatId.current, 'switch-chat');
           stop();
         }
       }
@@ -569,7 +544,6 @@ export default function ChatInterface() {
         currentChatId;
     }
   }, [
-    abortStreamForSession,
     currentChatId,
     isLoading,
     stop,
@@ -1240,7 +1214,6 @@ export default function ChatInterface() {
       try {
         if (isLoading) {
           finishRef.current = 'abort';
-          await streamController.abort(chatId, 'switch-branch');
           stop();
         }
 
