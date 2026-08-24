@@ -64,6 +64,15 @@ const KATEX_MACRO_TEMPLATE: Record<string, string> = {
 
 const REMARK_PLUGINS: any[] = [remarkGfm, [remarkMath, { singleDollarTextMath: true }]];
 
+/**
+ * CDN media của Qwen (cdn.qwenlm.ai) chặn hotlink theo `Referer`: mọi request
+ * có Referer khác domain của họ trả 403. Trình duyệt tự gắn Referer của trang
+ * (localhost / vercel), nên <img>/<video> bị 403 và KHÔNG hiển thị dù URL đúng.
+ * `no-referrer` bỏ hẳn Referer → CDN cho qua (đã kiểm chứng: có Referer=403,
+ * không Referer=206). Ảnh assistant tạo phải dùng policy này.
+ */
+const MEDIA_REFERRER_POLICY = 'no-referrer' as const;
+
 /* -------------------------------------------------------------------------- */
 /* Thông báo ảnh load xong — MessageList lắng nghe để ghim đáy.               */
 /* Việc đo lại chiều cao dòng do ResizeObserver của chính virtualizer đảm nhiệm. */
@@ -285,6 +294,8 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
 
       a: ({ href, children }: any) => {
         // Link video do AI tạo (qwen-video...) — phát trực tiếp trong chat.
+        // Referer bị bỏ ở cấp document (layout.tsx `referrer: no-referrer`) —
+        // <video> không có thuộc tính referrerPolicy riêng nên phải dựa vào đó.
         if (typeof href === 'string' && /\.(?:mp4|webm)(?:[?#]|$)/i.test(href)) {
           return (
             <video
@@ -340,6 +351,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
               alt={alt ?? 'Ảnh do AI tạo'}
               loading="lazy"
               decoding="async"
+              referrerPolicy={MEDIA_REFERRER_POLICY}
               className="max-h-[420px] w-auto max-w-full rounded-xl border border-zinc-200 bg-white object-contain shadow-sm"
               onLoad={emitImageLoaded}
               onError={(e) => {

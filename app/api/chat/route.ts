@@ -1054,6 +1054,18 @@ export async function POST(req: Request) {
                   writeAnnotation({ error: diagnosis.code });
                   throw new ChatUpstreamError(diagnosis.userMessage, diagnosis.code, requestId);
                 }
+
+                /**
+                 * Lỗi KHÔNG phải của key (400 "unknown model", 4xx đặc thù model)
+                 * mà đổi key cũng vô ích: thử MODEL kế tiếp trong chain trước.
+                 * Đây là đường sống còn của model mặc định trên crax — crax đặt
+                 * tên bằng gạch (`gpt-5-6-sol`) và trả 400 cho bản chấm
+                 * (`gpt-5.6-sol`); phải rơi xuống biến thể gạch ngay sau đó thay
+                 * vì `break` sang key khác rồi kết thúc stream với bong bóng trống.
+                 */
+                if (!diagnosis.blameKey && modelIndex < modelChain.length - 1) {
+                  continue;
+                }
                 break;
               } finally {
                 link.dispose();
