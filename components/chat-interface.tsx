@@ -10,7 +10,7 @@ import {
   toParentKey,
   type StoredMessage,
 } from '@/lib/db';
-import { AVAILABLE_MODELS } from '@/lib/models';
+import { AVAILABLE_MODELS, MEDIA_MODELS } from '@/lib/models';
 import {
   reconstructActiveThread,
   reconstructActiveThreadSafe,
@@ -29,13 +29,19 @@ import { useCrossTabChatSync } from '@/lib/use-cross-tab-chat-sync';
 import { chatBroadcast } from '@/lib/chat-broadcast';
 import { createMutationId } from '@/lib/client-identity';
 import { useStickToBottom } from '@/lib/use-stick-to-bottom';
-import { Composer } from '@/components/composer';
+import { Composer, type MediaAction, type MediaActions } from '@/components/composer';
 import { Toast } from '@/components/toast';
 import type { ModelOption } from '@/components/model-selector';
 import { useTitleGenerator } from '@/lib/use-title-generator';
 import { ensurePromptSeed, savePrompt } from '@/lib/prompt-library';
 import { ensureProviderSeed } from '@/lib/providers';
-import { supportsThinkingLevel, type ThinkingLevel } from '@/lib/provider-url';
+import { isSameFamilyAsMedia, pickMediaModels } from '@/lib/media-models';
+import { MediaGenerationError, generateMedia } from '@/lib/media-generate';
+import {
+  supportsMediaGeneration,
+  supportsThinkingLevel,
+  type ThinkingLevel,
+} from '@/lib/provider-url';
 import {
   CONTINUE_PROMPT,
   sanitizeContent,
@@ -79,14 +85,21 @@ export default function ChatInterface() {
     void syncActiveProviderSnapshot(activeProviderId);
   }, [activeProviderId]);
 
-  /** Provider mặc định của server (env) có hỗ trợ mức suy luận không. */
-  const [serverThinking, setServerThinking] = useState(false);
+  /** Provider mặc định của server (env) hỗ trợ những tính năng nào. */
+  const [serverCaps, setServerCaps] = useState<{ thinkingLevel: boolean; media: boolean }>({
+    thinkingLevel: false,
+    media: false,
+  });
   useEffect(() => {
     let cancelled = false;
     fetch('/api/server-config')
       .then((r) => (r.ok ? r.json() : null))
-      .then((j: { thinkingLevel?: boolean } | null) => {
-        if (!cancelled && j?.thinkingLevel) setServerThinking(true);
+      .then((j: { thinkingLevel?: boolean; media?: boolean } | null) => {
+        if (cancelled || !j) return;
+        setServerCaps({
+          thinkingLevel: Boolean(j.thinkingLevel),
+          media: Boolean(j.media),
+        });
       })
       .catch(() => {});
     return () => {
@@ -111,22 +124,81 @@ export default function ChatInterface() {
     [],
   );
 
+  /**
+   * Model media khả dụng cho nhà cung cấp đang chọn.
+   * crax liệt kê `qwen-image-*` trong /v1/models nhưng KHÔNG liệt kê
+   * `qwen-video` (alias chỉ dùng được qua chat SSE) — nên với gateway crax ta
+   * bổ sung thêm model media built-in vào danh sách.
+   */
+  const mediaCatalog = useMemo(() => {
+    const craxLike = activeProvider
+      ? supportsMediaGeneration(activeProvider.baseUrl)
+      : serverCaps.media;
+
+    const fromProvider = (activeProvider?.models ?? []).map((m) => ({
+      id: m.id,
+      label: m.name || m.id,
+    }));
+    if (!craxLike) return fromProvider;
+
+    const known = new Set(fromProvider.map((m) => m.id));
+    return [
+      ...fromProvider,
+      ...MEDIA_MODELS.filter((m) => !known.has(m.id)).map((m) => ({ id: m.id, label: m.name })),
+    ];
+  }, [activeProvider, serverCaps.media]);
+
   const MODELS: ModelOption[] = useMemo(() => {
     if (activeProvider?.models?.length) {
-      return activeProvider.models.map((m) => ({
+      const base = activeProvider.models.map((m) => ({
         id: m.id,
         label: m.name || m.id,
         hint: m.contextLength
           ? `${Math.round(m.contextLength / 1000)}k ngữ cảnh`
           : activeProvider.name,
       }));
+      // Bổ sung model media built-in mà /v1/models của gateway không khai báo.
+      const known = new Set(base.map((m) => m.id));
+      const extra = mediaCatalog
+        .filter((m) => !known.has(m.id))
+        .map((m) => ({ id: m.id, label: m.label, hint: 'Tạo ảnh / video' }));
+      return [...base, ...extra];
     }
-    return AVAILABLE_MODELS.map((m) => ({
+    // Provider của server: bỏ model media nếu gateway env không hỗ trợ.
+    return AVAILABLE_MODELS.filter((m) => serverCaps.media || m.media === undefined).map((m) => ({
       id: m.id,
       label: m.name,
       hint: m.description,
     }));
-  }, [activeProvider]);
+  }, [activeProvider, mediaCatalog, serverCaps.media]);
+
+  /**
+   * Nút "Tạo ảnh" / "Tạo video" cạnh nút mic. Chỉ hiện khi model đang chọn
+   * cùng họ với model media của gateway — ví dụ crax: chọn qwen3.8-max /
+   * qwen3.7-max thì hiện 2 nút dùng qwen-image-3.0-pro và qwen-video.
+   *
+   * `direct`: có key ở phía trình duyệt → gọi thẳng gateway, không qua
+   * /api/chat, nên không bị giới hạn thời gian chạy của serverless function
+   * (video mất 2-5 phút, vượt xa hạn mức của Vercel Hobby).
+   */
+  const mediaActions: MediaActions | undefined = useMemo(() => {
+    if (!mediaCatalog.length) return undefined;
+    const picked = pickMediaModels(mediaCatalog);
+    if (!picked.image && !picked.video) return undefined;
+    if (!isSameFamilyAsMedia(model, picked)) return undefined;
+    // `direct` chỉ đúng khi CHÍNH provider đó có key trong IndexedDB. Điều kiện
+    // cũ `activeProvider.apiKey || apiKey` bật direct dựa trên key của máy chủ
+    // mặc định, dẫn tới handleGenerateMedia gửi key đó tới baseUrl của provider.
+    const direct = Boolean(activeProvider?.baseUrl && activeProvider.apiKey);
+    return {
+      ...(picked.image
+        ? { image: { modelId: picked.image.id, label: picked.image.label, direct } }
+        : {}),
+      ...(picked.video
+        ? { video: { modelId: picked.video.id, label: picked.video.label, direct } }
+        : {}),
+    };
+  }, [activeProvider, mediaCatalog, model]);
 
   /** Đổi provider → model hiện tại không còn trong danh sách thì lấy cái đầu. */
   useEffect(() => {
@@ -162,6 +234,13 @@ export default function ChatInterface() {
   const [draft, setDraft] = useState('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
+
+  /**
+   * Đang sinh ảnh/video trực tiếp từ trình duyệt (không đi qua /api/chat).
+   * Tách khỏi isLoading của useChat vì đây không phải stream của SDK.
+   */
+  const [mediaBusy, setMediaBusy] = useState(false);
+  const mediaAbortRef = useRef<AbortController | null>(null);
 
   const [allStoredMessages, setAllStoredMessages] = useState<StoredMessage[]>([]);
   const [activeLeafId, setActiveLeafId] = useState<string | null>(null);
@@ -267,17 +346,22 @@ export default function ChatInterface() {
     handleSubmit, stop, reload, append, isLoading, error, data,
   } = useChat({
     id: chatKey,
+    /**
+     * Key của "Máy chủ mặc định" (settings.apiKey) CHỈ đi tới baseUrl của
+     * server env. Khi có provider preset active, chỉ gửi key của chính provider
+     * đó — không fallback sang settings.apiKey, vì như vậy là gửi credential
+     * của gateway A tới gateway B do người dùng tự khai.
+     */
     headers: {
-      ...(apiKey ? { 'x-api-key': apiKey } : {}),
       ...(accessCode ? { 'x-access-code': accessCode } : {}),
       ...(activeProvider?.baseUrl
         ? {
             'x-api-base': activeProvider.baseUrl,
-            ...(activeProvider.apiKey || apiKey
-              ? { 'x-api-key': activeProvider.apiKey || apiKey }
-              : {}),
+            ...(activeProvider.apiKey ? { 'x-api-key': activeProvider.apiKey } : {}),
           }
-        : {}),
+        : apiKey
+          ? { 'x-api-key': apiKey }
+          : {}),
     },
     body: {
       model,
@@ -499,6 +583,8 @@ export default function ChatInterface() {
     finishRef.current = 'abort';
     stop();
 
+    // Hủy luôn lượt tạo ảnh/video đang chạy trực tiếp từ trình duyệt.
+    mediaAbortRef.current?.abort();
     /**
      * Không xóa ngay nếu Assistant đã xuất hiện vì persistence
      * vẫn cần metadata của node đó.
@@ -1735,8 +1821,11 @@ export default function ChatInterface() {
     setMessages,
   ]);
 
-  const onSubmit = useCallback(async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
+  /**
+   * Gửi lượt chat. `modelOverride` dùng cho 2 nút tạo ảnh / tạo video: chỉ
+   * lượt này đi bằng model media, model đang chọn trong ModelSelector giữ nguyên.
+   */
+  const submitTurn = useCallback(async (modelOverride?: string) => {
     if ((!input.trim() && attachments.length === 0) || isLoading) return;
 
     // Trình duyệt không có DataTransfer constructor thì không gắn được file —
@@ -1772,12 +1861,16 @@ export default function ChatInterface() {
       const isFirstMessage = messages.length === 0;
       const userText = input.trim();
 
-      let options: { experimental_attachments: FileList } | undefined;
+      const options: {
+        experimental_attachments?: FileList;
+        body?: Record<string, unknown>;
+      } = {};
       if (attachments.length > 0) {
         const dataTransfer = new DataTransfer();
         attachments.forEach((f) => dataTransfer.items.add(f));
-        options = { experimental_attachments: dataTransfer.files };
+        options.experimental_attachments = dataTransfer.files;
       }
+      if (modelOverride) options.body = { model: modelOverride };
 
       pin(1500);
 
@@ -1790,6 +1883,165 @@ export default function ChatInterface() {
       console.error('[onSubmit]', err);
     }
   }, [input, attachments, isLoading, currentChatId, draftId, setCurrentChatId, handleSubmit, pin, generateTitle, messages.length, showNotice]);
+
+  const onSubmit = useCallback(
+    async (e?: React.FormEvent) => {
+      if (e) e.preventDefault();
+      await submitTurn();
+    },
+    [submitTurn],
+  );
+
+  /**
+   * Tạo ảnh/video.
+   *
+   * Hai đường đi, chọn theo `action.direct`:
+   * - `direct` = gateway cho phép cross-origin VÀ có key phía client → fetch
+   *   thẳng từ tab, không đụng giới hạn thời gian của serverless.
+   * - ngược lại → qua /api/chat. Đây là đường của crax (crax trả 403 cho mọi
+   *   request có `Origin`, và không dùng API key), và nó KỊP: video đo được
+   *   120-126s, dưới ngân sách 290s của route.
+   *
+   * Tin nhắn user + assistant được đẩy vào state ngay để lớp persistence
+   * hiện có ghi xuống IndexedDB như một lượt chat bình thường.
+   */
+  const handleGenerateMedia = useCallback(
+    async (action: MediaAction, kind: 'image' | 'video') => {
+      const prompt = input.trim();
+      if (!prompt || isLoading || mediaBusy) return;
+
+      // Không gọi thẳng được → đi đường server. Video mất vài phút nên nói
+      // trước để người dùng không đóng tab giữa lúc đang tạo.
+      if (!action.direct) {
+        if (kind === 'video') {
+          showNotice('Đang tạo video — thường mất 2–3 phút. Giữ tab này mở.', 6000);
+        }
+        void submitTurn(action.modelId);
+        return;
+      }
+
+      const baseUrl = activeProvider?.baseUrl;
+      // Key phải thuộc đúng gateway sẽ được gọi. settings.apiKey là key của
+      // "Máy chủ mặc định" (server env) — không được gửi tới baseUrl mà người
+      // dùng tự khai, vì đường này fetch trực tiếp từ trình duyệt.
+      const key = activeProvider?.apiKey;
+      if (!baseUrl || !key) {
+        showNotice('Nhà cung cấp chưa có API key trong trình duyệt.');
+        return;
+      }
+
+      let chatId = currentChatId;
+      if (!chatId) {
+        chatId = draftId;
+        hydratedFor.current = chatId;
+        await db.chats.put({
+          id: chatId,
+          title: 'New Chat',
+          pinned: 0,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        });
+        setCurrentChatId(chatId);
+      }
+
+      const isFirstMessage = messages.length === 0;
+      const userId = crypto.randomUUID();
+      const assistantId = crypto.randomUUID();
+      const controller = new AbortController();
+
+      mediaAbortRef.current = controller;
+      setMediaBusy(true);
+      setInput('');
+      finishRef.current = 'stop';
+      pendingAssistantForkRef.current = null;
+      pin(1500);
+
+      setMessages((prev) => [
+        ...prev,
+        { id: userId, role: 'user', content: prompt },
+        {
+          id: assistantId,
+          role: 'assistant',
+          content: '',
+          reasoning: kind === 'image' ? 'Đang tạo ảnh…' : 'Đang gửi yêu cầu tạo video…',
+          annotations: [{ model: action.modelId }],
+        } as Message,
+      ]);
+
+      const setAssistant = (patch: Partial<Message>) => {
+        setMessages((prev) =>
+          prev.map((m) => (m.id === assistantId ? ({ ...m, ...patch } as Message) : m)),
+        );
+      };
+
+      try {
+        const result = await generateMedia({
+          kind,
+          baseUrl,
+          apiKey: key,
+          model: action.modelId,
+          prompt,
+          signal: controller.signal,
+          onProgress: (text) => setAssistant({ reasoning: text } as Partial<Message>),
+        });
+
+        setAssistant({ content: result.markdown, reasoning: undefined } as Partial<Message>);
+
+        if (isFirstMessage) void generateTitle(chatId, prompt);
+      } catch (err) {
+        if (controller.signal.aborted) {
+          setAssistant({ content: '_Đã hủy._', reasoning: undefined } as Partial<Message>);
+        } else if (err instanceof MediaGenerationError && err.originBlocked) {
+          /**
+           * Gateway chỉ allowlist origin của chính họ (crax: 403 "Origin not
+           * allowed"), hoặc trình duyệt chặn CORS. Bỏ 2 tin nhắn vừa thêm rồi
+           * gửi lại qua /api/chat — server không gửi Origin nên không bị chặn.
+           *
+           * Dùng append() chứ không phải submitTurn(): input đã bị xoá nên
+           * handleSubmit() của useChat sẽ gửi chuỗi rỗng.
+           */
+          setMessages((prev) => prev.filter((m) => m.id !== userId && m.id !== assistantId));
+          if (kind === 'video') {
+            showNotice(
+              'Đang tạo video qua máy chủ — thường mất 2–3 phút. Giữ tab này mở.',
+              6000,
+            );
+          }
+          void append(
+            { role: 'user', content: prompt },
+            { body: { model: action.modelId } },
+          );
+          if (isFirstMessage) void generateTitle(chatId, prompt);
+        } else {
+          const message =
+            err instanceof MediaGenerationError ? err.message : 'Tạo media thất bại.';
+          finishRef.current = 'error';
+          showNotice(message, 6000);
+          setAssistant({ content: `_${message}_`, reasoning: undefined } as Partial<Message>);
+        }
+      } finally {
+        mediaAbortRef.current = null;
+        setMediaBusy(false);
+      }
+    },
+    [
+      activeProvider,
+      append,
+      currentChatId,
+      draftId,
+      generateTitle,
+      input,
+      isLoading,
+      mediaBusy,
+      messages.length,
+      pin,
+      setCurrentChatId,
+      setInput,
+      setMessages,
+      showNotice,
+      submitTurn,
+    ],
+  );
 
   /** Voice input: nối câu đã nhận diện vào cuối input hiện tại. */
   const handleAppendVoiceText = useCallback(
@@ -1919,7 +2171,7 @@ export default function ChatInterface() {
           chatId={chatKey}
           messages={messages}
           branchInfoByMessageId={branchInfoByMessageId}
-          isLoading={isLoading}
+          isLoading={isLoading || mediaBusy}
           lastMessageId={lastMessageId}
           editingId={editingId}
           copiedId={copiedId}
@@ -1952,7 +2204,7 @@ export default function ChatInterface() {
         onInputChange={handleInputChange}
         onSubmit={onSubmit}
         onKeyDown={onTextareaKeyDown}
-        isStreaming={isLoading}
+        isStreaming={isLoading || mediaBusy}
         onStop={handleStop}
         attachments={composerAttachments}
         onAddFiles={addFiles}
@@ -1964,10 +2216,12 @@ export default function ChatInterface() {
         models={MODELS}
         model={model}
         onModelChange={handleModelChange}
+        mediaActions={mediaActions}
+        onGenerateMedia={handleGenerateMedia}
         canContinue={canContinue}
         onContinue={continueGenerating}
         thinkingLevel={
-          (activeProvider ? supportsThinkingLevel(activeProvider.baseUrl) : serverThinking)
+          (activeProvider ? supportsThinkingLevel(activeProvider.baseUrl) : serverCaps.thinkingLevel)
             ? thinkingLevel
             : undefined
         }

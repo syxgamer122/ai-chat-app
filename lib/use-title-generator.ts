@@ -59,13 +59,21 @@ export function useTitleGenerator({ onTitle, accessCode, apiKey, providerBase, p
       controllers.current.set(conversationId, controller);
       const timeout = setTimeout(() => controller.abort(), 12_000);
 
+      /**
+       * Key gửi lên phải thuộc đúng baseUrl sẽ được dùng. Có providerBase =>
+       * chỉ dùng providerKey; không có => mới dùng key của máy chủ mặc định.
+       * Fallback `providerKey || apiKey` cũ làm key của server env bị gửi tới
+       * gateway do người dùng tự khai.
+       */
+      const outboundKey = providerBase ? providerKey : apiKey;
+
       try {
         const res = await fetch('/api/title', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             ...(accessCode ? { Authorization: `Bearer ${accessCode}` } : {}),
-            ...((providerKey || apiKey) ? { 'x-api-key': providerKey || apiKey } : {}),
+            ...(outboundKey ? { 'x-api-key': outboundKey } : {}),
             ...(providerBase ? { 'x-api-base': providerBase } : {}),
           },
           body: JSON.stringify({ message: firstUserMessage.slice(0, 2000) }),

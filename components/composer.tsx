@@ -2,7 +2,17 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import TextareaAutosize from 'react-textarea-autosize';
-import { ArrowUp, BookmarkPlus, CornerDownLeft, Mic, Paperclip, Square, X } from 'lucide-react';
+import {
+  ArrowUp,
+  BookmarkPlus,
+  CornerDownLeft,
+  Film,
+  ImagePlus,
+  Mic,
+  Paperclip,
+  Square,
+  X,
+} from 'lucide-react';
 import { ModelSelector, type ModelOption } from '@/components/model-selector';
 import { ThinkingSlider } from '@/components/thinking-slider';
 import type { ThinkingLevel } from '@/lib/provider-url';
@@ -19,6 +29,21 @@ export interface SlashPrompt {
   id: string;
   title: string;
   content: string;
+}
+
+/** Model sinh media khả dụng của nhà cung cấp hiện tại (cho 2 nút cạnh mic). */
+export interface MediaAction {
+  /** Model id gửi lên gateway cho lượt này. */
+  modelId: string;
+  /** Tên model, dùng cho tooltip. */
+  label: string;
+  /** true = chạy thẳng từ trình duyệt (không giới hạn thời gian function). */
+  direct: boolean;
+}
+
+export interface MediaActions {
+  image?: MediaAction;
+  video?: MediaAction;
 }
 
 interface ComposerProps {
@@ -44,6 +69,10 @@ interface ComposerProps {
   /** Mức suy luận — chỉ hiển thị khi provider hiện tại hỗ trợ (crax). */
   thinkingLevel?: ThinkingLevel;
   onThinkingLevelChange?: (level: ThinkingLevel) => void;
+  /** Nút tạo ảnh / tạo video — chỉ hiện khi provider có model tương ứng. */
+  mediaActions?: MediaActions;
+  /** Tạo media cho lượt này (model media chỉ định, không đổi model đang chọn). */
+  onGenerateMedia?: (action: MediaAction, kind: 'image' | 'video') => void;
   canContinue?: boolean;
   onContinue?: () => void;
   maxFileBytes?: number;
@@ -70,6 +99,8 @@ export function Composer({
   onModelChange,
   thinkingLevel,
   onThinkingLevelChange,
+  mediaActions,
+  onGenerateMedia,
   canContinue,
   onContinue,
   maxFileBytes = DEFAULT_MAX_FILE_BYTES,
@@ -127,6 +158,17 @@ export function Composer({
 
   const hasContent = input.trim().length > 0 || attachments.length > 0;
   const canSubmit = hasContent && !isStreaming;
+
+  /** Media cần mô tả bằng chữ — tệp đính kèm không thay được prompt. */
+  const canGenerateMedia = Boolean(onGenerateMedia) && input.trim().length > 0 && !isStreaming;
+
+  const startMedia = useCallback(
+    (action: MediaAction | undefined, kind: 'image' | 'video') => {
+      if (!action || !onGenerateMedia || !canGenerateMedia) return;
+      onGenerateMedia(action, kind);
+    },
+    [canGenerateMedia, onGenerateMedia],
+  );
 
   const acceptFiles = useCallback(
     (files: FileList | File[] | null) => {
@@ -383,6 +425,41 @@ export function Composer({
                   ) : (
                     <Mic size={16} />
                   )}
+                </button>
+              )}
+
+              {/* Tạo ảnh / tạo video: gửi lượt này bằng model media, giữ
+                  nguyên model chat đang chọn cho các lượt sau. */}
+              {mediaActions?.image && (
+                <button
+                  type="button"
+                  onClick={() => startMedia(mediaActions.image, 'image')}
+                  disabled={!canGenerateMedia}
+                  aria-label={`Tạo ảnh bằng ${mediaActions.image.label}`}
+                  title={
+                    canGenerateMedia
+                      ? `Tạo ảnh bằng ${mediaActions.image.label}`
+                      : 'Nhập mô tả ảnh trước khi tạo'
+                  }
+                  className="icon-btn h-9 w-9 rounded-full disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <ImagePlus size={16} />
+                </button>
+              )}
+              {mediaActions?.video && (
+                <button
+                  type="button"
+                  onClick={() => startMedia(mediaActions.video, 'video')}
+                  disabled={!canGenerateMedia}
+                  aria-label={`Tạo video bằng ${mediaActions.video.label}`}
+                  title={
+                    canGenerateMedia
+                      ? `Tạo video bằng ${mediaActions.video.label} (mất vài phút)`
+                      : 'Nhập mô tả video trước khi tạo'
+                  }
+                  className="icon-btn h-9 w-9 rounded-full disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <Film size={16} />
                 </button>
               )}
             </div>

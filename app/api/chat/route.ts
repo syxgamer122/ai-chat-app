@@ -16,15 +16,41 @@ import {
   classifyUpstreamStatus,
   type UpstreamScope,
 } from '@/lib/api-keys';
-import { ALLOWED_MODEL_IDS, DEFAULT_MODEL_ID, getModelConfig, resolveProviderModelChain } from '@/lib/models';
+import { ALLOWED_MODEL_IDS, DEFAULT_MODEL_ID, getModelConfig, mediaKindOf, resolveProviderModelChain } from '@/lib/models';
 import { validateProviderBaseUrl, THINKING_LEVELS, supportsThinkingLevel } from '@/lib/provider-url';
 import { acquireUpstreamSlot, sharedFreeBudget } from '@/lib/upstream-queue';
+import { pumpSseLines } from '@/lib/sse';
 import { checkRateLimit, getClientIp, checkSameOrigin, verifyAccessAuth } from '@/lib/security';
 
+/**
+ * Giữ nguyên edge runtime cho chat (không đổi sang nodejs trong phạm vi thay
+ * đổi này — nodejs bị cắt cứng theo maxDuration, cần đo lại trước khi đổi).
+ *
+ * Tạo ảnh/video ĐI QUA route này với mọi gateway chặn cross-origin — crax trả
+ * 403 cho bất kỳ request có header `Origin`, tức là mọi lời gọi từ trình duyệt,
+ * nên đường "gọi thẳng từ client" (lib/media-generate.ts) không dùng được cho
+ * crax và tự fallback về đây.
+ *
+ * Video vẫn kịp: đo thực tế crax `qwen-video-2.0-pro` xong trong 120-126s,
+ * byte đầu < 1.7s — nằm trong trần 300s của Vercel (kể cả Hobby) và thoả điều
+ * kiện edge "phải gửi byte đầu trong 25s để được stream tiếp".
+ */
 export const runtime = 'edge';
 export const dynamic = 'force-dynamic';
 
 const STREAM_BUDGET_MS = 270_000;
+
+/**
+ * Ngân sách riêng cho model sinh video. Vercel cắt cứng function ở 300s
+ * (Hobby: default = max = 300s; edge stream cũng 300s), nên đặt 290s để CHÍNH
+ * ta kết thúc trước nền tảng và trả được thông báo tử tế — thay vì bị giết giữa
+ * stream, người dùng thấy treo không rõ lý do.
+ *
+ * Đo thực tế trên crax `qwen-video-2.0-pro`: 120s và 126s cho 2 lần chạy,
+ * first byte < 1.7s, khoảng cách event lớn nhất ~19s. Video thường nằm gọn
+ * trong ngân sách; chỉ video nặng bất thường mới chạm trần.
+ */
+const VIDEO_BUDGET_MS = 290_000;
 const IDLE_TIMEOUT_MS = 60_000;
 const HEARTBEAT_MS = 10_000;
 const MAX_BODY_BYTES = 4.5 * 1024 * 1024;
@@ -87,6 +113,8 @@ function extractDelta(part: unknown): string {
 const IMAGE_MODEL_RE = /image|seedream|t2i|dall-e|dalle|flux|stable-diffusion|imggen|imagen|sdxl/i;
 
 function isImageModel(modelId: string): boolean {
+  const declared = mediaKindOf(modelId);
+  if (declared) return declared === 'image';
   return IMAGE_MODEL_RE.test(modelId);
 }
 
@@ -94,6 +122,8 @@ function isImageModel(modelId: string): boolean {
 const VIDEO_MODEL_RE = /video|kling|seedance|sora|veo|hailuo|vidu|jimeng/i;
 
 function isVideoModel(modelId: string): boolean {
+  const declared = mediaKindOf(modelId);
+  if (declared) return declared === 'video';
   return VIDEO_MODEL_RE.test(modelId);
 }
 
@@ -110,29 +140,15 @@ function coreToOpenAiMessages(core: CoreMessage[]): Array<{ role: string; conten
   });
 }
 
-/** Đọc từng payload `data:` từ một SSE stream. */
-async function pumpSseData(
-  body: ReadableStream<Uint8Array>,
-  onData: (raw: string) => void,
-): Promise<void> {
-  const reader = body.getReader();
-  const decoder = new TextDecoder();
-  let buf = '';
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-    let nl: number;
-    while ((nl = buf.indexOf('\n')) >= 0) {
-      const line = buf.slice(0, nl).replace(/\r$/, '');
-      buf = buf.slice(nl + 1);
-      if (line.startsWith('data:')) {
-        const raw = line.slice(5).trim();
-        if (raw) onData(raw);
-      }
-    }
-  }
-}
+/**
+ * Đọc từng payload `data:` từ một SSE stream.
+ *
+ * `onAlive` được gọi cho MỌI byte nhận được từ upstream, kể cả dòng comment
+ * SSE (`: keepalive`) mà crax phát khi model còn đang xử lý. Idle-timer phải
+ * reset theo tín hiệu này: tạo video có quãng chỉ toàn keepalive, nếu chỉ đếm
+ * dòng `data:` thì stream đang sống vẫn bị coi là treo và bị abort oan.
+ */
+const pumpSseData = pumpSseLines;
 
 /**
  * Sửa A7: chỉ coi `undefined` và `[object Object]` là artifact.
@@ -751,8 +767,9 @@ export async function POST(req: Request) {
             for (let modelIndex = 0; modelIndex < modelChain.length; modelIndex++) {
               const targetModel = modelChain[modelIndex];
               let abortKind: AbortKind | null = null;
-              // Tạo video cần vài phút — nới ngân sách riêng cho model video.
-              const budgetMs = isVideoModel(targetModel) ? 600_000 : STREAM_BUDGET_MS;
+              // Tạo video cần vài phút — nới ngân sách riêng cho model video,
+              // nhưng vẫn dưới trần 300s của nền tảng (xem VIDEO_BUDGET_MS).
+              const budgetMs = isVideoModel(targetModel) ? VIDEO_BUDGET_MS : STREAM_BUDGET_MS;
               const budgetController = new AbortController();
               const budgetTimer = setTimeout(() => {
                 abortKind = 'budget';
@@ -800,10 +817,12 @@ export async function POST(req: Request) {
                       ?.content ?? '';
 
                   const emitMedia = (kind: 'image' | 'video', url: string) => {
-                    // Ảnh: markdown img (renderer có component riêng).
-                    // Video: URL trần trên dòng riêng — renderer nhận diện .mp4.
+                    // Ảnh: markdown img. Video: markdown link (component `a`
+                    // của renderer nhận diện .mp4/.webm và render <video>).
+                    // Dùng cú pháp markdown tường minh cho cả hai để không phụ
+                    // thuộc autolink — URL media có query `?key=<JWT>` rất dài.
                     if (kind === 'image') writeText(`\n\n![${targetModel}](${url})\n`);
-                    else writeText(`\n\n${url}\n`);
+                    else writeText(`\n\n[${targetModel}](${url})\n`);
                   };
 
                   if (isImageModel(targetModel)) {
@@ -905,7 +924,9 @@ export async function POST(req: Request) {
                         writeText(c);
                       }
                     }
-                  });
+                  },
+                  // Keepalive/comment line cũng là dấu hiệu upstream còn sống.
+                  resetIdleTimer);
                   if (!got) writeText('_(Nhà cung cấp không trả về media nào)_');
                   markKeySuccess(apiKey);
                   writeFinish('stop');
@@ -1001,9 +1022,16 @@ export async function POST(req: Request) {
                   const isIdle = abortKind === 'idle';
                   if (isIdle) markKeyFailure(apiKey, undefined);
                   const code = isIdle ? 'STREAM_IDLE_TIMEOUT' : 'STREAM_BUDGET_EXCEEDED';
+                  const budgetSec = Math.round(budgetMs / 1000);
+                  /* Thông báo phải khớp ngân sách THỰC của lượt này: model video
+                     dùng VIDEO_BUDGET_MS, không phải 270s như model chat. Video
+                     chạm trần là do prompt nặng — gợi ý cách xử lý thay vì chỉ
+                     báo lỗi kỹ thuật. */
                   const diagMsg = isIdle
                     ? `AI Provider ${upstreamHost} ngừng gửi token trong 60 giây, phiên stream đã bị hủy.`
-                    : 'Phản hồi vượt quá ngân sách 270 giây của Edge Function và đã bị cắt.';
+                    : isVideoModel(targetModel)
+                      ? `Video chưa xong trong ${budgetSec} giây — vượt giới hạn thời gian của nền tảng. Thử mô tả ngắn/đơn giản hơn, hoặc tạo lại.`
+                      : `Phản hồi vượt quá ngân sách ${budgetSec} giây của Edge Function và đã bị cắt.`;
                   console.error(`[req:${requestId}][${code}] key=${keyLabel} model=${targetModel}`);
                   writeAnnotation({ error: code });
                   throw new ChatUpstreamError(diagMsg, code, requestId);

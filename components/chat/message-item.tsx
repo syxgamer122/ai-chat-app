@@ -260,6 +260,17 @@ export const MessageItem = memo(
             </div>
           )}
 
+          {/* Tiến trình tạo ảnh/video (route ghi vào kênh reasoning). Chỉ hiện
+              lúc đang stream — media mất vài phút nên cần dấu hiệu còn sống. */}
+          {isStreaming && typeof (m as any).reasoning === 'string' && (m as any).reasoning.trim() && (
+            <p role="status" className="mb-2 flex items-center gap-1.5 text-[12px] text-zinc-600">
+              <span className="h-1.5 w-1.5 flex-shrink-0 animate-pulse rounded-full bg-brand" />
+              <span className="truncate">
+                {(m as any).reasoning.trim().split('\n').filter(Boolean).slice(-1)[0]}
+              </span>
+            </p>
+          )}
+
           <div
             className={`claude-prose ${isStreaming ? 'streaming-caret' : ''}`}
             aria-busy={isStreaming}
@@ -349,6 +360,9 @@ export const MessageItem = memo(
   (prev, next) =>
     prev.m.id === next.m.id &&
     prev.m.content === next.m.content &&
+    // Model media chưa có content nào trong lúc chạy — tiến trình đi qua
+    // `reasoning`, phải so cả field này nếu không dòng trạng thái đứng im.
+    (prev.m as any).reasoning === (next.m as any).reasoning &&
     prev.m.role === next.m.role &&
     prev.branchInfo?.currentIndex === next.branchInfo?.currentIndex &&
     prev.branchInfo?.total === next.branchInfo?.total &&

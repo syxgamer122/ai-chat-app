@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   validateProviderBaseUrl,
   normalizeProviderModels,
+  providerNeedsApiKey,
 } from '@/lib/providers';
 
 describe('providers — provider presets', () => {
@@ -44,5 +45,42 @@ describe('providers — provider presets', () => {
     expect(out[0].id).toBe('gpt-5-6-sol'); // sort theo id
     expect(out[1].contextLength).toBe(131072);
     expect(normalizeProviderModels({ data: 'không phải mảng' })).toEqual([]);
+  });
+});
+
+/**
+ * Gateway free xác thực bằng IP, không đọc Authorization (kiểm chứng bằng
+ * request thật: key rác / không key vẫn 200, 429 áp theo IP kể cả khi mỗi
+ * request dùng key khác nhau). Ô nhập key phải bị ẩn cho các host này.
+ */
+describe('providerNeedsApiKey — gateway free không dùng key', () => {
+  it('crax và Kilgore: không cần key', () => {
+    expect(providerNeedsApiKey('https://gpt.crax.lol/v1')).toBe(false);
+    expect(providerNeedsApiKey('https://kilgoreai.freesrv.com/v1')).toBe(false);
+  });
+
+  it('không phân biệt hoa thường và dung sai path/slash', () => {
+    expect(providerNeedsApiKey('https://GPT.CRAX.LOL/v1/')).toBe(false);
+    expect(providerNeedsApiKey('https://gpt.crax.lol')).toBe(false);
+  });
+
+  it('gateway key cá nhân: vẫn cần key', () => {
+    expect(providerNeedsApiKey('https://openrouter.ai/api/v1')).toBe(true);
+    expect(providerNeedsApiKey('https://api.orcarouter.ai/v1')).toBe(true);
+    expect(providerNeedsApiKey('https://tokenin.my.id/v1')).toBe(true);
+  });
+
+  it('khớp đúng hostname, không khớp chuỗi con — chống host giả mạo', () => {
+    // Kẻ tấn công dựng host chứa tên gateway free để lừa ẩn ô key.
+    expect(providerNeedsApiKey('https://gpt.crax.lol.evil.com/v1')).toBe(true);
+    expect(providerNeedsApiKey('https://evil.com/gpt.crax.lol/v1')).toBe(true);
+    expect(providerNeedsApiKey('https://notgpt.crax.lol/v1')).toBe(true);
+  });
+
+  it('rỗng / URL lỗi → mặc định an toàn là cần key', () => {
+    expect(providerNeedsApiKey('')).toBe(true);
+    expect(providerNeedsApiKey(null)).toBe(true);
+    expect(providerNeedsApiKey(undefined)).toBe(true);
+    expect(providerNeedsApiKey('không-phải-url')).toBe(true);
   });
 });

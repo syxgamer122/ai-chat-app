@@ -76,6 +76,44 @@ export function supportsThinkingLevel(baseUrl: string | null | undefined): boole
   }
 }
 
+/**
+ * true khi gateway có sẵn model sinh ảnh/video built-in (crax: qwen-image-*,
+ * qwen-video). Gateway khác vẫn dùng được nếu /v1/models của họ liệt kê model
+ * media — phần đó phát hiện qua tên model, không qua hàm này.
+ */
+export function supportsMediaGeneration(baseUrl: string | null | undefined): boolean {
+  return supportsThinkingLevel(baseUrl);
+}
+
+/**
+ * Gateway miễn phí KHÔNG kiểm tra API key — xác thực bằng IP, không bằng key.
+ * Kiểm chứng thực tế: `GET /v1/models` và `POST /v1/chat/completions` của
+ * gpt.crax.lol trả 200 với key bất kỳ, key rác, hoặc không có header
+ * Authorization; giới hạn tốc độ áp theo IP (bắn 8 request với 8 key khác nhau
+ * vẫn nhận 429 từ request thứ 6). Kilgore hành xử giống vậy.
+ *
+ * Hệ quả UX: bắt người dùng dán key cho 2 host này là gây hiểu nhầm — họ tưởng
+ * thiếu key nên mới bị 429, trong khi key không liên quan. Ô nhập key bị ẩn cho
+ * các host này, và ngân sách dùng chung được quản ở `lib/upstream-queue.ts`.
+ */
+const NO_AUTH_HOSTS: readonly string[] = Object.freeze([
+  'gpt.crax.lol',
+  'kilgoreai.freesrv.com',
+]);
+
+/**
+ * false = gateway không cần API key (miễn phí, chặn theo IP). Dùng để ẩn ô nhập
+ * key trong Settings và để cho phép gọi thẳng từ trình duyệt dù không có key.
+ */
+export function providerNeedsApiKey(baseUrl: string | null | undefined): boolean {
+  if (!baseUrl) return true;
+  try {
+    return !NO_AUTH_HOSTS.includes(new URL(baseUrl).hostname.toLowerCase());
+  } catch {
+    return true;
+  }
+}
+
 /** Chuẩn hoá danh sách model từ GET /v1/models (dung sai nhiều dạng). */
 export function normalizeProviderModels(json: unknown): ProviderModel[] {
   const data = (json as { data?: unknown })?.data;

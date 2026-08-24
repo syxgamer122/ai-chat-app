@@ -1,6 +1,11 @@
 import { db } from '@/lib/db';
 import { useAppStore, SERVER_PROVIDER_ID, type ActiveProviderSnapshot } from '@/lib/store';
-import { validateProviderBaseUrl, normalizeProviderModels, type ProviderModel } from '@/lib/provider-url';
+import {
+  validateProviderBaseUrl,
+  normalizeProviderModels,
+  providerNeedsApiKey,
+  type ProviderModel,
+} from '@/lib/provider-url';
 
 /**
  * Provider Presets — nhiều nhà cung cấp API chuẩn OpenAI-compatible.
@@ -10,7 +15,7 @@ import { validateProviderBaseUrl, normalizeProviderModels, type ProviderModel } 
 
 export { SERVER_PROVIDER_ID };
 export type { ActiveProviderSnapshot };
-export { validateProviderBaseUrl, normalizeProviderModels };
+export { validateProviderBaseUrl, normalizeProviderModels, providerNeedsApiKey };
 export type { ProviderModel, BaseUrlCheck } from '@/lib/provider-url';
 
 export interface ProviderConfig {
@@ -82,9 +87,10 @@ export async function syncActiveProviderSnapshot(providerId: string): Promise<vo
 /* Seed 2 provider mặc định (chạy 1 lần)                               */
 /* ------------------------------------------------------------------ */
 
-// v5: thêm OrcaRouter + Tokenin (không kèm key — user tự dán API key cá nhân
-// qua nút Sửa, key không bao giờ nằm trong code/repo).
-const PROVIDER_SEED_FLAG = 'providers-seeded-v5';
+// v6: KHÔNG seed API key nào kèm code. Trước đây `crax-gpt` mang sẵn
+// apiKey: 'crax-gpt' — credential nằm trong repo và trong git history. User tự
+// dán key qua nút Sửa; key chỉ sống trong IndexedDB của trình duyệt.
+const PROVIDER_SEED_FLAG = 'providers-seeded-v6';
 
 /** Khoá module: chống 2 effect chạy song song cùng lúc (StrictMode / 2 tab). */
 let seedPromise: Promise<void> | null = null;
@@ -93,7 +99,7 @@ const DEFAULT_PROVIDER_SEEDS: Array<Pick<ProviderConfig, 'name' | 'baseUrl' | 'a
   {
     name: 'crax-gpt',
     baseUrl: 'https://gpt.crax.lol/v1',
-    apiKey: 'crax-gpt',
+    apiKey: '',
   },
   {
     name: 'KilgoreAI',

@@ -14,6 +14,7 @@ import {
   upsertProvider,
   type ProviderConfig,
 } from '@/lib/providers';
+import { providerNeedsApiKey } from '@/lib/provider-url';
 import { useAppStore, SERVER_PROVIDER_ID } from '@/lib/store';
 
 /**
@@ -83,7 +84,8 @@ export function ProviderManager() {
     }
     const p = await db.providers.get(id);
     if (!p) return;
-    if (!p.apiKey && !p.models?.length) {
+    // Gateway free (crax, Kilgore) không dùng key — bỏ qua mọi cảnh báo về key.
+    if (!p.apiKey && !p.models?.length && providerNeedsApiKey(p.baseUrl)) {
       // Gateway key cá nhân (OpenRouter, OrcaRouter…) trả 401 khi chưa có key —
       // nói rõ để user dán key thay vì thấy "lỗi kết nối" không hiểu vì sao.
       setStatus(`"${p.name}" cần API key cá nhân — dán key vào ô bên dưới rồi bấm "Lưu & test".`);
@@ -131,9 +133,10 @@ export function ProviderManager() {
       const data = await res.json();
       if (!res.ok) {
         // 401/403 do thiếu hoặc sai key là ca phổ biến nhất — nói rõ cách sửa.
-        const needsKey = !p.apiKey && /40[13]|unauthor|forbidden|key/i.test(
-          `${res.status} ${data?.error ?? ''}`,
-        );
+        const needsKey =
+          !p.apiKey &&
+          providerNeedsApiKey(p.baseUrl) &&
+          /40[13]|unauthor|forbidden|key/i.test(`${res.status} ${data?.error ?? ''}`);
         setStatus(
           needsKey
             ? `${p.name}: cần API key cá nhân. Dán key vào ô "API key cá nhân" rồi bấm "Lưu & test".`
@@ -227,6 +230,8 @@ export function ProviderManager() {
         const active = activeProviderId === p.id;
         const guide = keyGuideFor(p.baseUrl);
         const draft = keyDraft[p.id];
+        // crax/Kilgore: gateway free chặn theo IP, key không có tác dụng.
+        const needsKey = providerNeedsApiKey(p.baseUrl);
         return (
           <div
             key={p.id}
@@ -246,7 +251,14 @@ export function ProviderManager() {
                 <span className="min-w-0">
                   <span className="flex items-center gap-1.5">
                     <span className="truncate text-sm font-medium text-zinc-800">{p.name}</span>
-                    {p.apiKey ? (
+                    {!needsKey ? (
+                      <span
+                        title="Gateway miễn phí — không cần API key"
+                        className="flex items-center gap-0.5 rounded bg-sky-50 px-1 py-0.5 text-[10px] font-medium text-sky-700"
+                      >
+                        miễn phí
+                      </span>
+                    ) : p.apiKey ? (
                       <span
                         title="Đã lưu API key"
                         className="flex items-center gap-0.5 rounded bg-emerald-50 px-1 py-0.5 text-[10px] font-medium text-emerald-700"
@@ -306,8 +318,12 @@ export function ProviderManager() {
             {/*
               * Ô dán key cá nhân ngay tại chỗ — hiện khi provider đang được chọn
               * hoặc khi chưa có key. Không phải mở form "Sửa" mới nhập được.
+              *
+              * Ẩn hoàn toàn với gateway free (crax, Kilgore): các host này không
+              * đọc Authorization, giới hạn tính theo IP. Hiện ô nhập key ở đây
+              * làm người dùng tưởng dán key sẽ hết 429.
               */}
-            {(active || !p.apiKey) && (
+            {needsKey && (active || !p.apiKey) && (
               <div className="mt-2 border-t border-zinc-200/70 pt-2">
                 <label
                   htmlFor={`pv-key-${p.id}`}
@@ -358,6 +374,14 @@ export function ProviderManager() {
                 )}
               </div>
             )}
+
+            {/* Gateway free: nói rõ vì sao không có ô nhập key. */}
+            {!needsKey && active && (
+              <p className="mt-2 border-t border-zinc-200/70 pt-2 text-[11px] leading-relaxed text-zinc-600">
+                Dùng được ngay, không cần API key. Gateway này giới hạn theo lượt
+                dùng chung nên lúc đông có thể phải chờ vài giây.
+              </p>
+            )}
           </div>
         );
       })}
@@ -391,14 +415,21 @@ export function ProviderManager() {
             value={editing.baseUrl}
             onChange={(e) => setEditing({ ...editing, baseUrl: e.target.value })}
           />
-          <input
-            className="field-sm font-mono"
-            type="password"
-            aria-label="API key"
-            placeholder="API key (có thể bỏ trống)"
-            value={editing.apiKey}
-            onChange={(e) => setEditing({ ...editing, apiKey: e.target.value })}
-          />
+          {/* Gateway free: ẩn luôn ô key trong form Sửa cho nhất quán. */}
+          {providerNeedsApiKey(editing.baseUrl) ? (
+            <input
+              className="field-sm font-mono"
+              type="password"
+              aria-label="API key"
+              placeholder="API key (có thể bỏ trống)"
+              value={editing.apiKey}
+              onChange={(e) => setEditing({ ...editing, apiKey: e.target.value })}
+            />
+          ) : (
+            <p className="text-[11px] leading-relaxed text-zinc-600">
+              Gateway miễn phí — không cần API key.
+            </p>
+          )}
           <div className="flex flex-wrap gap-2">
             <button
               type="button"

@@ -1,5 +1,8 @@
 export type ProviderId = 'openai' | 'anthropic' | 'deepseek' | 'google' | 'gateway';
-export type ModelCategory = 'general' | 'coding' | 'reasoning' | 'fast';
+export type ModelCategory = 'general' | 'coding' | 'reasoning' | 'fast' | 'media';
+
+/** Model sinh media: route /api/chat đi đường riêng (images API / SSE type:video). */
+export type MediaKind = 'image' | 'video';
 
 export interface ModelConfig {
   readonly id: string;
@@ -17,6 +20,8 @@ export interface ModelConfig {
   readonly supportsTemperature: boolean;
   readonly supportsImages: boolean;
   readonly supportsPdf: boolean;
+  /** Có mặt = model sinh ảnh/video, không phải model chat. */
+  readonly media?: MediaKind;
 }
 
 type ModelInput = Omit<ModelConfig, 'providerModelFallbacks'> & {
@@ -307,6 +312,54 @@ export const AVAILABLE_MODELS: readonly ModelConfig[] = Object.freeze([
     supportsImages: false,
     supportsPdf: false,
   }),
+  /* ---------------- Model sinh media (gateway crax) ---------------- */
+  def({
+    id: 'qwen-image-3.0-pro',
+    name: 'Qwen Image 3.0 Pro',
+    provider: 'gateway',
+    providerModel: 'qwen-image-3.0-pro',
+    providerModelFallbacks: ['qwen-image-2.0-pro'],
+    description: 'Tạo ảnh từ mô tả văn bản, chất lượng cao nhất.',
+    category: 'media',
+    media: 'image',
+    contextWindowTokens: 4_000,
+    maxOutputTokens: 1_024,
+    isReasoning: false,
+    supportsTemperature: false,
+    supportsImages: false,
+    supportsPdf: false,
+  }),
+  def({
+    id: 'qwen-image-2.0-pro',
+    name: 'Qwen Image 2.0 Pro',
+    provider: 'gateway',
+    providerModel: 'qwen-image-2.0-pro',
+    providerModelFallbacks: ['qwen-image-3.0-pro'],
+    description: 'Tạo ảnh nhanh hơn, phong cách khác bản 3.0.',
+    category: 'media',
+    media: 'image',
+    contextWindowTokens: 4_000,
+    maxOutputTokens: 1_024,
+    isReasoning: false,
+    supportsTemperature: false,
+    supportsImages: false,
+    supportsPdf: false,
+  }),
+  def({
+    id: 'qwen-video',
+    name: 'Qwen Video',
+    provider: 'gateway',
+    providerModel: 'qwen-video',
+    description: 'Tạo video ngắn từ mô tả văn bản (mất 2-5 phút).',
+    category: 'media',
+    media: 'video',
+    contextWindowTokens: 4_000,
+    maxOutputTokens: 1_024,
+    isReasoning: false,
+    supportsTemperature: false,
+    supportsImages: false,
+    supportsPdf: false,
+  }),
   def({
     id: 'gemini-2.0-flash',
     name: 'Gemini 2.0 Flash',
@@ -342,6 +395,15 @@ const MODEL_BY_PROVIDER_NAME: ReadonlyMap<string, ModelConfig> = (() => {
 })();
 
 export const ALLOWED_MODEL_IDS: ReadonlySet<string> = new Set(MODEL_BY_ID.keys());
+
+/** Model sinh ảnh/video built-in — dùng cho 2 nút media cạnh nút mic. */
+export const MEDIA_MODELS: readonly ModelConfig[] = Object.freeze(
+  AVAILABLE_MODELS.filter((m) => m.media !== undefined),
+);
+
+export function mediaKindOf(modelId: string | null | undefined): MediaKind | undefined {
+  return findModelConfig(modelId)?.media;
+}
 
 /**
  * Override mapping không cần redeploy code.
@@ -404,7 +466,9 @@ export function resolveProviderModelChain(model: ModelConfig): readonly string[]
   push(model.providerModel);
   for (const f of model.providerModelFallbacks) push(f);
 
-  if (model.id !== DEFAULT_MODEL_ID) {
+  // Model media: KHÔNG chèn model chat mặc định vào chuỗi — nếu gateway không
+  // có model ảnh/video thì phải báo lỗi, chứ không âm thầm trả về text.
+  if (model.media === undefined && model.id !== DEFAULT_MODEL_ID) {
     const d = MODEL_BY_ID.get(DEFAULT_MODEL_ID);
     if (d) {
       push(aliasOverrides()[d.id]);
