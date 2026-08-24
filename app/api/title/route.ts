@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { getKeyCandidates, markKeyFailure, markKeySuccess, getKeyLabel } from '@/lib/api-keys';
 import { validateProviderBaseUrl } from '@/lib/provider-url';
 import { sharedFreeBudget } from '@/lib/upstream-queue';
+import { filterSupportedModels, markModelUnsupported } from '@/lib/model-negative-cache';
 import {
   checkRateLimit,
   rateLimitHeaders,
@@ -193,13 +194,20 @@ export async function POST(req: Request) {
       'Output ONLY the title without quotes, markdown, or punctuation.',
     ].join(' ');
 
+    const titleUpstreamBase = providerBase ?? process.env.OPENAI_BASE_URL ?? null;
+    // Negative cache dùng chung với /api/chat: bỏ qua model vừa bị gateway
+    // từ chối gần đây để sinh tiêu đề không phải trả "thuế thử sai" mỗi lần.
+    const titleModelChain = titleUpstreamBase
+      ? filterSupportedModels(titleUpstreamBase, TITLE_MODEL_CHAIN)
+      : [...TITLE_MODEL_CHAIN];
+
     for (const key of candidateKeys) {
       const openai = createOpenAI({
         apiKey: key,
         baseURL: providerBase ?? (process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1'),
       });
 
-      for (const modelName of TITLE_MODEL_CHAIN) {
+      for (const modelName of titleModelChain) {
         if (req.signal.aborted) {
           return Response.json({ title: fallbackTitle, final: true }, { headers: NO_STORE });
         }
@@ -225,6 +233,7 @@ export async function POST(req: Request) {
             return Response.json({ title: fallbackTitle, final: true }, { headers: NO_STORE });
           }
           if (isModelNotFound(err)) {
+            if (titleUpstreamBase) markModelUnsupported(titleUpstreamBase, modelName);
             console.warn(`[Title API] Model "${modelName}" 404 -> thử model kế tiếp.`);
             continue;
           }

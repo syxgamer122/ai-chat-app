@@ -20,6 +20,8 @@ import { ALLOWED_MODEL_IDS, DEFAULT_MODEL_ID, getModelConfig, mediaKindOf, resol
 import { validateProviderBaseUrl, THINKING_LEVELS, supportsThinkingLevel } from '@/lib/provider-url';
 import { acquireUpstreamSlot, sharedFreeBudget } from '@/lib/upstream-queue';
 import { pumpSseLines } from '@/lib/sse';
+import { filterSupportedModels, markModelUnsupported } from '@/lib/model-negative-cache';
+import { bridgeImagesInMessages, shouldBridgeImages, type BridgeableMessage } from '@/lib/vision-bridge';
 import { checkRateLimit, getClientIp, checkSameOrigin, verifyAccessAuth } from '@/lib/security';
 
 /**
@@ -255,6 +257,8 @@ interface UpstreamDiagnosis {
   stopFailover: boolean;
   /** true = lỗi của key, nên markKeyFailure. false = lỗi của ta hoặc của request. */
   blameKey: boolean;
+  /** true = gateway không có/không cho phép model này → ghi negative cache. */
+  modelUnsupported: boolean;
 }
 
 function diagnoseUpstreamError(
@@ -291,6 +295,11 @@ function diagnoseUpstreamError(
   let code = `UPSTREAM_${status ?? 'NETWORK'}`;
   let userMessage: string;
   let blameKey = true;
+  let modelUnsupported = false;
+  let stopFailover = false;
+
+  // crax (New API) trả 400 kèm "Unknown model" thay vì 404 cho model lạ.
+  const unknownModel400 = status === 400 && /unknown model/i.test(bodySnippet);
 
   switch (status) {
     case 401:
@@ -306,6 +315,18 @@ function diagnoseUpstreamError(
       userMessage = `Tài khoản upstream tại ${upstreamHost} đã hết credit / hết hạn thanh toán (402).`;
       break;
     case 403:
+      if (!bodySnippet && !cfRay && !upstreamServer) {
+        // New API trả 403 với body RỖNG khi model không nằm trong allowlist
+        // của gateway (đo trên gorouter/justwoker) — thông tin theo MODEL,
+        // không phải lỗi key hay WAF: không phạt key, ghi negative cache.
+        code = 'UPSTREAM_MODEL_403';
+        blameKey = false;
+        modelUnsupported = true;
+        userMessage =
+          `Model '${ctx.model}' không nằm trong danh mục mà ${upstreamHost} ` +
+          `cho phép key ${ctx.keyLabel} dùng (403).`;
+        break;
+      }
       code = looksLikeCloudflare ? 'UPSTREAM_WAF_403' : 'UPSTREAM_FORBIDDEN_403';
       // WAF chặn theo IP của Vercel → đổi key vô ích, nhưng cũng không phải lỗi key.
       blameKey = !looksLikeCloudflare;
@@ -320,12 +341,14 @@ function diagnoseUpstreamError(
       code = 'UPSTREAM_MODEL_404';
       // Model không tồn tại trên gateway → đổi key không giúp gì.
       blameKey = false;
+      modelUnsupported = true;
       userMessage = `Model '${ctx.model}' không tồn tại hoặc không được cấp quyền trên ${upstreamHost} (404).`;
       break;
     case 400:
     case 422:
       code = `UPSTREAM_BAD_REQUEST_${status}`;
       blameKey = false;
+      modelUnsupported = unknownModel400;
       userMessage = `Yêu cầu gửi lên AI Provider không hợp lệ (${status}). Đổi key cũng không giải quyết được.`;
       break;
     case 429:
@@ -334,9 +357,25 @@ function diagnoseUpstreamError(
       break;
     default:
       if (status && status >= 500) {
-        code = `UPSTREAM_SERVER_${status}`;
-        blameKey = false;
-        userMessage = `AI Provider ${upstreamHost} đang gặp sự cố (${status}). Vui lòng thử lại sau ít phút.`;
+        // Luật "500-as-validation" (Free-Claude-Gateway): 500 kèm nội dung
+        // validation nghĩa là CẤU TRÚC REQUEST của ta bị từ chối — retry trên
+        // key/model khác cũng y hệt, chỉ đốt quota và kéo dài thời gian chờ.
+        const looksLikeValidation =
+          /field\s+\S+\s+is required/i.test(bodySnippet) ||
+          /invalid_request|invalid request/i.test(bodySnippet) ||
+          /missing required (parameter|field)/i.test(bodySnippet);
+        if (looksLikeValidation) {
+          code = 'UPSTREAM_INVALID_REQUEST_500';
+          blameKey = false;
+          stopFailover = true;
+          userMessage =
+            `Yêu cầu bị ${upstreamHost} từ chối (500 — dữ liệu không hợp lệ: ` +
+            `${bodySnippet.slice(0, 160)}). Thử lại bằng key/model khác cũng không thay đổi được.`;
+        } else {
+          code = `UPSTREAM_SERVER_${status}`;
+          blameKey = false;
+          userMessage = `AI Provider ${upstreamHost} đang gặp sự cố (${status}). Vui lòng thử lại sau ít phút.`;
+        }
       } else if (status === undefined) {
         code = 'UPSTREAM_NETWORK';
         blameKey = false;
@@ -363,10 +402,22 @@ function diagnoseUpstreamError(
 
   // 403-WAF và 5xx: vẫn nên thử key khác (có thể route khác IP / retry may mắn).
   // 400 "Unknown model" (kiểu crax trả thay vì 404) vẫn cho thử model kế tiếp.
-  const unknownModel400 = status === 400 && /unknown model/i.test(bodySnippet);
-  const stopFailover = (scope === 'request' && !unknownModel400) || status === 404;
+  // Rule 500-validation tự đặt stopFailover trong switch — lỗi request của ta,
+  // retry nơi khác vô ích.
+  if (!stopFailover) {
+    stopFailover = (scope === 'request' && !unknownModel400) || status === 404;
+  }
 
-  return { status, scope, code, userMessage, devLog, stopFailover, blameKey };
+  return {
+    status,
+    scope,
+    code,
+    userMessage,
+    devLog,
+    stopFailover,
+    blameKey,
+    modelUnsupported,
+  };
 }
 
 class ChatUpstreamError extends Error {
@@ -594,9 +645,14 @@ export async function POST(req: Request) {
     const modelConfig = providerBase
       ? { ...baseConfig, providerModel: selectedModelId }
       : baseConfig;
-    const modelChain = providerBase
+    const upstreamBase = providerBase ?? process.env.OPENAI_BASE_URL ?? null;
+    let modelChain: readonly string[] = providerBase
       ? [selectedModelId]
       : resolveProviderModelChain(baseConfig);
+    // Negative cache: bỏ qua tên model vừa bị gateway từ chối gần đây (404 /
+    // 400 unknown-model / 403 body rỗng) để không lặp lại lượt thử chết trong
+    // mọi tin nhắn. Lọc sạch thì giữ nguyên chain — vẫn thử và tự phục hồi.
+    if (upstreamBase) modelChain = filterSupportedModels(upstreamBase, modelChain);
     const targetModel = modelConfig.providerModel;
     const contextMessages = messages.slice(-50);
 
@@ -619,9 +675,35 @@ export async function POST(req: Request) {
       };
     });
 
+    /* Vision bridge: model chữ thuần (supportsImages=false) + tin nhắn có ảnh
+       data-URL + server có GEMINI_API_KEY → thay ảnh bằng mô tả của Gemini
+       trước khi gọi upstream. Mọi lỗi bridge đều được bỏ qua — attachment giữ
+       nguyên như hành vi cũ, không bao giờ làm hỏng tin nhắn. */
+    let bridgeMessages: readonly BridgeableMessage[] = sanitizedContextMessages;
+    const geminiApiKey = (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '').trim();
+    if (
+      geminiApiKey &&
+      shouldBridgeImages(modelConfig) &&
+      sanitizedContextMessages.some((m) =>
+        m.experimental_attachments?.some((a) => a.contentType?.startsWith('image/')),
+      )
+    ) {
+      try {
+        bridgeMessages = await bridgeImagesInMessages(sanitizedContextMessages, {
+          apiKey: geminiApiKey,
+          geminiModel: process.env.GEMINI_VISION_MODEL || undefined,
+        });
+        console.info(`[req:${requestId}] vision bridge: ảnh đã thay bằng mô tả cho model ${targetModel}`);
+      } catch (bridgeError) {
+        console.warn(
+          `[req:${requestId}] vision bridge lỗi, giữ attachment nguyên trạng: ${sanitizeErrorMessage(bridgeError)}`,
+        );
+      }
+    }
+
     let core: CoreMessage[];
     try {
-      core = mergeSameRole(normalize(convertToCoreMessages(sanitizedContextMessages as any)));
+      core = mergeSameRole(normalize(convertToCoreMessages(bridgeMessages as any)));
     } catch {
       return jsonError(
         requestId,
@@ -894,6 +976,7 @@ export async function POST(req: Request) {
                   }
                   resetIdleTimer();
                   let got = false;
+                  let sseError = '';
                   await pumpSseData(res.body, (raw) => {
                     if (raw === '[DONE]') return;
                     let j: unknown;
@@ -907,6 +990,7 @@ export async function POST(req: Request) {
                       type?: string;
                       url?: unknown;
                       text?: unknown;
+                      error?: unknown;
                       choices?: Array<{ delta?: { content?: unknown }; message?: { content?: unknown } }>;
                     };
                     if (p.type === 'image' && typeof p.url === 'string') {
@@ -923,11 +1007,26 @@ export async function POST(req: Request) {
                       if (typeof c === 'string' && c) {
                         got = true;
                         writeText(c);
+                      } else if (p.error && !got) {
+                        // Envelope lỗi trong body 200 — rule "200-with-error"
+                        // của Free-Claude-Gateway: coi như lỗi gateway, cho
+                        // failover thay vì kết thúc im lặng.
+                        sseError =
+                          typeof p.error === 'string'
+                            ? p.error
+                            : JSON.stringify(p.error).slice(0, 300);
                       }
                     }
                   },
                   // Keepalive/comment line cũng là dấu hiệu upstream còn sống.
                   resetIdleTimer);
+                  if (!got && sseError) {
+                    throw new ChatUpstreamError(
+                      `Gateway trả lỗi khi tạo media tại ${hostOf(base) ?? base}: ${redact(sseError).slice(0, 200)}`,
+                      'MEDIA_UPSTREAM_ERROR',
+                      requestId,
+                    );
+                  }
                   if (!got) writeText('_(Nhà cung cấp không trả về media nào)_');
                   markKeySuccess(apiKey);
                   writeFinish('stop');
@@ -1028,6 +1127,7 @@ export async function POST(req: Request) {
                 const isLastModelInChain = targetModel === modelChain[modelChain.length - 1];
                 const isLastKeyAttempt = attempt === candidateKeys.length - 1;
                 if (is404 && emittedChars === 0 && !(isLastModelInChain && isLastKeyAttempt)) {
+                  if (upstreamBase) markModelUnsupported(upstreamBase, targetModel);
                   console.warn(`[req:${requestId}] Model "${targetModel}" 404 trên ${upstreamHost} -> thử model tiếp theo trong chain.`);
                   continue;
                 }
@@ -1058,6 +1158,12 @@ export async function POST(req: Request) {
                   providerBase,
                 });
                 console.error(diagnosis.devLog);
+
+                // Model bị gateway từ chối (404 / 400 unknown-model / 403 body
+                // rỗng): ghi negative cache — các request sau bỏ qua tên này.
+                if (diagnosis.modelUnsupported && upstreamBase) {
+                  markModelUnsupported(upstreamBase, targetModel);
+                }
 
                 if (diagnosis.blameKey) markKeyFailure(apiKey, diagnosis.status);
 
