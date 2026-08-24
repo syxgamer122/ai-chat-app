@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import type { MessageStatus } from "@/lib/chat-types";
 import type { StoredMessageStatus } from "@/lib/db";
@@ -13,7 +13,7 @@ export function MessageStatusBadge({
   if (status === "streaming") {
     return (
       <span className="animate-pulse text-[11px] text-zinc-600">
-        Äang táº¡oâ€¦
+        Äang tạo…
       </span>
     );
   }
@@ -21,7 +21,7 @@ export function MessageStatusBadge({
   if (status === "aborted") {
     return (
       <span className="text-[11px] font-medium text-amber-700 dark:text-amber-400">
-        ÄÃ£ dá»«ng giá»¯a chá»«ng
+        Äã dừng giữa chừng
       </span>
     );
   }
@@ -29,7 +29,7 @@ export function MessageStatusBadge({
   if (status === "error") {
     return (
       <span className="text-[11px] font-medium text-red-700 dark:text-red-400">
-        CÃ³ lá»—i khi táº¡o ná»™i dung
+        Có lỗi khi tạo nội dung
       </span>
     );
   }
