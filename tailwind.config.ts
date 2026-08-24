@@ -2,6 +2,21 @@ import type { Config } from 'tailwindcss'
 import defaultTheme from 'tailwindcss/defaultTheme'
 
 /**
+ * Ramp zinc dẫn qua CSS variables (`--zinc-*` trong globals.css).
+ * Class sẵn có (`text-zinc-800`, `hover:bg-zinc-100`...) nhờ đó tự thích
+ * ứng cả hai theme mà không phải sửa từng component: giá trị biến bị LẬT
+ * bậc trong theme tối (zinc-100 sáng ↔ nền tối) để giữ đúng vai trò
+ * "nền nhạt / chữ đậm" thay vì đúng mã hex gốc.
+ */
+const zincRamp = (suffix = '') =>
+  Object.fromEntries(
+    [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950].map((step) => [
+      step,
+      `rgb(var(--zinc-${step}${suffix}) / <alpha-value>)`,
+    ]),
+  )
+
+/**
  * Design tokens dùng chung. Màu khai báo dạng channel RGB trong globals.css
  * (`--brand: 10 126 140`) để Tailwind vẫn áp dụng được modifier opacity
  * (`bg-brand/20`) mà CSS thuần cũng dùng lại được cùng một biến.
@@ -16,6 +31,8 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
+        /** Thang xám chủ đạo — theo theme qua --zinc-*. */
+        zinc: zincRamp(),
         /** Canvas & các mặt phẳng nổi. */
         surface: {
           DEFAULT: 'rgb(var(--surface) / <alpha-value>)',

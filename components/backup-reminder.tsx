@@ -70,7 +70,7 @@ export function BackupReminder({ chatCount }: { chatCount: number }) {
                 snoozeBackupReminder();
                 setVisible(false);
               }}
-              className="rounded-lg px-2 py-1 text-amber-800 transition hover:bg-amber-100"
+              className="rounded-lg px-2 py-1 text-amber-800 transition hover:bg-amber-100 dark:text-amber-300 dark:hover:bg-amber-500/10"
             >
               Để sau
             </button>
@@ -83,7 +83,7 @@ export function BackupReminder({ chatCount }: { chatCount: number }) {
             snoozeBackupReminder();
             setVisible(false);
           }}
-          className="-mr-1 -mt-0.5 flex-shrink-0 rounded p-0.5 text-amber-700/70 transition hover:bg-amber-100 hover:text-amber-900"
+          className="-mr-1 -mt-0.5 flex-shrink-0 rounded p-0.5 text-amber-700/70 transition hover:bg-amber-100 hover:text-amber-900 dark:text-amber-400/70 dark:hover:bg-amber-500/10 dark:hover:text-amber-300"
         >
           <X size={13} />
         </button>

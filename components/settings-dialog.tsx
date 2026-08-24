@@ -192,7 +192,7 @@ function PromptLibrarySection() {
                 type="button"
                 onClick={() => startEdit(p)}
                 aria-label={`Sửa ${p.title}`}
-                className="rounded p-1 text-zinc-500 transition-colors hover:bg-zinc-200 hover:text-zinc-900"
+                className="rounded p-1 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800 dark:hover:bg-zinc-200/60 dark:hover:text-zinc-100"
               >
                 <Pencil size={12} />
               </button>
@@ -202,7 +202,7 @@ function PromptLibrarySection() {
                   if (window.confirm(`Xóa prompt "${p.title}"?`)) void deletePrompt(p.id);
                 }}
                 aria-label={`Xóa ${p.title}`}
-                className="rounded p-1 text-zinc-500 transition-colors hover:bg-red-50 hover:text-red-600"
+                className="rounded p-1 text-zinc-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10 dark:hover:text-red-400"
               >
                 <Trash2 size={12} />
               </button>
@@ -328,7 +328,7 @@ function AutoBackupSection() {
                     setMessage('Đã gỡ thư mục tự động — quay lại chế độ nhắc + tải file.');
                   });
                 }}
-                className="flex-shrink-0 rounded px-1.5 py-0.5 text-zinc-600 transition-colors hover:bg-red-50 hover:text-red-600"
+                className="flex-shrink-0 rounded px-1.5 py-0.5 text-zinc-600 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10 dark:hover:text-red-400"
               >
                 Gỡ
               </button>
@@ -786,9 +786,9 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                   <p
                     className={`text-xs leading-relaxed ${
                       status.kind === 'error'
-                        ? 'text-red-700'
+                        ? 'text-red-700 dark:text-red-400'
                         : status.kind === 'ok'
-                          ? 'text-emerald-700'
+                          ? 'text-emerald-700 dark:text-emerald-400'
                           : 'text-zinc-600'
                     }`}
                     role="status"
@@ -799,9 +799,9 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
               </div>
 
               <div>
-                <h3 className="mb-2 text-sm font-semibold text-red-700">Vùng nguy hiểm</h3>
+                <h3 className="mb-2 text-sm font-semibold text-red-700 dark:text-red-400">Vùng nguy hiểm</h3>
                 <div className="mb-2 flex items-start gap-2 text-xs text-zinc-600">
-                  <ShieldAlert size={14} className="mt-0.5 flex-shrink-0 text-red-600" />
+                  <ShieldAlert size={14} className="mt-0.5 flex-shrink-0 text-red-600 dark:text-red-400" />
                   <span>Hãy xuất bản sao lưu .json trước khi thực hiện hành động này.</span>
                 </div>
                 <button
@@ -828,7 +828,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                       window.location.reload();
                     }
                   }}
-                  className="w-full rounded-xl border border-red-300 bg-red-50 px-4 py-2.5 text-sm font-medium text-red-700 transition hover:bg-red-100"
+                  className="w-full rounded-xl border border-red-300 bg-red-50 px-4 py-2.5 text-sm font-medium text-red-700 transition hover:bg-red-100 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300 dark:hover:bg-red-500/20"
                 >
                   Xóa toàn bộ dữ liệu ứng dụng
                 </button>

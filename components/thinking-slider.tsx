@@ -11,10 +11,10 @@ const LEVELS: {
   color: string;
   description: string;
 }[] = [
-  { key: 'low', label: 'Thấp', icon: Lightbulb, color: 'text-blue-600', description: 'Suy luận nhẹ cho câu hỏi đơn giản' },
-  { key: 'medium', label: 'Trung bình', icon: Brain, color: 'text-purple-600', description: 'Cân bằng tốc độ và độ sâu' },
-  { key: 'high', label: 'Cao', icon: Sparkles, color: 'text-amber-600', description: 'Phân tích sâu, chậm hơn' },
-  { key: 'max', label: 'Tối đa', icon: Rocket, color: 'text-rose-600', description: 'Suy luận tối đa, tốn nhiều token nhất' },
+  { key: 'low', label: 'Thấp', icon: Lightbulb, color: 'text-blue-600 dark:text-blue-400', description: 'Suy luận nhẹ cho câu hỏi đơn giản' },
+  { key: 'medium', label: 'Trung bình', icon: Brain, color: 'text-purple-600 dark:text-purple-400', description: 'Cân bằng tốc độ và độ sâu' },
+  { key: 'high', label: 'Cao', icon: Sparkles, color: 'text-amber-600 dark:text-amber-400', description: 'Phân tích sâu, chậm hơn' },
+  { key: 'max', label: 'Tối đa', icon: Rocket, color: 'text-rose-600 dark:text-rose-400', description: 'Suy luận tối đa, tốn nhiều token nhất' },
 ];
 
 interface ThinkingSliderProps {

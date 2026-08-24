@@ -347,7 +347,7 @@ export function Composer({
                 </span>
               )}
               {voice.error && (
-                <span role="alert" className="text-amber-700">
+                <span role="alert" className="text-amber-700 dark:text-amber-400">
                   {voice.error}
                 </span>
               )}
@@ -487,7 +487,7 @@ export function Composer({
                   type="button"
                   onClick={onStop}
                   aria-label="Dừng tạo"
-                  className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-zinc-800 text-white transition hover:bg-zinc-900"
+                  className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-zinc-800 text-white transition hover:bg-zinc-900 dark:bg-zinc-200 dark:text-zinc-900 dark:hover:bg-zinc-300"
                 >
                   <Square size={13} className="fill-current" />
                 </button>

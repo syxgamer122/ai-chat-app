@@ -17,6 +17,7 @@ import { KodaLogo } from '@/components/koda-logo';
 import {
   Plus, MessageSquare, Pin, Trash2, Search, Settings as SettingsIcon,
   X, MoreHorizontal, FileJson, FileText, Loader2, PanelLeftClose, PanelLeftOpen,
+  Sun, Moon, Monitor,
 } from 'lucide-react';
 
 const EMPTY_CHATS: ChatSession[] = [];
@@ -199,6 +200,19 @@ export function Sidebar() {
   const isSidebarCollapsed = useAppStore((s) => s.isSidebarCollapsed);
   const setSidebarCollapsed = useAppStore((s) => s.setSidebarCollapsed);
   const setSettingsOpen = useAppStore((s) => s.setSettingsOpen);
+  const theme = useAppStore((s) => s.theme);
+  const setTheme = useAppStore((s) => s.setTheme);
+
+  /** light -> dark -> system -> light. */
+  const cycleTheme = useCallback(() => {
+    const next = theme === 'light' ? 'dark' : theme === 'dark' ? 'system' : 'light';
+    setTheme(next);
+  }, [theme, setTheme]);
+
+  const ThemeIcon =
+    theme === 'light' ? Sun : theme === 'dark' ? Moon : Monitor;
+  const themeLabel =
+    theme === 'light' ? 'Sáng' : theme === 'dark' ? 'Tối' : 'Hệ thống';
 
   /*
    * Từ `md` trở lên sidebar là một cột tĩnh, luôn hiển thị. Trạng thái
@@ -322,7 +336,7 @@ export function Sidebar() {
         <div
           role="presentation"
           onClick={() => setSidebarOpen(false)}
-          className="fixed inset-0 z-30 bg-zinc-900/30 backdrop-blur-[2px] animate-fade-in md:hidden"
+          className="fixed inset-0 z-30 bg-zinc-900/30 backdrop-blur-[2px] animate-fade-in md:hidden dark:bg-black/50"
         />
       )}
 
@@ -453,6 +467,17 @@ export function Sidebar() {
         </div>
 
         <div className="border-t border-zinc-200/80 px-2 pb-safe-2 pt-2">
+          {/* Giao diện: Sáng -> Tối -> Hệ thống (theo OS). */}
+          <button
+            type="button"
+            onClick={cycleTheme}
+            aria-label={`Giao diện: ${themeLabel}`}
+            title={`Giao diện: ${themeLabel} (bấm để đổi)`}
+            className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] text-zinc-600 transition-colors hover:bg-zinc-200/60 hover:text-zinc-800"
+          >
+            <ThemeIcon size={15} />
+            <span>Giao diện: {themeLabel}</span>
+          </button>
           <button
             type="button"
             onClick={() => setSettingsOpen(true)}
@@ -493,6 +518,15 @@ export function Sidebar() {
           </div>
           <div className="flex-1" />
           <div className="flex flex-col items-center gap-1 py-3 pb-safe-2">
+            <button
+              type="button"
+              aria-label={`Giao diện: ${themeLabel}`}
+              title={`Giao diện: ${themeLabel} (bấm để đổi)`}
+              onClick={cycleTheme}
+              className="icon-btn-sm"
+            >
+              <ThemeIcon size={15} />
+            </button>
             <button
               type="button"
               aria-label="Cài đặt"

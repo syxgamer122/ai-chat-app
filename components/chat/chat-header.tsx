@@ -60,7 +60,7 @@ export const ChatHeader = memo(function ChatHeader({
               <button
                 type="button"
                 onClick={onDeleteChat}
-                className="rounded-md px-2.5 py-1 text-xs font-medium text-red-600 transition-colors hover:bg-red-50"
+                className="rounded-md px-2.5 py-1 text-xs font-medium text-red-600 transition-colors hover:bg-red-50 dark:hover:bg-red-500/10"
               >
                 Xóa hẳn
               </button>

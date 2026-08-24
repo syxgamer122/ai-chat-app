@@ -1,5 +1,5 @@
-/*
- * Hàng tin nhắn (user/assistant) — memoized, hỗ trợ edit/branch/attachment.
+﻿/*
+ * HÃ ng tin nháº¯n (user/assistant) â€” memoized, há»— trá»£ edit/branch/attachment.
  */
 import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
 import type { Message } from 'ai/react';
@@ -16,12 +16,12 @@ import { sanitizeContent, getFinishInfo } from '@/lib/chat-tree-persistence';
 /* ------------------------------------------------------------------ */
 export interface BranchInfo {
   /**
-   * Index zero-based của message hiện tại trong nhóm siblings.
+   * Index zero-based cá»§a message hiá»‡n táº¡i trong nhÃ³m siblings.
    */
   currentIndex: number;
 
   /**
-   * Tổng số siblings.
+   * Tá»•ng sá»‘ siblings.
    */
   total: number;
 }
@@ -30,8 +30,8 @@ interface MessageItemProps {
   m: Message;
 
   /**
-   * Thông tin branch của message đang hiển thị.
-   * undefined nếu message không có siblings.
+   * ThÃ´ng tin branch cá»§a message Ä‘ang hiá»ƒn thá»‹.
+   * undefined náº¿u message khÃ´ng cÃ³ siblings.
    */
   branchInfo?: BranchInfo;
 
@@ -111,7 +111,7 @@ export const MessageItem = memo(
               </div>
             )}
 
-            {/* Nội dung tin nhắn / Chỉnh sửa */}
+            {/* Ná»™i dung tin nháº¯n / Chá»‰nh sá»­a */}
             {isEditing ? (
               <div className="flex w-full min-w-[260px] flex-col gap-2 rounded-2xl border border-zinc-300 bg-surface-raised p-3 shadow-panel">
                 <TextareaAutosize
@@ -124,7 +124,7 @@ export const MessageItem = memo(
                     }
                     if (e.key === 'Escape') onCancelEdit();
                   }}
-                  aria-label="Sửa nội dung tin nhắn"
+                  aria-label="Sá»­a ná»™i dung tin nháº¯n"
                   className="w-full resize-none bg-transparent text-sm text-zinc-800 outline-none placeholder:text-zinc-400"
                   autoFocus
                 />
@@ -134,14 +134,14 @@ export const MessageItem = memo(
                     onClick={onCancelEdit}
                     className="rounded-lg px-2.5 py-1 text-zinc-600 transition-colors hover:bg-zinc-100"
                   >
-                    Hủy
+                    Há»§y
                   </button>
                   <button
                     type="button"
                     onClick={() => onSaveEdit(m.id)}
                     className="rounded-lg bg-brand px-3 py-1 font-medium text-white shadow-sm transition-colors hover:bg-brand-hover"
                   >
-                    Lưu &amp; Gửi lại
+                    LÆ°u &amp; Gá»­i láº¡i
                   </button>
                 </div>
               </div>
@@ -175,12 +175,12 @@ export const MessageItem = memo(
                     {isExpanded ? (
                       <>
                         <ChevronUp size={13} />
-                        <span>Thu gọn</span>
+                        <span>Thu gá»n</span>
                       </>
                     ) : (
                       <>
                         <ChevronDown size={13} />
-                        <span>Xem toàn bộ ({m.content.length.toLocaleString('vi-VN')} ký tự)</span>
+                        <span>Xem toÃ n bá»™ ({m.content.length.toLocaleString('vi-VN')} kÃ½ tá»±)</span>
                       </>
                     )}
                   </button>
@@ -204,17 +204,17 @@ export const MessageItem = memo(
                 <button
                   type="button"
                   onClick={() => onCopy(m)}
-                  aria-label="Sao chép tin nhắn"
-                  title="Sao chép"
+                  aria-label="Sao chÃ©p tin nháº¯n"
+                  title="Sao chÃ©p"
                   className="flex h-7 w-7 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-zinc-200 hover:text-zinc-800"
                 >
-                  {isCopied ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
+                  {isCopied ? <Check className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
                 </button>
                 <button
                   type="button"
                   onClick={() => onStartEdit(m)}
-                  aria-label="Chỉnh sửa tin nhắn"
-                  title="Chỉnh sửa"
+                  aria-label="Chá»‰nh sá»­a tin nháº¯n"
+                  title="Chá»‰nh sá»­a"
                   className="flex h-7 w-7 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-zinc-200 hover:text-zinc-800"
                 >
                   <Pencil className="h-3.5 w-3.5" />
@@ -260,8 +260,8 @@ export const MessageItem = memo(
             </div>
           )}
 
-          {/* Tiến trình tạo ảnh/video (route ghi vào kênh reasoning). Chỉ hiện
-              lúc đang stream — media mất vài phút nên cần dấu hiệu còn sống. */}
+          {/* Tiáº¿n trÃ¬nh táº¡o áº£nh/video (route ghi vÃ o kÃªnh reasoning). Chá»‰ hiá»‡n
+              lÃºc Ä‘ang stream â€” media máº¥t vÃ i phÃºt nÃªn cáº§n dáº¥u hiá»‡u cÃ²n sá»‘ng. */}
           {isStreaming && typeof (m as any).reasoning === 'string' && (m as any).reasoning.trim() && (
             <p role="status" className="mb-2 flex items-center gap-1.5 text-[12px] text-zinc-600">
               <span className="h-1.5 w-1.5 flex-shrink-0 animate-pulse rounded-full bg-brand" />
@@ -289,14 +289,14 @@ export const MessageItem = memo(
             if (!truncated || isStreaming) return null;
             return (
               <div className="notice-warn mt-2.5 flex flex-wrap items-center justify-between gap-2">
-                <span className="min-w-0">{note ?? 'Câu trả lời có thể chưa hoàn chỉnh do đạt giới hạn token.'}</span>
+                <span className="min-w-0">{note ?? 'CÃ¢u tráº£ lá»i cÃ³ thá»ƒ chÆ°a hoÃ n chá»‰nh do Ä‘áº¡t giá»›i háº¡n token.'}</span>
                 {onContinueGenerating && (
                   <button
                     type="button"
                     onClick={onContinueGenerating}
                     className="flex-shrink-0 rounded-lg bg-amber-600 px-2.5 py-1 font-medium text-white shadow-sm transition-colors hover:bg-amber-700"
                   >
-                    Viết tiếp
+                    Viáº¿t tiáº¿p
                   </button>
                 )}
               </div>
@@ -307,15 +307,15 @@ export const MessageItem = memo(
             <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-zinc-200 pt-2">
               <div className="flex items-center gap-1.5">
                 <MessageStatusBadge status="aborted" />
-                <span className="text-[11px] text-zinc-500">· Bạn có thể tạo lại để sinh câu trả lời mới</span>
+                <span className="text-[11px] text-zinc-500">Â· Báº¡n cÃ³ thá»ƒ táº¡o láº¡i Ä‘á»ƒ sinh cÃ¢u tráº£ lá»i má»›i</span>
               </div>
-              <button
-                type="button"
-                onClick={() => onRegenerate(m.id)}
-                className="inline-flex items-center gap-1 rounded-md bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-800 transition-colors hover:bg-amber-100"
-              >
+                <button
+                  type="button"
+                  onClick={() => onRegenerate(m.id)}
+                  className="inline-flex items-center gap-1 rounded-md bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-800 transition-colors hover:bg-amber-100 dark:bg-amber-500/10 dark:text-amber-300 dark:hover:bg-amber-500/20"
+                >
                 <RefreshCcw size={12} />
-                <span>Tạo nhánh mới</span>
+                <span>Táº¡o nhÃ¡nh má»›i</span>
               </button>
             </div>
           )}
@@ -326,17 +326,17 @@ export const MessageItem = memo(
               <button
                 type="button"
                 onClick={() => onCopy(m)}
-                aria-label="Sao chép câu trả lời"
-                title="Sao chép"
+                aria-label="Sao chÃ©p cÃ¢u tráº£ lá»i"
+                title="Sao chÃ©p"
                 className="flex h-7 w-7 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-zinc-200 hover:text-zinc-800"
               >
-                {isCopied ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
+                {isCopied ? <Check className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
               </button>
               <button
                 type="button"
                 onClick={() => onRegenerate(m.id)}
-                aria-label="Tạo lại câu trả lời"
-                title="Tạo lại câu trả lời"
+                aria-label="Táº¡o láº¡i cÃ¢u tráº£ lá»i"
+                title="Táº¡o láº¡i cÃ¢u tráº£ lá»i"
                 className="flex h-7 w-7 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-zinc-200 hover:text-zinc-800"
               >
                 <RefreshCcw className="h-3.5 w-3.5" />
@@ -360,8 +360,8 @@ export const MessageItem = memo(
   (prev, next) =>
     prev.m.id === next.m.id &&
     prev.m.content === next.m.content &&
-    // Model media chưa có content nào trong lúc chạy — tiến trình đi qua
-    // `reasoning`, phải so cả field này nếu không dòng trạng thái đứng im.
+    // Model media chÆ°a cÃ³ content nÃ o trong lÃºc cháº¡y â€” tiáº¿n trÃ¬nh Ä‘i qua
+    // `reasoning`, pháº£i so cáº£ field nÃ y náº¿u khÃ´ng dÃ²ng tráº¡ng thÃ¡i Ä‘á»©ng im.
     (prev.m as any).reasoning === (next.m as any).reasoning &&
     prev.m.role === next.m.role &&
     prev.branchInfo?.currentIndex === next.branchInfo?.currentIndex &&

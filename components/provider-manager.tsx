@@ -265,21 +265,21 @@ export function ProviderManager() {
                     {!needsKey ? (
                       <span
                         title="Gateway miễn phí — không cần API key"
-                        className="flex items-center gap-0.5 rounded bg-sky-50 px-1 py-0.5 text-[10px] font-medium text-sky-700"
+                        className="flex items-center gap-0.5 rounded bg-sky-50 px-1 py-0.5 text-[10px] font-medium text-sky-700 dark:bg-sky-500/10 dark:text-sky-300"
                       >
                         miễn phí
                       </span>
                     ) : p.apiKey ? (
                       <span
                         title="Đã lưu API key"
-                        className="flex items-center gap-0.5 rounded bg-emerald-50 px-1 py-0.5 text-[10px] font-medium text-emerald-700"
+                        className="flex items-center gap-0.5 rounded bg-emerald-50 px-1 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300"
                       >
                         <KeyRound size={9} /> có key
                       </span>
                     ) : (
                       <span
                         title="Chưa có API key"
-                        className="flex items-center gap-0.5 rounded bg-amber-50 px-1 py-0.5 text-[10px] font-medium text-amber-800"
+                        className="flex items-center gap-0.5 rounded bg-amber-50 px-1 py-0.5 text-[10px] font-medium text-amber-800 dark:bg-amber-500/10 dark:text-amber-300"
                       >
                         <KeyRound size={9} /> chưa key
                       </span>
@@ -319,7 +319,7 @@ export function ProviderManager() {
                   aria-label={`Xóa ${p.name}`}
                   title="Xóa"
                   onClick={() => void remove(p)}
-                  className="rounded-lg p-1.5 text-zinc-500 transition-colors hover:bg-red-50 hover:text-red-600"
+                  className="rounded-lg p-1.5 text-zinc-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10 dark:hover:text-red-400"
                 >
                   <Trash2 size={14} />
                 </button>

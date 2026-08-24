@@ -29,6 +29,68 @@
     --scrollbar-hover: 174 185 199; /* #AEB9C7 */
     --code-inline-bg: 234 243 245; /* #EAF3F5 */
     --code-inline-border: 207 227 230; /* #CFE3E6 */
+
+    /* Ramp zinc gốc (đúng hex Tailwind) — theme sáng. */
+    --zinc-50: 250 250 250;
+    --zinc-100: 244 244 245;
+    --zinc-200: 228 228 231;
+    --zinc-300: 212 212 216;
+    --zinc-400: 161 161 170;
+    --zinc-500: 113 113 122;
+    --zinc-600: 82 82 91;
+    --zinc-700: 63 63 70;
+    --zinc-800: 39 39 42;
+    --zinc-900: 24 24 27;
+    --zinc-950: 9 9 11;
+
+    color-scheme: light;
+  }
+
+  /*
+   * Theme tối — bật bằng class `dark` trên <html> (darkMode:'class').
+   * Token mặt phẳng/foreground đổi hẳn; brand làm sáng nhẹ hơn để giữ
+   * tương phản trên nền tối.
+   *
+   * QUAN TRỌNG về ramp --zinc-*: giá trị bị LẬT bậc đối xứng
+   * (50↔950, 100↔900...) so với theme sáng. Class như `text-zinc-800`
+   * hay `hover:bg-zinc-100` được sinh ra theo vai trò "chữ đậm" /
+   * "nền nhạt" — lật bậc giữ nguyên vai trò đó trên nền tối, nên toàn bộ
+   * UI viết bằng zinc tự thích ứng mà không cần sửa từng component.
+   */
+  .dark {
+    --surface: 9 9 11; /* zinc-950 */
+    --surface-raised: 24 24 27; /* zinc-900 */
+    --surface-bubble: 26 46 43; /* teal đậm — cùng tông brand với bubble sáng */
+    --surface-muted: 39 39 42; /* zinc-800 */
+    --surface-code: 13 13 16;
+    --surface-code-header: 23 23 27;
+    --brand: 34 178 193; /* #22B2C1 — sáng hơn bản light để nổi trên nền tối */
+    --brand-hover: 52 196 212;
+    --brand-accent: 78 203 113;
+    --brand-border: 70 110 104;
+    --foreground: 228 228 231; /* zinc-200 */
+    --foreground-strong: 250 250 250;
+    --muted-foreground: 148 163 184; /* slate-400 */
+    --line: 39 39 42;
+    --line-strong: 63 63 70;
+    --scrollbar: 52 52 58;
+    --scrollbar-hover: 82 82 91;
+    --code-inline-bg: 24 39 41;
+    --code-inline-border: 45 74 71;
+
+    --zinc-50: 9 9 11; /* ↔ zinc-950 */
+    --zinc-100: 24 24 27; /* ↔ zinc-900 */
+    --zinc-200: 39 39 42; /* ↔ zinc-800 */
+    --zinc-300: 63 63 70; /* ↔ zinc-700 */
+    --zinc-400: 113 113 122; /* ↔ zinc-500 */
+    --zinc-500: 161 161 170; /* ↔ zinc-400 */
+    --zinc-600: 212 212 216; /* ↔ zinc-300 */
+    --zinc-700: 228 228 231; /* ↔ zinc-200 */
+    --zinc-800: 244 244 245; /* ↔ zinc-100 */
+    --zinc-900: 250 250 250; /* ↔ zinc-50 */
+    --zinc-950: 255 255 255;
+
+    color-scheme: dark;
   }
 
   html,
@@ -48,6 +110,14 @@
       transparent 70%
     );
     background-repeat: no-repeat;
+  }
+  /* Theme tối: glow yếu hơn nữa để không gây chói trên nền đen. */
+  .dark body {
+    background-image: radial-gradient(
+      900px 420px at 50% -180px,
+      rgb(var(--brand) / 0.09),
+      transparent 70%
+    );
   }
 
   button,
@@ -217,6 +287,24 @@ html[data-animations='off'] *::after {
    */
   .settings-panel > * + * {
     @apply mt-5 border-t border-zinc-200 pt-5;
+  }
+
+  /*
+   * Dark mode cho các recipe mang màu accent: nền -50/-100 lật thành
+   * phiên bản trong suốt đậm (amber/red-500/10 trên nền tối) thay vì hex
+   * sáng chói, chữ nâng lên bậc -300/-400 cho đủ tương phản.
+   */
+  .dark .notice-warn {
+    @apply border-amber-500/30 bg-amber-500/10 text-amber-300;
+  }
+  .dark .notice-error {
+    @apply border-red-500/30 bg-red-500/10 text-red-300;
+  }
+  .dark .menu-item-danger {
+    @apply text-red-400 hover:bg-red-500/10 hover:text-red-300;
+  }
+  .dark .icon-btn-danger {
+    @apply hover:bg-red-500/10 hover:text-red-400;
   }
 }
 

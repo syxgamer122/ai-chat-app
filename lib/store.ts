@@ -10,6 +10,12 @@ import {
 /** id provider "dùng cấu hình env của server" — định nghĩa ở store để tránh vòng import. */
 export const SERVER_PROVIDER_ID = '__server__';
 
+export type ThemePreference = 'light' | 'dark' | 'system';
+
+export function isThemePreference(v: unknown): v is ThemePreference {
+  return v === 'light' || v === 'dark' || v === 'system';
+}
+
 /** Snapshot nhà cung cấp đang active — nằm trong store, không persist. */
 export interface ActiveProviderSnapshot {
   id: string;
@@ -45,6 +51,8 @@ interface AppState {
   isSidebarCollapsed: boolean;
   isSettingsOpen: boolean;
   settings: Settings;
+  /** Giao diện sáng/tối — 'system' theo prefers-color-scheme của OS. */
+  theme: ThemePreference;
   /** Provider đang dùng — SERVER_PROVIDER_ID = cấu hình env của server. */
   activeProviderId: string;
   /** Snapshot provider active (baseUrl/key/models) — không persist. */
@@ -53,6 +61,7 @@ interface AppState {
   setSidebarOpen: (open: boolean) => void;
   setSidebarCollapsed: (collapsed: boolean) => void;
   setSettingsOpen: (open: boolean) => void;
+  setTheme: (theme: ThemePreference) => void;
   updateSettings: (s: Partial<Omit<Settings, 'perf'>>) => void;
   updatePerf: (p: Partial<PerfSettings>) => void;
   setActiveProvider: (id: string) => void;
@@ -80,12 +89,14 @@ export const useAppStore = create<AppState>()(
       isSidebarCollapsed: false,
       isSettingsOpen: false,
       settings: DEFAULT_SETTINGS,
+      theme: 'system',
       activeProviderId: SERVER_PROVIDER_ID,
       activeProvider: null,
       setCurrentChatId: (id) => set({ currentChatId: id, isSidebarOpen: false }),
       setSidebarOpen: (open) => set({ isSidebarOpen: open }),
       setSidebarCollapsed: (collapsed) => set({ isSidebarCollapsed: collapsed }),
       setSettingsOpen: (open) => set({ isSettingsOpen: open }),
+      setTheme: (theme) => set({ theme }),
       updateSettings: (partial) =>
         set((s) => ({ settings: { ...s.settings, ...partial } })),
       updatePerf: (partial) =>
@@ -99,6 +110,7 @@ export const useAppStore = create<AppState>()(
       partialize: (s) => ({
         activeProviderId: s.activeProviderId,
         isSidebarCollapsed: s.isSidebarCollapsed,
+        theme: s.theme,
         settings: {
           model: s.settings.model,
           temperature: s.settings.temperature,
@@ -123,6 +135,7 @@ export const useAppStore = create<AppState>()(
         return {
           ...current,
           ...p,
+          theme: isThemePreference(p.theme) ? p.theme : current.theme,
           settings: {
             ...current.settings,
             ...(p.settings ?? {}),
