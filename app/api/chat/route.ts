@@ -20,6 +20,7 @@ import { ALLOWED_MODEL_IDS, DEFAULT_MODEL_ID, getModelConfig, mediaKindOf, resol
 import { validateProviderBaseUrl, THINKING_LEVELS, supportsThinkingLevel } from '@/lib/provider-url';
 import { acquireUpstreamSlot, sharedFreeBudget } from '@/lib/upstream-queue';
 import { pumpSseLines } from '@/lib/sse';
+import { parseLooseJson } from '@/lib/json-repair';
 import { filterSupportedModels, markModelUnsupported } from '@/lib/model-negative-cache';
 import { bridgeImagesInMessages, downgradeImagesToPlaceholders, shouldBridgeImages, type BridgeableMessage } from '@/lib/vision-bridge';
 import { checkRateLimit, getClientIp, checkSameOrigin, verifyAccessAuth } from '@/lib/security';
@@ -1053,12 +1054,10 @@ export async function POST(req: Request) {
                   let sseError = '';
                   await pumpSseData(res.body, (raw) => {
                     if (raw === '[DONE]') return;
-                    let j: unknown;
-                    try {
-                      j = JSON.parse(raw);
-                    } catch {
-                      return;
-                    }
+                    // JSON hỏng nhẹ (control char/backslash sai) được sửa lại
+                    // thay vì drop cả event — mất event image/video là mất URL.
+                    const j = parseLooseJson(raw);
+                    if (j === null) return;
                     resetIdleTimer();
                     const p = j as {
                       type?: string;

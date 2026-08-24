@@ -18,6 +18,7 @@
  */
 
 import { validateProviderBaseUrl } from '@/lib/provider-url';
+import { parseLooseJson } from '@/lib/json-repair';
 import { pumpSseLines } from '@/lib/sse';
 
 export type MediaKind = 'image' | 'video';
@@ -206,12 +207,9 @@ async function generateVideo(req: MediaRequest, base: string): Promise<MediaResu
   let text = '';
 
   await pumpSse(res.body, (raw) => {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(raw);
-    } catch {
-      return;
-    }
+    // JSON hỏng nhẹ được sửa lại thay vì drop — mất event là mất URL media.
+    const parsed = parseLooseJson(raw);
+    if (parsed === null) return;
     const p = parsed as {
       type?: string;
       url?: unknown;
