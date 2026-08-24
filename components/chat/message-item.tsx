@@ -10,10 +10,23 @@ import { ErrorBoundary } from '@/components/error-boundary';
 import { BranchSwitcher } from '@/components/branch-switcher';
 import { MessageStatusBadge } from '@/components/message-status-badge';
 import { sanitizeContent, getFinishInfo } from '@/lib/chat-tree-persistence';
+import { KodaMark } from '@/components/koda-logo';
 
 /* ------------------------------------------------------------------ */
 /* Memoized Message Item                                              */
 /* ------------------------------------------------------------------ */
+
+/** Avatar của trợ lý — dấu hiệu KODA trên nền thương hiệu nhạt. */
+export function AssistantAvatar() {
+  return (
+    <div
+      aria-hidden="true"
+      className="mt-0.5 flex h-7 w-7 flex-shrink-0 select-none items-center justify-center rounded-full bg-surface-bubble shadow-sm ring-1 ring-brand/30"
+    >
+      <KodaMark size={15} />
+    </div>
+  );
+}
 export interface BranchInfo {
   /**
    * Index zero-based cá»§a message hiá»‡n táº¡i trong nhÃ³m siblings.
@@ -229,9 +242,7 @@ export const MessageItem = memo(
     /* ---------- ASSISTANT ---------- */
     return (
       <div className="group flex w-full items-start gap-3 px-2 md:px-4">
-        <div className="mt-0.5 flex h-7 w-7 flex-shrink-0 select-none items-center justify-center rounded-full bg-brand text-[11px] font-semibold text-white shadow-sm">
-          AI
-        </div>
+        <AssistantAvatar />
 
         <div className="min-w-0 flex-1">
           {/* File Attachments */}

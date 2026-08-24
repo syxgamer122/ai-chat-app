@@ -1,13 +1,13 @@
 /*
  * Danh sách tin nhắn virtualized + các chiến lược scroll/pin.
  */
-import React, { memo, useEffect, useMemo } from 'react';
+import React, { memo, useEffect, useMemo, useState } from 'react';
 import type { Message } from 'ai/react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { ArrowDown, ArrowUp } from 'lucide-react';
 import { ChatErrorBoundary } from '@/components/chat-error-boundary';
 import { KodaLogo } from '@/components/koda-logo';
-import { MessageItem, type BranchInfo } from './message-item';
+import { MessageItem, AssistantAvatar, type BranchInfo } from './message-item';
 
 /* ------------------------------------------------------------------ */
 /* Subcomponent 2: Memoized MessageList with Virtualization           */
@@ -44,6 +44,45 @@ function friendlyErrorMessage(raw?: string): string {
   } catch {
     return raw;
   }
+}
+
+/**
+ * Hàng "AI đang xử lý" — hiện giữa lúc chờ token đầu tiên (user vừa gửi,
+ * hoặc regenerate chưa nhả chữ). Avatar + chấm nảy + số giây đã chờ để
+ * người dùng biết hệ thống còn hoạt động, không phải treo.
+ */
+function ThinkingIndicator() {
+  const [elapsedSec, setElapsedSec] = useState(0);
+
+  useEffect(() => {
+    const startedAt = Date.now();
+    setElapsedSec(0);
+    const timer = setInterval(() => {
+      setElapsedSec(Math.floor((Date.now() - startedAt) / 1000));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  return (
+    <div className="mx-auto flex max-w-thread items-start gap-3 px-2 pb-6 md:px-4">
+      <AssistantAvatar />
+      <div className="flex items-center gap-2.5 py-1.5" role="status" aria-live="polite">
+        <span aria-hidden="true" className="flex items-center gap-1">
+          {[0, 1, 2].map((i) => (
+            <span
+              key={i}
+              className="h-1.5 w-1.5 animate-bounce rounded-full bg-brand/80"
+              style={{ animationDelay: `${i * 150}ms`, animationDuration: '900ms' }}
+            />
+          ))}
+        </span>
+        <span className="text-[13px] tabular-nums text-zinc-500">
+          Đang suy nghĩ{elapsedSec >= 3 ? `… ${elapsedSec}s` : '…'}
+        </span>
+        <span className="sr-only">AI đang xử lý câu trả lời của bạn</span>
+      </div>
+    </div>
+  );
 }
 
 interface MessageListProps {
@@ -118,6 +157,9 @@ export const MessageList = memo(function MessageList({
   onReload,
   onContinueGenerating,
 }: MessageListProps) {
+  // App không bật React Compiler; useVirtualizer của TanStack trả về hàm
+  // mỗi render là hành vi chủ đích của thư viện — bỏ cảnh báo nhiễu.
+  // eslint-disable-next-line react-hooks/incompatible-library
   const rowVirtualizer = useVirtualizer({
     count: messages.length,
     getScrollElement: () => scrollRef.current,
@@ -340,12 +382,12 @@ export const MessageList = memo(function MessageList({
               })}
             </div>
 
-            {isLoading && lastRole === 'user' && (
-              <div className="mx-auto flex max-w-thread justify-start px-1 pb-6">
-                <span className="inline-block h-4 w-2 animate-pulse bg-brand" />
-                <span className="sr-only">AI đang trả lời…</span>
-              </div>
-            )}
+            {isLoading &&
+              !(
+                lastRole === 'assistant' &&
+                ((lastMsg as any)?.reasoning || lastContentLen > 0)
+              ) &&
+              <ThinkingIndicator />}
           </>
         )}
 
