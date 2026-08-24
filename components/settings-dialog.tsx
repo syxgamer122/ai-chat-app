@@ -812,7 +812,18 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                         'CẢNH BÁO: Hành động này sẽ xóa toàn bộ lịch sử chat và cài đặt. Bạn có chắc chắn không?',
                       )
                     ) {
-                      await db.delete();
+                      try {
+                        await db.delete();
+                      } catch {
+                        // Tab khác đang giữ IndexedDB mở → delete bị chặn vĩnh viễn.
+                        // Trước đây lỗi này nuốt lặng lẽ: bấm nút không có gì xảy ra.
+                        setStatus({
+                          kind: 'error',
+                          message:
+                            'Không xóa được: có tab khác đang mở ứng dụng. Hãy đóng các tab khác rồi thử lại.',
+                        });
+                        return;
+                      }
                       localStorage.clear();
                       window.location.reload();
                     }

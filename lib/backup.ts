@@ -133,6 +133,23 @@ export async function createBackup(
   const includeAttachments = options.includeAttachments ?? true;
   const ids = normalizeIds(chatIds);
 
+  /**
+   * ids === undefined: xuất toàn bộ. Còn truyền danh sách (kể cả RỖNG) thì
+   * chỉ được xuất đúng những id đó — trước đây mảng rỗng rơi vào nhánh
+   * "xuất tất cả", một selection trống biến thành full-database dump.
+   */
+  const scoped = ids !== undefined && !ids.length;
+
+  const empty: BackupFile = {
+    format: BACKUP_FORMAT,
+    version: BACKUP_VERSION,
+    exportedAt: Date.now(),
+    app: 'ai-chat',
+    chats: [],
+    messages: [],
+  };
+  if (scoped) return empty;
+
   const chats = ids?.length
     ? ((await db.chats.bulkGet(ids)).filter(Boolean) as ChatSession[])
     : await db.chats.orderBy('updatedAt').toArray();
@@ -270,6 +287,10 @@ export function chatToMarkdown(
 
 export async function exportMarkdown(chatIds?: string | string[]): Promise<void> {
   const ids = normalizeIds(chatIds);
+  // Truyền danh sách rỗng = selection trống → không xuất gì (xem createBackup).
+  if (ids !== undefined && !ids.length) {
+    throw new Error('Không có cuộc trò chuyện nào để xuất.');
+  }
   const chats = ids?.length
     ? ((await db.chats.bulkGet(ids)).filter(Boolean) as ChatSession[])
     : await db.chats.orderBy('updatedAt').reverse().toArray();

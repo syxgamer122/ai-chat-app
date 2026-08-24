@@ -49,21 +49,40 @@ function newPromptId(): string {
   }
 }
 
+/** Khoá module: chống 2 effect chạy song song cùng lúc (StrictMode / 2 tab). */
+let seedPromise: Promise<void> | null = null;
+
 /** Seed mẫu mặc định lần đầu (idempotent qua flag trong bảng kv). */
 export async function ensurePromptSeed(): Promise<void> {
+  if (!seedPromise) {
+    seedPromise = seedOnce().catch((err) => {
+      seedPromise = null; // lỗi → cho phép thử lại lần sau
+      throw err;
+    });
+  }
+  return seedPromise;
+}
+
+async function seedOnce(): Promise<void> {
   const flag = await db.kv.get(SEED_FLAG);
   if (flag) return;
-  const now = Date.now();
-  await db.prompts.bulkAdd(
-    DEFAULT_PROMPTS.map((p, i) => ({
-      id: newPromptId(),
-      title: p.title,
-      content: p.content,
-      createdAt: now + i,
-      updatedAt: now + i,
-    })),
-  );
-  await db.kv.put({ key: SEED_FLAG, value: true });
+  // Transaction + flag ghi trong cùng transaction: 2 tab khởi động đồng thời
+  // cũng chỉ 1 bên seed được, không sinh bản mẫu trùng lặp.
+  await db.transaction('rw', [db.prompts, db.kv], async () => {
+    const confirmed = await db.kv.get(SEED_FLAG);
+    if (confirmed) return;
+    const now = Date.now();
+    await db.prompts.bulkAdd(
+      DEFAULT_PROMPTS.map((p, i) => ({
+        id: newPromptId(),
+        title: p.title,
+        content: p.content,
+        createdAt: now + i,
+        updatedAt: now + i,
+      })),
+    );
+    await db.kv.put({ key: SEED_FLAG, value: true });
+  });
 }
 
 export async function listPrompts(): Promise<PromptTemplate[]> {

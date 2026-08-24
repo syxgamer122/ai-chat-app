@@ -7,6 +7,7 @@ import { Download, FileJson, FileText, Loader2 } from 'lucide-react';
 export function ChatExportMenu({ chatId }: { chatId: string | null }) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -27,12 +28,18 @@ export function ChatExportMenu({ chatId }: { chatId: string | null }) {
 
   const run = async (kind: 'json' | 'md') => {
     setBusy(true);
+    setExportError(null);
     try {
       if (kind === 'json') await exportJson([chatId]);
       else await exportMarkdown([chatId]);
       setOpen(false);
     } catch (err) {
       console.error('[ChatExportMenu]', err);
+      // Không được nuốt lặng lẽ: user sẽ tưởng file đã tải xong và bỏ
+      // qua backup thật, trong khi dữ liệu chưa ra khỏi máy.
+      setExportError(
+        `Xuất thất bại: ${err instanceof Error ? err.message : 'lỗi không rõ'}. Thử lại hoặc chọn định dạng khác.`,
+      );
     } finally {
       setBusy(false);
     }
@@ -58,6 +65,11 @@ export function ChatExportMenu({ chatId }: { chatId: string | null }) {
           role="menu"
           className="surface-panel absolute right-0 top-full z-50 mt-1.5 w-60 animate-pop-in p-1"
         >
+          {exportError && (
+            <p role="alert" className="notice-error mx-1 mb-1 px-2 py-1.5 text-[11px] leading-relaxed">
+              {exportError}
+            </p>
+          )}
           <MenuRow
             icon={<FileJson size={15} className="text-zinc-500" />}
             title="Xuất JSON (đầy đủ nhánh)"
@@ -71,6 +83,15 @@ export function ChatExportMenu({ chatId }: { chatId: string | null }) {
             onClick={() => run('md')}
           />
         </div>
+      )}
+
+      {!open && exportError && (
+        <p
+          role="alert"
+          className="notice-error absolute right-0 top-full z-50 mt-1.5 w-60 px-2.5 py-2 text-[11px] leading-relaxed"
+        >
+          {exportError}
+        </p>
       )}
     </div>
   );

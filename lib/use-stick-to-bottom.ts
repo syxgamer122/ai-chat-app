@@ -23,6 +23,8 @@ export function useStickToBottom(
   const infiniteRef = useRef(false);
   const streamingRef = useRef(streaming);
   const lastProgrammaticRef = useRef(0);
+  /** Vị trí scrollTop do vòng lặp ghi gần nhất — nhận diện scroll "của mình". */
+  const lastProgrammaticTopRef = useRef(0);
   const lastScrollTopRef = useRef(0);
   const touchStartYRef = useRef(0);
 
@@ -30,12 +32,6 @@ export function useStickToBottom(
     stickRef.current = v;
     setIsAtBottom((prev) => (prev === v ? prev : v));
   }, []);
-
-  const distanceFromBottom = useCallback(() => {
-    const el = scrollRef.current;
-    if (!el) return 0;
-    return el.scrollHeight - el.scrollTop - el.clientHeight;
-  }, [scrollRef]);
 
   const stopLoop = useCallback(() => {
     cancelAnimationFrame(rafRef.current);
@@ -58,6 +54,7 @@ export function useStickToBottom(
       const target = el.scrollHeight - el.clientHeight;
       if (Math.abs(el.scrollTop - target) > 0.5) {
         lastProgrammaticRef.current = performance.now();
+        lastProgrammaticTopRef.current = target;
         el.scrollTop = target;
         lastScrollTopRef.current = target;
       }
@@ -90,6 +87,7 @@ export function useStickToBottom(
       if (!el) return;
       setStick(true);
       lastProgrammaticRef.current = performance.now();
+      lastProgrammaticTopRef.current = el.scrollHeight;
       el.scrollTo({ top: el.scrollHeight, behavior });
       window.setTimeout(() => pin(600), behavior === 'smooth' ? 320 : 0);
     },
@@ -104,8 +102,19 @@ export function useStickToBottom(
     const prev = lastScrollTopRef.current;
     lastScrollTopRef.current = top;
 
-    // Scroll do reflow hoặc do chính vòng lặp → không đổi trạng thái
-    if (performance.now() - lastProgrammaticRef.current < PROGRAMMATIC_GRACE_MS) return;
+    /**
+     * Scroll do chính vòng lặp gây ra: nhận diện bằng CẢ thời gian VÀ vị trí.
+     * Chỉ nhìn đồng hồ thì khi stream token dày, vòng lặp ghi lại mỗi frame
+     * nên cửa sổ grace luôn đóng mới → mọi scroll event của user (kể cả kéo
+     * scrollbar — thứ không sinh wheel/touch event) đều bị nuốt, không thoát
+     * ghim được. Vị trí lệch khỏi điểm ta vừa ghi ⇒ chắc chắn là người dùng.
+     */
+    if (
+      performance.now() - lastProgrammaticRef.current < PROGRAMMATIC_GRACE_MS &&
+      Math.abs(top - lastProgrammaticTopRef.current) <= 1
+    ) {
+      return;
+    }
 
     const dist = el.scrollHeight - top - el.clientHeight;
 
@@ -130,14 +139,16 @@ export function useStickToBottom(
     if (!el) return;
 
     const onWheel = (e: WheelEvent) => {
-      if (e.deltaY < 0 && distanceFromBottom() > 4) release();
+      // Không kèm kiểm tra khoảng-cách-đáy: khi vòng lặp đang snap-back,
+      // khoảng cách tại thời điểm event gần như luôn ~0 và lọc cuộn nhỏ nhất.
+      if (e.deltaY < 0) release();
     };
     const onTouchStart = (e: TouchEvent) => {
       touchStartYRef.current = e.touches[0]?.clientY ?? 0;
     };
     const onTouchMove = (e: TouchEvent) => {
       const y = e.touches[0]?.clientY ?? 0;
-      if (y - touchStartYRef.current > 12 && distanceFromBottom() > 4) release();
+      if (y - touchStartYRef.current > 12) release();
     };
     const onKeyDown = (e: KeyboardEvent) => {
       if (['PageUp', 'ArrowUp', 'Home'].includes(e.key)) release();
@@ -153,7 +164,7 @@ export function useStickToBottom(
       el.removeEventListener('touchmove', onTouchMove);
       el.removeEventListener('keydown', onKeyDown);
     };
-  }, [distanceFromBottom, release, scrollRef]);
+  }, [release, scrollRef]);
 
   // Bật/tắt ghim vô hạn theo trạng thái streaming
   useEffect(() => {

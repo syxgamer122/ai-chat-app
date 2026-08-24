@@ -154,7 +154,9 @@ function cutIndexForStream(s: string, scan: ScanResult): number | null {
     if (s.length - idx > TAIL_WINDOW) break;
     const tail = s.slice(idx + 1);
     if (tail.length === 0) return idx;
-    if (/^\S/.test(tail) && (STRONG_MATH_SIGNAL.test(tail) || !/\s/.test(tail))) {
+    // Chỉ cắt khi đuôi có dấu hiệu toán mạnh (\ ^ _ { }). Đuôi như "5"
+    // (tiền tệ "$5") phải hiển thị luôn thay vì biến mất trong lúc stream.
+    if (/^\S/.test(tail) && STRONG_MATH_SIGNAL.test(tail)) {
       return idx;
     }
   }
@@ -175,7 +177,13 @@ function closeOpenMath(s: string, scan: ScanResult): string {
   const tail = s.slice(idx + 1);
   if (!tail.trim() || !/^\S/.test(tail)) return s;
   if (tail.length > MAX_INLINE_MATH || hasBlankLine(tail)) return s;
-  if (!STRONG_MATH_SIGNAL.test(tail) && /\s/.test(tail.trim())) return s;
+  /**
+   * Chỉ tự đóng khi đuôi có dấu hiệu LaTeX rõ ràng (\ ^ _ { }).
+   * Không có dấu hiệu này thì `$<token>` gần như chắc chắn là tiền tệ
+   * ("Gói này giá chỉ $5") — tự đóng sẽ biến nó thành công thức toán,
+   * lỗi này dính luôn vào lịch sử đã lưu vì preprocess chạy mỗi lần render.
+   */
+  if (!STRONG_MATH_SIGNAL.test(tail)) return s;
 
   return `${s}$`;
 }
@@ -214,9 +222,12 @@ function normalizeLatexDelimiters(s: string): string {
     },
   );
 
+  // \(...\) là toán INLINE — map về $...$ (remark-math đang bật
+  // singleDollarTextMath). Map lên $$...$$ trước đây khiến mọi công thức
+  // inline bị đội thành khối display giữa dòng, vỡ layout đoạn văn.
   out = out.replace(/\\\(([\s\S]*?)\\\)/g, (_m, body: string) => {
     const inner = String(body).trim();
-    return inner ? `$$${inner}$$` : '';
+    return inner ? `$${inner}$` : '';
   });
 
   return out;

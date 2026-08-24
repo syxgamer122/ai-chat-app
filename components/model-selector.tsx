@@ -67,11 +67,10 @@ export function ModelSelector({
   const listRef = useRef<HTMLDivElement>(null);
   const listId = useId();
 
-  const currentIndex = Math.max(
-    0,
-    models.findIndex((m) => m.id === value),
+  const current = useMemo(
+    () => models.find((m) => m.id === value),
+    [models, value],
   );
-  const current = models[currentIndex];
 
   /** Danh sách hiển thị (đã lọc theo ô tìm kiếm) — thứ tự = thứ tự render. */
   const visible = useMemo(() => {
@@ -112,7 +111,6 @@ export function ModelSelector({
 
   useEffect(() => {
     if (!open) return;
-    setCursor(currentIndex);
 
     const onPointerDown = (e: PointerEvent) => {
       if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
@@ -129,7 +127,7 @@ export function ModelSelector({
       document.removeEventListener('pointerdown', onPointerDown, true);
       document.removeEventListener('keydown', onKey);
     };
-  }, [open, currentIndex, close]);
+  }, [open, close]);
 
   useEffect(() => {
     if (open) {
@@ -177,6 +175,16 @@ export function ModelSelector({
     }
     return { columns: cols, ordered: order, renderIndex: index };
   }, [grouped, isNarrow]);
+
+  /**
+   * Mở dropdown / đổi model đang chọn: con trỏ phải theo THỨ TỪ RENDER
+   * (nhóm + 2 cột), không phải index trong mảng `models` prop — hai thứ tự
+   * khác nhau nên dùng nhầm sẽ highlight sai và Enter commit model khác.
+   */
+  useEffect(() => {
+    if (!open) return;
+    setCursor(renderIndex.get(value) ?? 0);
+  }, [open, value, renderIndex]);
 
   const commit = useCallback(
     (index: number) => {

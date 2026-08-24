@@ -58,11 +58,11 @@ self.addEventListener('fetch', (event) => {
   }
 
   if (req.mode === 'navigate') {
-    event.respondWith(networkFirstPage(req));
+    event.respondWith(networkFirstPage(req, event));
     return;
   }
 
-  event.respondWith(staleWhileRevalidate(req, STATIC_CACHE));
+  event.respondWith(staleWhileRevalidate(req, STATIC_CACHE, event));
 });
 
 async function cacheFirst(req, cacheName) {
@@ -71,17 +71,20 @@ async function cacheFirst(req, cacheName) {
   const res = await fetch(req);
   if (res.ok) {
     const cache = await caches.open(cacheName);
-    cache.put(req, res.clone());
+    await cache.put(req, res.clone());
   }
   return res;
 }
 
-async function networkFirstPage(req) {
+async function networkFirstPage(req, event) {
   try {
     const res = await fetch(req);
     if (res.ok) {
       const cache = await caches.open(PAGES_CACHE);
-      cache.put(req, res.clone());
+      // waitUntil: nếu không giữ SW sống đến khi ghi xong, lần offline đầu
+      // sau khi online có thể chưa thấy trang trong cache → rơi ra offline.html.
+      if (event) event.waitUntil(cache.put(req, res.clone()));
+      else await cache.put(req, res.clone());
     }
     return res;
   } catch {
@@ -90,12 +93,15 @@ async function networkFirstPage(req) {
   }
 }
 
-async function staleWhileRevalidate(req, cacheName) {
+async function staleWhileRevalidate(req, cacheName, event) {
   const cached = await caches.match(req);
   const network = fetch(req)
     .then((res) => {
       if (res.ok) {
-        caches.open(cacheName).then((cache) => cache.put(req, res.clone()));
+        const put = caches.open(cacheName).then((cache) => cache.put(req, res.clone()));
+        // Revalidate chạy nền — phải báo cho browser đợi, nếu không SW bị
+        // kill giữa chừng là cache mãi cũ.
+        if (event && event.waitUntil) event.waitUntil(put);
       }
       return res;
     })

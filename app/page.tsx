@@ -20,7 +20,10 @@ export default function Home() {
     setIsMounted(true);
     const handleKeyDown = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
-      if ((mod && e.key === 'n') || (mod && e.shiftKey && e.key.toLowerCase() === 'o')) {
+      // Chat mới: Ctrl/Cmd+Alt+N. Ctrl+N và Ctrl+Shift+O là tổ hợp browser
+      // reserved (cửa sổ mới / bookmark manager) — preventDefault không chặn
+      // được nên phím tắt cũ không bao giờ chạy.
+      if (mod && e.altKey && !e.shiftKey && e.key.toLowerCase() === 'n') {
         e.preventDefault();
         setCurrentChatId(null);
       }

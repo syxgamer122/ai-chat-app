@@ -14,7 +14,7 @@ import {
   upsertProvider,
   type ProviderConfig,
 } from '@/lib/providers';
-import { providerNeedsApiKey } from '@/lib/provider-url';
+import { providerNeedsApiKey, validateProviderBaseUrl } from '@/lib/provider-url';
 import { useAppStore, SERVER_PROVIDER_ID } from '@/lib/store';
 
 /**
@@ -119,6 +119,17 @@ export function ProviderManager() {
 
   /** Test kết nối + tải danh sách model về provider record. */
   const testAndLoadModels = async (p: ProviderConfig) => {
+    // Nút test cũng GHI record vào DB — validate trước như save(), nếu không
+    // một form đang sửa dở (baseUrl rỗng/sai) sẽ bị persist lặng lẽ.
+    if (!p.baseUrl.trim()) {
+      setStatus('Thiếu địa chỉ baseURL.');
+      return;
+    }
+    const baseUrlCheck = validateProviderBaseUrl(p.baseUrl.trim());
+    if (!baseUrlCheck.ok) {
+      setStatus(`Địa chỉ nhà cung cấp không hợp lệ: ${baseUrlCheck.error}`);
+      return;
+    }
     setBusyId(p.id);
     setStatus(`Đang kết nối ${p.name}…`);
     try {

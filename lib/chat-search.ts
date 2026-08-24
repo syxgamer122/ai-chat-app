@@ -25,7 +25,17 @@ export async function searchChats(
   const terms = tokenize(query).filter(Boolean);
   if (!terms.length) return [];
 
-  const perChat = new Map<string, { hits: StoredMessage[]; score: number }>();
+  interface Bucket {
+    hits: StoredMessage[];
+    /** id đã gặp — 1 message khớp N term vẫn chỉ chiếm 1 slot snippet. */
+    hitIds: Set<string>;
+    /** Số message khớp (đếm theo term, không đếm title). */
+    msgHits: number;
+    /** Điểm từ tiêu đề (+5/term) — tách khỏi msgHits để đếm "còn lại" đúng. */
+    titleHits: number;
+  }
+
+  const perChat = new Map<string, Bucket>();
   let scanned = 0;
 
   for (const term of terms) {
@@ -37,9 +47,19 @@ export async function searchChats(
       .between(term, upper, true, false)
       .until(() => signal?.aborted === true)
       .each((m) => {
-        const bucket = perChat.get(m.chatId) ?? { hits: [], score: 0 };
-        if (bucket.hits.length < MAX_HITS_PER_CHAT) bucket.hits.push(m);
-        bucket.score += 1;
+        // Multi-entry index: 1 message chứa cả "hoa" lẫn "hoat" được yield
+        // 2 lần cho term "hoa" — phải dedupe để snippet không lặp.
+        const bucket = perChat.get(m.chatId) ?? {
+          hits: [],
+          hitIds: new Set<string>(),
+          msgHits: 0,
+          titleHits: 0,
+        };
+        if (!bucket.hitIds.has(m.id)) {
+          bucket.hitIds.add(m.id);
+          if (bucket.hits.length < MAX_HITS_PER_CHAT) bucket.hits.push(m);
+        }
+        bucket.msgHits += 1;
         perChat.set(m.chatId, bucket);
         if (++scanned % YIELD_EVERY === 0) assertNotAborted(signal);
       });
@@ -49,15 +69,22 @@ export async function searchChats(
       .between(term, upper, true, false)
       .until(() => signal?.aborted === true)
       .each((c) => {
-        const bucket = perChat.get(c.id) ?? { hits: [], score: 0 };
-        bucket.score += 5;
+        const bucket = perChat.get(c.id) ?? {
+          hits: [],
+          hitIds: new Set<string>(),
+          msgHits: 0,
+          titleHits: 0,
+        };
+        bucket.titleHits += 5;
         perChat.set(c.id, bucket);
       });
   }
 
   assertNotAborted(signal);
 
-  const ranked = [...perChat.entries()].sort((a, b) => b[1].score - a[1].score).slice(0, MAX_CHATS);
+  const ranked = [...perChat.entries()]
+    .sort((a, b) => b[1].msgHits + b[1].titleHits - (a[1].msgHits + a[1].titleHits))
+    .slice(0, MAX_CHATS);
   const chats = await db.chats.bulkGet(ranked.map(([id]) => id));
   assertNotAborted(signal);
 
@@ -67,11 +94,12 @@ export async function searchChats(
       if (!chat) return null;
       const result: ChatSearchResult = {
         chat,
-        score: bucket.score,
+        score: bucket.msgHits + bucket.titleHits,
         snippets: bucket.hits
           .map((h) => buildSnippet(h.content, terms))
           .filter((s): s is SnippetSegment[] => s !== null),
-        extraHits: Math.max(0, bucket.score - bucket.hits.length),
+        // Số message DUY NHẤT khớp — dùng cho "+N kết quả khác".
+        extraHits: Math.max(0, bucket.hitIds.size - bucket.hits.length),
       };
       const titleSegments = buildSnippet(chat.title, terms);
       if (titleSegments) result.titleSegments = titleSegments;

@@ -533,6 +533,15 @@ export default function ChatInterface() {
         treePersistEpochRef.current += 1;
 
         /**
+         * Panel xác nhận xoá + trạng thái sửa của chat cũ không được
+         * kéo sang chat mới — nếu không, "Xóa hẳn" đang chờ xác nhận ở
+         * chat A sẽ xoá nhầm chat B vừa mở.
+         */
+        setConfirmClear(false);
+        setEditingId(null);
+        setDraft('');
+
+        /**
          * Hủy timer persist chưa chạy.
          */
         if (treePersistTimerRef.current) {
@@ -1328,10 +1337,14 @@ export default function ChatInterface() {
 
   const swipeHandlers = useSwipeBranch({
     onSwipeLeft: () => {
+      // Đang stream thì cấm đổi nhánh — handleSwitchBranch sẽ hủy stream
+      // và nhảy nhánh, cuộn tay vô ý trên mobile làm mất câu trả lời.
+      if (isLoading || isSwitchingBranch) return;
       showSwipeFeedback('left');
       handleShortcutNextBranch();
     },
     onSwipeRight: () => {
+      if (isLoading || isSwitchingBranch) return;
       showSwipeFeedback('right');
       handleShortcutPreviousBranch();
     },

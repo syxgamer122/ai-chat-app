@@ -152,7 +152,7 @@ export const MessageItem = memo(
                     isLongUserMsg && !isExpanded ? 'relative max-h-36 overflow-hidden' : ''
                   }`}
                 >
-                  <ErrorBoundary>
+                  <ErrorBoundary resetKey={`${m.id}:${m.content.length}`}>
                     <MarkdownRenderer
                       content={sanitizeContent(m.content)}
                       isStreaming={isStreaming}
@@ -275,7 +275,7 @@ export const MessageItem = memo(
             className={`claude-prose ${isStreaming ? 'streaming-caret' : ''}`}
             aria-busy={isStreaming}
           >
-            <ErrorBoundary>
+            <ErrorBoundary resetKey={`${m.id}:${m.content.length}`}>
               <MarkdownRenderer
                 content={sanitizeContent(m.content)}
                 isStreaming={isStreaming}

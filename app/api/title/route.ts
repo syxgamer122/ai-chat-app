@@ -110,6 +110,23 @@ export async function POST(req: Request) {
       );
     }
 
+    // Rate limit PHẢI đứng trước verifyAccessAuth: nếu không, mỗi request
+    // đoán sai ACCESS_CODE đều trả 401 mà không tốn quota — brute-force
+    // mã truy cập không bị chặn bởi gì cả.
+    const limit = checkRateLimit(`title:${rateLimitIdentity(req)}`, 30, 60_000);
+    if (!limit.ok) {
+      const peeked = await peekMessage(req);
+      return Response.json(
+        {
+          title: generateFallbackTitle(peeked),
+          final: true,
+          reason: 'rate_limited',
+          retryAfterSec: limit.retryAfterSec,
+        },
+        { status: 429, headers: { ...NO_STORE, ...rateLimitHeaders(limit) } },
+      );
+    }
+
     const auth = verifyAccessAuth(req);
     if (!auth.ok) {
       return Response.json(
@@ -128,20 +145,6 @@ export async function POST(req: Request) {
       rawCustomKey && rawCustomKey.length <= 256 && /^[\x21-\x7E]+$/.test(rawCustomKey)
         ? rawCustomKey
         : undefined;
-
-    const limit = checkRateLimit(`title:${rateLimitIdentity(req)}`, 30, 60_000);
-    if (!limit.ok) {
-      const peeked = await peekMessage(req);
-      return Response.json(
-        {
-          title: generateFallbackTitle(peeked),
-          final: true,
-          reason: 'rate_limited',
-          retryAfterSec: limit.retryAfterSec,
-        },
-        { status: 429, headers: { ...NO_STORE, ...rateLimitHeaders(limit) } },
-      );
-    }
 
     let json: unknown;
     try {

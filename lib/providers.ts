@@ -159,10 +159,15 @@ async function seedOnce(): Promise<void> {
         byBase.set(p.baseUrl, p);
         continue;
       }
-      const keepNewer = (cur.models?.length ?? 0) >= (p.models?.length ?? 0) ? cur : p;
-      const drop = keepNewer === cur ? p : cur;
+      // Ưu tiên bản có nhiều model đã tải; HOÀ thì giữ bản MỚI hơn —
+      // trước đây hoà giữ bản cũ nhất, xoá mất sửa đổi của user trên bản mới.
+      const curModels = cur.models?.length ?? 0;
+      const pModels = p.models?.length ?? 0;
+      const keep =
+        pModels > curModels || (pModels === curModels && p.updatedAt >= cur.updatedAt) ? p : cur;
+      const drop = keep === cur ? p : cur;
       await db.providers.delete(drop.id);
-      byBase.set(p.baseUrl, keepNewer);
+      byBase.set(p.baseUrl, keep);
     }
 
     const knownBases = new Set([...byBase.keys()]);

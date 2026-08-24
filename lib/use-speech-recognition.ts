@@ -84,6 +84,14 @@ export function useSpeechRecognition({
   finalRef.current = onFinalText;
   /** Ý định của user — phân biệt với việc engine tự stop sau im lặng. */
   const wantListeningRef = useRef(false);
+  /**
+   * Số thứ tự phiên nhận diện. Mỗi lần tạo/dừng phiên thì tăng — callback
+   * (onend/onresult) của phiên CŨ phải bỏ qua khi thấy số của mình đã cũ.
+   * Không có token này: bấm tắt→bật nhanh sẽ để onend của phiên cũ tự mở
+   * thêm một phiên mới song song → câu nói được chèn 2 lần và mic không
+   * được nhả khi unmount.
+   */
+  const sessionGenRef = useRef(0);
   /** Final gần nhất (đã chuẩn hoá) — để chặn echo replay sau restart. */
   const lastFinalRef = useRef('');
   /** Final đầu tiên của phiên mới là nơi duy nhất có thể xảy ra echo. */
@@ -92,6 +100,8 @@ export function useSpeechRecognition({
 
   const stop = useCallback(() => {
     wantListeningRef.current = false;
+    // Vô hiệu mọi callback của phiên hiện tại + phiên đang chờ onend.
+    sessionGenRef.current += 1;
     setListening(false);
     setInterim('');
     try {
@@ -105,6 +115,8 @@ export function useSpeechRecognition({
     const Ctor = getRecognitionCtor();
     if (!Ctor) return;
 
+    const gen = ++sessionGenRef.current;
+
     // Instance mới cho mỗi phiên — tái dùng instance cũ là nguyên nhân
     // câu bị lặp lại sau mỗi lần Chrome tự kết thúc phiên.
     const rec = new Ctor();
@@ -117,6 +129,7 @@ export function useSpeechRecognition({
     firstFinalRef.current = true;
 
     rec.onresult = (e) => {
+      if (gen !== sessionGenRef.current) return;
       let interimText = '';
       for (let i = e.resultIndex; i < e.results.length; i += 1) {
         const result = e.results[i];
@@ -140,6 +153,7 @@ export function useSpeechRecognition({
     };
 
     rec.onerror = (e) => {
+      if (gen !== sessionGenRef.current) return;
       const code = e?.error;
       if (code === 'not-allowed' || code === 'service-not-allowed') {
         setError('Không có quyền dùng micro. Hãy cho phép truy cập micro rồi thử lại.');
@@ -153,6 +167,8 @@ export function useSpeechRecognition({
     };
 
     rec.onend = () => {
+      // Phiên cũ (đã bị thay bởi phiên mới hoặc đã stop) — không tự restart.
+      if (gen !== sessionGenRef.current) return;
       if (!wantListeningRef.current) {
         setListening(false);
         setInterim('');
@@ -163,8 +179,11 @@ export function useSpeechRecognition({
         createSessionRef.current();
       } catch {
         // start() quá sớm sau phiên cũ — đợi một nhịp rồi thử lại.
+        // Token = số thứ tự của lần tạo vừa thất bại; nếu giữa chừng user
+        // đã tự bật phiên khác thì token cũ lệch và retry tự huỷ.
+        const token = sessionGenRef.current;
         window.setTimeout(() => {
-          if (!wantListeningRef.current) return;
+          if (!wantListeningRef.current || token !== sessionGenRef.current) return;
           try {
             createSessionRef.current();
           } catch {
@@ -199,10 +218,11 @@ export function useSpeechRecognition({
 
   const clearError = useCallback(() => setError(null), []);
 
-  // Unmount / đổi chat — huỷ phiên đang nghe.
+  // Unmount / đổi chat — huỷ phiên đang nghe + vô hiệu mọi callback treo.
   useEffect(
     () => () => {
       wantListeningRef.current = false;
+      sessionGenRef.current += 1;
       try {
         recRef.current?.abort();
       } catch {

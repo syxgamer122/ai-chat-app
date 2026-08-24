@@ -34,10 +34,14 @@ function findFallbackLeafId(
   }
 
   /**
-   * Ưu tiên deepest leaf từ root.
+   * Ưu tiên deepest leaf từ root. Chọn root MỚI NHẤT (regenerate/edit tạo
+   * nhiều root anh em — lấy root đầu tiên sẽ nhảy về nhánh cổ nhất).
    * Row trong DB luôn mang sentinel '__ROOT__' — không bao giờ là null.
    */
-  const root = sessionMessages.find((m) => m.parentId === ROOT_KEY);
+  const roots = sessionMessages
+    .filter((m) => m.parentId === ROOT_KEY)
+    .sort(compareMessagesForFallback);
+  const root = roots[0];
   if (root) {
     const deepestFromRoot = findDeepestLeafId(
       sessionMessages,

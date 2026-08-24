@@ -257,19 +257,28 @@ export function Sidebar() {
     }
   }, []);
 
+  /** Đang chạy — chặn double-click tạo 2 chat rỗng song song. */
+  const newChatBusyRef = useRef(false);
+
   const handleNewChat = useCallback(async () => {
-    const recent = await db.chats.orderBy('updatedAt').reverse().limit(5).toArray();
-    for (const c of recent) {
-      const count = await db.messages.where('chatId').equals(c.id).count();
-      if (count === 0) {
-        useAppStore.getState().setCurrentChatId(c.id);
-        return;
+    if (newChatBusyRef.current) return;
+    newChatBusyRef.current = true;
+    try {
+      const recent = await db.chats.orderBy('updatedAt').reverse().limit(5).toArray();
+      for (const c of recent) {
+        const count = await db.messages.where('chatId').equals(c.id).count();
+        if (count === 0) {
+          useAppStore.getState().setCurrentChatId(c.id);
+          return;
+        }
       }
+      const id = newId();
+      const now = Date.now();
+      await db.chats.add({ id, title: 'Cuộc trò chuyện mới', pinned: 0, createdAt: now, updatedAt: now });
+      useAppStore.getState().setCurrentChatId(id);
+    } finally {
+      newChatBusyRef.current = false;
     }
-    const id = newId();
-    const now = Date.now();
-    await db.chats.add({ id, title: 'Cuộc trò chuyện mới', pinned: 0, createdAt: now, updatedAt: now });
-    useAppStore.getState().setCurrentChatId(id);
   }, []);
 
   const handleTogglePin = useCallback(async (id: string, cur: 0 | 1) => {
@@ -472,13 +481,13 @@ export function Sidebar() {
             >
               <PanelLeftOpen size={15} />
             </button>
-            <button
-              type="button"
-              aria-label="Đoạn chat mới"
-              title="Đoạn chat mới (Ctrl+N)"
-              onClick={() => void handleNewChat()}
-              className="icon-btn-sm mt-2"
-            >
+              <button
+                type="button"
+                aria-label="Đoạn chat mới"
+                title="Đoạn chat mới (Ctrl+Alt+N)"
+                onClick={() => void handleNewChat()}
+                className="icon-btn-sm mt-2"
+              >
               <Plus size={16} />
             </button>
           </div>

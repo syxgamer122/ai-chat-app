@@ -495,17 +495,9 @@ export async function POST(req: Request) {
       return jsonError(requestId, 403, 'ORIGIN_FORBIDDEN', 'Truy cập bị từ chối: Origin không được phép.');
     }
 
-    /* --- Tầng 2: Access code --- */
-    const auth = verifyAccessAuth(req as any);
-    if (!auth.ok) {
-      console.warn(`[req:${requestId}][AUTH_UNAUTHORIZED] ${auth.error}`);
-      return jsonError(requestId, auth.status ?? 401, 'UNAUTHORIZED', auth.error ?? 'Unauthorized');
-    }
-
-    /* --- BYOK + rate limit --- */
+    /* --- BYOK + provider preset override (chỉ đọc header) --- */
     const rawCustomKey = req.headers.get('x-api-key')?.trim();
 
-    /* --- Provider preset override (x-api-base) --- */
     const rawProviderBase = req.headers.get('x-api-base')?.trim() || undefined;
     const providerBaseCheck = rawProviderBase
       ? validateProviderBaseUrl(rawProviderBase)
@@ -527,6 +519,8 @@ export async function POST(req: Request) {
         ? rawCustomKey
         : undefined;
 
+    /* --- Tầng 2: Rate limit — PHẢI chạy trước verifyAccessAuth để mỗi lần
+       đoán sai ACCESS_CODE cũng tốn quota, không thể brute-force miễn phí. --- */
     const clientIp = getClientIp(req as any);
     const rateKey = `${customKey ? 'byok' : 'pool'}:${clientIp}`;
     const rl = checkRateLimit(rateKey, customKey ? 60 : 20, 60_000);
@@ -539,6 +533,13 @@ export async function POST(req: Request) {
         undefined,
         { 'Retry-After': String(rl.retryAfterSec) },
       );
+    }
+
+    /* --- Tầng 3: Access code --- */
+    const auth = verifyAccessAuth(req as any);
+    if (!auth.ok) {
+      console.warn(`[req:${requestId}][AUTH_UNAUTHORIZED] ${auth.error}`);
+      return jsonError(requestId, auth.status ?? 401, 'UNAUTHORIZED', auth.error ?? 'Unauthorized');
     }
 
     /* --- Body --- */
