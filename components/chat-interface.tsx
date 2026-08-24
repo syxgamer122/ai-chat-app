@@ -370,6 +370,33 @@ export default function ChatInterface() {
     experimental_throttle: throttleMs,
     onFinish: (message, { finishReason, usage }) => {
       const clean = sanitizeContent(message.content);
+
+      /**
+       * Gateway đôi khi trả stream rỗng (502 ngầm, quá tải, model reasoning
+       * bị nuốt token). Kết thúc im lặng để lại bong bóng trống vô nghĩa —
+       * đánh dấu error, ghi câu gợi ý vào bong bóng và báo toast.
+       */
+      if (!clean.trim()) {
+        finishRef.current = 'error';
+        showNotice('Nhà cung cấp trả về phản hồi rỗng. Bấm "Tạo lại" hoặc đổi model khác thử lại.', 6000);
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === message.id
+              ? {
+                  ...m,
+                  content:
+                    '_Phản hồi trống từ nhà cung cấp (lỗi gateway tạm thời). Bấm "Tạo lại" để thử lại, hoặc đổi model khác._',
+                  annotations: [
+                    ...((message.annotations ?? []) as Array<Record<string, unknown>>),
+                    { error: 'EMPTY_RESPONSE' },
+                  ] as typeof m.annotations,
+                }
+              : m,
+          ),
+        );
+        return;
+      }
+
       const promptTokens = Number(usage?.promptTokens ?? 0) || 0;
       // Gateway không báo usage ra → ước lượng từ độ dài câu trả lời.
       const completionTokens =

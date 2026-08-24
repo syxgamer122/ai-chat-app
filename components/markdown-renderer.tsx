@@ -171,13 +171,13 @@ const CodeBlock = memo(function CodeBlock({
     <div className="claude-code-block my-4">
       {/* Thanh công cụ nằm trên nền tối → dùng border/chữ sáng cho đủ tương phản. */}
       <div className="flex items-center justify-between border-b border-white/10 bg-surface-code-header px-3 py-1.5">
-        <span className="font-mono text-[11px] font-medium text-zinc-400">
+        <span className="font-mono text-[11px] font-medium text-[rgb(161,161,170)]">
           {language || 'text'}
         </span>
         <button
           type="button"
           onClick={onCopy}
-          className="flex items-center gap-1 rounded px-1 py-0.5 text-[11px] text-zinc-400 transition-colors hover:bg-white/10 hover:text-zinc-100"
+          className="flex items-center gap-1 rounded px-1 py-0.5 text-[11px] text-[rgb(161,161,170)] transition-colors hover:bg-white/10 hover:text-zinc-100"
           aria-label={copied ? 'Đã chép đoạn mã' : 'Chép đoạn mã'}
         >
           {copied ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
@@ -203,7 +203,7 @@ const CodeBlock = memo(function CodeBlock({
           {value}
         </SyntaxHighlighter>
       ) : (
-        <pre className="m-0 overflow-x-auto bg-surface-code px-4 py-[0.9rem] font-mono text-[13px] leading-[1.6] text-zinc-300">
+        <pre className="m-0 overflow-x-auto bg-surface-code px-4 py-[0.9rem] font-mono text-[13px] leading-[1.6] text-[rgb(212,212,216)]">
           <code>{value}</code>
         </pre>
       )}

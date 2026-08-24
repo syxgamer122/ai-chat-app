@@ -990,6 +990,19 @@ export async function POST(req: Request) {
                 if (streamError) throw streamError;
 
                 markKeySuccess(apiKey);
+                /**
+                 * Gateway đôi khi trả 200 + stream KHÔNG có token nào (crax
+                 * lúc quá tải, model reasoning chỉ nhả reasoning bị gateway
+                 * nuốt...). Kết thúc 'stop' im lặng ở đây = bong bóng rỗng
+                 * không lời giải thích cho người dùng — báo EMPTY_RESPONSE
+                 * để client hiện cảnh báo và gợi ý tạo lại.
+                 */
+                if (emittedChars === 0) {
+                  console.warn(`[req:${requestId}] Stream kết thúc không có nội dung (model=${targetModel}).`);
+                  writeAnnotation({ error: 'EMPTY_RESPONSE' });
+                  writeFinish('other');
+                  return;
+                }
                 writeFinish(finishReason === 'length' ? 'length' : 'stop');
                 return;
               } catch (e: any) {
