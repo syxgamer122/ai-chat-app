@@ -6,8 +6,10 @@ import {
   parseGeminiDescription,
   appendDescription,
   bridgeImagesInMessages,
+  downgradeImagesToPlaceholders,
   resetVisionBridgeCache,
   VISION_BRIDGE_PROMPT,
+  IMAGE_OMITTED_PLACEHOLDER,
 } from '@/lib/vision-bridge';
 
 const PNG_DATA_URL =
@@ -197,5 +199,75 @@ describe('vision-bridge — bridgeImagesInMessages', () => {
     });
     expect(out[0].content).toEqual([{ type: 'text', text: 'parts' }]);
     expect(out[0].experimental_attachments).toHaveLength(1);
+  });
+});
+
+describe('downgradeImagesToPlaceholders — lớp chốt hạ khi không bridge được', () => {
+  const img = (url: string = PNG_DATA_URL) => ({ contentType: 'image/png', url });
+  const pdf = { contentType: 'application/pdf', url: 'data:application/pdf;base64,AAAA' };
+
+  it('thay ảnh bằng placeholder + bỏ attachment ảnh', () => {
+    const messages = [
+      { role: 'user', content: 'Ảnh này là gì?', experimental_attachments: [img()] },
+    ];
+    const out = downgradeImagesToPlaceholders(messages);
+    expect(out).not.toBe(messages);
+    expect(out[0].content).toContain(IMAGE_OMITTED_PLACEHOLDER);
+    expect(out[0].content).toContain('Ảnh này là gì?');
+    expect(out[0].experimental_attachments).toBeUndefined();
+  });
+
+  it('nhiều ảnh trong một message -> placeholder ghi kèm số lượng', () => {
+    const messages = [
+      { role: 'user', content: 'x', experimental_attachments: [img(), img()] },
+    ];
+    const out = downgradeImagesToPlaceholders(messages) as typeof messages;
+    expect((out[0].content as string)).toContain('(2 ảnh)');
+  });
+
+  it('giữ attachment phi-ảnh (pdf/text), chỉ bỏ ảnh — kể cả ảnh http(s)', () => {
+    const messages = [
+      {
+        role: 'user',
+        content: 'hồ sơ',
+        experimental_attachments: [
+          pdf,
+          img('https://example.com/remote.png'),
+          { contentType: 'text/plain', url: 'data:text/plain;base64,SGk=' },
+        ],
+      },
+    ];
+    const out = downgradeImagesToPlaceholders(messages) as typeof messages;
+    const atts = out[0].experimental_attachments ?? [];
+    expect(atts).toHaveLength(2);
+    expect(atts.some((a) => a.contentType === 'application/pdf')).toBe(true);
+    expect(atts.some((a) => a.contentType === 'text/plain')).toBe(true);
+  });
+
+  it('không có ảnh -> trả nguyên mảng gốc (=== ), không thêm placeholder', () => {
+    const messages = [
+      { role: 'user', content: 'chữ thôi', experimental_attachments: [pdf] },
+      { role: 'user', content: 'trống attachments' },
+    ];
+    const out = downgradeImagesToPlaceholders(messages);
+    expect(out).toBe(messages);
+  });
+
+  it('message content rỗng + chỉ có ảnh -> content thành một mình placeholder', () => {
+    const messages = [{ role: 'user', content: '', experimental_attachments: [img()] }];
+    const out = downgradeImagesToPlaceholders(messages) as typeof messages;
+    expect(out[0].content).toBe(IMAGE_OMITTED_PLACEHOLDER);
+  });
+
+  it('content dạng mảng parts được giữ nguyên (không đụng cấu trúc)', () => {
+    const messages = [
+      {
+        role: 'user',
+        content: [{ type: 'text', text: 'parts' }],
+        experimental_attachments: [img()],
+      },
+    ];
+    const out = downgradeImagesToPlaceholders(messages);
+    expect(out).toBe(messages);
   });
 });

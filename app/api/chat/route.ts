@@ -21,7 +21,7 @@ import { validateProviderBaseUrl, THINKING_LEVELS, supportsThinkingLevel } from 
 import { acquireUpstreamSlot, sharedFreeBudget } from '@/lib/upstream-queue';
 import { pumpSseLines } from '@/lib/sse';
 import { filterSupportedModels, markModelUnsupported } from '@/lib/model-negative-cache';
-import { bridgeImagesInMessages, shouldBridgeImages, type BridgeableMessage } from '@/lib/vision-bridge';
+import { bridgeImagesInMessages, downgradeImagesToPlaceholders, shouldBridgeImages, type BridgeableMessage } from '@/lib/vision-bridge';
 import { checkRateLimit, getClientIp, checkSameOrigin, verifyAccessAuth } from '@/lib/security';
 
 /**
@@ -58,6 +58,12 @@ const HEARTBEAT_MS = 10_000;
 const MAX_BODY_BYTES = 4.5 * 1024 * 1024;
 const MAX_FAILOVER_KEYS = 3;
 
+/* Port từ prime-agent (`isRetryableError`): lỗi TẠM THỜI của gateway thì thử
+   lại ĐÚNG model đó một lần (kèm backoff ngắn) trước khi đốt model/key kế
+   tiếp trong chuỗi failover — overload/rate-limit thường nhả sau vài trăm ms. */
+const RETRYABLE_SAME_MODEL_STATUSES = new Set([429, 500, 502, 503, 504, 529]);
+const SAME_MODEL_RETRY_DELAY_MS = 800;
+
 const DEBUG_ERRORS = ['1', 'true', 'yes'].includes(
   (process.env.CHAT_DEBUG_ERRORS ?? '').trim().toLowerCase(),
 );
@@ -72,6 +78,10 @@ function newRequestId(): string {
   } catch {
     return Math.random().toString(36).slice(2, 10);
   }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /** Response JSON luôn kèm requestId — sửa A10. */
@@ -301,6 +311,14 @@ function diagnoseUpstreamError(
   // crax (New API) trả 400 kèm "Unknown model" thay vì 404 cho model lạ.
   const unknownModel400 = status === 400 && /unknown model/i.test(bodySnippet);
 
+  /* Port từ prime-agent `classifyStreamFailure`: từ chối do bộ lọc nội dung
+     (refusal/safety) — đổi key/model cũng gần như vô ích vì nguyên nhân nằm
+     ở NỘI DUNG, không phải hạ tầng; dừng failover để không đốt chuỗi model. */
+  const looksLikeSafetyBlock =
+    /content_filter|content.?policy|flagged|prohibited_content|recitation|\bsafety\b|guardrail/i.test(
+      bodySnippet,
+    );
+
   switch (status) {
     case 401:
       code = 'UPSTREAM_AUTH_401';
@@ -346,6 +364,17 @@ function diagnoseUpstreamError(
       break;
     case 400:
     case 422:
+      if (looksLikeSafetyBlock && !unknownModel400) {
+        // Gateway trả 400/422 cho vi phạm content policy (không phải cú pháp):
+        // dừng failover như nhánh 5xx-safety ở default.
+        code = 'UPSTREAM_SAFETY_BLOCKED';
+        blameKey = false;
+        stopFailover = true;
+        userMessage =
+          `Yêu cầu bị ${upstreamHost} chặn bởi bộ lọc nội dung (${status}): ` +
+          `${bodySnippet.slice(0, 160)}.`;
+        break;
+      }
       code = `UPSTREAM_BAD_REQUEST_${status}`;
       blameKey = false;
       modelUnsupported = unknownModel400;
@@ -371,11 +400,37 @@ function diagnoseUpstreamError(
           userMessage =
             `Yêu cầu bị ${upstreamHost} từ chối (500 — dữ liệu không hợp lệ: ` +
             `${bodySnippet.slice(0, 160)}). Thử lại bằng key/model khác cũng không thay đổi được.`;
+        } else if (looksLikeSafetyBlock) {
+          // 5xx kèm nội dung safety/refusal (Anthropic "refusal", Gemini
+          // "SAFETY", recitation...): lỗi của nội dung — dừng failover.
+          code = 'UPSTREAM_SAFETY_BLOCKED';
+          blameKey = false;
+          stopFailover = true;
+          userMessage =
+            `Model từ chối trả lời vì bộ lọc nội dung của ${upstreamHost} ` +
+            `(${bodySnippet.slice(0, 160)}). Đổi model/key thường không thay đổi được.`;
+        } else if (status === 529 || /overloaded/i.test(bodySnippet)) {
+          // 529 = "site overloaded" của Anthropic; một số gateway map overload
+          // thành 503 kèm chữ overloaded. Quá tải là TẠM THỜI — không phạt key,
+          // cho retry/failover như 5xx thường nhưng báo đúng bản chất.
+          code = 'UPSTREAM_OVERLOADED';
+          blameKey = false;
+          userMessage =
+            `${upstreamHost} đang quá tải (${status}). Vài giây nữa thử lại thường được.`;
         } else {
           code = `UPSTREAM_SERVER_${status}`;
           blameKey = false;
           userMessage = `AI Provider ${upstreamHost} đang gặp sự cố (${status}). Vui lòng thử lại sau ít phút.`;
         }
+      } else if (looksLikeSafetyBlock) {
+        // 4xx kèm chữ safety (một số gateway trả 400/422 cho content policy):
+        // cùng logic với nhánh 5xx ở trên — dừng failover, báo rõ nguyên nhân.
+        code = 'UPSTREAM_SAFETY_BLOCKED';
+        blameKey = false;
+        stopFailover = true;
+        userMessage =
+          `Yêu cầu bị ${upstreamHost} chặn bởi bộ lọc nội dung (${status}): ` +
+          `${bodySnippet.slice(0, 160)}.`;
       } else if (status === undefined) {
         code = 'UPSTREAM_NETWORK';
         blameKey = false;
@@ -701,6 +756,21 @@ export async function POST(req: Request) {
       }
     }
 
+    /* Lớp chốt hạ (port từ prime-agent): model không xem được ảnh mà message
+       VẪN còn ảnh — không có Gemini key, Gemini lỗi với message đó, hoặc ảnh
+       http(s) remote không bridge được — thì thay ảnh bằng placeholder text.
+       Gửi image part thẳng cho model chữ là 400 hoặc bị nuốt im lặng; placeholder
+       giúp model ít nhất biết user từng gửi ảnh và trả lời tử tế hơn. */
+    if (shouldBridgeImages(modelConfig)) {
+      const downgraded = downgradeImagesToPlaceholders(bridgeMessages);
+      if (downgraded !== bridgeMessages) {
+        bridgeMessages = downgraded;
+        console.info(
+          `[req:${requestId}] ảnh còn sót sau vision bridge đã thay bằng placeholder cho model ${targetModel}`,
+        );
+      }
+    }
+
     let core: CoreMessage[];
     try {
       core = mergeSameRole(normalize(convertToCoreMessages(bridgeMessages as any)));
@@ -772,6 +842,10 @@ export async function POST(req: Request) {
         let emittedChars = 0;
         let usage: { promptTokens: number; completionTokens: number } | undefined;
         let heartbeat: ReturnType<typeof setInterval> | null = null;
+        // Các ô (key × model) đã dùng hết lượt retry-in-place — Set ngoài vòng
+        // lặp vì retry quay lại CÙNG ô qua `modelIndex -= 1`, biến trong thân
+        // loop sẽ bị khai báo lại và tạo vòng lặp vô hạn.
+        const retriedSlotKeys = new Set<string>();
 
         const writeAnnotation = (payload: Record<string, unknown>) => {
           dataStream.write(
@@ -1166,6 +1240,27 @@ export async function POST(req: Request) {
                 }
 
                 if (diagnosis.blameKey) markKeyFailure(apiKey, diagnosis.status);
+
+                /* Retry-in-place (port từ prime-agent): lỗi tạm thời 429/5xx,
+                   chưa emit token nào, không phải safety/invalid-request thì
+                   thử lại ĐÚNG model này một lần trước khi chuyển model/key.
+                   `modelIndex -= 1` + continue: vòng for tăng lại → lặp đúng ô. */
+                const slotKey = `${attempt}:${modelIndex}`;
+                const isRetryableSameModel =
+                  !diagnosis.stopFailover &&
+                  !diagnosis.modelUnsupported &&
+                  diagnosis.status !== undefined &&
+                  RETRYABLE_SAME_MODEL_STATUSES.has(diagnosis.status) &&
+                  !retriedSlotKeys.has(slotKey);
+                if (isRetryableSameModel && emittedChars === 0) {
+                  retriedSlotKeys.add(slotKey);
+                  console.warn(
+                    `[req:${requestId}] Lỗi tạm thời ${diagnosis.status} trên ${targetModel} -> retry sau ${SAME_MODEL_RETRY_DELAY_MS}ms.`,
+                  );
+                  await sleep(SAME_MODEL_RETRY_DELAY_MS);
+                  modelIndex -= 1;
+                  continue;
+                }
 
                 // Chỉ dừng hẳn khi đã hết cả model lẫn key để thử.
                 const isLast =

@@ -108,6 +108,64 @@ export function appendDescription(content: string, description: string): string 
 }
 
 /* ------------------------------------------------------------------ */
+/* Placeholder dự phòng khi KHÔNG bridge được                          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Lớp chốt hạ (port từ prime-agent `transform-messages.ts`): model chữ thuần
+ * mà vẫn còn ảnh trong message (không có GEMINI_API_KEY, Gemini lỗi, hoặc là
+ * ảnh http(s) remote không bridge được) → thay ảnh bằng một dòng placeholder
+ * thay vì gửi image part cho upstream để nhận 400 hoặc bị bỏ qua im lặng.
+ * Người dùng ít nhất thấy model "biết" là đã từng có ảnh.
+ */
+export const IMAGE_OMITTED_PLACEHOLDER =
+  '[Ảnh đính kèm đã bị bỏ qua — model hiện tại không xem được ảnh]';
+
+/**
+ * Bỏ mọi ảnh khỏi messages và ghi chú lại bằng text — bất kể nguồn (data-URL
+ * lẫn http(s) remote): model khai báo không xem được ảnh thì chẳng nhận được
+ * ảnh từ đâu. Message không có ảnh giữ nguyên tham chiếu; trả nguyên mảng gốc
+ * (cùng ===) khi không phải thay đổi gì — cùng hợp đồng với
+ * `bridgeImagesInMessages`.
+ */
+export function downgradeImagesToPlaceholders(
+  messages: readonly BridgeableMessage[],
+): readonly BridgeableMessage[] {
+  const out: BridgeableMessage[] = [];
+  let changed = false;
+
+  const isImageAtt = (att: BridgeableAttachment) => att.contentType?.startsWith('image/') ?? false;
+
+  for (const message of messages) {
+    if (typeof message.content !== 'string') {
+      out.push(message);
+      continue;
+    }
+    const atts = message.experimental_attachments ?? [];
+    if (!atts.some(isImageAtt)) {
+      out.push(message);
+      continue;
+    }
+
+    // Giữ lại attachment phi-ảnh (pdf/text); ảnh bị thay bởi placeholder.
+    const remaining = atts.filter((att) => !isImageAtt(att));
+    const imageCount = atts.length - remaining.length;
+    const note =
+      imageCount > 1
+        ? `${IMAGE_OMITTED_PLACEHOLDER} (${imageCount} ảnh)`
+        : IMAGE_OMITTED_PLACEHOLDER;
+    out.push({
+      ...message,
+      content: message.content.trim() ? `${message.content}\n\n${note}` : note,
+      experimental_attachments: remaining.length ? remaining : undefined,
+    });
+    changed = true;
+  }
+
+  return changed ? out : messages;
+}
+
+/* ------------------------------------------------------------------ */
 /* Cache mô tả theo nội dung ảnh                                       */
 /* ------------------------------------------------------------------ */
 
