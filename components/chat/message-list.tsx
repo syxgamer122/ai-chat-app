@@ -157,18 +157,39 @@ export const MessageList = memo(function MessageList({
   onReload,
   onContinueGenerating,
 }: MessageListProps) {
+  const lastMsg = messages[messages.length - 1];
+  const lastRole = lastMsg?.role;
+  const lastContentLen = lastMsg?.content?.length ?? 0;
+
+  /**
+   * Đang chờ token đầu tiên mà tin nhắn assistant cuối vẫn rỗng: hàng rỗng
+   * (avatar + caret nháy trên bong bóng trống) bị ẩn, ThinkingIndicator đại
+   * diện — nếu không sẽ có 2 avatar KODA cùng lúc cho 1 câu trả lời. Ký tự
+   * đầu tiên tới → hàng hiện lại và indicator tự ẩn (caret tiếp quản).
+   */
+  const pendingEmptyAssistant =
+    isLoading &&
+    lastRole === 'assistant' &&
+    lastContentLen === 0 &&
+    !(lastMsg as any)?.reasoning;
+
+  const visibleMessages = useMemo(
+    () => (pendingEmptyAssistant ? messages.slice(0, -1) : messages),
+    [messages, pendingEmptyAssistant],
+  );
+
   // App không bật React Compiler; useVirtualizer của TanStack trả về hàm
   // mỗi render là hành vi chủ đích của thư viện — bỏ cảnh báo nhiễu.
   // eslint-disable-next-line react-hooks/incompatible-library
   const rowVirtualizer = useVirtualizer({
-    count: messages.length,
+    count: visibleMessages.length,
     getScrollElement: () => scrollRef.current,
-    getItemKey: (index) => messages[index]?.id ?? `row-${index}`,
+    getItemKey: (index) => visibleMessages[index]?.id ?? `row-${index}`,
     overscan: 6,
     paddingStart: 16,
     paddingEnd: 96,
     estimateSize: (index) => {
-      const m = messages[index];
+      const m = visibleMessages[index];
       if (!m) return 140;
       return HEIGHT_CACHE.get(cacheKey(chatId, m.id)) ?? estimateMessageHeight(m);
     },
@@ -196,10 +217,6 @@ export const MessageList = memo(function MessageList({
         .join('|'),
     [messages, branchInfoByMessageId],
   );
-
-  const lastMsg = messages[messages.length - 1];
-  const lastRole = lastMsg?.role;
-  const lastContentLen = lastMsg?.content?.length ?? 0;
 
   /* 1. Đổi chat: xoá cache chiều cao của chat khác (tránh phình vô hạn theo
      phiên), nhảy đáy TỨC THÌ rồi ghim 1s để bù các lần đo lại */
@@ -335,7 +352,7 @@ export const MessageList = memo(function MessageList({
               className="max-w-thread"
             >
               {rowVirtualizer.getVirtualItems().map((virtualRow) => {
-                const m = messages[virtualRow.index];
+                const m = visibleMessages[virtualRow.index];
                 if (!m) return null;
 
                 return (
