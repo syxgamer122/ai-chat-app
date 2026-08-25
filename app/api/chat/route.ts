@@ -17,7 +17,9 @@ import {
   type UpstreamScope,
 } from '@/lib/api-keys';
 import { ALLOWED_MODEL_IDS, DEFAULT_MODEL_ID, getModelConfig, mediaKindOf, resolveProviderModelChain } from '@/lib/models';
-import { validateProviderBaseUrl, THINKING_LEVELS, supportsThinkingLevel } from '@/lib/provider-url';
+import { validateProviderBaseUrl, THINKING_LEVELS, supportsThinkingLevel, type ThinkingLevel } from '@/lib/provider-url';
+import { getReasoningCapability } from '@/lib/model-reasoning-cache';
+import { resolveNearestEffort } from '@/lib/reasoning-capability';
 import { acquireUpstreamSlot, sharedFreeBudget } from '@/lib/upstream-queue';
 import { pumpSseLines } from '@/lib/sse';
 import { parseLooseJson } from '@/lib/json-repair';
@@ -703,10 +705,11 @@ export async function POST(req: Request) {
     const { messages, model, temperature, system, thinkingLevel, contextSummary, compactBoundaryId } =
       parsed.data;
 
-    /* Mức suy luận chỉ có tác dụng trên gateway crax — gateway khác sẽ bỏ qua. */
+    /* Mức suy luận: crax dịch trực tiếp (fast-path, không cần metadata).
+       Gateway khác tra metadata kiểu OpenRouter LƯỜI qua cache 5 phút —
+       model khai báo hỗ trợ thì gửi mức GẦN NHẤT được hỗ trợ; không khai
+       báo thì bỏ tham số như hành vi cũ (nhiều gateway 400 nếu nhận mù). */
     const effortBase = providerBase ?? process.env.OPENAI_BASE_URL ?? null;
-    const reasoningEffort =
-      thinkingLevel && supportsThinkingLevel(effortBase) ? thinkingLevel : null;
 
     const selectedModelId = model ?? DEFAULT_MODEL_ID;
     // Provider override: model do gateway của user định nghĩa (/v1/models),
@@ -739,6 +742,15 @@ export async function POST(req: Request) {
     // mọi tin nhắn. Lọc sạch thì giữ nguyên chain — vẫn thử và tự phục hồi.
     if (upstreamBase) modelChain = filterSupportedModels(upstreamBase, modelChain);
     const targetModel = modelConfig.providerModel;
+    let reasoningEffort: ThinkingLevel | null = null;
+    if (thinkingLevel && effortBase) {
+      if (supportsThinkingLevel(effortBase)) {
+        reasoningEffort = thinkingLevel;
+      } else {
+        const cap = await getReasoningCapability(effortBase, targetModel);
+        if (cap) reasoningEffort = resolveNearestEffort(thinkingLevel, cap);
+      }
+    }
     /* Compaction: bỏ mọi tin thuộc phần ĐÃ nén (trước/trên boundary) TRƯỚC
        khi áp trần 50 tin — nội dung phần đó được thay thế bằng contextSummary
        chèn vào đầu system. Tìm lần xuất hiện CUỐI của boundary id: user có thể

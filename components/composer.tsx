@@ -66,8 +66,10 @@ interface ComposerProps {
   models: ModelOption[];
   model: string;
   onModelChange: (id: string) => void;
-  /** Mức suy luận — chỉ hiển thị khi provider hiện tại hỗ trợ (crax). */
+  /** Mức suy luận — hiển thị khi provider/model hỗ trợ (crax hoặc metadata). */
   thinkingLevel?: ThinkingLevel;
+  /** Mức model hỗ trợ (null = không ràng buộc) — mờ các mức ngoài danh sách. */
+  thinkingSupportedLevels?: ThinkingLevel[] | null;
   onThinkingLevelChange?: (level: ThinkingLevel) => void;
   /** Nút tạo ảnh / tạo video — chỉ hiện khi provider có model tương ứng. */
   mediaActions?: MediaActions;
@@ -98,6 +100,7 @@ export function Composer({
   model,
   onModelChange,
   thinkingLevel,
+  thinkingSupportedLevels,
   onThinkingLevelChange,
   mediaActions,
   onGenerateMedia,
@@ -471,6 +474,7 @@ export function Composer({
                   value={thinkingLevel}
                   onChange={onThinkingLevelChange}
                   disabled={isStreaming}
+                  supportedLevels={thinkingSupportedLevels}
                 />
               )}
               <ModelSelector

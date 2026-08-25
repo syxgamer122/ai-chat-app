@@ -4,6 +4,7 @@ import { DEFAULT_MODEL_ID, normalizeModelId } from '@/lib/models';
 import {
   DEFAULT_THINKING_LEVEL,
   isThinkingLevel,
+  type ProviderModel,
   type ThinkingLevel,
 } from '@/lib/provider-url';
 
@@ -22,7 +23,7 @@ export interface ActiveProviderSnapshot {
   name: string;
   baseUrl: string;
   apiKey: string;
-  models: Array<{ id: string; name?: string; contextLength?: number }>;
+  models: Array<ProviderModel>;
 }
 
 export interface PerfSettings {

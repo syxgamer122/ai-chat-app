@@ -84,6 +84,8 @@ export default function ChatInterface() {
   const activeProvider = useAppStore((s) => s.activeProvider);
   const sendOnEnter = useAppStore((s) => s.settings.sendOnEnter);
   const autoCompactEnabled = useAppStore((s) => s.settings.autoCompact);
+  /** Capability suy luận của model đang chọn (metadata kiểu OpenRouter). */
+  const modelReasoningCap = activeProvider?.models?.find((m) => m.id === model)?.reasoning ?? null;
   const throttleMs = useAppStore((s) => s.settings.perf.throttleMs);
 
   /** Nạp snapshot provider đang active từ IndexedDB vào store. */
@@ -2412,9 +2414,15 @@ export default function ChatInterface() {
         canContinue={canContinue}
         onContinue={continueGenerating}
         thinkingLevel={
-          (activeProvider ? supportsThinkingLevel(activeProvider.baseUrl) : serverCaps.thinkingLevel)
+          (activeProvider ? supportsThinkingLevel(activeProvider.baseUrl) : serverCaps.thinkingLevel) ||
+          !!modelReasoningCap
             ? thinkingLevel
             : undefined
+        }
+        thinkingSupportedLevels={
+          modelReasoningCap && modelReasoningCap.efforts.length > 0
+            ? modelReasoningCap.efforts
+            : null
         }
         onThinkingLevelChange={handleThinkingLevelChange}
       />

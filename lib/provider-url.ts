@@ -3,10 +3,16 @@
  * client lẫn edge server route). Tách riêng để route không kéo Dexie.
  */
 
+import { parseModelReasoning, type ReasoningCapability } from '@/lib/reasoning-capability';
+
+export type { ReasoningCapability };
+
 export interface ProviderModel {
   id: string;
   name?: string;
   contextLength?: number;
+  /** Metadata suy luận kiểu OpenRouter — có khi gateway khai báo. */
+  reasoning?: ReasoningCapability;
 }
 
 export type BaseUrlCheck =
@@ -126,10 +132,12 @@ export function normalizeProviderModels(json: unknown): ProviderModel[] {
     if (!id || seen.has(id)) continue;
     seen.add(id);
     const ctxRaw = (m.context_length ?? m.contextLength) as unknown;
+    const reasoning = parseModelReasoning(item);
     out.push({
       id,
       ...(typeof m.name === 'string' && m.name ? { name: m.name } : {}),
       ...(typeof ctxRaw === 'number' && ctxRaw > 0 ? { contextLength: ctxRaw } : {}),
+      ...(reasoning ? { reasoning } : {}),
     });
   }
   return out.sort((a, b) => a.id.localeCompare(b.id));
