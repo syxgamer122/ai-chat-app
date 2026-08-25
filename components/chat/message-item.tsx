@@ -10,6 +10,7 @@ import { ErrorBoundary } from '@/components/error-boundary';
 import { BranchSwitcher } from '@/components/branch-switcher';
 import { MessageStatusBadge } from '@/components/message-status-badge';
 import { sanitizeContent, getFinishInfo } from '@/lib/chat-tree-persistence';
+import { stripEmulatedToolMarkup } from '@/lib/text-tool-guard';
 import { stripMarkdownForSpeech } from '@/lib/speech-text';
 import { useTts } from '@/lib/use-tts';
 import { ToolTrace } from '@/components/chat/tool-trace';
@@ -300,7 +301,7 @@ export const MessageItem = memo(
           >
             <ErrorBoundary resetKey={`${m.id}:${m.content.length}`}>
               <MarkdownRenderer
-                content={sanitizeContent(m.content)}
+                content={sanitizeContent(stripEmulatedToolMarkup(m.content).text)}
                 isStreaming={isStreaming}
                 throttleMs={throttleMs}
               />

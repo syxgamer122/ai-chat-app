@@ -113,6 +113,13 @@ export function summarizeToolResult(name: string, result: unknown): string {
       const matches = Array.isArray(r.matches) ? r.matches : [];
       return matches.length ? `${matches.length} ghi nhớ khớp` : 'Không có ghi nhớ khớp';
     }
+    case 'memory_save': {
+      if (r.accepted === true) {
+        const t = String(r.text ?? '');
+        return `Chấp nhận: "${t.slice(0, 50)}${t.length > 50 ? '…' : ''}"`;
+      }
+      return String(r.note ?? 'Từ chối');
+    }
     default:
       return typeof r.note === 'string' ? r.note.slice(0, 80) : '';
   }
@@ -348,16 +355,91 @@ export function buildAgentTools(
               query: z.string().min(1).max(200).describe('Từ khóa cần tra, ví dụ "ngôn ngữ ưa thích"'),
             }),
             execute: async (args) =>
-              guarded('memory_search', args, async () => {
-                const matches = searchMemories(memories, args.query);
-                return {
-                  matches,
-                  totalMemories: memories.length,
-                  note: matches.length ? undefined : 'Không có ghi nhớ nào khớp.',
-                };
-              }),
+              guarded(
+                'memory_search',
+                args,
+                async () => {
+                  const matches = searchMemories(memories, args.query);
+                  return {
+                    matches,
+                    totalMemories: memories.length,
+                    note: matches.length ? undefined : 'Không có ghi nhớ nào khớp.',
+                  };
+                },
+                {},
+              ),
           }),
         }
       : {}),
+
+    /* memory_save LUÔN có mặt (kể cả khi memories rỗng — đó chính là cách
+       fact đầu tiên được lưu). Execute phía server CHỈ validate và chấp nhận
+       đề xuất: việc ghi thật vào IndexedDB thuộc về client (route phát
+       annotation {memoryProposal}, chat-interface gọi addMemory) vì DB nằm
+       trong trình duyệt của user. */
+    memory_save: tool({
+      description:
+        'Lưu một THÔNG TIN DÀI HẠN về người dùng để các hội thoại sau nhớ lại (sở thích, tên gọi, ' +
+        'quy ước làm việc, ràng buộc cá nhân). CHỈ gọi khi người dùng yêu cầu nhớ rõ ràng ("nhớ giúp ' +
+        'mình...", "ghi lại...") hoặc khi họ chia sẻ fact quan trọng cần tái sử dụng. Một lần gọi = ' +
+        'MỘT câu ngắn độc lập, không lưu nội dung nhạy cảm (mật khẩu, số thẻ).',
+      parameters: z.object({
+        text: z.string().min(4).max(400).describe('Câu ghi nhớ ngắn gọn, đứng độc lập, ví dụ "Người dùng thích code style functional TS"'),
+      }),
+      execute: async (args) =>
+        guarded(
+          'memory_save',
+          args,
+          async () => {
+            const verdict = validateMemoryProposal(args.text, memories);
+            if (!verdict.ok) {
+              return {
+                accepted: false,
+                note: verdict.reason,
+              };
+            }
+            // Chấp thuận KHÔNG có nghĩa là đã ghi — client mới là nơi ghi.
+            return {
+              accepted: true,
+              text: verdict.text,
+              note: undefined,
+            };
+          },
+          { accepted: false },
+        ),
+    }),
   };
+}
+
+/* ------------------------------------------------------------------ */
+/* Validate đề xuất ghi nhớ — thuần, test được                         */
+/* ------------------------------------------------------------------ */
+
+export interface MemoryVerdict {
+  ok: boolean;
+  /** Text đã chuẩn hóa khi ok. */
+  text?: string;
+  reason?: string;
+}
+
+/** Trần ký tự mỗi đề xuất — khớp MAX_MEMORY_CHARS ở db.ts. */
+const MEMORY_TEXT_CHARS = 400;
+
+export function validateMemoryProposal(
+  rawText: string,
+  existingMemories: MemoryItem[],
+): MemoryVerdict {
+  const text = (rawText ?? '').replace(/\s+/g, ' ').trim().slice(0, MEMORY_TEXT_CHARS);
+  if (text.length < 4) {
+    return { ok: false, reason: 'Ghi nhớ quá ngắn/không có nội dung.' };
+  }
+  // Không cho nội dung web/injection chui vào kho dài hạn — đây là dữ liệu
+  // sống sót qua nhiều phiên nên phải sạch hơn mọi nơi khác.
+  if (judgeInjection(text) === 'block') {
+    return { ok: false, reason: 'Nội dung chứa mẫu prompt-injection nên bị từ chối.' };
+  }
+  if (existingMemories.some((m) => m.text === text)) {
+    return { ok: false, reason: 'Ghi nhớ này đã tồn tại.' };
+  }
+  return { ok: true, text };
 }

@@ -62,9 +62,10 @@ import {
   type PendingAssistantFork,
 } from '@/lib/chat-tree-persistence';
 import { gatherWebContext } from '@/lib/use-web-search';
+import { stripEmulatedToolMarkup } from '@/lib/text-tool-guard';
 import { gatherPdfContexts } from '@/lib/use-pdf-context';
 import { gatherLiveContext } from '@/lib/live-tools';
-import { listMemories } from '@/lib/db';
+import { addMemory, listMemories } from '@/lib/db';
 import { compressImageFiles } from '@/lib/image-compress';
 import { ChatHeader } from './chat/chat-header';
 import { MessageList } from './chat/message-list';
@@ -416,7 +417,9 @@ export default function ChatInterface() {
     },
     experimental_throttle: throttleMs,
     onFinish: (message, { finishReason, usage }) => {
-      const clean = sanitizeContent(message.content);
+      // Guard markup tool-call model tự nhả vào kênh text — strip TRƯỚC khi
+      // sanitize/lưu để nội dung trong DB cũng sạch (tokens + search index).
+      const clean = sanitizeContent(stripEmulatedToolMarkup(message.content).text);
 
       /**
        * Gateway đôi khi trả stream rỗng (502 ngầm, quá tải, model reasoning
@@ -482,6 +485,30 @@ export default function ChatInterface() {
   /* ------------------------------------------------------------------ */
   /* Compaction hội thoại dài                                            */
   /* ------------------------------------------------------------------ */
+
+  /* memory_save: server CHẤP NHẬN đề xuất qua annotation {memoryProposal}
+     — nơi ghi thật là client (IndexedDB của user). Ref chặn xử lý trùng:
+     annotation persist theo message nên mở lại hội thoại cũ sẽ thấy lại
+     proposals, nhưng addMemory tự dedupe nguyên văn nên không sinh bản
+     sao; ref chỉ để tránh gọi lặp trong cùng phiên render. */
+  const processedMemoryProposalsRef = useRef(new Set<string>());
+  useEffect(() => {
+    const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant');
+    if (!lastAssistant?.annotations) return;
+    for (const ann of lastAssistant.annotations as Array<Record<string, unknown>>) {
+      const proposal = ann?.memoryProposal as { text?: unknown } | undefined;
+      const text = typeof proposal?.text === 'string' ? proposal.text.trim() : '';
+      if (!text) continue;
+      const dedupeKey = `${lastAssistant.id}:${text}`;
+      if (processedMemoryProposalsRef.current.has(dedupeKey)) continue;
+      processedMemoryProposalsRef.current.add(dedupeKey);
+      void addMemory(text).then((saved) => {
+        if (saved) {
+          showNotice(`Đã nhớ: ${text.slice(0, 60)}${text.length > 60 ? '…' : ''}`, 4000);
+        }
+      });
+    }
+  }, [messages, showNotice]);
 
   const compaction = currentChat?.compaction;
   // Marker chỉ hợp lệ khi ranh giới vẫn nằm trên projection nhánh đang mở
