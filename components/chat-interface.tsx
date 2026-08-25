@@ -41,6 +41,13 @@ import {
   supportsThinkingLevel,
   type ThinkingLevel,
 } from '@/lib/provider-url';
+import { estimateContextTokens, shouldCompact, splitForCompaction } from '@/lib/context-budget';
+import {
+  resolveContextWindow,
+  serializeForCompaction,
+  findActiveCompaction,
+  type CompactionMarker,
+} from '@/lib/context-compaction';
 import {
   CONTINUE_PROMPT,
   sanitizeContent,
@@ -76,6 +83,7 @@ export default function ChatInterface() {
   const activeProviderId = useAppStore((s) => s.activeProviderId);
   const activeProvider = useAppStore((s) => s.activeProvider);
   const sendOnEnter = useAppStore((s) => s.settings.sendOnEnter);
+  const autoCompactEnabled = useAppStore((s) => s.settings.autoCompact);
   const throttleMs = useAppStore((s) => s.settings.perf.throttleMs);
 
   /** Nạp snapshot provider đang active từ IndexedDB vào store. */
@@ -339,6 +347,14 @@ export default function ChatInterface() {
     };
   }, []);
 
+  /* Compaction: marker đưa vào request qua useChat `body` (được đọc từ ref
+     cập nhật mỗi render). State khai báo TRƯỚC useChat để tránh TDZ; giá trị
+     được đồng bộ từ activeCompaction bằng effect ngay sau hook. */
+  const [requestCompaction, setRequestCompaction] = useState<CompactionMarker | undefined>(
+    undefined,
+  );
+  const [compactBusy, setCompactBusy] = useState(false);
+
   const {
     messages, setMessages, input, setInput, handleInputChange,
     handleSubmit, stop, reload, append, isLoading, error, data,
@@ -366,6 +382,13 @@ export default function ChatInterface() {
       temperature,
       thinkingLevel,
       system: systemPrompt,
+      /* Compaction: chỉ gửi khi marker còn hợp lệ trên nhánh hiện tại. */
+      ...(requestCompaction
+        ? {
+            contextSummary: requestCompaction.summary,
+            compactBoundaryId: requestCompaction.upToId,
+          }
+        : {}),
     },
     experimental_throttle: throttleMs,
     onFinish: (message, { finishReason, usage }) => {
@@ -431,6 +454,157 @@ export default function ChatInterface() {
     },
     onError: (err) => console.error('[useChat]', err),
   });
+
+  /* ------------------------------------------------------------------ */
+  /* Compaction hội thoại dài                                            */
+  /* ------------------------------------------------------------------ */
+
+  const compaction = currentChat?.compaction;
+  // Marker chỉ hợp lệ khi ranh giới vẫn nằm trên projection nhánh đang mở
+  // (đổi nhánh sang nơi chưa từng nén → marker cũ tự vô hiệu).
+  const activeCompaction = useMemo(
+    () => findActiveCompaction(compaction, messages),
+    [compaction, messages],
+  );
+
+  useEffect(() => {
+    setRequestCompaction(activeCompaction);
+  }, [activeCompaction]);
+
+  const compactBusyRef = useRef(false);
+
+  /**
+   * Nén phần cũ: gọi /api/compact rồi lưu marker vào ChatSession. Thất bại
+   * tóm tắt (gateway bận/hỏng/mạng) thì CHỈ hard-trim khi đang cứu lỗi tràn
+   * context; auto/manual bỏ qua để hẹn lần sau — không mất ngữ cảnh âm thầm.
+   * Nén lần thứ hai sẽ ghép tóm tắt cũ vào đầu payload để không đứt mạch
+   * ngữ cảnh giữa hai marker.
+   */
+  const performCompaction = useCallback(
+    async (reason: 'auto' | 'manual' | 'overflow'): Promise<boolean> => {
+      const chatId = currentChatId;
+      if (!chatId || isLoading || compactBusyRef.current) return false;
+      if (reason === 'auto' && !autoCompactEnabled) return false;
+      if (activeCompaction && Date.now() - activeCompaction.createdAt < 60_000) return false;
+
+      const split = splitForCompaction(messages);
+      if (!split) return false;
+      const upToId = split.older[split.older.length - 1]?.id ?? '';
+      if (!upToId) return false;
+
+      const payload = serializeForCompaction(split.older);
+      if (
+        activeCompaction &&
+        split.older.some((m) => m.id === activeCompaction.upToId) &&
+        activeCompaction.summary
+      ) {
+        payload.unshift({
+          role: 'system',
+          content: `[Tóm tắt các lượt nén trước đó]\n${activeCompaction.summary}`,
+        });
+      }
+
+      compactBusyRef.current = true;
+      setCompactBusy(true);
+      try {
+        let summary = '';
+        try {
+          const res = await fetch('/api/compact', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(accessCode ? { 'x-access-code': accessCode } : {}),
+              ...(activeProvider?.baseUrl
+                ? {
+                    'x-api-base': activeProvider.baseUrl,
+                    ...(activeProvider.apiKey ? { 'x-api-key': activeProvider.apiKey } : {}),
+                  }
+                : apiKey
+                  ? { 'x-api-key': apiKey }
+                  : {}),
+            },
+            body: JSON.stringify({ messages: payload }),
+          });
+          const j = (await res.json().catch(() => null)) as { summary?: unknown } | null;
+          if (typeof j?.summary === 'string' && j.summary.trim()) {
+            summary = j.summary.trim().slice(0, 16_000);
+          }
+        } catch {
+          /* mạng/gateway lỗi → summary rỗng, quyết định ở dưới. */
+        }
+
+        if (!summary && reason !== 'overflow') return false;
+
+        await db.chats.update(chatId, {
+          compaction: {
+            upToId,
+            summary,
+            compactedCount: split.older.length,
+            createdAt: Date.now(),
+          },
+          updatedAt: Date.now(),
+        });
+        showNotice(
+          summary
+            ? `Đã nén ${split.older.length} tin nhắn cũ thành tóm tắt — chat tiếp nhẹ hơn.`
+            : `Đã lược bỏ ${split.older.length} tin nhắn cũ (không tạo được tóm tắt).`,
+        );
+        return true;
+      } finally {
+        compactBusyRef.current = false;
+        setCompactBusy(false);
+      }
+    },
+    [
+      currentChatId, isLoading, activeCompaction, autoCompactEnabled, messages,
+      accessCode, activeProvider, apiKey, showNotice,
+    ],
+  );
+
+  /**
+   * Auto-nén sau stream: ước lượng trên phần SAU marker (+ bản thân summary)
+   * thay vì toàn bộ projection — nếu không, sau khi nén xong ước lượng vẫn
+   * đếm cả tin cũ và kích hoạt nén lại vô hạn.
+   */
+  useEffect(() => {
+    if (isLoading || !currentChatId || !messages.length) return;
+    const boundaryIndex = activeCompaction
+      ? messages.findIndex((m) => m.id === activeCompaction.upToId)
+      : -1;
+    const effective =
+      boundaryIndex >= 0 ? messages.slice(boundaryIndex + 1) : messages;
+    const tokens =
+      estimateContextTokens(effective) +
+      (activeCompaction ? Math.ceil(activeCompaction.summary.length / 4) : 0);
+    const windowTokens = resolveContextWindow(model, activeProvider?.models);
+    if (!shouldCompact(tokens, windowTokens)) return;
+    const timer = setTimeout(() => {
+      void performCompaction('auto');
+    }, 3_000);
+    return () => clearTimeout(timer);
+  }, [messages, isLoading, currentChatId, model, activeProvider, activeCompaction, performCompaction]);
+
+  /**
+   * Recovery khi upstream trả UPSTREAM_CONTEXT_OVERFLOW: nén rồi gửi lại đúng
+   * MỘT lần — ref đặt lại khi lượt stream kế bắt đầu (state machine kiểu
+   * prime-agent chống vòng lặp nén-retry).
+   */
+  const overflowRetryUsedRef = useRef(false);
+  useEffect(() => {
+    if (isLoading) {
+      overflowRetryUsedRef.current = false;
+      return;
+    }
+    if (!error) return;
+    const text = error instanceof Error ? error.message : String(error ?? '');
+    if (!text.includes('UPSTREAM_CONTEXT_OVERFLOW')) return;
+    if (overflowRetryUsedRef.current) return;
+    overflowRetryUsedRef.current = true;
+    void (async () => {
+      const ok = await performCompaction('overflow');
+      if (ok) void reload();
+    })();
+  }, [error, isLoading, performCompaction, reload]);
 
   const continueGenerating = useCallback(() => {
     void append({ role: 'user', content: CONTINUE_PROMPT });
@@ -2163,6 +2337,9 @@ export default function ChatInterface() {
         onOpenSidebar={onOpenSidebar}
         sidebarCollapsed={isSidebarCollapsed}
         currentChatId={currentChatId}
+        canCompact={!!splitForCompaction(messages) && !isLoading}
+        compactBusy={compactBusy}
+        onCompact={() => void performCompaction('manual')}
       />
 
       {swipeDirection && (
@@ -2183,6 +2360,7 @@ export default function ChatInterface() {
         <MessageList
           chatId={chatKey}
           messages={messages}
+          compaction={activeCompaction}
           branchInfoByMessageId={branchInfoByMessageId}
           isLoading={isLoading || mediaBusy}
           lastMessageId={lastMessageId}

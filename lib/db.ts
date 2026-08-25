@@ -31,6 +31,18 @@ export interface ChatSession {
   branchSelection?: Record<string, string>;
   revision?: number;
   lastWriterId?: string;
+  /**
+   * Marker nén hội thoại (compaction): mọi tin nhắn TRƯỚC/TRÊN `upToId`
+   * dọc nhánh hiện tại đã được thay thế bằng `summary` khi gửi lên model.
+   * summary rỗng = hard-trim (tóm tắt thất bại, bỏ tin cũ không tóm tắt).
+   * Tính hợp lệ theo nhánh: upToId không còn trong projection → marker bỏ qua.
+   */
+  compaction?: {
+    upToId: string;
+    summary: string;
+    compactedCount: number;
+    createdAt: number;
+  };
 }
 
 export interface StoredAttachment {

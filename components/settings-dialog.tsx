@@ -595,6 +595,25 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                   />
                 </label>
 
+                <label htmlFor="auto-compact-toggle" className="flex items-start justify-between gap-3">
+                  <span className="min-w-0">
+                    <span className="block text-sm font-medium text-zinc-700">
+                      Nén hội thoại tự động
+                    </span>
+                    <span className="mt-0.5 block text-[11px] leading-relaxed text-zinc-600">
+                      Khi hội thoại gần trần ngữ cảnh của model, tự tóm tắt phần cũ và chỉ gửi
+                      tóm tắt + tin mới lên AI. Luôn có nút &ldquo;Nén bây giờ&rdquo; ở header.
+                    </span>
+                  </span>
+                  <input
+                    id="auto-compact-toggle"
+                    type="checkbox"
+                    checked={settings.autoCompact}
+                    onChange={(e) => updateSettings({ autoCompact: e.target.checked })}
+                    className="mt-0.5 h-4 w-4 flex-shrink-0 rounded accent-brand"
+                  />
+                </label>
+
                 <label htmlFor="anim-toggle" className="flex items-start justify-between gap-3">
                   <span className="min-w-0">
                     <span className="block text-sm font-medium text-zinc-700">

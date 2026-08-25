@@ -40,6 +40,8 @@ export interface Settings {
   systemPrompt: string;
   perf: PerfSettings;
   sendOnEnter: boolean;
+  /** Tự động nén hội thoại khi ước lượng token gần trần context của model. */
+  autoCompact: boolean;
   apiKey?: string;
   accessCode?: string;
 }
@@ -77,6 +79,7 @@ const DEFAULT_SETTINGS: Settings = {
     'For LaTeX math, always use $$...$$ for block math and \\(...\\) for inline math.',
   perf: { throttleMs: 150, animations: true },
   sendOnEnter: true,
+  autoCompact: true,
   apiKey: '',
   accessCode: '',
 };
@@ -118,6 +121,7 @@ export const useAppStore = create<AppState>()(
           systemPrompt: s.settings.systemPrompt,
           perf: s.settings.perf,
           sendOnEnter: s.settings.sendOnEnter,
+          autoCompact: s.settings.autoCompact,
         },
       }),
       merge: (persisted, current) => {

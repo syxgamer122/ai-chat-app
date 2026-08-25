@@ -2,7 +2,7 @@
  * Header hội thoại: tiêu đề, xuất/nhập, xoá chat.
  */
 import React, { memo } from 'react';
-import { X, Trash2, Menu } from 'lucide-react';
+import { X, Trash2, Menu, Scissors } from 'lucide-react';
 import { ChatExportMenu } from '@/components/chat-export-menu';
 
 /* ------------------------------------------------------------------ */
@@ -18,6 +18,10 @@ interface ChatHeaderProps {
   /** Desktop: sidebar đang thu gọn → hiện nút mở rộng bên trái header. */
   sidebarCollapsed: boolean;
   currentChatId: string | null;
+  /** Nén hội thoại: đủ tin đáng nén (và không đang stream) mới hiện nút. */
+  canCompact?: boolean;
+  compactBusy?: boolean;
+  onCompact?: () => void;
 }
 
 export const ChatHeader = memo(function ChatHeader({
@@ -29,6 +33,9 @@ export const ChatHeader = memo(function ChatHeader({
   onOpenSidebar,
   sidebarCollapsed,
   currentChatId,
+  canCompact,
+  compactBusy,
+  onCompact,
 }: ChatHeaderProps) {
   return (
     /*
@@ -52,6 +59,22 @@ export const ChatHeader = memo(function ChatHeader({
       </div>
 
       <div className="flex items-center gap-1">
+        {canCompact && onCompact && (
+          <button
+            type="button"
+            onClick={onCompact}
+            disabled={compactBusy}
+            aria-label={compactBusy ? 'Đang nén hội thoại' : 'Nén hội thoại'}
+            title={
+              compactBusy
+                ? 'Đang nén hội thoại...'
+                : 'Nén phần hội thoại cũ thành tóm tắt để chat nhẹ hơn'
+            }
+            className="icon-btn-sm"
+          >
+            <Scissors size={16} className={compactBusy ? 'animate-pulse' : ''} />
+          </button>
+        )}
         <ChatExportMenu chatId={currentChatId} />
 
         {hasMessages &&

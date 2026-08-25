@@ -125,6 +125,13 @@ interface MessageListProps {
   onSelectSuggestion: (prompt: string) => void;
   onReload: () => void;
   onContinueGenerating?: () => void;
+
+  /** Marker nén hội thoại — banner gắn vào tin ĐẦU TIÊN sau ranh giới. */
+  compaction?: {
+    upToId: string;
+    summary: string;
+    compactedCount: number;
+  } | null;
 }
 
 export const MessageList = memo(function MessageList({
@@ -156,6 +163,7 @@ export const MessageList = memo(function MessageList({
   onSelectSuggestion,
   onReload,
   onContinueGenerating,
+  compaction,
 }: MessageListProps) {
   const lastMsg = messages[messages.length - 1];
   const lastRole = lastMsg?.role;
@@ -177,6 +185,14 @@ export const MessageList = memo(function MessageList({
     () => (pendingEmptyAssistant ? messages.slice(0, -1) : messages),
     [messages, pendingEmptyAssistant],
   );
+
+  /** Banner nén gắn vào tin ĐẦU TIÊN nằm sau ranh giới marker. */
+  const compactionBannerBeforeId = useMemo(() => {
+    if (!compaction) return null;
+    const idx = visibleMessages.findIndex((m) => m.id === compaction.upToId);
+    const next = idx >= 0 ? visibleMessages[idx + 1] : undefined;
+    return next?.id ?? null;
+  }, [compaction, visibleMessages]);
 
   // App không bật React Compiler; useVirtualizer của TanStack trả về hàm
   // mỗi render là hành vi chủ đích của thư viện — bỏ cảnh báo nhiễu.
@@ -370,6 +386,25 @@ export const MessageList = memo(function MessageList({
                       paddingBottom: '1.5rem',
                     }}
                   >
+                    {compaction && compactionBannerBeforeId === m.id && (
+                      <div className="mb-2">
+                        {compaction.summary ? (
+                          <details className="surface-panel rounded-lg px-3 py-1.5 text-[11px] text-zinc-500">
+                            <summary className="cursor-pointer select-none font-medium text-zinc-600">
+                              ✂ Đã nén {compaction.compactedCount} tin nhắn trước đó — bấm để xem
+                              tóm tắt
+                            </summary>
+                            <div className="mt-1.5 max-h-48 overflow-y-auto whitespace-pre-wrap leading-relaxed text-zinc-600">
+                              {compaction.summary}
+                            </div>
+                          </details>
+                        ) : (
+                          <div className="surface-panel rounded-lg px-3 py-1.5 text-[11px] text-zinc-500">
+                            ✂ Đã lược bỏ {compaction.compactedCount} tin nhắn cũ
+                          </div>
+                        )}
+                      </div>
+                    )}
                     <ChatErrorBoundary onReset={() => rowVirtualizer.measure()}>
                       <MessageItem
                         m={m}
