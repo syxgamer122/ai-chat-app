@@ -16,6 +16,33 @@ import { chunkSpeechText } from '@/lib/speech-text';
 let speakingId: string | null = null;
 const listeners = new Set<() => void>();
 
+// Dừng giọng khi THẬT SỰ rời trang — đăng ký đúng MỘT lần ở mức module.
+// KHÔNG đặt cancel trong cleanup của từng MessageItem: danh sách tin nhắn
+// được virtualize (@tanstack/react-virtual), cuộn ra xa là hàng bị unmount
+// và cleanup sẽ tắt oan giọng đang đọc.
+let pageListenersBound = false;
+function bindPageListenersOnce(): void {
+  if (pageListenersBound || typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+  pageListenersBound = true;
+  const stopAll = () => {
+    window.speechSynthesis.cancel();
+    setSpeakingId(null);
+  };
+  window.addEventListener('beforeunload', stopAll);
+  document.addEventListener('visibilitychange', () => {
+    // Tab ẩn lâu (đóng/mở app PWA trên mobile) cũng nên im — tránh giọng đọc
+    // vang lên bất ngờ khi người dùng đã quên.
+    if (document.visibilityState === 'hidden' && speakingId !== null) {
+      const synth = window.speechSynthesis;
+      // paused ≠ kết thúc: mobile Safari tự pause khi ẩn tab; chỉ hủy nếu
+      // không còn active nào (trường hợp engine chết ngầm).
+      setTimeout(() => {
+        if (!synth.speaking && !synth.pending && !synth.paused) setSpeakingId(null);
+      }, 500);
+    }
+  });
+}
+
 function emit() {
   for (const l of listeners) l();
 }
@@ -131,13 +158,7 @@ export function useTts(): {
   const current = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 
   useEffect(() => {
-    // Rời trang / unmount cây chat thì im luôn, tránh giọng đọc ma.
-    return () => {
-      if (isTtsSupported()) {
-        window.speechSynthesis.cancel();
-        setSpeakingId(null);
-      }
-    };
+    bindPageListenersOnce();
   }, []);
 
   const toggleSpeak = useCallback((id: string, text: string) => {

@@ -308,15 +308,22 @@ export default function ChatInterface() {
   const MAX_TOTAL_ATTACHMENT_BYTES = 3 * 1024 * 1024;
   const MAX_FILES = 4;
 
+  // Đếm thế hệ attachment: mỗi lần clear (gửi/xóa) tăng 1 — đợt nén ảnh chạy
+  // nền khởi động trước đó sẽ tự hủy kết quả nếu giữa chừng list đã bị clear
+  // (chống file "ma" dính nhầm vào tin nhắn kế tiếp).
+  const attachGenRef = useRef(0);
+
   const addFiles = useCallback((files: FileList | File[] | null) => {
     if (!files) return;
     const fileArr = Array.from(files);
+    const gen = attachGenRef.current;
 
     // Nén ảnh trước khi xét trần: ảnh chụp điện thoại 3-5MB về vài trăm KB
     // (canvas resize + WebP) nên trần 3MB không còn chặn oan người dùng.
     void compressImageFiles(fileArr)
       .catch(() => fileArr) // nén lỗi thì dùng file gốc như cũ
       .then((processed) => {
+        if (attachGenRef.current !== gen) return; // đã clear trong lúc nén
         let totalSize = attachments.reduce((sum, f) => sum + f.size, 0);
         const ok: File[] = [];
         const rejected: string[] = [];
@@ -2010,6 +2017,7 @@ export default function ChatInterface() {
 
       setDraftId(crypto.randomUUID());
       setCurrentChatId(null);
+      attachGenRef.current += 1;
       setAttachments([]);
       setEditingId(null);
       setDraft('');
@@ -2135,6 +2143,7 @@ export default function ChatInterface() {
 
       pin(1500);
 
+      attachGenRef.current += 1;
       setAttachments([]);
       handleSubmit(undefined, options);
       if (isFirstMessage && userText) {

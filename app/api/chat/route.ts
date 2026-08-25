@@ -28,6 +28,7 @@ import { formatWebContextBlock, type WebContextPayload } from '@/lib/web-context
 import { filterSupportedModels, markModelUnsupported } from '@/lib/model-negative-cache';
 import { isToolUnsupported, markToolsUnsupported } from '@/lib/tool-support-cache';
 import { buildAgentTools, summarizeToolArgs, summarizeToolResult } from '@/lib/agent-tools';
+import { pollinationsMarkdown } from '@/lib/pollinations';
 import { judgeInjection } from '@/lib/injection-guard';
 import { bridgeImagesInMessages, downgradeImagesToPlaceholders, shouldBridgeImages, type BridgeableMessage } from '@/lib/vision-bridge';
 import { checkRateLimit, getClientIp, checkSameOrigin, verifyAccessAuth } from '@/lib/security';
@@ -1187,7 +1188,18 @@ export async function POST(req: Request) {
                           return;
                         }
                       }
-                      // 404/501 (endpoint chưa có) hoặc data rỗng → fallback SSE.
+                      // 404/501 (endpoint chưa có) hoặc data rỗng → Pollinations
+                      // (free, không key) trước, rồi mới fallback SSE chậm.
+                      const poll = pollinationsMarkdown(lastUser, targetModel);
+                      if (poll) {
+                        writeText(poll);
+                        writeText(
+                          '\n_(Ảnh từ Pollinations.AI — dự phòng miễn phí vì gateway chính không trả ảnh)_\n',
+                          'reasoning',
+                        );
+                        writeFinish('stop');
+                        return;
+                      }
                     } catch (e) {
                       if (e instanceof ChatUpstreamError || isAbortError(e)) throw e;
                       // lỗi mạng images API → thử đường chat SSE bên dưới.

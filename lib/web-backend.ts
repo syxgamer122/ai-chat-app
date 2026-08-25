@@ -64,12 +64,23 @@ async function readTextCapped(res: Response, maxBytes: number): Promise<string> 
  * Fetch URL public với kiểm soát SSRF TỪNG hop redirect: dùng `redirect:
  * 'manual'` rồi tự resolve Location — nếu để `follow`, request tới host private
  * trong hop redirect ĐÃ xảy ra trước khi ta kịp nhìn URL cuối.
+ *
+ * `trusted = true`: bỏ kiểm SSRF cho endpoint do NGƯỜI VẬN HÀNH cấu hình qua
+ * env (vd SEARXNG_URL chạy trên localhost/LAN) — chặn theo guard sẽ vô lý vì
+ * chính owner đã chọn địa chỉ đó. Input người dùng vẫn KHÔNG BAO GIỜ được
+ * hưởng cờ này.
  */
-export async function guardedFetch(rawUrl: string, timeoutMs: number): Promise<Response> {
+export async function guardedFetch(
+  rawUrl: string,
+  timeoutMs: number,
+  trusted = false,
+): Promise<Response> {
   let current = rawUrl;
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-    const check = assertFetchableUrl(current);
-    if (!check.ok) throw new WebOpError(check.error, 400, 'WEB_URL_BLOCKED');
+    if (!trusted) {
+      const check = assertFetchableUrl(current);
+      if (!check.ok) throw new WebOpError(check.error, 400, 'WEB_URL_BLOCKED');
+    }
 
     const res = await fetch(current, {
       redirect: 'manual',
@@ -103,16 +114,85 @@ async function engineText(url: string, label: string): Promise<string> {
 
 export interface WebSearchResult {
   hits: Array<{ title: string; url: string; snippet: string }>;
-  engine: 'ddg-lite' | 'ddg-html';
+  engine: 'searxng' | 'ddg-lite' | 'ddg-html';
+}
+
+/* ------------------------------------------------------------------ */
+/* SearXNG (tự host, env SEARXNG_URL)                                  */
+/* ------------------------------------------------------------------ */
+
+/** Đọc base URL SearXNG từ env; sai protocol/rác → null (bỏ engine này). */
+export function searxngBase(env = process.env.SEARXNG_URL): string | null {
+  const raw = (env ?? '').trim().replace(/\/+$/, '');
+  if (!raw) return null;
+  try {
+    const u = new URL(raw);
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+    return `${u.protocol}//${u.host}${u.pathname === '/' ? '' : u.pathname.replace(/\/+$/, '')}`;
+  } catch {
+    return null;
+  }
 }
 
 /**
- * Chuỗi engine fallback: lite → html. Cả hai hỏng mới trả lỗi; một cái sống
- * là đủ kết quả. Lite bị bot-challenge đôi khi vẫn trả 200 với trang rỗng —
- * coi như thất bại để rơi sang engine kế tiếp.
+ * Parse JSON của SearXNG `/search?format=json` — `results[].{url,title,content}`.
+ * Trả [] cho payload lạ, coi như engine hỏng để rơi sang DDG.
+ */
+export function parseSearxngJson(text: string): WebSearchResult['hits'] {
+  let json: unknown;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    return [];
+  }
+  const results = (json as { results?: Array<{ title?: unknown; url?: unknown; content?: unknown }> })
+    ?.results;
+  if (!Array.isArray(results)) return [];
+  const out: WebSearchResult['hits'] = [];
+  for (const r of results) {
+    const title = typeof r?.title === 'string' ? r.title.trim() : '';
+    const url = typeof r?.url === 'string' ? r.url.trim() : '';
+    const snippet = typeof r?.content === 'string' ? r.content : '';
+    if (!title || !/^https?:\/\//i.test(url)) continue;
+    out.push({ title, url, snippet });
+  }
+  return out;
+}
+
+async function searchSearxng(query: string): Promise<WebSearchResult['hits']> {
+  const base = searxngBase();
+  if (!base) throw new WebOpError('SEARXNG_URL chưa cấu hình.', 502, 'WEB_SEARCH_UPSTREAM');
+  // trusted=true: endpoint do owner cấu hình qua env (thường localhost/LAN),
+  // guard SSRF theo URL công cộng không áp dụng ở đây.
+  const res = await guardedFetch(
+    `${base}/search?q=${encodeURIComponent(query)}&format=json`,
+    SEARCH_TIMEOUT_MS,
+    true,
+  );
+  if (!res.ok) throw new WebOpError(`SearXNG trả ${res.status}.`, 502, 'WEB_SEARCH_UPSTREAM');
+  return parseSearxngJson(await readTextCapped(res, MAX_ENGINE_BYTES));
+}
+
+/**
+ * Chuỗi engine fallback: SearXNG (nếu cấu hình env) → lite → html. Cả hai
+ * DDG hỏng mới trả lỗi; một cái sống là đủ kết quả. Lite bị bot-challenge
+ * đôi khi vẫn trả 200 với trang rỗng — coi như thất bại để rơi sang engine kế.
  */
 export async function searchWeb(query: string): Promise<WebSearchResult> {
   const failures: string[] = [];
+
+  // SearXNG ưu tiên tuyệt đối khi có: metasearch tổng hợp nhiều engine,
+  // JSON sạch không phải scrape, không bot-challenge.
+  if (searxngBase()) {
+    try {
+      const hits = await searchSearxng(query);
+      if (hits.length > 0) return { hits, engine: 'searxng' };
+      failures.push('SearXNG: kết quả rỗng');
+    } catch (e) {
+      failures.push(`SearXNG: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
   const engines = [
     ['ddg-lite', `https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(query)}`, 'DuckDuckGo Lite'],
     ['ddg-html', `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`, 'DuckDuckGo HTML'],
