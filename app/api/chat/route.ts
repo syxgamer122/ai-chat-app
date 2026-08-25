@@ -21,6 +21,7 @@ import { validateProviderBaseUrl, THINKING_LEVELS, supportsThinkingLevel } from 
 import { acquireUpstreamSlot, sharedFreeBudget } from '@/lib/upstream-queue';
 import { pumpSseLines } from '@/lib/sse';
 import { parseLooseJson } from '@/lib/json-repair';
+import { isContextOverflowError } from '@/lib/context-budget';
 import { filterSupportedModels, markModelUnsupported } from '@/lib/model-negative-cache';
 import { bridgeImagesInMessages, downgradeImagesToPlaceholders, shouldBridgeImages, type BridgeableMessage } from '@/lib/vision-bridge';
 import { checkRateLimit, getClientIp, checkSameOrigin, verifyAccessAuth } from '@/lib/security';
@@ -320,6 +321,12 @@ function diagnoseUpstreamError(
       bodySnippet,
     );
 
+  /* Port từ prime-agent `overflow.ts`: lỗi TRÀN CONTEXT — payload hiện tại
+     vượt window model, nén/xoá hội thoại mới giải quyết được; failover sang
+     key khác vô ích (chain thường cùng họ window nhỏ). Client nhận code
+     UPSTREAM_CONTEXT_OVERFLOW sẽ tự nén rồi thử lại đúng một lần. */
+  const looksLikeContextOverflow = isContextOverflowError(status, bodySnippet);
+
   switch (status) {
     case 401:
       code = 'UPSTREAM_AUTH_401';
@@ -364,6 +371,7 @@ function diagnoseUpstreamError(
       userMessage = `Model '${ctx.model}' không tồn tại hoặc không được cấp quyền trên ${upstreamHost} (404).`;
       break;
     case 400:
+    case 413:
     case 422:
       if (looksLikeSafetyBlock && !unknownModel400) {
         // Gateway trả 400/422 cho vi phạm content policy (không phải cú pháp):
@@ -374,6 +382,14 @@ function diagnoseUpstreamError(
         userMessage =
           `Yêu cầu bị ${upstreamHost} chặn bởi bộ lọc nội dung (${status}): ` +
           `${bodySnippet.slice(0, 160)}.`;
+        break;
+      }
+      if (looksLikeContextOverflow) {
+        code = 'UPSTREAM_CONTEXT_OVERFLOW';
+        blameKey = false;
+        stopFailover = true;
+        userMessage =
+          'Hội thoại đã vượt quá giới hạn ngữ cảnh của model. Hãy nén bớt hội thoại hoặc bắt đầu cuộc trò chuyện mới.';
         break;
       }
       code = `UPSTREAM_BAD_REQUEST_${status}`;
@@ -410,6 +426,15 @@ function diagnoseUpstreamError(
           userMessage =
             `Model từ chối trả lời vì bộ lọc nội dung của ${upstreamHost} ` +
             `(${bodySnippet.slice(0, 160)}). Đổi model/key thường không thay đổi được.`;
+        } else if (looksLikeContextOverflow) {
+          // 5xx kèm chữ tràn context (một số gateway trả 500/503 thay vì
+          // 400): cùng xử lý với nhánh 400-overflow — dừng failover, client
+          // sẽ nén hội thoại rồi thử lại.
+          code = 'UPSTREAM_CONTEXT_OVERFLOW';
+          blameKey = false;
+          stopFailover = true;
+          userMessage =
+            'Hội thoại đã vượt quá giới hạn ngữ cảnh của model. Hãy nén bớt hội thoại hoặc bắt đầu cuộc trò chuyện mới.';
         } else if (status === 529 || /overloaded/i.test(bodySnippet)) {
           // 529 = "site overloaded" của Anthropic; một số gateway map overload
           // thành 503 kèm chữ overloaded. Quá tải là TẠM THỜI — không phạt key,
@@ -516,6 +541,9 @@ const BodySchema = z.object({
   temperature: z.number().min(0).max(2).optional(),
   thinkingLevel: z.enum(THINKING_LEVELS).optional(),
   system: z.string().max(8_000).optional(),
+  /* Compaction: tóm tắt phần cũ + ranh giới "tin cuối thuộc phần đã nén". */
+  contextSummary: z.string().max(16_000).optional(),
+  compactBoundaryId: z.string().max(128).optional(),
   data: z.unknown().optional(),
 });
 
@@ -672,7 +700,8 @@ export async function POST(req: Request) {
       });
     }
 
-    const { messages, model, temperature, system, thinkingLevel } = parsed.data;
+    const { messages, model, temperature, system, thinkingLevel, contextSummary, compactBoundaryId } =
+      parsed.data;
 
     /* Mức suy luận chỉ có tác dụng trên gateway crax — gateway khác sẽ bỏ qua. */
     const effortBase = providerBase ?? process.env.OPENAI_BASE_URL ?? null;
@@ -710,7 +739,22 @@ export async function POST(req: Request) {
     // mọi tin nhắn. Lọc sạch thì giữ nguyên chain — vẫn thử và tự phục hồi.
     if (upstreamBase) modelChain = filterSupportedModels(upstreamBase, modelChain);
     const targetModel = modelConfig.providerModel;
-    const contextMessages = messages.slice(-50);
+    /* Compaction: bỏ mọi tin thuộc phần ĐÃ nén (trước/trên boundary) TRƯỚC
+       khi áp trần 50 tin — nội dung phần đó được thay thế bằng contextSummary
+       chèn vào đầu system. Tìm lần xuất hiện CUỐI của boundary id: user có thể
+       nén nhiều lần, marker mới nhất luôn là ranh giới đúng. */
+    let activeMessages = messages;
+    if (compactBoundaryId) {
+      let boundaryIndex = -1;
+      for (let i = messages.length - 1; i >= 0; i--) {
+        if (messages[i].id === compactBoundaryId) {
+          boundaryIndex = i;
+          break;
+        }
+      }
+      if (boundaryIndex >= 0) activeMessages = messages.slice(boundaryIndex + 1);
+    }
+    const contextMessages = activeMessages.slice(-50);
 
     const sanitizedContextMessages = contextMessages.map((msg) => {
       if (!msg.experimental_attachments?.length) return msg;
@@ -1116,8 +1160,12 @@ export async function POST(req: Request) {
                   ...(reasoningEffort
                     ? { providerOptions: { openai: { reasoningEffort } } }
                     : {}),
+                  /* Tóm tắt compaction đứng TRƯỚC persona để model đọc bối
+                     cảnh cũ trước, hệ thống/persona giữ vai trò cuối cùng. */
                   system:
-                    system ??
+                    (contextSummary
+                      ? `[Tóm tắt phần hội thoại đã nén trước đó]\n${contextSummary}${system ? `\n\n${system}` : ''}`
+                      : system) ??
                     'Bạn là một trợ lý AI thông minh, hữu ích và chính xác. Trả lời bằng tiếng Việt trừ khi được yêu cầu ngôn ngữ khác.',
                   abortSignal: link.signal,
                 });
