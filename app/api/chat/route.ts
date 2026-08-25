@@ -24,8 +24,11 @@ import { acquireUpstreamSlot, sharedFreeBudget } from '@/lib/upstream-queue';
 import { pumpSseLines } from '@/lib/sse';
 import { parseLooseJson } from '@/lib/json-repair';
 import { isContextOverflowError } from '@/lib/context-budget';
+import { restateUpstreamStatus } from '@/lib/upstream-status-rules';
 import { formatWebContextBlock, type WebContextPayload } from '@/lib/web-context';
 import { filterSupportedModels, markModelUnsupported } from '@/lib/model-negative-cache';
+import { markModelFailure, decayModelFailure, isModelLockedOut } from '@/lib/model-lockout';
+import { recordModelOutcome, reorderModelsByQuality } from '@/lib/model-quality';
 import { isToolUnsupported, markToolsUnsupported } from '@/lib/tool-support-cache';
 import { buildAgentTools, summarizeToolArgs, summarizeToolResult } from '@/lib/agent-tools';
 import { pollinationsMarkdown } from '@/lib/pollinations';
@@ -284,8 +287,7 @@ function diagnoseUpstreamError(
   e: unknown,
   ctx: { requestId: string; model: string; keyLabel: string; providerBase?: string },
 ): UpstreamDiagnosis {
-  const status = getStatusCode(e);
-  const scope = classifyUpstreamStatus(status);
+  let status = getStatusCode(e);
 
   let url: string | undefined;
   let body: string | undefined;
@@ -310,6 +312,19 @@ function diagnoseUpstreamError(
     /cloudflare|attention required|just a moment|error code: 1020/i.test(
       `${bodySnippet} ${upstreamServer ?? ''}`,
     );
+
+  /* Status restatement: free gateway hay gắn nhãn sai (403 mang chữ quota,
+     500 mang chữ rate-limit...). Sửa lại TRƯỚC khi phân loại để toàn bộ
+     switch phía dưới + scope + blameKey đi đúng hướng. */
+  let restateReason: string | undefined;
+  {
+    const r = restateUpstreamStatus(status, bodySnippet);
+    if (r.status !== status && r.reason) {
+      status = r.status;
+      restateReason = r.reason;
+    }
+  }
+  const scope = classifyUpstreamStatus(status);
 
   let code = `UPSTREAM_${status ?? 'NETWORK'}`;
   let userMessage: string;
@@ -481,7 +496,7 @@ function diagnoseUpstreamError(
     `key=${ctx.keyLabel}`,
     `model=${ctx.model}`,
     `host=${upstreamHost}`,
-    status ? `status=${status}` : 'status=none',
+    status ? `status=${status}${restateReason ? ` (${restateReason})` : ''}` : 'status=none',
     cfRay ? `cf-ray=${cfRay}` : '',
     bodySnippet ? `body=${bodySnippet}` : `msg=${sanitizeErrorMessage(e)}`,
   ]
@@ -850,6 +865,9 @@ export async function POST(req: Request) {
     // 400 unknown-model / 403 body rỗng) để không lặp lại lượt thử chết trong
     // mọi tin nhắn. Lọc sạch thì giữ nguyên chain — vẫn thử và tự phục hồi.
     if (upstreamBase) modelChain = filterSupportedModels(upstreamBase, modelChain);
+    /* Quality score (EWMA): sắp xếp MỀM chuỗi theo độ tin cậy gần đây —
+       model đang khỏe được thử trước, model trục trặc tụt xuống sau. */
+    if (upstreamBase) modelChain = reorderModelsByQuality(upstreamBase, modelChain);
     const targetModel = modelConfig.providerModel;
 
     // Model/base từng chê function calling trong 10 phút qua → bỏ tools ngay
@@ -1095,6 +1113,25 @@ export async function POST(req: Request) {
 
             for (let modelIndex = 0; modelIndex < modelChain.length; modelIndex++) {
               const targetModel = modelChain[modelIndex];
+
+              /* Lockout mềm per key×model: ô đang khóa (5xx/timeout liên tiếp)
+                 bị bỏ qua — TRỪ khi đây là model cuối của key cuối mà chưa
+                 emit gì: luôn giữ đúng MỘT cơ hội thử thật để stream không
+                 kết thúc rỗng vô giải thích. */
+              if (
+                upstreamBase &&
+                isModelLockedOut(upstreamBase, keyLabel, targetModel) &&
+                !(
+                  emittedChars === 0 &&
+                  attempt === candidateKeys.length - 1 &&
+                  modelIndex === modelChain.length - 1
+                )
+              ) {
+                console.warn(
+                  `[req:${requestId}] skip ${targetModel} cho key ${keyLabel} — đang lockout`,
+                );
+                continue;
+              }
               let abortKind: AbortKind | null = null;
               // Tạo video cần vài phút — nới ngân sách riêng cho model video,
               // nhưng vẫn dưới trần 300s của nền tảng (xem VIDEO_BUDGET_MS).
@@ -1420,10 +1457,17 @@ export async function POST(req: Request) {
                  */
                 if (emittedChars === 0) {
                   console.warn(`[req:${requestId}] Stream kết thúc không có nội dung (model=${targetModel}).`);
+                  // Response rỗng là một lần lãng phí thật: trừ điểm quality +
+                  // khóa mềm ô này để lượt sau ưu tiên hướng khác.
+                  recordModelOutcome(upstreamBase ?? '', targetModel, false);
+                  markModelFailure(upstreamBase ?? '', keyLabel, targetModel);
                   writeAnnotation({ error: 'EMPTY_RESPONSE' });
                   writeFinish('other');
                   return;
                 }
+                // Stream thật sự có nội dung — model ô này đang khỏe.
+                recordModelOutcome(upstreamBase ?? '', targetModel, true);
+                decayModelFailure(upstreamBase ?? '', keyLabel, targetModel);
                 writeFinish(finishReason === 'length' ? 'length' : 'stop');
                 return;
               } catch (e: any) {
@@ -1476,7 +1520,12 @@ export async function POST(req: Request) {
 
                 if (abortKind && isAbortError(e)) {
                   const isIdle = abortKind === 'idle';
-                  if (isIdle) markKeyFailure(apiKey, undefined);
+                  if (isIdle) {
+                    markKeyFailure(apiKey, undefined);
+                    // Idle = model/gateway ngắt hơi: trừ điểm + khóa mềm ô.
+                    recordModelOutcome(upstreamBase ?? '', targetModel, false);
+                    markModelFailure(upstreamBase ?? '', keyLabel, targetModel);
+                  }
                   const code = isIdle ? 'STREAM_IDLE_TIMEOUT' : 'STREAM_BUDGET_EXCEEDED';
                   const budgetSec = Math.round(budgetMs / 1000);
                   /* Thông báo phải khớp ngân sách THỰC của lượt này: model video
@@ -1508,6 +1557,19 @@ export async function POST(req: Request) {
                 }
 
                 if (diagnosis.blameKey) markKeyFailure(apiKey, diagnosis.status);
+
+                /* Quality/lockout: chỉ trừ điểm ô (key×model) khi lỗi là
+                   TẠM THỜI của đường truyền/model — lỗi model-unsupported
+                   thuộc negative-cache, lỗi nội dung request (stopFailover)
+                   không phải tội của ai trong pool. */
+                if (
+                  !diagnosis.modelUnsupported &&
+                  !diagnosis.stopFailover &&
+                  !req.signal.aborted
+                ) {
+                  recordModelOutcome(upstreamBase ?? '', targetModel, false);
+                  markModelFailure(upstreamBase ?? '', keyLabel, targetModel);
+                }
 
                 /* Retry-in-place (port từ prime-agent): lỗi tạm thời 429/5xx,
                    chưa emit token nào, không phải safety/invalid-request thì
