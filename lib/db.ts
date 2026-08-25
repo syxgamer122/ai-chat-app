@@ -102,6 +102,13 @@ export interface KVEntry {
   value: unknown;
 }
 
+/** Ghi nhớ dài hạn kiểu fx-memory: fact ngắn user/model muốn giữ xuyên chat. */
+export interface StoredMemory {
+  id: string;
+  text: string;
+  createdAt: number;
+}
+
 function newAttachmentId(): string {
   try {
     return globalThis.crypto.randomUUID();
@@ -144,6 +151,7 @@ export class ChatAppDatabase extends Dexie {
   prompts!: Table<PromptTemplate, string>;
   kv!: Table<KVEntry, string>;
   providers!: Table<ProviderPresetRecord, string>;
+  memories!: Table<StoredMemory, string>;
 
   constructor() {
     super('ai_chat_app_db');
@@ -237,6 +245,19 @@ export class ChatAppDatabase extends Dexie {
       providers: 'id, updatedAt',
     });
 
+    // v8: ghi nhớ dài hạn kiểu fx-memory — model tra qua tool memory_search.
+    this.version(8).stores({
+      chats: 'id, createdAt, updatedAt, pinned, activeLeafId, *titleTokens',
+      messages:
+        'id, chatId, role, createdAt, seq, parentId, ' +
+        '[chatId+parentId], [chatId+createdAt], [chatId+seq], ' +
+        '[chatId+parentId+branchOrder], *tokens',
+      prompts: 'id, updatedAt',
+      kv: 'key',
+      providers: 'id, updatedAt',
+      memories: 'id, createdAt',
+    });
+
     this.messages.hook('creating', (_primKey, obj) => {
       obj.parentId = toParentKey(obj.parentId as string | null);
       if (typeof obj.branchTieBreaker !== 'string') obj.branchTieBreaker = obj.id;
@@ -288,6 +309,54 @@ export class ChatAppDatabase extends Dexie {
 }
 
 export const db = new ChatAppDatabase();
+
+/* ------------------------------------------------------------------ */
+/* Ghi nhớ dài hạn (memory) — CRUD dùng chung client                   */
+/* ------------------------------------------------------------------ */
+
+/** Trần số fact và độ dài mỗi fact — khớp schema /api/chat (memories). */
+export const MAX_MEMORIES = 40;
+export const MAX_MEMORY_CHARS = 400;
+
+function newMemoryId(): string {
+  try {
+    return globalThis.crypto.randomUUID();
+  } catch {
+    return `mem-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  }
+}
+
+export async function listMemories(): Promise<StoredMemory[]> {
+  try {
+    const all = await db.memories.orderBy('createdAt').reverse().toArray();
+    return all.slice(0, MAX_MEMORIES).map(({ id, text, createdAt }) => ({ id, text, createdAt }));
+  } catch {
+    return [];
+  }
+}
+
+/** Thêm fact: bỏ trùng nguyên văn, cắt trần ký tự, giữ tối đa MAX_MEMORIES (cũ nhất bị loại). */
+export async function addMemory(rawText: string): Promise<StoredMemory | null> {
+  const text = rawText.trim().slice(0, MAX_MEMORY_CHARS);
+  if (!text) return null;
+  const existing = await db.memories.toArray();
+  if (existing.some((m) => m.text === text)) return null;
+  if (existing.length >= MAX_MEMORIES) {
+    const oldest = existing.sort((a, b) => a.createdAt - b.createdAt)[0];
+    if (oldest) await db.memories.delete(oldest.id);
+  }
+  const record: StoredMemory = { id: newMemoryId(), text, createdAt: Date.now() };
+  await db.memories.put(record);
+  return record;
+}
+
+export async function deleteMemory(id: string): Promise<void> {
+  await db.memories.delete(id);
+}
+
+export async function clearMemories(): Promise<void> {
+  await db.memories.clear();
+}
 
 /* ------------------------------------------------------------------ */
 /* Allocator ATOMIC — mọi lệnh chèn message PHẢI đi qua đây            */

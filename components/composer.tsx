@@ -7,6 +7,7 @@ import {
   BookmarkPlus,
   CornerDownLeft,
   Film,
+  Globe,
   ImagePlus,
   Mic,
   Paperclip,
@@ -75,6 +76,11 @@ interface ComposerProps {
   mediaActions?: MediaActions;
   /** Tạo media cho lượt này (model media chỉ định, không đổi model đang chọn). */
   onGenerateMedia?: (action: MediaAction, kind: 'image' | 'video') => void;
+  /** Toggle "Tìm kiếm web" — bật thì lượt gửi kế tiếp kèm kết quả tra cứu. */
+  webSearch?: boolean;
+  onToggleWebSearch?: () => void;
+  /** Đang tra cứu web phía client trước khi gửi — hiện trạng thái chờ. */
+  webBusy?: boolean;
   canContinue?: boolean;
   onContinue?: () => void;
   maxFileBytes?: number;
@@ -104,6 +110,9 @@ export function Composer({
   onThinkingLevelChange,
   mediaActions,
   onGenerateMedia,
+  webSearch,
+  onToggleWebSearch,
+  webBusy,
   canContinue,
   onContinue,
   maxFileBytes = DEFAULT_MAX_FILE_BYTES,
@@ -339,8 +348,14 @@ export function Composer({
             </div>
           )}
 
-          {(voice.listening || voice.error) && (
+          {(voice.listening || voice.error || webBusy) && (
             <div className="flex items-center gap-2 px-4 pt-3 text-[12px] leading-relaxed">
+              {webBusy && (
+                <span className="flex min-w-0 items-center gap-1.5 text-zinc-600">
+                  <span className="h-1.5 w-1.5 flex-shrink-0 animate-pulse rounded-full bg-brand" />
+                  <span className="truncate">Đang tra cứu web…</span>
+                </span>
+              )}
               {voice.listening && (
                 <span className="flex min-w-0 items-center gap-1.5 text-zinc-600">
                   <span className="h-1.5 w-1.5 flex-shrink-0 animate-pulse rounded-full bg-brand" />
@@ -428,6 +443,30 @@ export function Composer({
                   ) : (
                     <Mic size={16} />
                   )}
+                </button>
+              )}
+
+              {/* Tìm kiếm web: bật/tắt tra cứu cho LƯỢT GỬI KẾ TIẾP.
+                  Giống nút mic — trạng thái bật tô màu brand. */}
+              {onToggleWebSearch && (
+                <button
+                  type="button"
+                  onClick={onToggleWebSearch}
+                  disabled={isStreaming}
+                  aria-label={webSearch ? 'Tắt tìm kiếm web' : 'Bật tìm kiếm web'}
+                  aria-pressed={Boolean(webSearch)}
+                  title={
+                    webSearch
+                      ? 'Đang BẬT: lượt gửi kế tiếp sẽ kèm kết quả web (bấm để tắt)'
+                      : 'Bật tìm kiếm web cho tin nhắn tiếp theo'
+                  }
+                  className={
+                    webSearch
+                      ? 'flex h-9 w-9 items-center justify-center rounded-full bg-brand text-white transition-colors'
+                      : 'icon-btn h-9 w-9 rounded-full disabled:cursor-not-allowed disabled:opacity-40'
+                  }
+                >
+                  <Globe size={16} />
                 </button>
               )}
 

@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import { db, type PromptTemplate } from '@/lib/db';
+import { db, addMemory, deleteMemory, MAX_MEMORIES, MAX_MEMORY_CHARS, type PromptTemplate } from '@/lib/db';
 import { useAppStore, SERVER_PROVIDER_ID } from '@/lib/store';
 import { exportJson, exportMarkdown, importBackup, type ImportMode } from '@/lib/backup';
 import { X, Download, Upload, Loader2, ShieldAlert, Pencil, Trash2 } from 'lucide-react';
@@ -28,8 +28,84 @@ type Status = { kind: 'idle' | 'busy' | 'ok' | 'error'; message?: string };
  * PWA: nút cài đặt lên thiết bị (Chrome/Edge/Android);
  * iOS hiện hướng dẫn "Thêm vào Màn hình chính".
  */
-function InstallSection() {
-  const { canInstall, installed, isIOS, install } = useInstallPrompt();
+/* ------------------ Ghi nhớ dài hạn (memory) ------------------ */
+
+function MemoriesSection() {
+  const memories = useLiveQuery(() => db.memories.orderBy('createdAt').reverse().toArray(), [], []);
+
+  const [newText, setNewText] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  const add = async () => {
+    if (!newText.trim()) return;
+    try {
+      const created = await addMemory(newText);
+      if (!created) {
+        setError('Ghi nhớ trùng nội dung đã có hoặc rỗng.');
+        return;
+      }
+      setError(null);
+      setNewText('');
+    } catch (e) {
+      console.error('[memory]', e);
+      setError('Không lưu được ghi nhớ.');
+    }
+  };
+
+  return (
+    <div className="space-y-3">
+      <h3 className="text-sm font-semibold text-zinc-800">Ghi nhớ dài hạn</h3>
+      <p className="text-xs leading-relaxed text-zinc-600">
+        Các fact ngắn model tự tra qua công cụ <code className="claude-inline-code">memory_search</code> khi
+        liên quan (sở thích, thông tin cá nhân, quy ước...). Lưu trong máy bạn, tối đa{' '}
+        {MAX_MEMORIES} mục.
+      </p>
+
+      {(memories ?? []).length === 0 && (
+        <p className="rounded-lg bg-surface-muted/60 px-2.5 py-2 text-[11px] italic text-zinc-500">
+          Chưa có ghi nhớ nào.
+        </p>
+      )}
+
+      {(memories ?? []).map((m) => (
+        <div
+          key={m.id}
+          className="group flex items-start justify-between gap-2 rounded-lg border border-zinc-200 bg-surface-muted/60 px-2.5 py-2"
+        >
+          <div className="min-w-0 flex-1 text-[12px] leading-relaxed text-zinc-700">{m.text}</div>
+          <button
+            type="button"
+            onClick={() => {
+              void deleteMemory(m.id);
+            }}
+            aria-label="Xóa ghi nhớ"
+            className="flex-shrink-0 rounded p-1 text-zinc-500 opacity-70 transition-colors hover:bg-red-50 hover:text-red-600 group-hover:opacity-100 dark:hover:bg-red-500/10 dark:hover:text-red-400"
+          >
+            <Trash2 size={12} />
+          </button>
+        </div>
+      ))}
+
+      <div className="space-y-2 rounded-xl border border-dashed border-zinc-300 p-2.5">
+        <textarea
+          value={newText}
+          onChange={(e) => setNewText(e.target.value)}
+          rows={2}
+          maxLength={MAX_MEMORY_CHARS}
+          className="field-sm resize-none text-xs"
+          placeholder='Ví dụ: "Tôi thích trả lời ngắn gọn, code dùng TypeScript"'
+          aria-label="Nội dung ghi nhớ mới"
+        />
+        {error && <p className="text-[11px] text-red-600">{error}</p>}
+        <button type="button" onClick={() => void add()} disabled={!newText.trim()} className="btn-secondary w-full justify-center">
+          Thêm ghi nhớ
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function InstallSection() {  const { canInstall, installed, isIOS, install } = useInstallPrompt();
 
   const [installing, setInstalling] = useState(false);
   const handleInstall = async () => {
@@ -79,13 +155,14 @@ function InstallSection() {
   );
 }
 
-type SettingsTab = 'chung' | 'provider' | 'stats' | 'prompts' | 'data' | 'app';
+type SettingsTab = 'chung' | 'provider' | 'stats' | 'prompts' | 'memory' | 'data' | 'app';
 
 const SETTINGS_TABS: Array<{ id: SettingsTab; label: string }> = [
   { id: 'chung', label: 'Chung' },
   { id: 'provider', label: 'Nhà cung cấp' },
   { id: 'stats', label: 'Thống kê' },
   { id: 'prompts', label: 'Prompt' },
+  { id: 'memory', label: 'Ghi nhớ' },
   { id: 'data', label: 'Dữ liệu' },
   { id: 'app', label: 'Ứng dụng' },
 ];
@@ -734,6 +811,8 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
           )}
 
           {show('prompts') && <PromptLibrarySection />}
+
+          {show('memory') && <MemoriesSection />}
 
           {show('app') && <InstallSection />}
 

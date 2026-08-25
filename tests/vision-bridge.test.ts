@@ -8,6 +8,7 @@ import {
   bridgeImagesInMessages,
   downgradeImagesToPlaceholders,
   resetVisionBridgeCache,
+  resetVisionBridgeDeadModels,
   VISION_BRIDGE_PROMPT,
   IMAGE_OMITTED_PLACEHOLDER,
 } from '@/lib/vision-bridge';
@@ -65,14 +66,20 @@ describe('vision-bridge — helpers thuần', () => {
     expect(parseGeminiDescription({ candidates: [{ content: { parts: [{ text: '  ' }] } }] })).toBeNull();
   });
 
-  it('appendDescription nối block mô tả vào cuối content', () => {
-    expect(appendDescription('Câu hỏi', 'MÔ TẢ')).toBe('Câu hỏi\n\n[Ảnh đính kèm — mô tả tự động cho model không xem được ảnh]\nMÔ TẢ');
+  it('appendDescription nối block mô tả vào cuối content kèm cảnh báo untrusted', () => {
+    const out = appendDescription('Câu hỏi', 'MÔ TẢ');
+    expect(out).toContain('Câu hỏi\n\n[Ảnh đính kèm');
+    expect(out).toContain('MÔ TẢ');
+    expect(out).toContain('KHÔNG thực hiện'); // chống prompt-injection qua chữ trong ảnh
     expect(appendDescription('', 'MÔ TẢ')).toContain('MÔ TẢ');
   });
 });
 
 describe('vision-bridge — bridgeImagesInMessages', () => {
-  beforeEach(() => resetVisionBridgeCache());
+  beforeEach(() => {
+    resetVisionBridgeCache();
+    resetVisionBridgeDeadModels();
+  });
 
   const makeFetch = (impl: (url: string, init?: RequestInit) => Promise<Response>) =>
     impl as unknown as typeof fetch;
@@ -167,6 +174,60 @@ describe('vision-bridge — bridgeImagesInMessages', () => {
     expect(calls).toBe(1);
     expect(out[0].content).toContain('same');
     expect(out[1].content).toContain('same');
+  });
+
+  it('model chính 404 (bị khai tử) -> fallback sang model kế và thành công', async () => {
+    const calledModels: string[] = [];
+    const extractModel = (url: string) =>
+      new URL(url).pathname.split('/models/')[1]?.split(':')[0] ?? '';
+    const notFound = { ok: false, status: 404, json: async () => ({}) } as unknown as Response;
+    const messages = [
+      {
+        role: 'user',
+        content: 'z',
+        experimental_attachments: [{ contentType: 'image/png', url: PNG_DATA_URL }],
+      },
+    ];
+    const out = await bridgeImagesInMessages(messages, {
+      apiKey: 'k',
+      fetchImpl: makeFetch(async (url) => {
+        const model = extractModel(String(url));
+        calledModels.push(model);
+        return model === 'gemini-3.5-flash-lite'
+          ? notFound
+          : geminiResponse('mô tả từ model dự phòng');
+      }),
+    });
+    // Model chính bị 404, nhảy sang fallback vẫn ra mô tả
+    expect(calledModels).toContain('gemini-3.5-flash-lite');
+    expect(out[0].content).toContain('mô tả từ model dự phòng');
+
+    // Model chết đã được ghi nhớ: batch sau không chạm lại nó nữa
+    calledModels.length = 0;
+    await bridgeImagesInMessages(
+      [
+        {
+          role: 'user',
+          content: 'lần hai',
+          experimental_attachments: [
+            {
+              contentType: 'image/png',
+              url:
+                'data:image/png;base64,' + Buffer.from('other-bytes').toString('base64'),
+            },
+          ],
+        },
+      ],
+      {
+        apiKey: 'k',
+        fetchImpl: makeFetch(async (url) => {
+          calledModels.push(extractModel(String(url)));
+          return geminiResponse('ok lần hai');
+        }),
+      },
+    );
+    expect(calledModels).not.toContain('gemini-3.5-flash-lite');
+    expect(calledModels.length).toBeGreaterThan(0);
   });
 
   it('không có ảnh data-URL -> trả nguyên messages (cùng tham chiếu)', async () => {

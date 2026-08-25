@@ -61,6 +61,11 @@ import {
   reconcileActiveMessages,
   type PendingAssistantFork,
 } from '@/lib/chat-tree-persistence';
+import { gatherWebContext } from '@/lib/use-web-search';
+import { gatherPdfContexts } from '@/lib/use-pdf-context';
+import { gatherLiveContext } from '@/lib/live-tools';
+import { listMemories } from '@/lib/db';
+import { compressImageFiles } from '@/lib/image-compress';
 import { ChatHeader } from './chat/chat-header';
 import { MessageList } from './chat/message-list';
 import type { BranchInfo } from './chat/message-item';
@@ -84,6 +89,7 @@ export default function ChatInterface() {
   const activeProvider = useAppStore((s) => s.activeProvider);
   const sendOnEnter = useAppStore((s) => s.settings.sendOnEnter);
   const autoCompactEnabled = useAppStore((s) => s.settings.autoCompact);
+  const webSearchEnabled = useAppStore((s) => s.settings.webSearch);
   /** Capability suy luận của model đang chọn (metadata kiểu OpenRouter). */
   const modelReasoningCap = activeProvider?.models?.find((m) => m.id === model)?.reasoning ?? null;
   const throttleMs = useAppStore((s) => s.settings.perf.throttleMs);
@@ -305,23 +311,30 @@ export default function ChatInterface() {
   const addFiles = useCallback((files: FileList | File[] | null) => {
     if (!files) return;
     const fileArr = Array.from(files);
-    let totalSize = attachments.reduce((sum, f) => sum + f.size, 0);
-    const ok: File[] = [];
-    const rejected: string[] = [];
 
-    for (const f of fileArr) {
-      if (totalSize + f.size > MAX_TOTAL_ATTACHMENT_BYTES) {
-        rejected.push(f.name);
-      } else {
-        totalSize += f.size;
-        ok.push(f);
-      }
-    }
+    // Nén ảnh trước khi xét trần: ảnh chụp điện thoại 3-5MB về vài trăm KB
+    // (canvas resize + WebP) nên trần 3MB không còn chặn oan người dùng.
+    void compressImageFiles(fileArr)
+      .catch(() => fileArr) // nén lỗi thì dùng file gốc như cũ
+      .then((processed) => {
+        let totalSize = attachments.reduce((sum, f) => sum + f.size, 0);
+        const ok: File[] = [];
+        const rejected: string[] = [];
 
-    if (rejected.length) {
-      showNotice(`Bỏ qua file vượt quá tổng giới hạn 3MB: ${rejected.join(', ')}`);
-    }
-    setAttachments((prev) => [...prev, ...ok].slice(0, MAX_FILES));
+        for (const f of processed) {
+          if (totalSize + f.size > MAX_TOTAL_ATTACHMENT_BYTES) {
+            rejected.push(f.name);
+          } else {
+            totalSize += f.size;
+            ok.push(f);
+          }
+        }
+
+        if (rejected.length) {
+          showNotice(`Bỏ qua file vượt quá tổng giới hạn 3MB: ${rejected.join(', ')}`);
+        }
+        setAttachments((prev) => [...prev, ...ok].slice(0, MAX_FILES));
+      });
   }, [attachments, showNotice]);
 
   const removeAttachment = useCallback((index: number) => {
@@ -356,6 +369,8 @@ export default function ChatInterface() {
     undefined,
   );
   const [compactBusy, setCompactBusy] = useState(false);
+  /** Tra cứu web đang chạy trước khi gửi (toggle Globe trong composer). */
+  const [webBusy, setWebBusy] = useState(false);
 
   const {
     messages, setMessages, input, setInput, handleInputChange,
@@ -2061,6 +2076,63 @@ export default function ChatInterface() {
       }
       if (modelOverride) options.body = { model: modelOverride };
 
+      /* Tìm kiếm web (toggle Globe): tra cứu TRƯỚC khi submit rồi gửi kèm qua
+         per-call body — useChat gộp options.body lên config body mỗi lần gọi,
+         nên không đụng stale closure như đường state→ref của compaction.
+         Media không cần web; lỗi tra cứu chỉ cảnh báo, KHÔNG chặn gửi. */
+      if (!modelOverride && webSearchEnabled && userText) {
+        setWebBusy(true);
+        try {
+          const ctx = await gatherWebContext(userText);
+          if (ctx) {
+            options.body = { ...options.body, webContext: ctx };
+          } else {
+            showNotice('Không lấy được kết quả web — gửi tin nhắn bình thường.');
+          }
+        } catch (err) {
+          console.warn('[web-search]', err);
+          showNotice('Tra cứu web lỗi — gửi tin nhắn bình thường.');
+        } finally {
+          setWebBusy(false);
+        }
+      }
+
+      /* Live tools (thời tiết/tỷ giá): chạy MỌI lượt có ý định, không phụ thuộc
+         toggle web. Lỗi tool chỉ nghĩa là thiếu khối dữ liệu, không báo lỗi. */
+      if (userText) {
+        try {
+          const liveCtx = await gatherLiveContext(userText);
+          if (liveCtx) options.body = { ...options.body, liveContext: liveCtx };
+        } catch {
+          /* bỏ qua — đã là best-effort */
+        }
+      }
+
+      /* Ghi nhớ dài hạn: đọc trực tiếp Dexie mỗi lượt gửi (≤40 fact, rẻ) để
+         luôn mới nhất kể cả khi vừa thêm trong settings. */
+      try {
+        const mems = await listMemories();
+        if (mems.length) {
+          options.body = {
+            ...options.body,
+            memories: mems.map(({ id, text }) => ({ id, text })),
+          };
+        }
+      } catch {
+        /* bỏ qua */
+      }
+
+      /* Chat với PDF: attachment PDF được trích text qua /api/pdf rồi gửi kèm
+         body. Không trích được (scan/lỗi) vẫn gửi như cũ. */
+      if (attachments.length > 0) {
+        try {
+          const pdfCtxs = await gatherPdfContexts(attachments);
+          if (pdfCtxs.length) options.body = { ...options.body, pdfContexts: pdfCtxs };
+        } catch {
+          /* bỏ qua */
+        }
+      }
+
       pin(1500);
 
       setAttachments([]);
@@ -2071,7 +2143,7 @@ export default function ChatInterface() {
     } catch (err) {
       console.error('[onSubmit]', err);
     }
-  }, [input, attachments, isLoading, currentChatId, draftId, setCurrentChatId, handleSubmit, pin, generateTitle, messages.length, showNotice]);
+  }, [input, attachments, isLoading, currentChatId, draftId, setCurrentChatId, handleSubmit, pin, generateTitle, messages.length, showNotice, webSearchEnabled]);
 
   const onSubmit = useCallback(
     async (e?: React.FormEvent) => {
@@ -2411,6 +2483,9 @@ export default function ChatInterface() {
         onModelChange={handleModelChange}
         mediaActions={mediaActions}
         onGenerateMedia={handleGenerateMedia}
+        webSearch={webSearchEnabled}
+        onToggleWebSearch={() => updateSettings({ webSearch: !webSearchEnabled })}
+        webBusy={webBusy}
         canContinue={canContinue}
         onContinue={continueGenerating}
         thinkingLevel={

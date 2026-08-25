@@ -14,6 +14,7 @@
 - **BYOK**: người dùng tự dán API key riêng trong Settings (không persist), hoặc dùng key pool cấu hình trên server.
 - **Failover đa key + đa model**: server tự xoay API key theo health, thử chuỗi model thay thế khi upstream 404.
 - **Voice input**: bấm nút mic trong ô nhập, nói tiếng Việt — chữ hiện realtime, chạy 100% client (Web Speech API).
+- **Tìm kiếm web**: bật nút 🌐 trong composer — lượt gửi kế tiếp tự tra cứu DuckDuckGo (top nguồn + đọc nguyên văn tối đa 2 trang), chèn vào ngữ cảnh kèm yêu cầu trích dẫn link. Dán URL trực tiếp trong tin nhắn sẽ được ưu tiên đọc nguyên trang. Proxy qua `/api/web` có chắn SSRF từng hop redirect.
 - **Thư viện prompt "/"**: gõ `/` trong ô nhập để chèn prompt mẫu (có sẵn 5 mẫu tiếng Việt, thêm/sửa/xoá trong Settings; filter không phân biệt dấu — gõ "tom tat" ra "Tóm tắt").
 - **Auto-backup**: nhắc định kỳ theo chu kỳ tuỳ chọn; desktop Chrome/Edge chọn được thư mục để app **tự ghi file .json ngầm** khi đến kỳ (File System Access API).
 - **PWA cài lên thiết bị**: Android/Chrome bấm "Cài đặt ứng dụng" hoặc nút trong Settings; iOS Safari → Chia sẻ → Thêm vào Màn hình chính. Có trang offline khi mất mạng.
@@ -61,6 +62,8 @@ app/api/chat    — stream chat: same-origin + access-code + rate-limit →
                   key pool failover → model chain fallback → data stream
                   (heartbeat 10s, idle 60s, budget 270s)
 app/api/title   — sinh tiêu đề, chống prompt-injection, heuristic fallback
+app/api/web     — proxy tra cứu web: DuckDuckGo lite→html + đọc trang
+                  (SSRF guard từng hop redirect, trần 1.5MB/12s mỗi trang)
 app/api/diag    — chẩn đoán upstream (khóa mặc định, secret qua header)
 
 lib/db.ts                   — Dexie schema + hooks (tokenize, sanitize) +

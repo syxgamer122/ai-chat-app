@@ -4,12 +4,15 @@
 import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
 import type { Message } from 'ai/react';
 import TextareaAutosize from 'react-textarea-autosize';
-import { RefreshCcw, Paperclip, Pencil, Copy, Check, ChevronDown, ChevronUp } from 'lucide-react';
+import { RefreshCcw, Paperclip, Pencil, Copy, Check, ChevronDown, ChevronUp, Volume2, OctagonX } from 'lucide-react';
 import { MarkdownRenderer } from '@/components/markdown-renderer';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { BranchSwitcher } from '@/components/branch-switcher';
 import { MessageStatusBadge } from '@/components/message-status-badge';
 import { sanitizeContent, getFinishInfo } from '@/lib/chat-tree-persistence';
+import { stripMarkdownForSpeech } from '@/lib/speech-text';
+import { useTts } from '@/lib/use-tts';
+import { ToolTrace } from '@/components/chat/tool-trace';
 import { KodaMark } from '@/components/koda-logo';
 
 /* ------------------------------------------------------------------ */
@@ -93,6 +96,11 @@ export const MessageItem = memo(
   }: MessageItemProps) {
     const [isExpanded, setIsExpanded] = useState(false);
     const isLongUserMsg = m.role === 'user' && m.content.length > 250;
+
+    // Hook phải gọi vô điều kiện (trước return user) — state loa dùng chung
+    // module-level nên mọi message đều biết message nào đang đọc.
+    const { speakingId, supported: ttsSupported, toggleSpeak } = useTts();
+    const isSpeakingThis = speakingId === m.id;
 
     if (m.role === 'user') {
       return (
@@ -271,6 +279,10 @@ export const MessageItem = memo(
             </div>
           )}
 
+          {/* Tool trace: các lần model gọi công cụ (web_search, web_fetch...)
+              — stream realtime qua annotation và persist theo message. */}
+          <ToolTrace annotations={(m as any).annotations as Array<Record<string, unknown>> | undefined} />
+
           {/* Tiến trình tạo ảnh/video (route ghi vào kênh reasoning). Chỉ hiện
               lúc đang stream — media mất vài phút nên cần dấu hiệu còn sống. */}
           {isStreaming && typeof (m as any).reasoning === 'string' && (m as any).reasoning.trim() && (
@@ -343,6 +355,20 @@ export const MessageItem = memo(
               >
                 {isCopied ? <Check className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
               </button>
+              {ttsSupported && m.content.trim() && (
+                <button
+                  type="button"
+                  onClick={() => toggleSpeak(m.id, stripMarkdownForSpeech(sanitizeContent(m.content)))}
+                  aria-label={isSpeakingThis ? 'Dừng đọc' : 'Đọc to câu trả lời'}
+                  title={isSpeakingThis ? 'Dừng đọc' : 'Đọc to'}
+                  aria-pressed={isSpeakingThis}
+                  className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-zinc-200 ${
+                    isSpeakingThis ? 'text-brand' : 'text-zinc-500 hover:text-zinc-800'
+                  }`}
+                >
+                  {isSpeakingThis ? <OctagonX className="h-3.5 w-3.5 animate-pulse" /> : <Volume2 className="h-3.5 w-3.5" />}
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => onRegenerate(m.id)}

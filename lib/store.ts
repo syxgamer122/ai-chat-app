@@ -43,6 +43,8 @@ export interface Settings {
   sendOnEnter: boolean;
   /** Tự động nén hội thoại khi ước lượng token gần trần context của model. */
   autoCompact: boolean;
+  /** Bật tra cứu web cho tin nhắn tiếp theo (nút Globe trong composer). */
+  webSearch: boolean;
   apiKey?: string;
   accessCode?: string;
 }
@@ -81,6 +83,7 @@ const DEFAULT_SETTINGS: Settings = {
   perf: { throttleMs: 150, animations: true },
   sendOnEnter: true,
   autoCompact: true,
+  webSearch: false,
   apiKey: '',
   accessCode: '',
 };
@@ -123,6 +126,7 @@ export const useAppStore = create<AppState>()(
           perf: s.settings.perf,
           sendOnEnter: s.settings.sendOnEnter,
           autoCompact: s.settings.autoCompact,
+          webSearch: s.settings.webSearch,
         },
       }),
       merge: (persisted, current) => {
