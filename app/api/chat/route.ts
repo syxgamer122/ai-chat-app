@@ -1693,6 +1693,26 @@ export async function POST(req: Request) {
                     // Idle = model/gateway ngắt hơi: trừ điểm + khóa mềm ô.
                     recordModelOutcome(upstreamBase ?? '', targetModel, false);
                     markModelFailure(upstreamBase ?? '', keyLabel, targetModel);
+
+                    /* Idle với 0 token thường là gateway chết TẠM ở một patch
+                       (quan sát thật: request tiếp diễn của agent coding dính
+                       đúng lúc crax ngốn 60s im lặng). status=none không rơi
+                       vào retry-in-place thường → thử lại ĐÚNG ô một lần ở
+                       đây, nếu không agent turn đổ chỉ vì mạng hắt hơi. */
+                    const idleSlotKey = `idle:${attempt}:${modelIndex}`;
+                    if (
+                      emittedChars === 0 &&
+                      !retriedSlotKeys.has(idleSlotKey) &&
+                      !req.signal.aborted
+                    ) {
+                      retriedSlotKeys.add(idleSlotKey);
+                      console.warn(
+                        `[req:${requestId}] Idle 0-token trên ${targetModel} -> retry sau ${SAME_MODEL_RETRY_DELAY_MS * 2}ms.`,
+                      );
+                      await sleep(SAME_MODEL_RETRY_DELAY_MS * 2);
+                      modelIndex -= 1;
+                      continue;
+                    }
                   }
                   const code = isIdle ? 'STREAM_IDLE_TIMEOUT' : 'STREAM_BUDGET_EXCEEDED';
                   const budgetSec = Math.round(budgetMs / 1000);
