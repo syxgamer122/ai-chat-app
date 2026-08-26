@@ -37,6 +37,12 @@ export interface AgentToolsOptions {
   memories?: MemoryItem[];
   /** Host được phép web_fetch: từ URL user gắn + kết quả search cùng lượt. */
   allowedHosts?: Iterable<string>;
+  /** Tắt khi lượt hiện tại đã có webContext được người dùng yêu cầu. */
+  includeWeb?: boolean;
+  /** Tắt riêng khi client đã lấy được dữ liệu thời tiết cho lượt này. */
+  includeWeather?: boolean;
+  /** Tắt riêng khi client đã lấy được tỷ giá cho lượt này. */
+  includeExchangeRates?: boolean;
 }
 
 /** Trần số lần gọi tool MỌI LOẠI trong một lượt chat. */
@@ -217,7 +223,7 @@ export function buildAgentTools(
     }
   }
 
-  return {
+  const serverTools = {
     web_search: tool({
       description:
         'Tìm kiếm thông tin HIỆN TẠI trên web công khai (tin tức, giá cả, sự kiện sau thời điểm ' +
@@ -409,6 +415,20 @@ export function buildAgentTools(
         ),
     }),
   };
+
+  // Những capability đã có dữ liệu đáng tin cậy trong prompt của CHÍNH lượt
+  // này không cần xuất hiện thêm trong catalog tool. Vẫn giữ implementation để
+  // dùng làm fallback khi prefetch thất bại hoặc không được bật.
+  if (opts.includeWeb === false) {
+    Reflect.deleteProperty(serverTools, 'web_search');
+    Reflect.deleteProperty(serverTools, 'web_fetch');
+  }
+  if (opts.includeWeather === false) Reflect.deleteProperty(serverTools, 'weather');
+  if (opts.includeExchangeRates === false) {
+    Reflect.deleteProperty(serverTools, 'exchange_rates');
+  }
+
+  return serverTools;
 }
 
 /* ------------------------------------------------------------------ */
@@ -424,6 +444,45 @@ export function buildAgentTools(
  * Chỉ hoạt động trên đường NATIVE function calling. Đường emulated lọc các
  * tool này ra (xem route) vì client-execution protocol của nó khác.
  */
+/**
+ * Emulated Agent cần schema ở dạng text; native function-calling không cần
+ * block này. Giữ mô tả ở cạnh registry tool để không drift với runtime.
+ */
+const TOOL_PROTOCOL_LINES: Record<string, readonly string[]> = {
+  web_search: [
+    '- web_search: tìm thông tin hiện tại trên web. args: {"query": string, "count"?: number}',
+  ],
+  web_fetch: [
+    '- web_fetch: đọc URL public do người dùng cung cấp hoặc xuất hiện từ web_search. args: {"url": string}',
+  ],
+  weather: ['- weather: thời tiết theo nơi. args: {"location": string, vd "Hà Nội"}'],
+  exchange_rates: ['- exchange_rates: tỷ giá hôm nay. args: {}'],
+  memory_search: ['- memory_search: tra ghi nhớ dài hạn. args: {"query": string}'],
+  memory_save: [
+    '- memory_save: chỉ lưu fact dài hạn khi người dùng yêu cầu nhớ rõ ràng. args: {"text": string}',
+  ],
+  fs_list: ['- fs_list: liệt kê MỘT cấp thư mục workspace. args: {"path"?: string}'],
+  fs_read: [
+    '- fs_read: đọc file text. args: {"path": string, "start_line"?: number, "line_count"?: number}',
+  ],
+  fs_search: ['- fs_search: tìm chuỗi hoặc regex trong workspace. args: {"query": string, "is_regex"?: boolean}'],
+  fs_edit: [
+    '- fs_edit: sửa cục bộ file bằng khối SEARCH/REPLACE; ưa hơn fs_write với file lớn. args: {"path": string, "blocks": string}',
+  ],
+  fs_write: [
+    '- fs_write: tạo mới hoặc ghi toàn bộ file; người dùng luôn duyệt diff. args: {"path": string, "content": string}',
+  ],
+};
+
+export const ALL_TOOL_PROTOCOL_NAMES = Object.freeze(Object.keys(TOOL_PROTOCOL_LINES));
+
+/** Chỉ render tool thực sự khả dụng trong request hiện tại. */
+export function formatToolProtocolManual(toolNames: Iterable<string>): string {
+  const lines: string[] = [];
+  for (const name of toolNames) lines.push(...(TOOL_PROTOCOL_LINES[name] ?? []));
+  return lines.join('\n');
+}
+
 export const CLIENT_TOOL_DEFS = {
   fs_list: tool({
     description:
@@ -436,19 +495,11 @@ export const CLIENT_TOOL_DEFS = {
   fs_read: tool({
     description:
       'Đọc nội dung một FILE text trong workspace (mã nguồn, cấu hình, tài liệu...). Trần ~24k ký tự, ' +
-      'dài hơn sẽ báo truncated — đọc theo phần nếu cần.',
+      'dài hơn sẽ báo truncated — dùng start_line/line_count để đọc phần cần thiết.',
     parameters: z.object({
       path: z.string().min(1).max(500).describe('Đường dẫn tương đối tới file, vd "src/index.ts"'),
-    }),
-  }),
-  fs_write: tool({
-    description:
-      'GHI một file trong workspace (tạo mới hoặc đè). Người dùng sẽ thấy DIFF và PHẢI PHÊ DUYỆT — ' +
-      'kết quả trả về cho biết họ đã duyệt hay từ chối. Nếu bị từ chối, đừng ghi lại y nguyên: hỏi ' +
-      'người dùng muốn sửa gì. Nội dung ghi là TOÀN BỘ file cuối cùng.',
-    parameters: z.object({
-      path: z.string().min(1).max(500).describe('Đường dẫn tương đối tới file cần ghi'),
-      content: z.string().max(100_000).describe('Toàn bộ nội dung file sau khi ghi'),
+      start_line: z.number().int().min(1).max(1_000_000).optional().describe('Dòng bắt đầu, đánh số từ 1; mặc định 1'),
+      line_count: z.number().int().min(1).max(2_000).optional().describe('Số dòng cần đọc; mặc định đọc tới trần ký tự'),
     }),
   }),
   fs_search: tool({
@@ -462,19 +513,29 @@ export const CLIENT_TOOL_DEFS = {
   }),
   fs_edit: tool({
     description:
-      'SỬA một file trong workspace bằng khối SEARCH/REPLACE (an toàn hơn fs_write với file lớn — ' +
-      'chỉ gửi đoạn đổi). Định dạng CHÍNH XÁC:\n' +
-      '<<<<<<< SEARCH\n(đoạn cần tìm — PHẢI khớp NGUYÊN VĂN và DUY NHẤT trong file, copy trực tiếp từ fs_read)\n=======\n(nội dung thay thế)\n>>>>>>> REPLACE\n' +
-      'Quy tắc: SEARCH ngắn nhất vẫn chứa đủ ngữ cảnh để duy nhất; KHÔNG bọc fence; sửa nhiều chỗ = ' +
-      'nhiều khối liên tiếp cùng tên file. Người dùng sẽ thấy diff và phê duyệt. Nếu lỗi "không tìm thấy", ' +
-      'đọc lại file (fs_read) rồi copy nguyên văn — đừng đoán.',
+      'Sửa CỤC BỘ một file trong workspace bằng khối SEARCH/REPLACE. Người dùng LUÔN xem diff và PHẢI phê duyệt. ' +
+      'Ưu tiên tool này cho file lớn hoặc chỉ cần thay vài đoạn; SEARCH phải khớp nguyên văn, duy nhất, và copy từ fs_read. ' +
+      'Sửa nhiều chỗ bằng nhiều khối liên tiếp; nếu không tìm thấy thì đọc lại file rồi copy nguyên văn. ' +
+      'Nếu bị từ chối, đừng gửi lại y nguyên — hỏi người dùng muốn điều chỉnh gì.',
     parameters: z.object({
       path: z.string().min(1).max(500).describe('Đường dẫn tương đối tới file cần sửa'),
       blocks: z
         .string()
         .min(10)
         .max(100_000)
-        .describe('Một hoặc nhiều khối SEARCH/REPLACE theo đúng định dạng trên'),
+        .describe(
+          'Một hoặc nhiều khối:\n<<<<<<< SEARCH\n(đoạn khớp NGUYÊN VĂN và DUY NHẤT, copy từ fs_read)\n=======\n(nội dung thay thế)\n>>>>>>> REPLACE\nKhông bọc code fence.',
+        ),
+    }),
+  }),
+  fs_write: tool({
+    description:
+      'Tạo mới hoặc ghi toàn bộ một file trong workspace. Người dùng LUÔN xem diff và PHẢI phê duyệt. ' +
+      'Dùng cho file mới, file nhỏ, hoặc tái cấu trúc lớn khi fs_edit không phù hợp. ' +
+      'Nếu bị từ chối, đừng gửi lại y nguyên — hỏi người dùng muốn điều chỉnh gì.',
+    parameters: z.object({
+      path: z.string().min(1).max(500).describe('Đường dẫn tương đối tới file cần ghi'),
+      content: z.string().max(100_000).describe('Toàn bộ nội dung file sau khi ghi'),
     }),
   }),
 } as const;

@@ -242,7 +242,7 @@ export function ModelSelector({
         className="flex h-8 items-center gap-1.5 rounded-full px-2.5 text-[12px] font-medium text-zinc-600 transition-colors hover:bg-zinc-200/70 hover:text-zinc-900 disabled:opacity-50"
       >
         <Sparkles size={13} className="text-brand" />
-        <span className="max-w-[110px] truncate sm:max-w-[160px]">{current?.label ?? 'Model'}</span>
+        <span className="max-w-[34vw] truncate sm:max-w-[160px]">{current?.label ?? 'Model'}</span>
         <ChevronDown size={13} className="text-zinc-400" />
       </button>
 

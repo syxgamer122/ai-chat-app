@@ -409,9 +409,9 @@ export function Composer({
             className="w-full resize-none bg-transparent px-4 pb-2 pt-3.5 text-[15px] leading-relaxed text-zinc-800 outline-none placeholder:text-zinc-400"
           />
 
-          <div className="flex items-center justify-between gap-2 px-2.5 pb-2.5">
+          <div className="flex flex-col items-stretch gap-2 px-2 pb-2 pb-safe-2 sm:flex-row sm:items-center sm:justify-between sm:gap-2 sm:px-2.5">
             {/* Trái: đính kèm / voice / thinking */}
-            <div className="flex min-w-0 items-center gap-1">
+            <div className="flex min-w-0 flex-wrap items-center gap-1">
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
@@ -538,7 +538,7 @@ export function Composer({
             </div>
 
             {/* Giữa: chọn model — đặt giữa để panel mở lên không đè vào sidebar. */}
-            <div className="flex min-w-0 items-center justify-center">
+            <div className="order-last flex min-w-0 items-center justify-start sm:order-none sm:min-w-[9rem] sm:flex-1 sm:justify-center">
               {thinkingLevel && onThinkingLevelChange && (
                 <ThinkingSlider
                   value={thinkingLevel}
@@ -555,7 +555,7 @@ export function Composer({
               />
             </div>
 
-            <div className="flex items-center justify-end gap-1">
+            <div className="flex flex-shrink-0 items-center justify-end gap-1">
               <button
                 type={isStreaming ? 'button' : 'submit'}
                 onClick={isStreaming ? onStop : undefined}

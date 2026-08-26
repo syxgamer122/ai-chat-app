@@ -34,6 +34,16 @@ function authHeaders(): Record<string, string> {
   return headers;
 }
 
+export class WebSearchClientError extends Error {
+  constructor(
+    message: string,
+    public readonly code?: string,
+  ) {
+    super(message);
+    this.name = 'WebSearchClientError';
+  }
+}
+
 async function postWeb(body: unknown): Promise<Response | null> {
   try {
     return await fetch('/api/web', {
@@ -49,8 +59,21 @@ async function postWeb(body: unknown): Promise<Response | null> {
 
 export async function searchWeb(query: string, count?: number): Promise<WebSearchHit[]> {
   const res = await postWeb({ op: 'search', query, ...(count ? { count } : {}) });
-  if (!res || !res.ok) return [];
-  const j = (await res.json().catch(() => null)) as { results?: WebSearchHit[] } | null;
+  if (!res) {
+    throw new WebSearchClientError('Không kết nối được dịch vụ tra cứu web.', 'NETWORK');
+  }
+  const j = (await res.json().catch(() => null)) as
+    | { results?: WebSearchHit[]; error?: string; code?: string }
+    | null;
+  if (!res.ok) {
+    throw new WebSearchClientError(
+      j?.error || 'Dịch vụ tra cứu web hiện không khả dụng.',
+      j?.code,
+    );
+  }
+  if (!j) {
+    throw new WebSearchClientError('Phản hồi tra cứu web không hợp lệ.', 'BAD_RESPONSE');
+  }
   return Array.isArray(j?.results) ? j.results : [];
 }
 
@@ -92,7 +115,7 @@ export async function gatherWebContext(messageText: string): Promise<WebContextP
   const query = messageText.replace(/\s+/g, ' ').trim().slice(0, 300);
   if (!query) return null;
 
-  const [hits, pastedUrls] = await Promise.all([
+  const [searchOutcome, pastedOutcome] = await Promise.allSettled([
     searchWeb(query),
     Promise.resolve(
       typeof location !== 'undefined'
@@ -100,6 +123,17 @@ export async function gatherWebContext(messageText: string): Promise<WebContextP
         : [],
     ),
   ]);
+  const hits =
+    searchOutcome.status === 'fulfilled'
+      ? searchOutcome.value
+      : [];
+  const pastedUrls = pastedOutcome.status === 'fulfilled' ? pastedOutcome.value : [];
+
+  if (hits.length === 0 && pastedUrls.length === 0 && searchOutcome.status === 'rejected') {
+    throw searchOutcome.reason instanceof Error
+      ? searchOutcome.reason
+      : new WebSearchClientError('Tra cứu web thất bại.', 'SEARCH_FAILED');
+  }
 
   // Trang cần đọc nguyên văn: URL dán trực tiếp ưu tiên, sau đó mới tới
   // top kết quả tìm kiếm. Tổng cộng vẫn ≤ 2 trang để giữ ngân sách context.

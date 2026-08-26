@@ -1459,7 +1459,10 @@ export async function POST(req: Request) {
                            })),
                          )
                        : '',
-                     allowAgentTools
+                      allowAgentTools &&
+                        !webContext &&
+                        !liveContext?.weather &&
+                        !liveContext?.rates
                        ? '[Tools] Bạn có các công cụ: web_search (tìm web hiện tại), web_fetch ' +
                          '(đọc một URL), weather (thời tiết theo nơi), exchange_rates (tỷ giá hôm nay)' +
                          `${chatMemories.length ? ', memory_search (tra ghi nhớ dài hạn của người dùng)' : ''}` +
@@ -1496,6 +1499,9 @@ export async function POST(req: Request) {
                     tools: buildAgentTools({
                       memories: chatMemories,
                       allowedHosts: provenanceUrls,
+                      includeWeb: !webContext,
+                      includeWeather: !liveContext?.weather,
+                      includeExchangeRates: !liveContext?.rates,
                     }),
                     clientTools: CLIENT_TOOL_NAMES,
                     onClientToolCall: (call) => {
@@ -1561,6 +1567,9 @@ export async function POST(req: Request) {
                           ...buildAgentTools({
                             memories: chatMemories,
                             allowedHosts: provenanceUrls,
+                            includeWeb: !webContext,
+                            includeWeather: !liveContext?.weather,
+                            includeExchangeRates: !liveContext?.rates,
                           }),
                           ...CLIENT_TOOL_DEFS,
                         },

@@ -211,15 +211,25 @@ export interface FsReadResult {
   content: string;
   truncated: boolean;
   size: number;
+  startLine: number;
+  endLine: number;
 }
 
 const MAX_READ_CHARS = 24_000;
+
+export interface FsReadOptions {
+  maxChars?: number;
+  /** Dòng đầu tiên cần đọc, đánh số từ 1. */
+  startLine?: number;
+  /** Số dòng cần đọc; bỏ trống thì đọc tới trần ký tự. */
+  lineCount?: number;
+}
 
 /** Đọc file text; trần ký tự chống nuốt cả file build vào context. */
 export async function fsRead(
   deps: FsDeps,
   rawPath: string,
-  maxChars: number = MAX_READ_CHARS,
+  options: number | FsReadOptions = MAX_READ_CHARS,
 ): Promise<FsReadResult> {
   const path = normalizeRelPath(rawPath);
   if (path === null) throw new Error(`Đường dẫn không hợp lệ: "${rawPath}"`);
@@ -230,11 +240,24 @@ export async function fsRead(
   const handle = await dir.getFileHandle(fileName);
   const file = await handle.getFile();
   const text = await file.text();
+  const opts = typeof options === 'number' ? { maxChars: options } : options;
+  const maxChars = opts.maxChars ?? MAX_READ_CHARS;
+  const allLines = text.split('\n');
+  const startIndex = Math.min(
+    Math.max(0, Math.floor((opts.startLine ?? 1) - 1)),
+    Math.max(0, allLines.length - 1),
+  );
+  const endIndex = opts.lineCount
+    ? Math.min(allLines.length, startIndex + Math.max(1, Math.floor(opts.lineCount)))
+    : allLines.length;
+  const selected = allLines.slice(startIndex, endIndex).join('\n');
   return {
     path,
-    content: text.slice(0, maxChars),
-    truncated: text.length > maxChars,
+    content: selected.slice(0, maxChars),
+    truncated: endIndex < allLines.length || selected.length > maxChars,
     size: file.size,
+    startLine: startIndex + 1,
+    endLine: endIndex,
   };
 }
 

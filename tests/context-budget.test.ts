@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   estimateContextTokens,
+  estimatePromptTokens,
   isContextOverflowError,
   shouldCompact,
   splitForCompaction,
@@ -36,6 +37,39 @@ describe('estimateContextTokens — chars/4 + ảnh hằng số', () => {
     const pdf = { contentType: 'application/pdf', url: 'data:application/pdf;base64,' + 'B'.repeat(400) };
     // 26 ký tự prefix + 400 = 426 -> ceil/4 = 107
     expect(estimateContextTokens([msg('hi', [pdf])])).toBe(1 + 107);
+  });
+
+  it('tính kết quả tool invocation theo JSON, có trần ký tự', () => {
+    const m = {
+      role: 'assistant',
+      content: 'abcd',
+      toolInvocations: [
+        { state: 'call', args: { path: 'ab' } },
+        { state: 'result', args: { path: 'cd' }, result: { content: 'x'.repeat(40) } },
+      ],
+    };
+    // text 1 + args(12/4=3) + result JSON ~54/4=14
+    expect(estimateContextTokens([m])).toBeGreaterThan(15);
+  });
+
+  it('bỏ qua partial-call và giá trị không serialize được', () => {
+    const m = {
+      role: 'assistant',
+      content: '',
+      toolInvocations: [
+        { state: 'partial-call', args: { path: 'x'.repeat(100) } },
+        { state: 'call', args: { circular: BigInt(1) } },
+      ],
+    };
+    expect(estimateContextTokens([m])).toBe(0);
+  });
+});
+
+describe('estimatePromptTokens', () => {
+  it('cộng messages và các block system động', () => {
+    expect(
+      estimatePromptTokens([msg('abcd')], ['x'.repeat(8), undefined, null]),
+    ).toBe(3);
   });
 });
 

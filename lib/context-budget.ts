@@ -37,6 +37,11 @@ export interface BudgetMessageLike {
   /** string hoặc mảng parts dạng [{ type: 'text', text }] của AI SDK. */
   content?: unknown;
   experimental_attachments?: Array<{ contentType?: string; url?: string }>;
+  toolInvocations?: ReadonlyArray<{
+    state?: string;
+    args?: unknown;
+    result?: unknown;
+  }>;
 }
 
 function textLengthOf(content: unknown): number {
@@ -52,6 +57,31 @@ function textLengthOf(content: unknown): number {
   return total;
 }
 
+/** Trần ký tự mỗi tool result khi ước lượng — chống quét payload quá lớn. */
+export const TOOL_RESULT_ESTIMATE_CHARS = 24_000;
+
+function jsonLengthOf(value: unknown): number {
+  if (value == null) return 0;
+  if (typeof value === 'string') return value.length;
+  try {
+    return JSON.stringify(value)?.length ?? 0;
+  } catch {
+    return 0;
+  }
+}
+
+function toolInvocationChars(message: BudgetMessageLike): number {
+  let chars = 0;
+  for (const invocation of message.toolInvocations ?? []) {
+    if (invocation?.state === 'partial-call') continue;
+    chars += Math.min(jsonLengthOf(invocation?.args), TOOL_RESULT_ESTIMATE_CHARS);
+    if (invocation?.state === 'result') {
+      chars += Math.min(jsonLengthOf(invocation?.result), TOOL_RESULT_ESTIMATE_CHARS);
+    }
+  }
+  return chars;
+}
+
 /**
  * Ước lượng token kiểu chars/4 — cố tình THẮT (thiên về over-estimate) để
  * kích hoạt nén sớm hơn một chút thay vì để tràn thật. Ảnh tính hằng số vì
@@ -61,6 +91,7 @@ export function estimateContextTokens(messages: readonly BudgetMessageLike[]): n
   let tokens = 0;
   for (const message of messages) {
     tokens += Math.ceil(textLengthOf(message.content) / 4);
+    tokens += Math.ceil(toolInvocationChars(message) / 4);
     for (const att of message.experimental_attachments ?? []) {
       if ((att.contentType ?? '').startsWith('image/')) {
         tokens += IMAGE_TOKEN_ESTIMATE;
@@ -71,6 +102,21 @@ export function estimateContextTokens(messages: readonly BudgetMessageLike[]): n
     }
   }
   return tokens;
+}
+
+/**
+ * Ước lượng toàn bộ prompt gửi model: lịch sử hội thoại cộng các khối system
+ * động (persona, summary, skills, web/PDF...). Các khối này từng bị bỏ sót,
+ * khiến UI báo còn budget dù request thật đã gần tràn context window.
+ */
+export function estimatePromptTokens(
+  messages: readonly BudgetMessageLike[],
+  promptBlocks: readonly (string | null | undefined)[] = [],
+): number {
+  return (
+    estimateContextTokens(messages) +
+    promptBlocks.reduce((tokens, block) => tokens + Math.ceil((block?.length ?? 0) / 4), 0)
+  );
 }
 
 /** true khi ước lượng đã chạm ngưỡng nên nén (theo công thức prime-agent). */

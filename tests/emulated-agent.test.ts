@@ -272,6 +272,14 @@ describe('runEmulatedLoop — e2e với upstream giả lập', () => {
     expect(p).toContain('"name": "TEN_TOOL"');
   });
 
+  it('protocol runtime chỉ liệt kê tool thực sự khả dụng', () => {
+    const p = buildProtocolHeader(new Set(['web_search', 'fs_list']));
+    expect(p).toContain('web_search');
+    expect(p).toContain('fs_list');
+    expect(p).not.toContain('memory_search');
+    expect(p).not.toContain('exchange_rates');
+  });
+
   it(`số round mặc định = ${EMU_MAX_ROUNDS}`, () => {
     expect(EMU_MAX_ROUNDS).toBe(3);
   });

@@ -27,7 +27,12 @@
 import { generateText } from 'ai';
 import type { LanguageModel } from 'ai';
 import { parseLooseJson } from '@/lib/json-repair';
-import { summarizeToolArgs, summarizeToolResult, type AgentToolSet } from '@/lib/agent-tools';
+import {
+  formatToolProtocolManual,
+  summarizeToolArgs,
+  summarizeToolResult,
+  type AgentToolSet,
+} from '@/lib/agent-tools';
 import { stripEmulatedToolMarkup } from '@/lib/text-tool-guard';
 
 export const EMU_MAX_ROUNDS = 3;
@@ -56,7 +61,10 @@ const TOOLS_MANUAL = [
   '  args: {"path": string, "content": string}',
 ].join('\n');
 
-export function buildProtocolHeader(): string {
+export function buildProtocolHeader(toolNames?: Iterable<string>): string {
+  // Runtime luôn truyền danh sách tool thực tế. Giữ fallback legacy chỉ cho
+  // callers cũ; nhờ đó catalog emulated không còn quảng bá tool vắng mặt.
+  const manual = toolNames ? formatToolProtocolManual(toolNames) : TOOLS_MANUAL;
   return [
     '# Tool calling protocol',
     '',
@@ -67,7 +75,7 @@ export function buildProtocolHeader(): string {
     '',
     '## Các công cụ khả dụng',
     '',
-    TOOLS_MANUAL,
+    manual,
     '',
     '## Cách gọi',
     '',
@@ -248,7 +256,7 @@ export async function runEmulatedLoop(opts: EmulatedLoopOptions): Promise<Emulat
     ...Object.keys(opts.tools),
     ...(opts.clientTools ?? []),
   ]);
-  const protocol = buildProtocolHeader();
+  const protocol = buildProtocolHeader(knownTools);
   const messages: Array<{ role: 'user' | 'assistant'; content: string }> = opts.messages.filter(
     (m): m is { role: 'user' | 'assistant'; content: string } => m.role !== 'system',
   );

@@ -91,6 +91,19 @@ describe('agent tools', () => {
     const parsed = t.web_fetch.parameters.safeParse({ url: 'https://a.com' });
     expect(parsed.success).toBe(true);
   });
+
+  it('không đăng ký lại capability đã được prefetch trong cùng lượt', () => {
+    const t = buildAgentTools({
+      includeWeb: false,
+      includeWeather: false,
+      includeExchangeRates: false,
+    });
+    expect(Object.hasOwn(t, 'web_search')).toBe(false);
+    expect(Object.hasOwn(t, 'web_fetch')).toBe(false);
+    expect(Object.hasOwn(t, 'weather')).toBe(false);
+    expect(Object.hasOwn(t, 'exchange_rates')).toBe(false);
+    expect(Object.hasOwn(t, 'memory_save')).toBe(true);
+  });
 });
 
 describe('loop-guard — chặn gọi trùng và vượt trần', () => {

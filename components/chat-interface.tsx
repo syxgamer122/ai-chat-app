@@ -41,7 +41,7 @@ import {
   supportsThinkingLevel,
   type ThinkingLevel,
 } from '@/lib/provider-url';
-import { estimateContextTokens, shouldCompact, splitForCompaction } from '@/lib/context-budget';
+import { estimatePromptTokens, shouldCompact, splitForCompaction } from '@/lib/context-budget';
 import {
   resolveContextWindow,
   serializeForCompaction,
@@ -510,7 +510,12 @@ export default function ChatInterface() {
           case 'fs_list':
             return JSON.stringify(await fsList(ws.deps, String(args.path ?? '')));
           case 'fs_read':
-            return JSON.stringify(await fsRead(ws.deps, String(args.path ?? '')));
+            return JSON.stringify(
+              await fsRead(ws.deps, String(args.path ?? ''), {
+                ...(typeof args.start_line === 'number' ? { startLine: args.start_line } : {}),
+                ...(typeof args.line_count === 'number' ? { lineCount: args.line_count } : {}),
+              }),
+            );
           case 'fs_search':
             return JSON.stringify(
               await fsSearch(ws.deps, String(args.query ?? ''), { isRegex: args.is_regex === true }),
@@ -856,11 +861,12 @@ export default function ChatInterface() {
       : -1;
     const effective =
       boundaryIndex >= 0 ? messages.slice(boundaryIndex + 1) : messages;
-    const tokens =
-      estimateContextTokens(effective) +
-      (activeCompaction ? Math.ceil(activeCompaction.summary.length / 4) : 0);
+    const tokens = estimatePromptTokens(effective, [
+      activeCompaction?.summary,
+      systemPrompt,
+    ]);
     return { tokens, max: resolveContextWindow(model, activeProvider?.models) };
-  }, [messages, activeCompaction, model, activeProvider]);
+  }, [messages, activeCompaction, model, activeProvider, systemPrompt]);
 
   useEffect(() => {
     if (isLoading || !currentChatId || !contextUsage) return;
@@ -2414,7 +2420,10 @@ export default function ChatInterface() {
           }
         } catch (err) {
           console.warn('[web-search]', err);
-          showNotice('Tra cứu web lỗi — gửi tin nhắn bình thường.');
+          showNotice(
+            `${err instanceof Error ? err.message : 'Tra cứu web lỗi.'} Tin nhắn sẽ được gửi không kèm kết quả web.`,
+            6000,
+          );
         } finally {
           setWebBusy(false);
           webBusyRef.current = false;
