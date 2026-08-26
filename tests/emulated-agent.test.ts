@@ -231,29 +231,37 @@ describe('runEmulatedLoop — e2e với upstream giả lập', () => {
     expect(events.memoryProposals).toEqual(['Người dùng tên Tuấn']);
   });
 
-  it('fs_* ở chế độ giả lập → note giải thích thay vì drop im lặng', async () => {
+  it('fs_* ở chế độ giả lập → YIELD về client (pending-client + onClientToolCall)', async () => {
+    const clientCalls: Array<{ toolCallId: string; toolName: string; args: Record<string, unknown> }> = [];
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: string | URL) => {
         const url = String(input);
         if (url.includes('/chat/completions')) {
           return completion(
-            '<tool_call>\n{"name":"fs_list","arguments":{"path":"src"}}\n</tool_call>',
+            'Để tôi xem cấu trúc thư mục.\n<tool_call>\n{"name":"fs_list","arguments":{"path":"src"}}\n</tool_call>',
           );
         }
         throw new Error(`unexpected url ${url}`);
       }),
     );
 
-    const { events, opts } = makeOpts({ maxRounds: 2, clientOnlyTools: new Set(['fs_list', 'fs_read', 'fs_write', 'fs_search']) });
+    const { events, opts } = makeOpts({
+      maxRounds: 3,
+      clientTools: new Set(['fs_list', 'fs_read', 'fs_write', 'fs_search']),
+      onClientToolCall: (c) => clientCalls.push(c),
+    });
     const result = await runEmulatedLoop(opts);
 
-    // Call được ghi nhận (chip hiển thị) chứ không bị parser vứt.
-    const phases = events.annotations.filter((a) => (a.tool as { phase?: string })?.phase);
-    expect(phases.map((a) => (a.tool as { phase: string }).phase)).toEqual(['start', 'done']);
-    // Kết quả trả về model là note giải thích — model không retry mù.
-    expect(result.totalCalls).toBe(1);
-    expect(events.usage.length).toBe(2);
+    // Yield đúng nghi thức: status + callback mang args đã parse.
+    expect(result.status).toBe('pending-client');
+    expect(clientCalls).toEqual([
+      { toolCallId: 'emu-0-1', toolName: 'fs_list', args: { path: 'src' } },
+    ]);
+    // Preamble đi kênh reasoning để user thấy tiến trình.
+    expect(events.reasoning).toContain('Để tôi xem cấu trúc');
+    // Usage round 0 vẫn được ghi trước khi yield.
+    expect(events.usage.length).toBe(1);
   });
 
   it('protocol header có đủ quy tắc chống hallucination + chống loop', () => {

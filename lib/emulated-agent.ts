@@ -47,6 +47,11 @@ const TOOLS_MANUAL = [
   '- exchange_rates: tỷ giá hôm nay. args: {} (không cần tham số)',
   '- memory_search: tra ghi nhớ dài hạn của người dùng. args: {"query": string}',
   '- memory_save: lưu thông tin dài hạn khi người dùng YÊU CẦU NHỚ rõ ràng. args: {"text": string (một câu ngắn)}',
+  '- fs_list: liệt kê MỘT cấp thư mục trong workspace trên MÁY NGƯỜI DÙNG. args: {"path": string (rỗng = gốc)}',
+  '- fs_read: đọc một file text trong workspace. args: {"path": string, vd "src/index.ts"}',
+  '- fs_write: ghi file trong workspace — người dùng thấy diff và PHẢI PHÊ DUYỆT; bị từ chối thì',
+  '  đừng ghi lại y nguyên. args: {"path": string, "content": string (TOÀN BỘ nội dung file)}',
+  '- fs_search: tìm chuỗi/regex trong workspace (bỏ node_modules/.git/dist). args: {"query": string, "is_regex"?: boolean}',
 ].join('\n');
 
 export function buildProtocolHeader(): string {
@@ -204,11 +209,13 @@ export interface EmulatedLoopOptions {
   abortSignal?: AbortSignal;
   maxRounds?: number;
   /**
-   * Tool khai báo phía server nhưng CHẠY CLIENT (fs_* — agent coding). Ở chế
-   * độ giả lập không có đường client-execution: nếu model vẫn gọi, trả note
-   * giải thích ngay thay vì drop im lặng khiến model retry vô ích.
+   * Tool chạy CLIENT (fs_* — agent coding). Khi model gọi: YIELD cả turn —
+   * bắn onClientToolCall để route forward part 'tool_call' qua data-stream,
+   * kết thúc 'tool-calls'; useChat resubmit với kết quả từ máy user và vòng
+   * lặp emulated chạy lại từ đầu trên transcript mới (kèm TOOL_RESULT).
    */
-  clientOnlyTools?: ReadonlySet<string>;
+  clientTools?: ReadonlySet<string>;
+  onClientToolCall?: (call: { toolCallId: string; toolName: string; args: Record<string, unknown> }) => void;
   /* Callbacks xuống route (ghi stream/annotation) */
   onTextDelta: (delta: string) => void;
   onReasoningLine: (line: string) => void;
@@ -218,6 +225,12 @@ export interface EmulatedLoopOptions {
 }
 
 export interface EmulatedLoopResult {
+  /**
+   * 'done' = vòng lặp hoàn tất, đáp án đã phát qua onTextDelta.
+   * 'pending-client' = model gọi tool CLIENT (fs_*): đã bắn onClientToolCall,
+   * caller PHẢI kết thúc stream bằng 'tool-calls' để useChat resubmit.
+   */
+  status: 'done' | 'pending-client';
   roundsUsed: number;
   totalCalls: number;
 }
@@ -231,7 +244,7 @@ export async function runEmulatedLoop(opts: EmulatedLoopOptions): Promise<Emulat
   const maxRounds = Math.max(1, opts.maxRounds ?? EMU_MAX_ROUNDS);
   const knownTools = new Set([
     ...Object.keys(opts.tools),
-    ...(opts.clientOnlyTools ?? []),
+    ...(opts.clientTools ?? []),
   ]);
   const protocol = buildProtocolHeader();
   const messages: Array<{ role: 'user' | 'assistant'; content: string }> = opts.messages.filter(
@@ -270,7 +283,7 @@ export async function runEmulatedLoop(opts: EmulatedLoopOptions): Promise<Emulat
       const answer = stripped.text.trim() || (text ?? '').trim();
       if (answer) opts.onTextDelta(answer);
       if (preamble && calls.length > 0) opts.onTextDelta(preamble);
-      return { roundsUsed: round + 1, totalCalls };
+      return { status: 'done', roundsUsed: round + 1, totalCalls };
     }
 
     if (preamble) opts.onReasoningLine(preamble);
@@ -282,26 +295,30 @@ export async function runEmulatedLoop(opts: EmulatedLoopOptions): Promise<Emulat
 
     const resultBlocks: string[] = [];
     for (const call of calls) {
+      /* Tool CLIENT (fs_*): yield turn — route forward part, client thực thi
+         trên máy user, resubmit mang kết quả trở lại và loop chạy tiếp. */
+      if (opts.clientTools?.has(call.name)) {
+        totalCalls += 1;
+        opts.onClientToolCall?.({
+          toolCallId: `emu-${round}-${totalCalls}`,
+          toolName: call.name,
+          args: call.args,
+        });
+        return { status: 'pending-client', roundsUsed: round + 1, totalCalls };
+      }
+
       const id = `emu-${round}-${totalCalls}`;
       opts.onAnnotation({
         tool: { id, name: call.name, phase: 'start', args: summarizeToolArgs(call.name, call.args) },
       });
+      const toolDef = opts.tools[call.name as keyof AgentToolSet];
       let result: unknown;
-      if (opts.clientOnlyTools?.has(call.name)) {
-        result = {
-          note:
-            'Công cụ này thao tác file trên máy người dùng và chỉ khả dụng ở chế độ function calling ' +
-            'native — hiện đang ở chế độ giả lập. Đừng gọi lại; hãy trả lời bằng kiến thức có sẵn.',
-        };
-      } else {
-        const toolDef = opts.tools[call.name as keyof AgentToolSet];
-        try {
-          result = toolDef?.execute
-            ? await toolDef.execute(call.args as never, {} as never)
-            : { note: 'Công cụ không tồn tại.' };
-        } catch {
-          result = { note: 'Công cụ tạm thời không khả dụng.' };
-        }
+      try {
+        result = toolDef?.execute
+          ? await toolDef.execute(call.args as never, {} as never)
+          : { note: 'Công cụ không tồn tại.' };
+      } catch {
+        result = { note: 'Công cụ tạm thời không khả dụng.' };
       }
       totalCalls += 1;
       opts.onAnnotation({
@@ -333,5 +350,5 @@ export async function runEmulatedLoop(opts: EmulatedLoopOptions): Promise<Emulat
     });
   }
 
-  return { roundsUsed: maxRounds, totalCalls };
+  return { status: 'done', roundsUsed: maxRounds, totalCalls };
 }

@@ -805,6 +805,9 @@ export async function POST(req: Request) {
        lại — ghi nhớ theo base+model để các request sau khỏi dính lại. */
     let allowAgentTools = (agentTools ?? true) && true; // điều chỉnh sau khi biết model
     let retriedWithoutTools = false;
+    /** Gateway vừa chê tools param ở lượt này → retry bằng đường GIẢ LẬP
+        (protocol text) thay vì bỏ tools hoàn toàn — model vẫn agent được. */
+    let retryAsEmulated = false;
     const chatMemories = Array.isArray(memories) ? memories : [];
 
     /* Injection guard: chấm điểm message user CUỐI của lượt gửi. Chỉ chặn
@@ -1410,7 +1413,7 @@ export async function POST(req: Request) {
                   'Bạn là một trợ lý AI thông minh, hữu ích và chính xác. Trả lời bằng tiếng Việt trừ khi được yêu cầu ngôn ngữ khác.';
 
                 /* ---- EMULATED TOOL CALLING ---- */
-                if (emulatedMode) {
+                if (emulatedMode || retryAsEmulated) {
                   const loopResult = await runEmulatedLoop({
                     model: openai(targetModel),
                     messages: core.map((m) => ({
@@ -1431,7 +1434,13 @@ export async function POST(req: Request) {
                       memories: chatMemories,
                       allowedHosts: provenanceUrls,
                     }),
-                    clientOnlyTools: CLIENT_TOOL_NAMES,
+                    clientTools: CLIENT_TOOL_NAMES,
+                    onClientToolCall: (call) => {
+                      /* Forward part 'tool_call' — useChat populates
+                         toolInvocations + onToolCall chạy trên máy user. */
+                      hasPendingClientCalls = true;
+                      dataStream.write(formatDataStreamPart('tool_call', call));
+                    },
                     ...(modelConfig.supportsTemperature === false
                       ? {}
                       : { temperature: temperature ?? 0.7 }),
@@ -1452,8 +1461,18 @@ export async function POST(req: Request) {
                   clearTimeout(budgetTimer);
                   markKeySuccess(apiKey);
                   console.info(
-                    `[req:${requestId}] emulated loop xong (${loopResult.roundsUsed} rounds, ${loopResult.totalCalls} calls).`,
+                    `[req:${requestId}] emulated loop xong (${loopResult.status}, ${loopResult.roundsUsed} rounds, ${loopResult.totalCalls} calls).`,
                   );
+                  /* pending-client: fs_* call đã forward, kết thúc bằng
+                     'tool-calls' — useChat resubmit với kết quả từ máy user,
+                     vòng lặp emulated chạy lại trên transcript mới. */
+                  if (loopResult.status === 'pending-client') {
+                    recordModelOutcome(upstreamBase ?? '', targetModel, true);
+                    decayModelFailure(upstreamBase ?? '', keyLabel, targetModel);
+                    markStickyKey(conversationId, apiKey);
+                    writeFinish('tool-calls');
+                    return;
+                  }
                   if (emittedChars === 0) {
                     recordModelOutcome(upstreamBase ?? '', targetModel, false);
                     markModelFailure(upstreamBase ?? '', keyLabel, targetModel);
@@ -1652,9 +1671,10 @@ export async function POST(req: Request) {
                 ) {
                   allowAgentTools = false;
                   retriedWithoutTools = true;
+                  retryAsEmulated = true;
                   if (upstreamBase) markToolsUnsupported(upstreamBase, selectedModelId);
                   console.warn(
-                    `[req:${requestId}] Gateway/model chê tools -> thử lại KHÔNG tools (${targetModel}).`,
+                    `[req:${requestId}] Gateway/model chê tools -> thử lại bằng đường GIẢ LẬP (${targetModel}).`,
                   );
                   attempt -= 1; // retry đúng key/model này, không đốt key kế
                   continue;
