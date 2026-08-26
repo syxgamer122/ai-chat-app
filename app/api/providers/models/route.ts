@@ -1,7 +1,7 @@
 import { validateProviderBaseUrl, normalizeProviderModels } from '@/lib/provider-url';
 import { checkSameOrigin, verifyAccessAuth } from '@/lib/security';
 
-export const runtime = 'edge';
+export const runtime = 'nodejs';
 
 /**
  * POST { baseUrl, apiKey } → fetch `${baseUrl}/models` phía server

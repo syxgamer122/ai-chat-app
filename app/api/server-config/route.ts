@@ -1,7 +1,7 @@
 import { supportsMediaGeneration, supportsThinkingLevel } from '@/lib/provider-url';
 import { checkSameOrigin } from '@/lib/security';
 
-export const runtime = 'edge';
+export const runtime = 'nodejs';
 
 /**
  * Cho client biết provider mặc định của server (env) hỗ trợ những gì —

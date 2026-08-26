@@ -1,7 +1,7 @@
 import { getAllConfiguredKeys, getKeyLabel, getKeyPoolSnapshot } from '@/lib/api-keys';
 import { timingSafeEqual } from '@/lib/security';
 
-export const runtime = 'edge';
+export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 /**

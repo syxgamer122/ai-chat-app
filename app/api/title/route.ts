@@ -13,7 +13,7 @@ import {
   verifyAccessAuth,
 } from '@/lib/security';
 
-export const runtime = 'edge';
+export const runtime = 'nodejs';
 
 const TitleSchema = z.object({
   message: z.string().min(1).max(2000),

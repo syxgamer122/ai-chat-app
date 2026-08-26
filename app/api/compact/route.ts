@@ -23,7 +23,7 @@ import {
  * fallback sang "hard trim" (bỏ tin cũ không tóm tắt) thay vì treo hội thoại.
  */
 
-export const runtime = 'edge';
+export const runtime = 'nodejs';
 
 const NO_STORE = {
   'Content-Type': 'application/json',

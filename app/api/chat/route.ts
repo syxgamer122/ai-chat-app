@@ -55,7 +55,7 @@ import { checkRateLimit, getClientIp, checkSameOrigin, verifyAccessAuth } from '
  * byte đầu < 1.7s — nằm trong trần 300s của Vercel (kể cả Hobby) và thoả điều
  * kiện edge "phải gửi byte đầu trong 25s để được stream tiếp".
  */
-export const runtime = 'edge';
+export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 const STREAM_BUDGET_MS = 270_000;
