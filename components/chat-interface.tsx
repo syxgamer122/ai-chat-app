@@ -442,6 +442,44 @@ export default function ChatInterface() {
             return JSON.stringify(
               await fsSearch(ws.deps, String(args.query ?? ''), { isRegex: args.is_regex === true }),
             );
+          case 'fs_edit': {
+            const path = String(args.path ?? '');
+            const blocksText = String(args.blocks ?? '');
+            const { parseEditBlocks, replaceMostSimilarChunk } = await import('@/lib/edit-blocks');
+            const parsed = parseEditBlocks(blocksText);
+            if (parsed.error || parsed.blocks.length === 0) {
+              return JSON.stringify({ applied: false, error: parsed.error ?? 'Không parse được khối edit.' });
+            }
+            // Tất cả khối phải áp thành công TRƯỚC khi hiện diff — một khối
+            // hỏng thì trả hint để model tự sửa, không ghi nửa chừng.
+            let current = (await fsRead(ws.deps, path)).content;
+            const applied = [];
+            for (const block of parsed.blocks) {
+              const r = replaceMostSimilarChunk(current, block.search, block.replace);
+              if (!r.ok) {
+                return JSON.stringify({
+                  applied: false,
+                  failedBlock: { file: block.filename, search: block.search.slice(0, 200) },
+                  hint: r.hint,
+                  note: 'Khối SEARCH không khớp. Đọc lại file (fs_read) rồi copy NGUYÊN VĂN đoạn cần đổi.',
+                });
+              }
+              current = r.text!;
+              applied.push(r.strategy);
+            }
+            const approved = await new Promise<boolean>((resolve) => {
+              setDiffState({ open: true, path, oldText: (await fsRead(ws.deps, path)).content, newText: current, resolve });
+            });
+            if (!approved) {
+              return JSON.stringify({
+                applied: false,
+                approved: false,
+                note: 'Người dùng TỪ CHỐI bản sửa này. Hỏi họ muốn điều chỉnh gì trước khi thử lại.',
+              });
+            }
+            const res = await fsWrite(ws.deps, path, current);
+            return JSON.stringify({ applied: true, blocks: applied.length, strategies: applied, ...res });
+          }
           case 'fs_write': {
             const path = String(args.path ?? '');
             const content = String(args.content ?? '');

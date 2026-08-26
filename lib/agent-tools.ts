@@ -460,6 +460,23 @@ export const CLIENT_TOOL_DEFS = {
       is_regex: z.boolean().optional().describe('Mặc định false — tìm chuỗi thường'),
     }),
   }),
+  fs_edit: tool({
+    description:
+      'SỬA một file trong workspace bằng khối SEARCH/REPLACE (an toàn hơn fs_write với file lớn — ' +
+      'chỉ gửi đoạn đổi). Định dạng CHÍNH XÁC:\n' +
+      '<<<<<<< SEARCH\n(đoạn cần tìm — PHẢI khớp NGUYÊN VĂN và DUY NHẤT trong file, copy trực tiếp từ fs_read)\n=======\n(nội dung thay thế)\n>>>>>>> REPLACE\n' +
+      'Quy tắc: SEARCH ngắn nhất vẫn chứa đủ ngữ cảnh để duy nhất; KHÔNG bọc fence; sửa nhiều chỗ = ' +
+      'nhiều khối liên tiếp cùng tên file. Người dùng sẽ thấy diff và phê duyệt. Nếu lỗi "không tìm thấy", ' +
+      'đọc lại file (fs_read) rồi copy nguyên văn — đừng đoán.',
+    parameters: z.object({
+      path: z.string().min(1).max(500).describe('Đường dẫn tương đối tới file cần sửa'),
+      blocks: z
+        .string()
+        .min(10)
+        .max(100_000)
+        .describe('Một hoặc nhiều khối SEARCH/REPLACE theo đúng định dạng trên'),
+    }),
+  }),
 } as const;
 
 export type ClientToolSet = typeof CLIENT_TOOL_DEFS;

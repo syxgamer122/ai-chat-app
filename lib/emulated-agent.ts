@@ -49,9 +49,11 @@ const TOOLS_MANUAL = [
   '- memory_save: lưu thông tin dài hạn khi người dùng YÊU CẦU NHỚ rõ ràng. args: {"text": string (một câu ngắn)}',
   '- fs_list: liệt kê MỘT cấp thư mục trong workspace trên MÁY NGƯỜI DÙNG. args: {"path": string (rỗng = gốc)}',
   '- fs_read: đọc một file text trong workspace. args: {"path": string, vd "src/index.ts"}',
-  '- fs_write: ghi file trong workspace — người dùng thấy diff và PHẢI PHÊ DUYỆT; bị từ chối thì',
-  '  đừng ghi lại y nguyên. args: {"path": string, "content": string (TOÀN BỘ nội dung file)}',
   '- fs_search: tìm chuỗi/regex trong workspace (bỏ node_modules/.git/dist). args: {"query": string, "is_regex"?: boolean}',
+  '- fs_edit: SỬA file bằng khối SEARCH/REPLACE (ưa hơn fs_write với file lớn). args: {"path": string,',
+  '  "blocks": string} — blocks gồm một/nhiều khối:\n<<<<<<< SEARCH\n(đoạn cần tìm, khớp NGUYÊN VĂN, duy nhất)\n=======\n(nội dung thay)\n>>>>>>> REPLACE',
+  '- fs_write: ghi TOÀN BỘ file — người dùng thấy diff và phê duyệt; bị từ chối thì đừng ghi lại y nguyên.',
+  '  args: {"path": string, "content": string}',
 ].join('\n');
 
 export function buildProtocolHeader(): string {
