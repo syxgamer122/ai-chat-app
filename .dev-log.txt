@@ -1,0 +1,31 @@
+▲ Next.js 16.3.1 (Turbopack)
+- Local:         http://localhost:3000
+- Network:       http://172.16.0.2:3000
+- Environments: .env.local
+✓ Ready in 1794ms
+✓ Running next.config.js took 95ms
+
+○ Compiling / ...
+ GET / 200 in 11.9s (next.js: 11.0s, application-code: 891ms)
+ GET / 200 in 20.0s (next.js: 18.3s, application-code: 1706ms)
+○ Compiling /manifest.webmanifest ...
+ GET /manifest.webmanifest 200 in 4.6s (next.js: 4.6s, application-code: 46ms)
+ GET /api/server-config 200 in 3.2s
+ GET /api/server-config 200 in 16ms
+ GET / 200 in 193ms (next.js: 13ms, application-code: 180ms)
+ GET /api/server-config 200 in 17ms
+ GET / 200 in 369ms (next.js: 62ms, application-code: 307ms)
+ GET / 200 in 279ms (next.js: 64ms, application-code: 215ms)
+ GET /manifest.webmanifest 200 in 30ms (next.js: 15ms, application-code: 14ms)
+ GET /api/server-config 200 in 13ms
+ GET /api/server-config 200 in 97ms
+ POST /api/title 200 in 2.7s
+[req:99c05c7a] start model=deepseek-v4-flash upstream=gpt.crax.lol keys=1
+ POST /api/chat 200 in 63s
+ POST /api/providers/models 200 in 956ms
+[req:083940f4] start model=stealth/ox-alpha upstream=openrouter.ai keys=1
+ POST /api/chat 200 in 9.7s
+[req:d17b375c] start model=stealth/ox-alpha upstream=openrouter.ai keys=1
+ POST /api/chat 200 in 8.8s
+[req:e2dcb277] start model=stealth/ox-alpha upstream=openrouter.ai keys=1
+ POST /api/chat 200 in 7.1s

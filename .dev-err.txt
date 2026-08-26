@@ -1,0 +1,7 @@
+⚠ The Edge Runtime is deprecated. You can use the "nodejs" runtime instead. Learn more: https://nextjs.org/docs/messages/edge-runtime-deprecated
+[models] Model không hợp lệ "deepseek-v4-flash" -> dùng gpt-5.6-sol.
+[req:99c05c7a] [UPSTREAM_NETWORK] key=provide...-key model=deepseek-v4-flash host=gpt.crax.lol status=none msg=AI Provider không phản hồi token mới trong 60 giây.
+[browser] [useChat] Error: Không kết nối được tới AI Provider gpt.crax.lol: AI Provider không phản hồi token mới trong 60 giây. [UPSTREAM_NETWORK#99c05c7a] (components/chat-interface.tsx:581:31)
+[models] Model không hợp lệ "stealth/ox-alpha" -> dùng gpt-5.6-sol.
+[models] Model không hợp lệ "stealth/ox-alpha" -> dùng gpt-5.6-sol.
+[models] Model không hợp lệ "stealth/ox-alpha" -> dùng gpt-5.6-sol.

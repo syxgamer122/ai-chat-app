@@ -71,7 +71,7 @@ const STREAM_BUDGET_MS = 270_000;
  * trong ngân sách; chỉ video nặng bất thường mới chạm trần.
  */
 const VIDEO_BUDGET_MS = 290_000;
-const IDLE_TIMEOUT_MS = 60_000;
+const IDLE_TIMEOUT_MS = 90_000;
 const HEARTBEAT_MS = 10_000;
 const MAX_BODY_BYTES = 4.5 * 1024 * 1024;
 const MAX_FAILOVER_KEYS = 3;
@@ -1190,7 +1190,7 @@ export async function POST(req: Request) {
                 idleTimer = setTimeout(() => {
                   abortKind = 'idle';
                   budgetController.abort(
-                    new Error('AI Provider không phản hồi token mới trong 60 giây.'),
+                     new Error(`AI Provider không phản hồi token mới trong ${Math.round(IDLE_TIMEOUT_MS / 1000)} giây.`),
                   );
                 }, IDLE_TIMEOUT_MS);
               };
@@ -1686,7 +1686,13 @@ export async function POST(req: Request) {
                   continue;
                 }
 
-                if (abortKind && isAbortError(e)) {
+                if (abortKind) {
+                  /* KHÔNG dùng isAbortError(e) ở đây: Node undici khi abort
+                     kèm reason là Error sẽ ném CHÍNH Error đó (mất tên
+                     'AbortError') → phân loại nhầm thành UPSTREAM_NETWORK,
+                     nhánh retry idle không bao giờ chạy (bug lộ qua log
+                     99c06c7a). abortKind CHỈ do timer của ta đặt ngay trước
+                     khi abort — đủ tin cậy; client-abort đã xử lý ở trên. */
                   const isIdle = abortKind === 'idle';
                   if (isIdle) {
                     markKeyFailure(apiKey, undefined);
@@ -1721,7 +1727,7 @@ export async function POST(req: Request) {
                      chạm trần là do prompt nặng — gợi ý cách xử lý thay vì chỉ
                      báo lỗi kỹ thuật. */
                   const diagMsg = isIdle
-                    ? `AI Provider ${upstreamHost} ngừng gửi token trong 60 giây, phiên stream đã bị hủy.`
+                     ? `AI Provider ${upstreamHost} ngừng gửi token trong ${Math.round(IDLE_TIMEOUT_MS / 1000)} giây, phiên stream đã bị hủy.`
                     : isVideoModel(targetModel)
                       ? `Video chưa xong trong ${budgetSec} giây — vượt giới hạn thời gian của nền tảng. Thử mô tả ngắn/đơn giản hơn, hoặc tạo lại.`
                       : `Phản hồi vượt quá ngân sách ${budgetSec} giây của Edge Function và đã bị cắt.`;
