@@ -111,6 +111,34 @@ export interface KVEntry {
   value: unknown;
 }
 
+/**
+ * Checkpoint workspace cho agent coding: nội dung file NGAY TRƯỚC khi agent
+ * ghi (fs_write/fs_edit được duyệt). Rollback = ghi lại content cũ; file có
+ * existedBefore=false thì rollback XÓA file đi (tham khảo thiết kế snapshot
+ * của numasec: "file did not exist in snapshot, deleting").
+ */
+export interface WsSnapshotFile {
+  path: string;
+  /** Nội dung trước khi agent ghi ('' khi existedBefore=false). */
+  content: string;
+  existedBefore: boolean;
+}
+
+export interface WorkspaceSnapshot {
+  id: string;
+  chatId: string;
+  createdAt: number;
+  files: WsSnapshotFile[];
+  /**
+   * Có file không chụp được trước khi ghi (quá lớn / lỗi đọc) → snapshot
+   * KHÔNG đầy đủ → bị chặn rollback (an toàn hơn chiến lược bỏ-im-lặng của
+   * numasec vì browser không có git làm lưới cứu).
+   */
+  incomplete?: boolean;
+  /** Đã hoàn tác — chỉ còn là lịch sử, không restorable. */
+  undoneAt?: number;
+}
+
 /** Ghi nhớ dài hạn kiểu fx-memory: fact ngắn user/model muốn giữ xuyên chat. */
 export interface StoredMemory {
   id: string;
@@ -161,6 +189,7 @@ export class ChatAppDatabase extends Dexie {
   kv!: Table<KVEntry, string>;
   providers!: Table<ProviderPresetRecord, string>;
   memories!: Table<StoredMemory, string>;
+  wsSnapshots!: Table<WorkspaceSnapshot, string>;
 
   constructor() {
     super('ai_chat_app_db');
@@ -265,6 +294,21 @@ export class ChatAppDatabase extends Dexie {
       kv: 'key',
       providers: 'id, updatedAt',
       memories: 'id, createdAt',
+    });
+
+    // v9: workspace checkpoint — snapshot file trước khi agent coding ghi đĩa,
+    // phục vụ hoàn tác (undo). Chỉ thêm bảng mới, không đụng store cũ.
+    this.version(9).stores({
+      chats: 'id, createdAt, updatedAt, pinned, activeLeafId, *titleTokens',
+      messages:
+        'id, chatId, role, createdAt, seq, parentId, ' +
+        '[chatId+parentId], [chatId+createdAt], [chatId+seq], ' +
+        '[chatId+parentId+branchOrder], *tokens',
+      prompts: 'id, updatedAt',
+      kv: 'key',
+      providers: 'id, updatedAt',
+      memories: 'id, createdAt',
+      ws_snapshots: 'id, chatId, createdAt',
     });
 
     this.messages.hook('creating', (_primKey, obj) => {
@@ -413,10 +457,11 @@ export async function appendMessage(input: AppendMessageInput): Promise<StoredMe
   });
 }
 
-/** Cascade delete: messages + attachments của cả chat. */
+/** Cascade delete: messages + attachments + workspace snapshots của cả chat. */
 export async function deleteChatCascade(chatId: string): Promise<void> {
-  await db.transaction('rw', db.messages, db.chats, async () => {
+  await db.transaction('rw', db.messages, db.chats, db.wsSnapshots, async () => {
     await db.messages.where('chatId').equals(chatId).delete();
+    await db.wsSnapshots.where('chatId').equals(chatId).delete();
     await db.chats.delete(chatId);
   });
 }

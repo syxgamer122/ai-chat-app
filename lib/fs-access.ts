@@ -40,6 +40,8 @@ export interface FsFileHandleLike {
   kind: 'file';
   name: string;
   getFile(): Promise<File>;
+  /** Chrome 110+ — xoá file không cần handle thư mục cha. */
+  remove?(): Promise<void>;
 }
 
 export interface FsDirHandleLike {
@@ -48,6 +50,8 @@ export interface FsDirHandleLike {
   values(): AsyncIterable<FsFileHandleLike | FsDirHandleLike>;
   getDirectoryHandle(name: string, opts?: { create?: boolean }): Promise<FsDirHandleLike>;
   getFileHandle(name: string, opts?: { create?: boolean }): Promise<FsFileHandleLike>;
+  /** Fallback xoá file khi handle không có .remove(). */
+  removeEntry?(name: string): Promise<void>;
 }
 
 export interface WritableLike {
@@ -259,6 +263,91 @@ export async function fsWrite(
   await writable.write(content);
   await writable.close();
   return { path, bytes: content.length, created };
+}
+
+/* ------------------------------------------------------------------ */
+/* Checkpoint ops — phục vụ workspace snapshot/rollback                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Đọc TOÀN BỘ nội dung file cho snapshot (fsRead thường trần 24k ký tự để
+ * tiết kiệm context — KHÔNG dùng được cho rollback: restore bản truncated
+ * là hỏng file). Trần riêng chặn nuốt file build khổng lồ vào Dexie.
+ */
+export const SNAPSHOT_MAX_FILE_BYTES = 512_000;
+
+export type FsFullRead =
+  | { status: 'ok'; path: string; content: string }
+  | { status: 'missing'; path: string }
+  | { status: 'too-large'; path: string; size: number }
+  | { status: 'error'; path: string; message: string };
+
+function isNotFoundError(e: unknown): boolean {
+  if (e instanceof Error) return e.name === 'NotFoundError' || /NotFoundError/i.test(e.message);
+  return false;
+}
+
+export async function fsReadFull(
+  deps: FsDeps,
+  rawPath: string,
+  maxBytes: number = SNAPSHOT_MAX_FILE_BYTES,
+): Promise<FsFullRead> {
+  const path = normalizeRelPath(rawPath);
+  if (path === null || !path) {
+    return { status: 'error', path: String(rawPath), message: 'Đường dẫn không hợp lệ.' };
+  }
+  const segs = path.split('/').filter(Boolean);
+  const fileName = segs.pop();
+  if (!fileName) return { status: 'error', path, message: 'Thiếu tên file.' };
+
+  try {
+    const dir = await resolveDir(deps, segs.join('/'), false);
+    let handle: FsFileHandleLike;
+    try {
+      handle = await dir.getFileHandle(fileName);
+    } catch (e) {
+      if (isNotFoundError(e)) return { status: 'missing', path };
+      throw e;
+    }
+    const file = await handle.getFile();
+    if (file.size > maxBytes) {
+      return { status: 'too-large', path, size: file.size };
+    }
+    const content = await file.text();
+    return { status: 'ok', path, content };
+  } catch (e) {
+    return {
+      status: 'error',
+      path,
+      message: e instanceof Error ? e.message.slice(0, 200) : 'Lỗi đọc file không rõ.',
+    };
+  }
+}
+
+/**
+ * Xoá file trong workspace — dùng khi rollback file agent ĐÃ TẠO MỚI
+ * (trước checkpoint nó chưa tồn tại → hoàn tác nghĩa là xoá đi, đúng semantics
+ * revert của numasec). Ưu tiên handle.remove() (Chrome 110+), fallback
+ * removeEntry trên thư mục cha. Không tạo thư mục dọc đường đi.
+ */
+export async function fsDelete(deps: FsDeps, rawPath: string): Promise<{ path: string }> {
+  const path = normalizeRelPath(rawPath);
+  if (path === null || !path) throw new Error(`Đường dẫn không hợp lệ: "${rawPath}"`);
+  const segs = path.split('/').filter(Boolean);
+  const fileName = segs.pop();
+  if (!fileName) throw new Error('Thiếu tên file.');
+
+  const dir = await resolveDir(deps, segs.join('/'), false);
+  const handle = await dir.getFileHandle(fileName); // không tồn tại → ném lỗi tự nhiên
+  if (typeof handle.remove === 'function') {
+    await handle.remove();
+    return { path };
+  }
+  if (typeof dir.removeEntry === 'function') {
+    await dir.removeEntry(fileName);
+    return { path };
+  }
+  throw new Error('Trình duyệt không hỗ trợ xoá file qua File System Access API.');
 }
 
 export interface SearchMatch {

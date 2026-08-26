@@ -203,7 +203,15 @@ function matchButForLeadingWhitespace(
   if (!sameBody) return null;
   const prefixes = new Set(
     wholeLines
-      .map((w, i) => (w.trim() ? w.slice(0, w.length - partLines[i].length) : ''))
+      .map((w, i) => {
+        if (!w.trim()) return '';
+        /* Prefix đúng của w = phần TRƯỚC thân chung với partLines[i].
+           Dùng độ dài thân (sau khi bỏ indent) chứ không phải độ dài dòng
+           part — SEARCH thụy sâu hơn file từng làm chỉ số âm, slice(0, âm)
+           cắt từ CUỐI dòng ra prefix rác rồi ghi đè file user. */
+        const body = partLines[i].replace(/^\s+/, '');
+        return w.slice(0, w.length - body.length);
+      })
       .filter((p) => p !== ''),
   );
   if (prefixes.size !== 1) return null;

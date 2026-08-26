@@ -64,15 +64,25 @@ import {
 import { gatherWebContext } from '@/lib/use-web-search';
 import { stripEmulatedToolMarkup } from '@/lib/text-tool-guard';
 import {
+  fsDelete,
   fsList,
   fsRead,
+  fsReadFull,
   fsSearch,
   fsWrite,
   getWorkspaceInfo,
   pickWorkspaceRoot,
   requireWorkspace,
   restoreWorkspaceRoot,
+  type FsDeps,
 } from '@/lib/fs-access';
+import {
+  captureFile,
+  newTurnCapture,
+  saveTurnCapture,
+  type CaptureInput,
+  type TurnCapture,
+} from '@/lib/workspace-checkpoints';
 import { CLIENT_TOOL_NAMES } from '@/lib/agent-tools';
 import { DiffConfirm, type DiffConfirmState } from '@/components/diff-confirm';
 import { toSkills } from '@/lib/prompt-library';
@@ -84,6 +94,7 @@ import { compressImageFiles } from '@/lib/image-compress';
 import { ChatHeader } from './chat/chat-header';
 import { MessageList } from './chat/message-list';
 import { ContextMeter } from '@/components/context-meter';
+import { WorkspaceCheckpointBar } from '@/components/workspace-checkpoints';
 import type { BranchInfo } from './chat/message-item';
 
 /* ------------------------------------------------------------------ */
@@ -341,6 +352,33 @@ export default function ChatInterface() {
     attachmentsRef.current = attachments;
   }, [attachments]);
 
+  /* Workspace checkpoint (undo agent coding): 1 lượt agent = 1 snapshot.
+     Ref mở từ tool-call ghi đầu tiên tới khi stream kết thúc — useChat giữ
+     isLoading=true xuyên các resubmit của maxSteps nên mọi fs_write/fs_edit
+     trong cùng response gom về đúng một bản ghi (first-wins per path). */
+  const turnCaptureRef = useRef<TurnCapture | null>(null);
+  const closeTurnCapture = useCallback(() => {
+    turnCaptureRef.current = null;
+  }, []);
+  /** Đọc "trước khi ghi" cho snapshot — nội dung ĐẦY ĐỦ (fsRead thường trần
+      24k ký tự để đớn context; restore bản truncated là hỏng file user). */
+  const readCaptureForPath = useCallback(
+    async (deps: FsDeps, rawPath: string): Promise<CaptureInput> => {
+      const r = await fsReadFull(deps, rawPath);
+      switch (r.status) {
+        case 'ok':
+          return { status: 'ok', path: r.path, content: r.content };
+        case 'missing':
+          return { status: 'missing', path: r.path };
+        case 'too-large':
+          return { status: 'too-large', path: r.path };
+        default:
+          return { status: 'error', path: rawPath };
+      }
+    },
+    [],
+  );
+
   const addFiles = useCallback((files: FileList | File[] | null) => {
     if (!files) return;
     const fileArr = Array.from(files);
@@ -511,7 +549,17 @@ export default function ChatInterface() {
                 note: 'Người dùng TỪ CHỐI bản sửa này. Hỏi họ muốn điều chỉnh gì trước khi thử lại.',
               });
             }
+            /* Checkpoint: chụp nội dung TRƯỚC khi ghi (full content). Thất
+               bại chụp không chặn việc ghi — chỉ là lượt này mất điểm undo. */
+            const capChatId = useAppStore.getState().currentChatId;
+            if (capChatId) {
+              if (!turnCaptureRef.current) {
+                turnCaptureRef.current = newTurnCapture(capChatId);
+              }
+              captureFile(turnCaptureRef.current, await readCaptureForPath(ws.deps, path));
+            }
             const res = await fsWrite(ws.deps, path, current);
+            if (turnCaptureRef.current) void saveTurnCapture(turnCaptureRef.current);
             return JSON.stringify({ applied: true, blocks: applied.length, strategies: applied, ...res });
           }
           case 'fs_write': {
@@ -531,7 +579,17 @@ export default function ChatInterface() {
                 note: 'Người dùng TỪ CHỐI ghi file này. Đừng ghi lại y nguyên — hỏi họ muốn điều chỉnh gì.',
               });
             }
-            return JSON.stringify({ written: true, ...(await fsWrite(ws.deps, path, content)) });
+            /* Checkpoint — như fs_edit: chụp trước khi ghi, lưu sau khi xong. */
+            const capChatId = useAppStore.getState().currentChatId;
+            if (capChatId) {
+              if (!turnCaptureRef.current) {
+                turnCaptureRef.current = newTurnCapture(capChatId);
+              }
+              captureFile(turnCaptureRef.current, await readCaptureForPath(ws.deps, path));
+            }
+            const writeRes = await fsWrite(ws.deps, path, content);
+            if (turnCaptureRef.current) void saveTurnCapture(turnCaptureRef.current);
+            return JSON.stringify({ written: true, ...writeRes });
           }
           default:
             return JSON.stringify({ error: 'Tool không hỗ trợ phía client.' });
@@ -541,7 +599,7 @@ export default function ChatInterface() {
         return JSON.stringify({ error: msg });
       }
     },
-    [showNotice, showDiffModal],
+    [showNotice, showDiffModal, readCaptureForPath],
   );
 
   const {
@@ -586,6 +644,9 @@ export default function ChatInterface() {
     maxSteps: 8,
     onToolCall: handleClientToolCall,
     onFinish: (message, { finishReason, usage }) => {
+      // Đóng checkpoint turn — các snapshot của response này đã được lưu
+      // (fire-and-forget); lượt agent kế tiếp mở capture mới.
+      closeTurnCapture();
       // Guard markup tool-call model tự nhả vào kênh text — strip TRƯỚC khi
       // sanitize/lưu để nội dung trong DB cũng sạch (tokens + search index).
       const clean = sanitizeContent(stripEmulatedToolMarkup(message.content).text);
@@ -966,6 +1027,9 @@ export default function ChatInterface() {
           finishRef.current = 'abort';
           stop();
         }
+
+        /* Capture của chat cũ không được dính vào lượt ghi của chat mới. */
+        closeTurnCapture();
       }
 
       previousChatId.current =
@@ -975,24 +1039,30 @@ export default function ChatInterface() {
     currentChatId,
     isLoading,
     stop,
+    closeTurnCapture,
   ]);
 
   useEffect(() => {
-    if (error) finishRef.current = 'error';
-  }, [error]);
+    if (error) {
+      finishRef.current = 'error';
+      closeTurnCapture();
+    }
+  }, [error, closeTurnCapture]);
 
   useEffect(() => {
     if (!data?.length) return;
     const lastData = data[data.length - 1] as any;
     if (lastData?.type === 'generation-error') {
       finishRef.current = 'error';
+      closeTurnCapture();
       showNotice(lastData.message || 'Kết nối AI bị gián đoạn giữa chừng.');
     }
-  }, [data, showNotice]);
+  }, [data, showNotice, closeTurnCapture]);
 
   const handleStop = useCallback(() => {
     finishRef.current = 'abort';
     stop();
+    closeTurnCapture();
 
     // Hủy luôn lượt tạo ảnh/video đang chạy trực tiếp từ trình duyệt.
     mediaAbortRef.current?.abort();
@@ -1008,7 +1078,7 @@ export default function ChatInterface() {
     ) {
       pendingAssistantForkRef.current = null;
     }
-  }, [stop]);
+  }, [stop, closeTurnCapture]);
 
   useEffect(() => {
     if (isLoading) {
@@ -2724,6 +2794,13 @@ export default function ChatInterface() {
           <ContextMeter used={contextUsage.tokens} max={contextUsage.max} />
         </div>
       )}
+
+      {/* Undo agent coding: chỉ hiện khi chat này có snapshot restorable. */}
+      <WorkspaceCheckpointBar
+        chatId={currentChatId}
+        busy={isLoading || mediaBusy}
+        onNotice={showNotice}
+      />
 
       <Composer
         input={input}

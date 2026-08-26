@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { Check, X } from 'lucide-react';
 import { lineDiff, renderUnifiedDiff } from '@/lib/naive-diff';
+import { useHaptics } from '@/components/effects';
 
 /**
  * Modal phê duyệt ghi file của agent coding — cổng an toàn BẮT BUỘC trước
@@ -47,9 +48,13 @@ export function DiffConfirm({
     return () => window.removeEventListener('keydown', onKey);
   }, [state, onClose]);
 
+  /* Hook PHẢI gọi trước mọi early-return (rules-of-hooks). */
+  const haptics = useHaptics();
+
   if (!state?.open || !diff) return null;
 
   const decide = (approved: boolean) => {
+    if (approved) haptics.trigger('success');
     state.resolve(approved);
     onClose();
   };

@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { ModelSelector, type ModelOption } from '@/components/model-selector';
 import { ThinkingSlider } from '@/components/thinking-slider';
+import { MorphIcon, SiriWave, TextShimmer, useHaptics } from '@/components/effects';
 import type { ThinkingLevel } from '@/lib/provider-url';
 import { useSpeechRecognition } from '@/lib/use-speech-recognition';
 import { filterPrompts } from '@/lib/prompt-library';
@@ -244,15 +245,17 @@ export function Composer({
     [slashOpen, slashMatches, slashIndex, applyPrompt, onKeyDown],
   );
 
+  const haptics = useHaptics();
   const handleSubmit = useCallback(
     (e: React.FormEvent) => {
       if (!canSubmit) {
         e.preventDefault();
         return;
       }
+      haptics.trigger('light');
       onSubmit(e);
     },
-    [canSubmit, onSubmit],
+    [canSubmit, onSubmit, haptics],
   );
 
   return (
@@ -355,16 +358,16 @@ export function Composer({
           )}
 
           {(voice.listening || voice.error || webBusy) && (
-            <div className="flex items-center gap-2 px-4 pt-3 text-[12px] leading-relaxed">
+            <div className="flex items-center gap-3 px-4 pt-3 text-[12px] leading-relaxed">
               {webBusy && (
                 <span className="flex min-w-0 items-center gap-1.5 text-zinc-600">
                   <span className="h-1.5 w-1.5 flex-shrink-0 animate-pulse rounded-full bg-brand" />
-                  <span className="truncate">Đang tra cứu web…</span>
+                  <TextShimmer text="Đang tra cứu web…" className="truncate" />
                 </span>
               )}
               {voice.listening && (
-                <span className="flex min-w-0 items-center gap-1.5 text-zinc-600">
-                  <span className="h-1.5 w-1.5 flex-shrink-0 animate-pulse rounded-full bg-brand" />
+                <span className="flex min-w-0 items-center gap-2 text-zinc-600">
+                  <SiriWave active />
                   <span className="truncate">
                     {voice.interim || 'Đang nghe… nói tiếng Việt nhé'}
                   </span>
@@ -444,11 +447,9 @@ export function Composer({
                       : 'icon-btn h-9 w-9 rounded-full'
                   }
                 >
-                  {voice.listening ? (
-                    <Square size={11} className="animate-pulse fill-current" />
-                  ) : (
-                    <Mic size={16} />
-                  )}
+                  <MorphIcon active={voice.listening} inactive={<Mic size={16} />}>
+                    <Square size={11} className="fill-current" />
+                  </MorphIcon>
                 </button>
               )}
 
@@ -555,29 +556,23 @@ export function Composer({
             </div>
 
             <div className="flex items-center justify-end gap-1">
-              {isStreaming ? (
-                <button
-                  type="button"
-                  onClick={onStop}
-                  aria-label="Dừng tạo"
-                  className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-zinc-800 text-white transition hover:bg-zinc-900 dark:bg-zinc-200 dark:text-zinc-900 dark:hover:bg-zinc-300"
-                >
-                  <Square size={13} className="fill-current" />
-                </button>
-              ) : (
-                <button
-                  type="submit"
-                  disabled={!canSubmit}
-                  aria-label="Gửi tin nhắn"
-                  className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full transition-all ${
-                    canSubmit
+              <button
+                type={isStreaming ? 'button' : 'submit'}
+                onClick={isStreaming ? onStop : undefined}
+                disabled={!isStreaming && !canSubmit}
+                aria-label={isStreaming ? 'Dừng tạo' : 'Gửi tin nhắn'}
+                className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full transition-all ${
+                  isStreaming
+                    ? 'bg-zinc-800 text-white hover:bg-zinc-900 dark:bg-zinc-200 dark:text-zinc-900 dark:hover:bg-zinc-300'
+                    : canSubmit
                       ? 'bg-brand text-white shadow-brand hover:bg-brand-hover active:scale-95'
                       : 'cursor-not-allowed bg-zinc-200 text-zinc-400'
-                  }`}
-                >
-                  <ArrowUp size={17} />
-                </button>
-              )}
+                }`}
+              >
+                <MorphIcon active={isStreaming} inactive={<ArrowUp size={17} />}>
+                  <Square size={13} className="fill-current" />
+                </MorphIcon>
+              </button>
             </div>
           </div>
         </form>

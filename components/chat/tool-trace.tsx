@@ -11,6 +11,7 @@ import {
   Search,
   Wrench,
 } from 'lucide-react';
+import { ShimmerLine } from '@/components/effects';
 
 /**
  * Tool trace — timeline các lần model gọi công cụ trong bubble assistant.
@@ -109,8 +110,9 @@ export const ToolTrace = memo(function ToolTrace({
             key={ev.id}
             role="listitem"
             title={detail || undefined}
-            className="flex max-w-full items-center gap-1.5 rounded-lg border border-zinc-200/70 bg-surface-muted px-2 py-1 text-[11px] text-zinc-600"
+            className="relative flex max-w-full items-center gap-1.5 overflow-hidden rounded-lg border border-zinc-200/70 bg-surface-muted px-2 py-1 text-[11px] text-zinc-600"
           >
+            {!ev.done && <ShimmerLine />}
             <Icon size={12} className="flex-shrink-0 text-brand" aria-hidden />
             <span className="flex-shrink-0 font-medium text-zinc-700">{meta.label}</span>
             {ev.args && !ev.done && (

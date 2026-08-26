@@ -515,6 +515,42 @@ html[data-animations='off'] *::after {
 }
 
 /* ------------------------------------------------------------------ */
+/* FX shimmer text — vệt sáng quét qua chữ đang chờ (TextShimmer).      */
+/* CSS thuần thay framer-mask (type-safe + GPU rẻ); tôn trọng           */
+/* prefers-reduced-motion qua media query.                              */
+/* ------------------------------------------------------------------ */
+@keyframes fx-shimmer-sweep {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+.fx-shimmer-text {
+  background: linear-gradient(
+    90deg,
+    rgb(113 113 122 / 0.6) 42%,
+    var(--brand) 50%,
+    rgb(113 113 122 / 0.6) 58%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  animation: fx-shimmer-sweep 1.8s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .fx-shimmer-text {
+    animation: none;
+    background: none;
+    -webkit-text-fill-color: currentColor;
+    color: rgb(113 113 122 / 0.85);
+  }
+}
+
+/* ------------------------------------------------------------------ */
 /* KaTeX                                                               */
 /* ------------------------------------------------------------------ */
 

@@ -7,6 +7,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { ArrowDown, ArrowUp } from 'lucide-react';
 import { ChatErrorBoundary } from '@/components/chat-error-boundary';
 import { KodaLogo } from '@/components/koda-logo';
+import { TextShimmer, TypingIndicator } from '@/components/effects';
 import { MessageItem, AssistantAvatar, type BranchInfo } from './message-item';
 
 /* ------------------------------------------------------------------ */
@@ -67,18 +68,11 @@ function ThinkingIndicator() {
     <div className="mx-auto flex max-w-thread items-start gap-3 px-2 pb-6 md:px-4">
       <AssistantAvatar />
       <div className="flex items-center gap-2.5 py-1.5" role="status" aria-live="polite">
-        <span aria-hidden="true" className="flex items-center gap-1">
-          {[0, 1, 2].map((i) => (
-            <span
-              key={i}
-              className="h-1.5 w-1.5 animate-bounce rounded-full bg-brand/80"
-              style={{ animationDelay: `${i * 150}ms`, animationDuration: '900ms' }}
-            />
-          ))}
-        </span>
-        <span className="text-[13px] tabular-nums text-zinc-500">
-          Đang suy nghĩ{elapsedSec >= 3 ? `… ${elapsedSec}s` : '…'}
-        </span>
+        <TypingIndicator />
+        <TextShimmer
+          text={`Đang suy nghĩ${elapsedSec >= 3 ? `… ${elapsedSec}s` : '…'}`}
+          className="text-[13px] tabular-nums text-zinc-500"
+        />
         <span className="sr-only">AI đang xử lý câu trả lời của bạn</span>
       </div>
     </div>
