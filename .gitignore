@@ -4,3 +4,6 @@ node_modules
 .env.local
 *.tsbuildinfo
 gui-test-screenshots
+
+.dev-log.txt
+.dev-err.txt
