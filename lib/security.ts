@@ -35,10 +35,17 @@ function isValidIp(v: string): boolean {
 export function getClientIp(req: NextRequest | Request): string {
   const headers = req.headers;
 
+  /* Hardening: cf-connecting-ip / x-real-ip là header CLIENT GỬI ĐƯỢC nếu
+     không đứng sau proxy tương ứng — kẻ tấn công xoay header mỗi request để
+     đổi bucket rate-limit, brute-force ACCESS_CODE miễn phí. Mặc định chỉ
+     tin x-vercel-forwarded-for (platform ghi đè) + x-forwarded-for (đã trừ
+     hop tin cậy). Self-host sau Cloudflare: đặt TRUST_PROXY_IP_HEADERS=1. */
+  const trustExtraIpHeaders = process.env.TRUST_PROXY_IP_HEADERS === '1';
   const direct =
     headers.get('x-vercel-forwarded-for') ??
-    headers.get('cf-connecting-ip') ??
-    headers.get('x-real-ip');
+    (trustExtraIpHeaders
+      ? headers.get('cf-connecting-ip') ?? headers.get('x-real-ip')
+      : null);
   if (direct?.trim()) {
     const candidate = direct.split(',')[0].trim();
     if (isValidIp(candidate)) return candidate;
@@ -57,9 +64,7 @@ export function getClientIp(req: NextRequest | Request): string {
   }
 
   return '0.0.0.0';
-}
-
-export const normalizeIp = (ip: string): string => ip;
+}export const normalizeIp = (ip: string): string => ip;
 
 export function checkSameOrigin(req: NextRequest | Request): boolean {
   const hosts = allowedHosts();

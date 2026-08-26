@@ -15,6 +15,15 @@ export type ChatBroadcastEvent =
       mutationId: string;
       revision: number;
       originClientId: string;
+    }
+  | {
+      /** Tab khác xoá chat — tab đang mở chat đó phải stop + thoát ngay,
+          nếu không persist tiếp tục appendMessage vào chat ma (B5). */
+      type: "chat-deleted";
+      sessionId: string;
+      mutationId: string;
+      revision: number;
+      originClientId: string;
     };
 
 const CHANNEL_NAME = "ai-chat-tree";

@@ -4,6 +4,7 @@ import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from '
 import { createPortal } from 'react-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db, deleteChatCascade, type ChatSession } from '@/lib/db';
+import { chatBroadcast } from '@/lib/chat-broadcast';
 import { useAppStore } from '@/lib/store';
 import { searchChats, type ChatSearchResult } from '@/lib/chat-search';
 import { groupChatsByDate } from '@/lib/date-groups';
@@ -302,6 +303,13 @@ export function Sidebar() {
   const handleDelete = useCallback(async (id: string) => {
     if (!window.confirm('Bạn có chắc muốn xóa cuộc trò chuyện này?')) return;
     await deleteChatCascade(id);
+    /* B5: báo các tab khác — tab đang mở chat này phải stop + thoát,
+       không thì persist tiếp tục ghi message vào chat đã mất (mồ côi). */
+    chatBroadcast.publish({
+      type: 'chat-deleted',
+      sessionId: id,
+      mutationId: crypto.randomUUID(),
+    });
     if (useAppStore.getState().currentChatId === id) {
       useAppStore.getState().setCurrentChatId(null);
     }

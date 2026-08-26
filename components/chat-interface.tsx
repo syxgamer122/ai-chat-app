@@ -418,7 +418,7 @@ export default function ChatInterface() {
   const diffOpenRef = useRef(false);
   const diffQueueRef = useRef<DiffConfirmState[]>([]);
   const showDiffModal = useCallback(
-    (s: Omit<DiffConfirmState, 'open'>): Promise<boolean> =>
+    (s: Omit<DiffConfirmState, 'open' | 'resolve'>): Promise<boolean> =>
       new Promise((resolve) => {
         const item: DiffConfirmState = { ...s, open: true, resolve };
         if (diffOpenRef.current) {
@@ -1500,6 +1500,16 @@ export default function ChatInterface() {
   /* Đồng bộ hoá khi tab khác ghi vào cùng chat (qua chatBroadcast chung). */
   useEffect(() => {
     const unsubscribe = chatBroadcast.subscribe(async (event) => {
+      /* B5: chat vừa bị xoá ở tab khác — stop stream + thoát ngay, nếu không
+         persist tiếp tục appendMessage vào chat đã mất (message mồ côi). */
+      if (event.type === 'chat-deleted') {
+        if (event.sessionId !== currentChatIdRef.current) return;
+        finishRef.current = 'abort';
+        stop();
+        setCurrentChatId(null);
+        showNotice('Cuộc trò chuyện này đã bị xoá ở tab khác.');
+        return;
+      }
       if (event.type !== 'chat-updated') return;
       if (event.sessionId !== currentChatIdRef.current) return;
       if (isLoadingRef.current || !currentChatIdRef.current) return;

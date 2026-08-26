@@ -1174,7 +1174,22 @@ export async function POST(req: Request) {
                 usage && (usage.promptTokens || usage.completionTokens)
                   ? usage
                   : {
-                      promptTokens: Math.ceil(JSON.stringify(contextMessages).length / 4),
+                      // Ước lượng từ ĐỘ DÀI CHỮ — loại attachment (data-URL
+                      // base64 làm con số phình hàng chục lần).
+                      promptTokens: Math.ceil(
+                        JSON.stringify(
+                          contextMessages.map((m) => ({
+                            role: m.role,
+                            content:
+                              typeof m.content === 'string'
+                                ? m.content
+                                : (Array.isArray(m.content) ? m.content : [])
+                                    .filter((p: any) => p?.type === 'text')
+                                    .map((p: any) => String(p.text ?? ''))
+                                    .join(''),
+                          })),
+                        ).length / 4,
+                      ),
                       completionTokens: 0,
                     },
             }),
@@ -1299,6 +1314,8 @@ export async function POST(req: Request) {
                               : null;
                         if (url) {
                           emitMedia('image', url);
+                          clearIdle();
+                          clearTimeout(budgetTimer);
                           markKeySuccess(apiKey);
                           writeFinish('stop');
                           return;
@@ -1399,6 +1416,8 @@ export async function POST(req: Request) {
                     );
                   }
                   if (!got) writeText('_(Nhà cung cấp không trả về media nào)_');
+                  clearIdle();
+                  clearTimeout(budgetTimer);
                   markKeySuccess(apiKey);
                   writeFinish('stop');
                   return;
@@ -1494,9 +1513,11 @@ export async function POST(req: Request) {
                     onReasoningLine: (line) => writeText(`${line}\n`, 'reasoning'),
                     onAnnotation: (payload) => writeAnnotation(payload),
                     onUsage: (u) => {
+                      // Cộng dồn qua các round (gán = sẽ mất usage của
+                      // round trước — thống kê undercount ở loop nhiều bước).
                       usage = {
-                        promptTokens: u.promptTokens ?? 0,
-                        completionTokens: u.completionTokens ?? 0,
+                        promptTokens: (usage?.promptTokens ?? 0) + (u.promptTokens ?? 0),
+                        completionTokens: (usage?.completionTokens ?? 0) + (u.completionTokens ?? 0),
                       };
                     },
                     onMemoryProposal: (text) => writeAnnotation({ memoryProposal: { text } }),

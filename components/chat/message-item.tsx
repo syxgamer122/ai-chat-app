@@ -411,7 +411,7 @@ export const MessageItem = memo(
     prev.m.role === next.m.role &&
     // B7: badge aborted/error + tool-trace + attachment đứng im nếu thiếu
     // các field này trong comparator (persist reload/visibilitychange).
-    prev.m.status === next.m.status &&
+    (prev.m as any).status === (next.m as any).status &&
     prev.m.annotations === next.m.annotations &&
     (prev.m as any).toolInvocations === (next.m as any).toolInvocations &&
     prev.m.experimental_attachments === next.m.experimental_attachments &&

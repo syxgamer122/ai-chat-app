@@ -238,7 +238,11 @@ export async function POST(req: Request) {
             continue;
           }
           console.warn(`[Title API ${getKeyLabel(key)}] Error:`, sanitizeErrorMessage(err));
-          markKeyFailure(key, getStatusCode(err));
+          // Blame filter: 4xx request-content không phải lỗi key.
+          const st = getStatusCode(err);
+          if (st === undefined || st === 429 || st === 401 || st === 403 || st >= 500) {
+            markKeyFailure(key, st);
+          }
           break;
         }
       }

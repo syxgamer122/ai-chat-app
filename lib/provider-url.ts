@@ -26,6 +26,14 @@ const PRIVATE_HOST_PATTERNS = [
   /^192\.168\./,
   /^172\.(1[6-9]|2\d|3[01])\./,
   /^0\.0\.0\.0$/,
+  // Bổ sung defense-in-depth (khớp web-url-guard): link-local metadata của
+  // cloud (169.254.169.254 = credentials!), CGNAT, IPv6 ULA/link-local,
+  // IPv4-mapped IPv6 — BYOK nhập được nên phải chặn như input user.
+  /^169\.254\./,
+  /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./,
+  /^\[::ffff:/i,
+  /^\[f[cd]/i,
+  /^\[fe[89ab]/i,
   /\.local$/i,
   /^\[::1\]$/,
 ];
