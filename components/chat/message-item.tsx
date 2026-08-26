@@ -280,9 +280,16 @@ export const MessageItem = memo(
             </div>
           )}
 
-          {/* Tool trace: các lần model gọi công cụ (web_search, web_fetch...)
-              — stream realtime qua annotation và persist theo message. */}
-          <ToolTrace annotations={(m as any).annotations as Array<Record<string, unknown>> | undefined} />
+          {/* Tool trace: các lần model gọi công cụ (web_search, fs_list...)
+              — stream realtime qua annotation + toolInvocations (fs_* kết quả
+              đến từ client nên trạng thái ✓ đọc từ invocation state). */}
+          <ToolTrace
+            annotations={(m as any).annotations as Array<Record<string, unknown>> | undefined}
+            toolInvocations={(m as any).toolInvocations as Array<{
+              toolCallId?: string;
+              state?: string;
+            }> | undefined}
+          />
 
           {/* Tiến trình tạo ảnh/video (route ghi vào kênh reasoning). Chỉ hiện
               lúc đang stream — media mất vài phút nên cần dấu hiệu còn sống. */}

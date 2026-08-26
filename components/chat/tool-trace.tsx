@@ -31,21 +31,33 @@ interface ToolEvent {
   summary: string;
 }
 
-function collectToolEvents(annotations: Array<Record<string, unknown>> | undefined): ToolEvent[] {
-  if (!annotations?.length) return [];
+interface ToolInvocationLike {
+  toolCallId?: string;
+  state?: string;
+  result?: unknown;
+}
+
+function collectToolEvents(
+  annotations: Array<Record<string, unknown>> | undefined,
+  toolInvocations: ToolInvocationLike[] | undefined,
+): ToolEvent[] {
+  if (!annotations?.length && !toolInvocations?.length) return [];
   const order: string[] = [];
   const byId = new Map<string, ToolEvent>();
-  for (const ann of annotations) {
+  const push = (key: string) => {
+    if (!byId.has(key)) {
+      byId.set(key, { id: key, name: '', done: false, args: '', summary: '' });
+      order.push(key);
+    }
+    return byId.get(key)!;
+  };
+
+  for (const ann of annotations ?? []) {
     const tool = ann?.tool as Record<string, unknown> | undefined;
     if (!tool || typeof tool !== 'object') continue;
     const id = String(tool.id ?? '');
     const key = id || `${String(tool.name)}:${order.length}`;
-    let ev = byId.get(key);
-    if (!ev || (!id && ev.name !== String(tool.name))) {
-      ev = { id: key, name: '', done: false, args: '', summary: '' };
-      byId.set(key, ev);
-      order.push(key);
-    }
+    const ev = push(key);
     ev.name = String(tool.name ?? ev.name ?? '');
     if (tool.phase === 'start') {
       ev.args = typeof tool.args === 'string' ? tool.args : '';
@@ -55,6 +67,16 @@ function collectToolEvents(annotations: Array<Record<string, unknown>> | undefin
       ev.done = true;
     }
   }
+
+  /* fs_* tools kết quả đến từ CLIENT (onToolCall) — route không bao giờ ghi
+     annotation 'done' cho chúng. Trạng thái thật nằm trong message
+     .toolInvocations mà AI SDK populates từ part 'tool_call' forwarded. */
+  for (const inv of toolInvocations ?? []) {
+    if (!inv?.toolCallId) continue;
+    const ev = push(String(inv.toolCallId));
+    if (inv.state === 'result') ev.done = true;
+  }
+
   return order.map((k) => byId.get(k)!).filter((ev) => ev.name);
 }
 
@@ -68,10 +90,12 @@ const LABELS: Record<string, { label: string; Icon: typeof Search }> = {
 
 export const ToolTrace = memo(function ToolTrace({
   annotations,
+  toolInvocations,
 }: {
   annotations?: Array<Record<string, unknown>>;
+  toolInvocations?: ToolInvocationLike[];
 }) {
-  const events = collectToolEvents(annotations);
+  const events = collectToolEvents(annotations, toolInvocations);
   if (events.length === 0) return null;
 
   return (
