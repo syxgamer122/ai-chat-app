@@ -452,7 +452,8 @@ export default function ChatInterface() {
             }
             // Tất cả khối phải áp thành công TRƯỚC khi hiện diff — một khối
             // hỏng thì trả hint để model tự sửa, không ghi nửa chừng.
-            let current = (await fsRead(ws.deps, path)).content;
+            const beforeText = (await fsRead(ws.deps, path)).content;
+            let current = beforeText;
             const applied = [];
             for (const block of parsed.blocks) {
               const r = replaceMostSimilarChunk(current, block.search, block.replace);
@@ -468,7 +469,7 @@ export default function ChatInterface() {
               applied.push(r.strategy);
             }
             const approved = await new Promise<boolean>((resolve) => {
-              setDiffState({ open: true, path, oldText: (await fsRead(ws.deps, path)).content, newText: current, resolve });
+              setDiffState({ open: true, path, oldText: beforeText, newText: current, resolve });
             });
             if (!approved) {
               return JSON.stringify({

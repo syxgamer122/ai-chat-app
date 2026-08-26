@@ -331,8 +331,8 @@ export function replaceMostSimilarChunk(
 
   // Elision "..." — chia mảnh khớp duy nhất.
   try {
-    res = tryDotDotDots(wholeN, part, replace);
-    if (res !== null) return { ok: true, text: res, strategy: 'dotdotdots' };
+    const dots = tryDotDotDots(wholeN, part, replace);
+    if (dots !== null) return { ok: true, text: dots, strategy: 'dotdotdots' };
   } catch {
     /* ValueError của aider tương ứng return null ở đây */
   }
