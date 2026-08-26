@@ -194,9 +194,15 @@ export function verifyAccessAuth(req: NextRequest | Request): AuthResult {
 
   const header = req.headers.get('authorization') ?? '';
   const token = header.replace(/^Bearer\s+/i, '').trim();
-  if (!token) return { ok: false, authorized: false, status: 401, error: 'Thiếu mã truy cập.' };
-  if (timingSafeEqual(token, expected)) return { ok: true, authorized: true };
+  if (token && timingSafeEqual(token, expected)) return { ok: true, authorized: true };
 
+  /* Fallback hợp đồng client: useChat gửi mã qua header x-access-code
+     (không phải Authorization Bearer) — chat/compact/title đều đi qua đây.
+     Thiếu nhánh này, đặt ACCESS_CODE = toàn bộ route trả 401 (bug B1). */
+  const alt = req.headers.get('x-access-code')?.trim() ?? '';
+  if (alt && timingSafeEqual(alt, expected)) return { ok: true, authorized: true };
+
+  if (!token && !alt) return { ok: false, authorized: false, status: 401, error: 'Thiếu mã truy cập.' };
   return { ok: false, authorized: false, status: 401, error: 'Mã truy cập (Access Code) không chính xác.' };
 }
 

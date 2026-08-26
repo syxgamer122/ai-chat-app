@@ -281,10 +281,11 @@ export async function runEmulatedLoop(opts: EmulatedLoopOptions): Promise<Emulat
       // Prose thuần (hoặc round cuối buộc prose): trả nguyên văn cho user.
       // Round cuối vẫn có thể cứng đầu nhả thêm khối call — strip markup,
       // nhưng nếu strip hết sạch thì giữ nguyên văn (nguyên tắc không-rỗng).
+      // LƯU Ý: preamble NẰM SẴN trong answer (strip chỉ bỏ khối) — không
+      // được emit thêm lần nữa (bug B8: prose lặp 2 lần).
       const stripped = stripEmulatedToolMarkup((text ?? '').trim());
       const answer = stripped.text.trim() || (text ?? '').trim();
       if (answer) opts.onTextDelta(answer);
-      if (preamble && calls.length > 0) opts.onTextDelta(preamble);
       return { status: 'done', roundsUsed: round + 1, totalCalls };
     }
 

@@ -400,6 +400,8 @@ export default function ChatInterface() {
   const [compactBusy, setCompactBusy] = useState(false);
   /** Tra cứu web đang chạy trước khi gửi (toggle Globe trong composer). */
   const [webBusy, setWebBusy] = useState(false);
+  /** Ref đồng bộ để submitTurn gate đồng bộ (state có thể stale 1 render). */
+  const webBusyRef = useRef(false);
 
   /* ---------------- Agent coding: workspace + client tools ---------------- */
   const [workspace, setWorkspace] = useState(getWorkspaceInfo());
@@ -1612,6 +1614,10 @@ export default function ChatInterface() {
         if (isLoading) {
           finishRef.current = 'abort';
           stop();
+          /* B2: reset NGAY — nếu không, persist flush kế tiếp đẩy snapshot
+             nhánh MỚI qua reconcile với finishReason 'abort' đứng sót →
+             nhánh hiển thị hoàn chỉnh bị đóng dấu status:'aborted' trong DB. */
+          finishRef.current = 'stop';
         }
 
         const latestRows = allStoredMessagesRef.current;
@@ -2211,6 +2217,16 @@ export default function ChatInterface() {
    */
   const submitTurn = useCallback(async (modelOverride?: string) => {
     if ((!input.trim() && attachments.length === 0) || isLoading) return;
+    /* B4: gate thêm 2 đường hở — webBusy (tra cứu tới ~15s, isLoading vẫn
+       false) và mediaBusy (Enter bypass nút Send đã disabled). */
+    if (webBusyRef.current) {
+      showNotice('Đang tra cứu web — chờ xíu rồi gửi tiếp nhé.');
+      return;
+    }
+    if (mediaBusy) {
+      showNotice('Đang tạo media — đợi xong hoặc bấm Dừng đã nhé.');
+      return;
+    }
 
     // Trình duyệt không có DataTransfer constructor thì không gắn được file —
     // chặn sớm kèm thông báo, thay vì nuốt lỗi rồi mất luôn tin nhắn.
@@ -2279,6 +2295,7 @@ export default function ChatInterface() {
          Media không cần web; lỗi tra cứu chỉ cảnh báo, KHÔNG chặn gửi. */
       if (!modelOverride && webSearchEnabled && userText) {
         setWebBusy(true);
+        webBusyRef.current = true;
         try {
           const ctx = await gatherWebContext(userText);
           if (ctx) {
@@ -2291,6 +2308,7 @@ export default function ChatInterface() {
           showNotice('Tra cứu web lỗi — gửi tin nhắn bình thường.');
         } finally {
           setWebBusy(false);
+          webBusyRef.current = false;
         }
       }
 
@@ -2341,7 +2359,7 @@ export default function ChatInterface() {
     } catch (err) {
       console.error('[onSubmit]', err);
     }
-  }, [input, attachments, isLoading, currentChatId, draftId, setCurrentChatId, handleSubmit, pin, generateTitle, messages.length, showNotice, webSearchEnabled, promptTemplates]);
+  }, [input, attachments, isLoading, mediaBusy, currentChatId, draftId, setCurrentChatId, handleSubmit, pin, generateTitle, messages.length, showNotice, webSearchEnabled, promptTemplates]);
 
   const onSubmit = useCallback(
     async (e?: React.FormEvent) => {

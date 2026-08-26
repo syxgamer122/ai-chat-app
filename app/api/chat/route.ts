@@ -1720,7 +1720,7 @@ export async function POST(req: Request) {
                   console.warn(
                     `[req:${requestId}] Gateway/model chê tools -> thử lại bằng đường GIẢ LẬP (${targetModel}).`,
                   );
-                  attempt -= 1; // retry đúng key/model này, không đốt key kế
+                  modelIndex -= 1; // retry ĐÚNG key+model này (continue thuộc vòng modelIndex)
                   continue;
                 }
 
