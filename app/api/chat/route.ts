@@ -560,6 +560,21 @@ const MessageSchema = z.object({
     z.array(z.record(z.string(), z.unknown())).max(100),
   ]),
   experimental_attachments: z.array(AttachmentSchema).max(4).optional(),
+  /* Kết quả fs_* client-executed quay lại trong đây khi useChat resubmit —
+     KHÔNG được strip (zod mặc định) nếu không model không bao giờ thấy kết
+     quả và lặp gọi tool vô hạn. */
+  toolInvocations: z
+    .array(
+      z.object({
+        toolCallId: z.string().max(128),
+        toolName: z.string().max(64),
+        args: z.unknown().optional(),
+        state: z.string().max(16),
+        result: z.unknown().optional(),
+      }),
+    )
+    .max(12)
+    .optional(),
 });
 
 const BodySchema = z.object({
@@ -713,6 +728,33 @@ async function readJsonWithLimit(req: Request, maxBytes: number): Promise<unknow
   return JSON.parse(new TextDecoder().decode(body));
 }
 
+/**
+ * Gắn toolInvocations (kết quả fs_* client-executed) vào assistant messages
+ * dạng `parts` — convertToCoreMessages chỉ sinh tool-call/tool-result khi
+ * thấy parts; thiếu chúng, model không bao giờ thấy kết quả và lặp gọi tool
+ * vô hạn (bug lộ qua agent coding spike: fs_list lặp không hồi kết).
+ * Chỉ nhận invocation state 'result' — pending thì convert ném lỗi.
+ */
+function attachToolResultParts(
+  messages: Array<z.infer<typeof MessageSchema>>,
+): Array<z.infer<typeof MessageSchema>> {
+  return messages.map((m) => {
+    if (m.role !== 'assistant') return m;
+    const invs = m.toolInvocations;
+    if (!invs?.length) return m;
+    const done = invs.filter((inv) => inv.state === 'result');
+    if (!done.length) return m;
+    const text = typeof m.content === 'string' ? m.content : '';
+    return {
+      ...m,
+      parts: [
+        ...(text ? [{ type: 'text', text }] : []),
+        ...done.map((inv) => ({ type: 'tool-invocation', toolInvocation: inv })),
+      ],
+    } as z.infer<typeof MessageSchema>;
+  });
+}
+
 /* -------------------------------------------------------------------------- */
 /* Handler                                                                     */
 /* -------------------------------------------------------------------------- */
@@ -797,8 +839,9 @@ export async function POST(req: Request) {
       });
     }
 
-    const { messages, model, temperature, system, thinkingLevel, contextSummary, compactBoundaryId, webContext, liveContext, pdfContexts, agentTools, memories, skills, id: conversationId } =
+    const { model, temperature, system, thinkingLevel, contextSummary, compactBoundaryId, webContext, liveContext, pdfContexts, agentTools, memories, skills, id: conversationId } =
       parsed.data;
+    const messages = attachToolResultParts(parsed.data.messages);
 
     /* Agentic tools: bật mặc định. Nếu gateway/model chê tham số tools
        (function calling không hỗ trợ), tắt trong phạm vi request này và thử
