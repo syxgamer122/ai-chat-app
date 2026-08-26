@@ -193,7 +193,18 @@ export function useSpeechRecognition({
       }
     };
 
-    rec.start();
+    // B9: start() CÓ THỂ throw đồng bộ (InvalidStateError khi trình duyệt
+    // chưa kịp dọn phiên) — không bắt thì wantListeningRef kẹt true,
+    // start() về sau early-return mãi → mic chết đến khi reload.
+    try {
+      rec.start();
+    } catch (err) {
+      wantListeningRef.current = false;
+      setListening(false);
+      setError(
+        `Không bật được nhận diện giọng nói: ${err instanceof Error ? err.message : 'lỗi không rõ'}`,
+      );
+    }
   }, [lang]);
   createSessionRef.current = createSession;
 

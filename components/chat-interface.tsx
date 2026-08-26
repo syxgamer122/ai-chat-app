@@ -334,6 +334,12 @@ export default function ChatInterface() {
   // nền khởi động trước đó sẽ tự hủy kết quả nếu giữa chừng list đã bị clear
   // (chống file "ma" dính nhầm vào tin nhắn kế tiếp).
   const attachGenRef = useRef(0);
+  /** Mirror để addFiles đọc tổng size MỚI NHẤT qua gap async nén ảnh —
+      closure `attachments` stale làm 2 đợt add <1s bypass trần 3MB (B-att). */
+  const attachmentsRef = useRef(attachments);
+  useEffect(() => {
+    attachmentsRef.current = attachments;
+  }, [attachments]);
 
   const addFiles = useCallback((files: FileList | File[] | null) => {
     if (!files) return;
@@ -341,12 +347,12 @@ export default function ChatInterface() {
     const gen = attachGenRef.current;
 
     // Nén ảnh trước khi xét trần: ảnh chụp điện thoại 3-5MB về vài trăm KB
-    // (canvas resize + WebP) nên trần 3MB không còn chặn oan người dùng.
+    // (canvas resize + WebP) nên trên 3MB không cần chặn oan người dùng.
     void compressImageFiles(fileArr)
       .catch(() => fileArr) // nén lỗi thì dùng file gốc như cũ
       .then((processed) => {
         if (attachGenRef.current !== gen) return; // đã clear trong lúc nén
-        let totalSize = attachments.reduce((sum, f) => sum + f.size, 0);
+        let totalSize = attachmentsRef.current.reduce((sum, f) => sum + f.size, 0);
         const ok: File[] = [];
         const rejected: string[] = [];
 
@@ -360,11 +366,11 @@ export default function ChatInterface() {
         }
 
         if (rejected.length) {
-          showNotice(`Bỏ qua file vượt quá tổng giới hạn 3MB: ${rejected.join(', ')}`);
+          showNotice(`Bỏ qua file vượt quá giới hạn 3MB: ${rejected.join(', ')}`);
         }
         setAttachments((prev) => [...prev, ...ok].slice(0, MAX_FILES));
       });
-  }, [attachments, showNotice]);
+  }, [showNotice]);
 
   const removeAttachment = useCallback((index: number) => {
     setAttachments((prev) => prev.filter((_, i) => i !== index));
@@ -405,7 +411,34 @@ export default function ChatInterface() {
 
   /* ---------------- Agent coding: workspace + client tools ---------------- */
   const [workspace, setWorkspace] = useState(getWorkspaceInfo());
+  /* B6: hàng đợi diff — model gọi 2 fs_write/fs_edit trong cùng step thì
+     promise thứ nhất không bao giờ resolve nếu ghi đè slot. Queue + ref
+     mở/đóng: xong cái hiện tại mới shift cái kế. */
   const [diffState, setDiffState] = useState<DiffConfirmState | null>(null);
+  const diffOpenRef = useRef(false);
+  const diffQueueRef = useRef<DiffConfirmState[]>([]);
+  const showDiffModal = useCallback(
+    (s: Omit<DiffConfirmState, 'open'>): Promise<boolean> =>
+      new Promise((resolve) => {
+        const item: DiffConfirmState = { ...s, open: true, resolve };
+        if (diffOpenRef.current) {
+          diffQueueRef.current.push(item);
+          return;
+        }
+        diffOpenRef.current = true;
+        setDiffState(item);
+      }),
+    [],
+  );
+  const closeDiffModal = useCallback(() => {
+    const next = diffQueueRef.current.shift();
+    if (next) {
+      setDiffState(next);
+      return;
+    }
+    diffOpenRef.current = false;
+    setDiffState(null);
+  }, []);
   useEffect(() => {
     void restoreWorkspaceRoot(); // khôi phục handle phiên trước, im lặng
   }, []);
@@ -470,9 +503,7 @@ export default function ChatInterface() {
               current = r.text!;
               applied.push(r.strategy);
             }
-            const approved = await new Promise<boolean>((resolve) => {
-              setDiffState({ open: true, path, oldText: beforeText, newText: current, resolve });
-            });
+            const approved = await showDiffModal({ path, oldText: beforeText, newText: current });
             if (!approved) {
               return JSON.stringify({
                 applied: false,
@@ -492,9 +523,7 @@ export default function ChatInterface() {
             } catch {
               /* file mới — diff toàn bộ là add */
             }
-            const approved = await new Promise<boolean>((resolve) => {
-              setDiffState({ open: true, path, oldText, newText: content, resolve });
-            });
+            const approved = await showDiffModal({ path, oldText, newText: content });
             if (!approved) {
               return JSON.stringify({
                 written: false,
@@ -512,7 +541,7 @@ export default function ChatInterface() {
         return JSON.stringify({ error: msg });
       }
     },
-    [showNotice],
+    [showNotice, showDiffModal],
   );
 
   const {
@@ -2727,7 +2756,7 @@ export default function ChatInterface() {
       />
 
       {/* Thông báo lỗi/cảnh báo từ showNotice() — trước đây không hề được render. */}
-      <DiffConfirm state={diffState} onClose={() => setDiffState(null)} />
+      <DiffConfirm state={diffState} onClose={closeDiffModal} />
       <Toast message={notice} onClose={onClearNotice} />
     </div>
   );

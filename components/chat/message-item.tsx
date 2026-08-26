@@ -406,9 +406,15 @@ export const MessageItem = memo(
     prev.m.id === next.m.id &&
     prev.m.content === next.m.content &&
     // Model media chưa có content nào trong lúc chạy — tiến trình đi qua
-    // `reasoning`, phải so cả field này nếu không dòng trạng thái đứng im.
+    // `reasoning`, phải so thêm field này nếu không đứng im trạng thái đọng im.
     (prev.m as any).reasoning === (next.m as any).reasoning &&
     prev.m.role === next.m.role &&
+    // B7: badge aborted/error + tool-trace + attachment đứng im nếu thiếu
+    // các field này trong comparator (persist reload/visibilitychange).
+    prev.m.status === next.m.status &&
+    prev.m.annotations === next.m.annotations &&
+    (prev.m as any).toolInvocations === (next.m as any).toolInvocations &&
+    prev.m.experimental_attachments === next.m.experimental_attachments &&
     prev.branchInfo?.currentIndex === next.branchInfo?.currentIndex &&
     prev.branchInfo?.total === next.branchInfo?.total &&
     prev.isStreaming === next.isStreaming &&

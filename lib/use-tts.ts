@@ -104,16 +104,21 @@ export function detectSpeechLang(text: string): 'vi-VN' | 'en-US' {
   return VIETNAMESE_CHARS.test(text) ? 'vi-VN' : 'en-US';
 }
 
+/** Token thế hệ — cancel/chuyển bài tăng gen; closure cũ fire onend muộn
+    thì bị loại (bug: tắt nhầm speakingId của bài MỚI). */
+let ttsGeneration = 0;
+
 function speakChunks(chunks: string[], lang: string, onEnd: () => void) {
   const synth = window.speechSynthesis;
-  synth.cancel(); // dừng utterance cũ trước khi xếp hàng mới
+  const myGen = ++ttsGeneration;
+  synth.cancel(); // dừng utterance các phiên trước khi xếp hàng mới
 
-  // getVoices có thể trả rỗng lần đầu (Chrome load voice async); khi đó bỏ
-  // voice, trình duyệt tự dùng default.
+  // getVoices có thể trả rỗng lần đầu (Chrome load voice async); khi có
+  // voice, trình duyệt tự dừng default.
   const voice = pickVoice(synth.getVoices(), lang);
   let finished = false;
   const finishOnce = () => {
-    if (!finished) {
+    if (!finished && myGen === ttsGeneration) {
       finished = true;
       onEnd();
     }
@@ -141,6 +146,7 @@ function speakChunks(chunks: string[], lang: string, onEnd: () => void) {
 
 export function stopSpeaking() {
   if (!isTtsSupported()) return;
+  ttsGeneration += 1; // vô hiệu hóa closure cũ đang chờ onend
   window.speechSynthesis.cancel();
   setSpeakingId(null);
 }
