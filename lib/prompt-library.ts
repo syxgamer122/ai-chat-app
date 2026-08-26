@@ -94,17 +94,36 @@ export async function savePrompt(input: {
   id?: string;
   title: string;
   content: string;
+  mode?: 'insert' | 'skill';
+  description?: string;
 }): Promise<PromptTemplate> {
   const title = input.title.trim().slice(0, 80);
   const content = input.content.slice(0, 8000);
   if (!title) throw new Error('Tên prompt không được để trống.');
   if (!content.trim()) throw new Error('Nội dung prompt không được để trống.');
 
+  const mode = input.mode === 'skill' ? 'skill' : 'insert';
+  // Skill KHÔNG có mô tả thì matcher không có từ khóa — ép người dùng nhập.
+  const description =
+    mode === 'skill'
+      ? (input.description ?? '').trim().slice(0, 200)
+      : (input.description ?? '').trim().slice(0, 200) || undefined;
+  if (mode === 'skill' && !description) {
+    throw new Error('Skill cần mô tả "khi nào dùng" để tự kích hoạt được.');
+  }
+
   const now = Date.now();
   if (input.id) {
     const existing = await db.prompts.get(input.id);
     if (!existing) throw new Error('Prompt không tồn tại nữa.');
-    const updated: PromptTemplate = { ...existing, title, content, updatedAt: now };
+    const updated: PromptTemplate = {
+      ...existing,
+      title,
+      content,
+      mode,
+      ...(description ? { description } : { description: undefined }),
+      updatedAt: now,
+    };
     await db.prompts.put(updated);
     return updated;
   }
@@ -113,11 +132,25 @@ export async function savePrompt(input: {
     id: newPromptId(),
     title,
     content,
+    mode,
+    ...(description ? { description } : {}),
     createdAt: now,
     updatedAt: now,
   };
   await db.prompts.add(created);
   return created;
+}
+
+/** Danh sách skill (mode='skill') cho matcher lúc submitTurn. */
+export function toSkills(prompts: PromptTemplate[]) {
+  return prompts
+    .filter((p) => p.mode === 'skill')
+    .map((p) => ({
+      id: p.id,
+      name: p.title,
+      description: p.description,
+      body: p.content.slice(0, 4000),
+    }));
 }
 
 export async function deletePrompt(id: string): Promise<void> {

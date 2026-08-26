@@ -63,6 +63,8 @@ import {
 } from '@/lib/chat-tree-persistence';
 import { gatherWebContext } from '@/lib/use-web-search';
 import { stripEmulatedToolMarkup } from '@/lib/text-tool-guard';
+import { toSkills } from '@/lib/prompt-library';
+import { matchActiveSkills } from '@/lib/skills';
 import { gatherPdfContexts } from '@/lib/use-pdf-context';
 import { gatherLiveContext } from '@/lib/live-tools';
 import { addMemory, listMemories } from '@/lib/db';
@@ -137,6 +139,12 @@ export default function ChatInterface() {
     () => db.prompts.orderBy('updatedAt').reverse().toArray(),
     [],
     [],
+  );
+  /** Slash menu chỉ hiển thị prompt CHÈN — skill (mode='skill') tự kích hoạt
+      theo ngữ cảnh, không chọn tay qua "/". */
+  const insertPrompts = useMemo(
+    () => (promptTemplates ?? []).filter((p) => p.mode !== 'skill'),
+    [promptTemplates],
   );
 
   /**
@@ -2111,6 +2119,23 @@ export default function ChatInterface() {
       }
       if (modelOverride) options.body = { model: modelOverride };
 
+      /* Skills 2 tầng: matcher từ khóa (fold dấu) chọn tối đa 2 skill khớp
+         tin nhắn → body inject vào system LƯỢT NÀY qua per-call body. Không
+         khớp thì không đốt token nào — khác catalog-thường-trực của fx. */
+      if (!modelOverride && promptTemplates.length > 0 && userText) {
+        const active = matchActiveSkills(toSkills(promptTemplates), userText);
+        if (active.length > 0) {
+          options.body = {
+            ...options.body,
+            skills: active.map((s) => ({
+              name: s.name,
+              ...(s.description ? { description: s.description } : {}),
+              body: s.body,
+            })),
+          };
+        }
+      }
+
       /* Tìm kiếm web (toggle Globe): tra cứu TRƯỚC khi submit rồi gửi kèm qua
          per-call body — useChat gộp options.body lên config body mỗi lần gọi,
          nên không đụng stale closure như đường state→ref của compaction.
@@ -2179,7 +2204,7 @@ export default function ChatInterface() {
     } catch (err) {
       console.error('[onSubmit]', err);
     }
-  }, [input, attachments, isLoading, currentChatId, draftId, setCurrentChatId, handleSubmit, pin, generateTitle, messages.length, showNotice, webSearchEnabled]);
+  }, [input, attachments, isLoading, currentChatId, draftId, setCurrentChatId, handleSubmit, pin, generateTitle, messages.length, showNotice, webSearchEnabled, promptTemplates]);
 
   const onSubmit = useCallback(
     async (e?: React.FormEvent) => {
@@ -2510,7 +2535,7 @@ export default function ChatInterface() {
         attachments={composerAttachments}
         onAddFiles={addFiles}
         onAppendText={handleAppendVoiceText}
-        slashPrompts={promptTemplates ?? []}
+        slashPrompts={insertPrompts}
         onApplyPrompt={handleApplyPrompt}
         onSavePrompt={handleSaveQuickPrompt}
         onRemoveAttachment={handleRemoveAttachmentById}

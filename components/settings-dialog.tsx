@@ -177,17 +177,28 @@ function PromptLibrarySection() {
 
   const [newTitle, setNewTitle] = useState('');
   const [newContent, setNewContent] = useState('');
+  const [newMode, setNewMode] = useState<'insert' | 'skill'>('insert');
+  const [newDescription, setNewDescription] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState('');
   const [editContent, setEditContent] = useState('');
+  const [editMode, setEditMode] = useState<'insert' | 'skill'>('insert');
+  const [editDescription, setEditDescription] = useState('');
 
   const addPrompt = async () => {
     try {
-      await savePrompt({ title: newTitle, content: newContent });
+      await savePrompt({
+        title: newTitle,
+        content: newContent,
+        mode: newMode,
+        description: newDescription,
+      });
       setNewTitle('');
       setNewContent('');
+      setNewDescription('');
+      setNewMode('insert');
       setError(null);
     } catch (err: any) {
       setError(err?.message ?? 'Không lưu được prompt.');
@@ -198,12 +209,20 @@ function PromptLibrarySection() {
     setEditingId(p.id);
     setEditTitle(p.title);
     setEditContent(p.content);
+    setEditMode(p.mode ?? 'insert');
+    setEditDescription(p.description ?? '');
   };
 
   const saveEdit = async () => {
     if (!editingId) return;
     try {
-      await savePrompt({ id: editingId, title: editTitle, content: editContent });
+      await savePrompt({
+        id: editingId,
+        title: editTitle,
+        content: editContent,
+        mode: editMode,
+        description: editDescription,
+      });
       setEditingId(null);
       setError(null);
     } catch (err: any) {
@@ -211,11 +230,55 @@ function PromptLibrarySection() {
     }
   };
 
+  /** Cặp field chung cho form thêm/sửa: mode + mô tả khi nào dùng. */
+  const modeFields = (
+    mode: 'insert' | 'skill',
+    setMode: (m: 'insert' | 'skill') => void,
+    desc: string,
+    setDesc: (v: string) => void,
+  ) => (
+    <>
+      <div className="flex gap-1" role="radiogroup" aria-label="Kiểu prompt">
+        {(
+          [
+            { v: 'insert', label: 'Chèn qua "/"' },
+            { v: 'skill', label: 'Skill tự kích hoạt' },
+          ] as const
+        ).map((opt) => (
+          <button
+            key={opt.v}
+            type="button"
+            role="radio"
+            aria-checked={mode === opt.v}
+            onClick={() => setMode(opt.v)}
+            className={`rounded-lg px-2.5 py-1 text-[11px] font-medium transition-colors ${
+              mode === opt.v
+                ? 'bg-brand text-white'
+                : 'border border-zinc-300 text-zinc-600 hover:text-zinc-900'
+            }`}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+      {mode === 'skill' && (
+        <input
+          value={desc}
+          onChange={(e) => setDesc(e.target.value)}
+          className="field-sm"
+          placeholder='Khi nào dùng — vd: "soạn email công việc, viết đơn từ"'
+          aria-label="Mô tả khi nào dùng skill"
+        />
+      )}
+    </>
+  );
+
   return (
     <div className="space-y-3">
       <h3 className="text-sm font-semibold text-zinc-800">Thư viện prompt</h3>
       <p className="text-xs leading-relaxed text-zinc-600">
-        Gõ <code className="claude-inline-code">/</code> trong ô nhập tin nhắn để chèn nhanh.
+        Gõ <code className="claude-inline-code">/</code> trong ô nhập để chèn nhanh.{' '}
+        <strong>Skill</strong> khác: không chèn — tự bật khi tin nhắn khớp mô tả.
       </p>
 
       {(prompts ?? []).map((p) =>
@@ -236,6 +299,7 @@ function PromptLibrarySection() {
               placeholder="Nội dung prompt"
               aria-label="Nội dung prompt"
             />
+            {modeFields(editMode, setEditMode, editDescription, setEditDescription)}
             <div className="flex gap-2">
               <button
                 type="button"
@@ -259,7 +323,19 @@ function PromptLibrarySection() {
             className="group flex items-start justify-between gap-2 rounded-lg border border-zinc-200 bg-surface-muted/60 px-2.5 py-2"
           >
             <div className="min-w-0 flex-1">
-              <div className="text-[13px] font-medium text-zinc-800">{p.title}</div>
+              <div className="text-[13px] font-medium text-zinc-800">
+                {p.title}
+                {p.mode === 'skill' && (
+                  <span className="ml-1.5 rounded bg-brand/10 px-1.5 py-0.5 align-middle text-[9px] font-semibold uppercase tracking-wide text-brand">
+                    Skill
+                  </span>
+                )}
+              </div>
+              {p.mode === 'skill' && p.description && (
+                <div className="mt-0.5 line-clamp-1 text-[11px] italic text-zinc-500">
+                  Khi nào dùng: {p.description}
+                </div>
+              )}
               <div className="mt-0.5 line-clamp-2 text-[11px] leading-relaxed text-zinc-600">
                 {p.content.replace(/\n+/g, ' ')}
               </div>
@@ -304,6 +380,7 @@ function PromptLibrarySection() {
           placeholder="Nội dung prompt"
           aria-label="Nội dung prompt mới"
         />
+        {modeFields(newMode, setNewMode, newDescription, setNewDescription)}
         <button
           type="button"
           onClick={addPrompt}

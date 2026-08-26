@@ -82,6 +82,15 @@ export interface PromptTemplate {
   content: string;
   createdAt: number;
   updatedAt: number;
+  /**
+   * 'insert' (mặc định): chèn nội dung vào ô nhập qua menu "/".
+   * 'skill': KHÔNG chèn — tự kích hoạt khi tin nhắn khớp tên/mô tả
+   * (pattern SKILL.md của fx/Grok Build), body inject vào system lượt đó.
+   * Không index trường mới → không cần bump schema Dexie.
+   */
+  mode?: 'insert' | 'skill';
+  /** Khi nào dùng skill này — nguồn từ khóa cho matcher phía client. */
+  description?: string;
 }
 
 /** Nhà cung cấp API (provider preset) — chuẩn OpenAI-compatible. */

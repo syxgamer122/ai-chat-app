@@ -26,6 +26,7 @@ import { parseLooseJson } from '@/lib/json-repair';
 import { isContextOverflowError } from '@/lib/context-budget';
 import { restateUpstreamStatus } from '@/lib/upstream-status-rules';
 import { runEmulatedLoop } from '@/lib/emulated-agent';
+import { formatSkillsBlock } from '@/lib/skills';
 import { formatWebContextBlock, type WebContextPayload } from '@/lib/web-context';
 import { filterSupportedModels, markModelUnsupported } from '@/lib/model-negative-cache';
 import { markModelFailure, decayModelFailure, isModelLockedOut } from '@/lib/model-lockout';
@@ -567,6 +568,19 @@ const BodySchema = z.object({
   /* Compaction: tóm tắt phần cũ + ranh giới "tin cuối thuộc phần đã nén". */
   contextSummary: z.string().max(16_000).optional(),
   compactBoundaryId: z.string().max(128).optional(),
+  /* Skills kích hoạt: client matcher chọn tối đa 2 skill khớp tin nhắn,
+     body inject vào system lượt này (pattern SKILL.md của fx/Grok Build).
+     Trần trùng khớp formatSkillsBlock — server tự cắt lại theo ngân sách. */
+  skills: z
+    .array(
+      z.object({
+        name: z.string().min(1).max(80),
+        description: z.string().max(200).optional(),
+        body: z.string().min(1).max(4000),
+      }),
+    )
+    .max(2)
+    .optional(),
   /* Kết quả tra cứu web của lượt này (tính năng "Tìm kiếm web" — /api/web).
      Trần ký tự khớp WEB_LIMITS; server chỉ format, không tin nội dung. */
   webContext: z
@@ -779,7 +793,7 @@ export async function POST(req: Request) {
       });
     }
 
-    const { messages, model, temperature, system, thinkingLevel, contextSummary, compactBoundaryId, webContext, liveContext, pdfContexts, agentTools, memories } =
+    const { messages, model, temperature, system, thinkingLevel, contextSummary, compactBoundaryId, webContext, liveContext, pdfContexts, agentTools, memories, skills } =
       parsed.data;
 
     /* Agentic tools: bật mặc định. Nếu gateway/model chê tham số tools
@@ -1356,6 +1370,17 @@ export async function POST(req: Request) {
                           '\n[Cách dùng] Trả lời câu hỏi dựa trên nội dung file ở trên khi liên quan; trích dẫn kèm số trang nếu có.'
                       : '',
                      system,
+                     /* Skills: chỉ thị điều chỉnh cách trả lời → đứng SAU
+                        persona để giữ lực (khác dữ liệu sự kiện đặt trước). */
+                     skills?.length
+                       ? formatSkillsBlock(
+                           skills.map((s) => ({
+                             name: s.name,
+                             description: s.description,
+                             body: s.body,
+                           })),
+                         )
+                       : '',
                      allowAgentTools
                        ? '[Tools] Bạn có các công cụ: web_search (tìm web hiện tại), web_fetch ' +
                          '(đọc một URL), weather (thời tiết theo nơi), exchange_rates (tỷ giá hôm nay)' +
