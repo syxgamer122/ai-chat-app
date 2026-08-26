@@ -71,6 +71,7 @@ import { addMemory, listMemories } from '@/lib/db';
 import { compressImageFiles } from '@/lib/image-compress';
 import { ChatHeader } from './chat/chat-header';
 import { MessageList } from './chat/message-list';
+import { ContextMeter } from '@/components/context-meter';
 import type { BranchInfo } from './chat/message-item';
 
 /* ------------------------------------------------------------------ */
@@ -624,9 +625,11 @@ export default function ChatInterface() {
    * Auto-nén sau stream: ước lượng trên phần SAU marker (+ bản thân summary)
    * thay vì toàn bộ projection — nếu không, sau khi nén xong ước lượng vẫn
    * đếm cả tin cũ và kích hoạt nén lại vô hạn.
+   *
+   * contextUsage được tách thành useMemo dùng chung với ContextMeter (render).
    */
-  useEffect(() => {
-    if (isLoading || !currentChatId || !messages.length) return;
+  const contextUsage = useMemo(() => {
+    if (!messages.length) return null;
     const boundaryIndex = activeCompaction
       ? messages.findIndex((m) => m.id === activeCompaction.upToId)
       : -1;
@@ -635,13 +638,18 @@ export default function ChatInterface() {
     const tokens =
       estimateContextTokens(effective) +
       (activeCompaction ? Math.ceil(activeCompaction.summary.length / 4) : 0);
-    const windowTokens = resolveContextWindow(model, activeProvider?.models);
-    if (!shouldCompact(tokens, windowTokens)) return;
+    return { tokens, max: resolveContextWindow(model, activeProvider?.models) };
+  }, [messages, activeCompaction, model, activeProvider]);
+
+  useEffect(() => {
+    if (isLoading || !currentChatId || !contextUsage) return;
+    const { tokens, max } = contextUsage;
+    if (!shouldCompact(tokens, max)) return;
     const timer = setTimeout(() => {
       void performCompaction('auto');
     }, 3_000);
     return () => clearTimeout(timer);
-  }, [messages, isLoading, currentChatId, model, activeProvider, activeCompaction, performCompaction]);
+  }, [contextUsage, isLoading, currentChatId, performCompaction]);
 
   /**
    * Recovery khi upstream trả UPSTREAM_CONTEXT_OVERFLOW: nén rồi gửi lại đúng
@@ -2524,6 +2532,12 @@ export default function ChatInterface() {
           onContinueGenerating={continueGenerating}
         />
       </div>
+
+      {contextUsage && (
+        <div className="pb-1 pt-2">
+          <ContextMeter used={contextUsage.tokens} max={contextUsage.max} />
+        </div>
+      )}
 
       <Composer
         input={input}

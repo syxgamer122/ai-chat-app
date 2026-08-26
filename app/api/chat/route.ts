@@ -14,6 +14,10 @@ import {
   markKeySuccess,
   getKeyLabel,
   classifyUpstreamStatus,
+  getStickyKey,
+  markStickyKey,
+  clearStickyKey,
+  preferStickyKey,
   type UpstreamScope,
 } from '@/lib/api-keys';
 import { ALLOWED_MODEL_IDS, DEFAULT_MODEL_ID, getModelConfig, mediaKindOf, resolveProviderModelChain } from '@/lib/models';
@@ -793,7 +797,7 @@ export async function POST(req: Request) {
       });
     }
 
-    const { messages, model, temperature, system, thinkingLevel, contextSummary, compactBoundaryId, webContext, liveContext, pdfContexts, agentTools, memories, skills } =
+    const { messages, model, temperature, system, thinkingLevel, contextSummary, compactBoundaryId, webContext, liveContext, pdfContexts, agentTools, memories, skills, id: conversationId } =
       parsed.data;
 
     /* Agentic tools: bật mặc định. Nếu gateway/model chê tham số tools
@@ -999,7 +1003,13 @@ export async function POST(req: Request) {
       : customKey
         ? { keys: [customKey] }
         : getKeyCandidates();
-    const candidateKeys = candidateResult.keys.slice(0, MAX_FAILOVER_KEYS);
+    /* Sticky key theo hội thoại: key đã thành công ở lượt trước của CÙNG
+       hội thoại được ưu tiên lên đầu (nếu còn khỏe) — ăn prompt-cache prefix
+       của provider. Chỉ là soft-preference, vòng xoay sức khỏe vẫn thắng. */
+    let candidateKeys = preferStickyKey(
+      candidateResult.keys.slice(0, MAX_FAILOVER_KEYS),
+      getStickyKey(conversationId),
+    );
 
     /* Gateway free dùng chung (crax/Kilgore): ngân sách theo IP server là
        CHUNG cho toàn bộ user — xếp hàng để tổng luôn trong ngưỡng công bố. */
@@ -1447,6 +1457,7 @@ export async function POST(req: Request) {
                   }
                   recordModelOutcome(upstreamBase ?? '', targetModel, true);
                   decayModelFailure(upstreamBase ?? '', keyLabel, targetModel);
+                  markStickyKey(conversationId, apiKey);
                   writeFinish('stop');
                   return;
                 }
@@ -1566,13 +1577,16 @@ export async function POST(req: Request) {
                   // khóa mềm ô này để lượt sau ưu tiên hướng khác.
                   recordModelOutcome(upstreamBase ?? '', targetModel, false);
                   markModelFailure(upstreamBase ?? '', keyLabel, targetModel);
+                  if (getStickyKey(conversationId) === apiKey) clearStickyKey(conversationId);
                   writeAnnotation({ error: 'EMPTY_RESPONSE' });
                   writeFinish('other');
                   return;
                 }
-                // Stream thật sự có nội dung — model ô này đang khỏe.
+                // Stream thật sự có nội dung — model ô này đang khỏe. Ghim key
+                // cho hội thoại để lượt sau ăn prompt-cache của provider.
                 recordModelOutcome(upstreamBase ?? '', targetModel, true);
                 decayModelFailure(upstreamBase ?? '', keyLabel, targetModel);
+                markStickyKey(conversationId, apiKey);
                 writeFinish(finishReason === 'length' ? 'length' : 'stop');
                 return;
               } catch (e: any) {
@@ -1661,7 +1675,11 @@ export async function POST(req: Request) {
                   markModelUnsupported(upstreamBase, targetModel);
                 }
 
-                if (diagnosis.blameKey) markKeyFailure(apiKey, diagnosis.status);
+                if (diagnosis.blameKey) {
+                  markKeyFailure(apiKey, diagnosis.status);
+                  // Key này vừa bị phạt → gỡ ghim sticky nếu đang trùng.
+                  if (getStickyKey(conversationId) === apiKey) clearStickyKey(conversationId);
+                }
 
                 /* Quality/lockout: chỉ trừ điểm ô (key×model) khi lỗi là
                    TẠM THỜI của đường truyền/model — lỗi model-unsupported

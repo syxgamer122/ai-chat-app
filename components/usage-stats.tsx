@@ -4,7 +4,7 @@ import React, { useMemo, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { BarChart3 } from 'lucide-react';
 import { db } from '@/lib/db';
-import { aggregateUsage, extractUsage, formatTokens } from '@/lib/usage-stats';
+import { aggregateUsage, extractUsage, formatTokens, formatUsd } from '@/lib/usage-stats';
 
 const RANGES = [
   { label: '7 ngày', days: 7 },
@@ -66,7 +66,7 @@ export function UsageStats() {
       ) : (
         <>
           {/* Tổng quan */}
-          <div className="grid grid-cols-3 gap-2">
+          <div className={`grid gap-2 ${summary.costUsd !== null ? 'grid-cols-4' : 'grid-cols-3'}`}>
             <div className="rounded-xl border border-zinc-200 bg-surface-raised p-2.5">
               <div className="text-[11px] uppercase tracking-wide text-zinc-600">Token vào</div>
               <div className="text-sm font-semibold text-zinc-900">{formatTokens(summary.promptTokens)}</div>
@@ -79,6 +79,15 @@ export function UsageStats() {
               <div className="text-[11px] uppercase tracking-wide text-zinc-600">Tổng cộng</div>
               <div className="text-sm font-semibold text-brand">{formatTokens(totalAll)}</div>
             </div>
+            {summary.costUsd !== null && (
+              <div
+                title="Ước lượng theo bảng giá công khai — gateway riêng của bạn có thể khác"
+                className="rounded-xl border border-zinc-200 bg-surface-raised p-2.5"
+              >
+                <div className="text-[11px] uppercase tracking-wide text-zinc-600">Chi phí ước tính</div>
+                <div className="text-sm font-semibold text-brand">{formatUsd(summary.costUsd)}</div>
+              </div>
+            )}
           </div>
 
           {/* Theo ngày — cột xếp chồng vào/ra */}
@@ -122,6 +131,9 @@ export function UsageStats() {
                     <span className="min-w-0 truncate font-mono text-zinc-800">{m.model}</span>
                     <span className="flex-shrink-0 text-zinc-600">
                       {formatTokens(t)} · {m.messages} tin
+                      {m.costUsd !== null && (
+                        <span className="ml-1 font-medium text-brand">· {formatUsd(m.costUsd)}</span>
+                      )}
                     </span>
                   </div>
                   <div className="h-1.5 overflow-hidden rounded-full bg-zinc-100">

@@ -174,6 +174,52 @@ export function classifyUpstreamStatus(status?: number): UpstreamScope {
   return 'unknown';
 }
 
+/* ------------------------------------------------------------------ */
+/* Sticky key theo hội thoại — prompt-cache affinity                   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Giữ CÙNG một key cho cùng hội thoại giữa các lượt để provider hit
+ * prompt-cache của họ (prefix giống hệt → rẻ hơn + TTFT nhanh hơn). Chỉ là
+ * ƯU TIÊN MỀM: key sticky đang nghỉ/cooldown thì không ép — vòng xoay sức
+ * khỏe vẫn thắng. Key fail thì gỡ sticky để lượt sau chọn lại từ đầu.
+ * Map sống theo isolate như keyHealthMap — mất khi restart, chấp nhận.
+ */
+
+const stickyByConversation = new Map<string, string>();
+const MAX_STICKY_ENTRIES = 512;
+
+export function getStickyKey(conversationId: string | undefined): string | undefined {
+  if (!conversationId) return undefined;
+  return stickyByConversation.get(conversationId);
+}
+
+export function markStickyKey(conversationId: string | undefined, key: string): void {
+  if (!conversationId || !key) return;
+  if (stickyByConversation.size >= MAX_STICKY_ENTRIES && !stickyByConversation.has(conversationId)) {
+    const oldest = stickyByConversation.keys().next().value;
+    if (oldest !== undefined) stickyByConversation.delete(oldest);
+  }
+  stickyByConversation.set(conversationId, key);
+}
+
+export function clearStickyKey(conversationId: string | undefined): void {
+  if (conversationId) stickyByConversation.delete(conversationId);
+}
+
+/** Đưa sticky key lên đầu NẾU nó còn trong danh sách khả dụng. */
+export function preferStickyKey(keys: readonly string[], sticky?: string): string[] {
+  if (!sticky) return [...keys];
+  const idx = keys.indexOf(sticky);
+  if (idx <= 0) return [...keys];
+  return [sticky, ...keys.slice(0, idx), ...keys.slice(idx + 1)];
+}
+
+/** Dùng cho test. */
+export function resetStickyKeys(): void {
+  stickyByConversation.clear();
+}
+
 export function getKeyPoolSnapshot(): Array<{
   label: string;
   consecutiveFailures: number;
