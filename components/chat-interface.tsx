@@ -63,6 +63,18 @@ import {
 } from '@/lib/chat-tree-persistence';
 import { gatherWebContext } from '@/lib/use-web-search';
 import { stripEmulatedToolMarkup } from '@/lib/text-tool-guard';
+import {
+  fsList,
+  fsRead,
+  fsSearch,
+  fsWrite,
+  getWorkspaceInfo,
+  pickWorkspaceRoot,
+  requireWorkspace,
+  restoreWorkspaceRoot,
+} from '@/lib/fs-access';
+import { CLIENT_TOOL_NAMES } from '@/lib/agent-tools';
+import { DiffConfirm, type DiffConfirmState } from '@/components/diff-confirm';
 import { toSkills } from '@/lib/prompt-library';
 import { matchActiveSkills } from '@/lib/skills';
 import { gatherPdfContexts } from '@/lib/use-pdf-context';
@@ -389,6 +401,79 @@ export default function ChatInterface() {
   /** Tra cứu web đang chạy trước khi gửi (toggle Globe trong composer). */
   const [webBusy, setWebBusy] = useState(false);
 
+  /* ---------------- Agent coding: workspace + client tools ---------------- */
+  const [workspace, setWorkspace] = useState(getWorkspaceInfo());
+  const [diffState, setDiffState] = useState<DiffConfirmState | null>(null);
+  useEffect(() => {
+    void restoreWorkspaceRoot(); // khôi phục handle phiên trước, im lặng
+  }, []);
+  const pickFolder = useCallback(async () => {
+    const r = await pickWorkspaceRoot();
+    if (!r.ok) {
+      showNotice(r.error);
+    } else {
+      showNotice(`Đã kết nối thư mục: ${r.name}`, 3000);
+    }
+    setWorkspace(getWorkspaceInfo());
+  }, [showNotice]);
+
+  /**
+   * fs_* tools chạy NGAY TRÊN MÁY USER — server không thể chạm file. onToolCall
+   * trả kết quả (JSON string) → useChat đặt state 'result' → sau stream,
+   * maxSteps phía client tự resubmit cho model đọc kết quả tiếp.
+   * fs_write PHẢI qua DiffConfirm: người dùng duyệt mới ghi đĩa.
+   */
+  const handleClientToolCall = useCallback(
+    async ({ toolCall }: { toolCall: { toolName: string; args?: unknown } }) => {
+      if (!CLIENT_TOOL_NAMES.has(toolCall.toolName)) return undefined;
+      const ws = await requireWorkspace();
+      if (!ws.ok) {
+        showNotice(ws.error);
+        return JSON.stringify({ error: ws.error });
+      }
+      const args = (toolCall.args ?? {}) as Record<string, unknown>;
+      try {
+        switch (toolCall.toolName) {
+          case 'fs_list':
+            return JSON.stringify(await fsList(ws.deps, String(args.path ?? '')));
+          case 'fs_read':
+            return JSON.stringify(await fsRead(ws.deps, String(args.path ?? '')));
+          case 'fs_search':
+            return JSON.stringify(
+              await fsSearch(ws.deps, String(args.query ?? ''), { isRegex: args.is_regex === true }),
+            );
+          case 'fs_write': {
+            const path = String(args.path ?? '');
+            const content = String(args.content ?? '');
+            let oldText = '';
+            try {
+              oldText = (await fsRead(ws.deps, path)).content;
+            } catch {
+              /* file mới — diff toàn bộ là add */
+            }
+            const approved = await new Promise<boolean>((resolve) => {
+              setDiffState({ open: true, path, oldText, newText: content, resolve });
+            });
+            if (!approved) {
+              return JSON.stringify({
+                written: false,
+                approved: false,
+                note: 'Người dùng TỪ CHỐI ghi file này. Đừng ghi lại y nguyên — hỏi họ muốn điều chỉnh gì.',
+              });
+            }
+            return JSON.stringify({ written: true, ...(await fsWrite(ws.deps, path, content)) });
+          }
+          default:
+            return JSON.stringify({ error: 'Tool không hỗ trợ phía client.' });
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message.slice(0, 200) : 'Lỗi hệ thống tệp.';
+        return JSON.stringify({ error: msg });
+      }
+    },
+    [showNotice],
+  );
+
   const {
     messages, setMessages, input, setInput, handleInputChange,
     handleSubmit, stop, reload, append, isLoading, error, data,
@@ -425,6 +510,11 @@ export default function ChatInterface() {
         : {}),
     },
     experimental_throttle: throttleMs,
+    /* Client-executed tools (fs_*): onToolCall chạy trên máy user, trả kết quả
+       tại chỗ; sau stream, maxSteps phía useChat tự resubmit để model đọc
+       kết quả — vòng lặp agent coding chạy xuyên nhiều request. */
+    maxSteps: 8,
+    onToolCall: handleClientToolCall,
     onFinish: (message, { finishReason, usage }) => {
       // Guard markup tool-call model tự nhả vào kênh text — strip TRƯỚC khi
       // sanitize/lưu để nội dung trong DB cũng sạch (tokens + search index).
@@ -435,7 +525,7 @@ export default function ChatInterface() {
        * bị nuốt token). Kết thúc im lặng để lại bong bóng trống vô nghĩa —
        * đánh dấu error, ghi câu gợi ý vào bong bóng và báo toast.
        */
-      if (!clean.trim()) {
+      if (!clean.trim() && finishReason !== 'tool-calls') {
         finishRef.current = 'error';
         showNotice('Nhà cung cấp trả về phản hồi rỗng. Bấm "Tạo lại" hoặc đổi model khác thử lại.', 6000);
         setMessages((prev) =>
@@ -2561,6 +2651,8 @@ export default function ChatInterface() {
         webSearch={webSearchEnabled}
         onToggleWebSearch={() => updateSettings({ webSearch: !webSearchEnabled })}
         webBusy={webBusy}
+        workspace={workspace}
+        onPickWorkspace={pickFolder}
         canContinue={canContinue}
         onContinue={continueGenerating}
         thinkingLevel={
@@ -2578,6 +2670,7 @@ export default function ChatInterface() {
       />
 
       {/* Thông báo lỗi/cảnh báo từ showNotice() — trước đây không hề được render. */}
+      <DiffConfirm state={diffState} onClose={() => setDiffState(null)} />
       <Toast message={notice} onClose={onClearNotice} />
     </div>
   );

@@ -7,6 +7,7 @@ import {
   BookmarkPlus,
   CornerDownLeft,
   Film,
+  FolderOpen,
   Globe,
   ImagePlus,
   Mic,
@@ -81,6 +82,9 @@ interface ComposerProps {
   onToggleWebSearch?: () => void;
   /** Đang tra cứu web phía client trước khi gửi — hiện trạng thái chờ. */
   webBusy?: boolean;
+  /** Workspace agent coding: trạng thái kết nối thư mục + nút chọn/cấp quyền. */
+  workspace?: { connected: boolean; name: string | null };
+  onPickWorkspace?: () => void;
   canContinue?: boolean;
   onContinue?: () => void;
   maxFileBytes?: number;
@@ -113,6 +117,8 @@ export function Composer({
   webSearch,
   onToggleWebSearch,
   webBusy,
+  workspace,
+  onPickWorkspace,
   canContinue,
   onContinue,
   maxFileBytes = DEFAULT_MAX_FILE_BYTES,
@@ -443,6 +449,30 @@ export function Composer({
                   ) : (
                     <Mic size={16} />
                   )}
+                </button>
+              )}
+
+              {/* Workspace agent coding: kết nối thư mục làm việc (FS Access
+                  API — cần Chrome/Edge). Bấm lại để cấp quyền khi trình duyệt
+                  thu hồi. */}
+              {onPickWorkspace && (
+                <button
+                  type="button"
+                  onClick={onPickWorkspace}
+                  aria-label={workspace?.connected ? 'Thư mục làm việc đã kết nối' : 'Kết nối thư mục làm việc'}
+                  aria-pressed={Boolean(workspace?.connected)}
+                  title={
+                    workspace?.connected
+                      ? `Workspace: ${workspace.name} — bấm để chọn thư mục khác`
+                      : 'Kết nối thư mục làm việc cho agent đọc/ghi code'
+                  }
+                  className={
+                    workspace?.connected
+                      ? 'flex h-9 w-9 items-center justify-center rounded-full bg-brand text-white transition-colors'
+                      : 'icon-btn h-9 w-9 rounded-full'
+                  }
+                >
+                  <FolderOpen size={16} />
                 </button>
               )}
 

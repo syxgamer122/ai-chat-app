@@ -412,6 +412,62 @@ export function buildAgentTools(
 }
 
 /* ------------------------------------------------------------------ */
+/* CLIENT TOOLS — agent coding trên trình duyệt                        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * fs_* tools KHÔNG có execute: AI SDK v4 phát tool-call rồi dừng step, client
+ * (useChat onToolCall) thực thi trên File System Access API rồi tự resubmit
+ * với kết quả (maxSteps phía useChat). File nằm trong máy user nên server
+ * không thể — và không được phép — chạm vào.
+ *
+ * Chỉ hoạt động trên đường NATIVE function calling. Đường emulated lọc các
+ * tool này ra (xem route) vì client-execution protocol của nó khác.
+ */
+export const CLIENT_TOOL_DEFS = {
+  fs_list: tool({
+    description:
+      'Liệt kê MỘT cấp thư mục trong workspace của người dùng (trên máy họ). Dùng để khám phá ' +
+      'cấu trúc dự án từng bước. Thư mục con sắp trước file.',
+    parameters: z.object({
+      path: z.string().max(500).optional().describe('Đường dẫn tương đối trong workspace; rỗng = gốc'),
+    }),
+  }),
+  fs_read: tool({
+    description:
+      'Đọc nội dung một FILE text trong workspace (mã nguồn, cấu hình, tài liệu...). Trần ~24k ký tự, ' +
+      'dài hơn sẽ báo truncated — đọc theo phần nếu cần.',
+    parameters: z.object({
+      path: z.string().min(1).max(500).describe('Đường dẫn tương đối tới file, vd "src/index.ts"'),
+    }),
+  }),
+  fs_write: tool({
+    description:
+      'GHI một file trong workspace (tạo mới hoặc đè). Người dùng sẽ thấy DIFF và PHẢI PHÊ DUYỆT — ' +
+      'kết quả trả về cho biết họ đã duyệt hay từ chối. Nếu bị từ chối, đừng ghi lại y nguyên: hỏi ' +
+      'người dùng muốn sửa gì. Nội dung ghi là TOÀN BỘ file cuối cùng.',
+    parameters: z.object({
+      path: z.string().min(1).max(500).describe('Đường dẫn tương đối tới file cần ghi'),
+      content: z.string().max(100_000).describe('Toàn bộ nội dung file sau khi ghi'),
+    }),
+  }),
+  fs_search: tool({
+    description:
+      'Tìm chuỗi hoặc regex trong toàn bộ file text của workspace (bỏ qua node_modules/.git/dist...). ' +
+      'Trả tối đa 30 dòng khớp kèm file:dòng.',
+    parameters: z.object({
+      query: z.string().min(1).max(300).describe('Chuỗi hoặc regex cần tìm'),
+      is_regex: z.boolean().optional().describe('Mặc định false — tìm chuỗi thường'),
+    }),
+  }),
+} as const;
+
+export type ClientToolSet = typeof CLIENT_TOOL_DEFS;
+
+/** Tên các tool chạy phía client — route dùng để quyết forward part. */
+export const CLIENT_TOOL_NAMES: ReadonlySet<string> = new Set(Object.keys(CLIENT_TOOL_DEFS));
+
+/* ------------------------------------------------------------------ */
 /* Validate đề xuất ghi nhớ — thuần, test được                         */
 /* ------------------------------------------------------------------ */
 
