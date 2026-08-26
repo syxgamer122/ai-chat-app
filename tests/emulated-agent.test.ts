@@ -231,6 +231,31 @@ describe('runEmulatedLoop — e2e với upstream giả lập', () => {
     expect(events.memoryProposals).toEqual(['Người dùng tên Tuấn']);
   });
 
+  it('fs_* ở chế độ giả lập → note giải thích thay vì drop im lặng', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string | URL) => {
+        const url = String(input);
+        if (url.includes('/chat/completions')) {
+          return completion(
+            '<tool_call>\n{"name":"fs_list","arguments":{"path":"src"}}\n</tool_call>',
+          );
+        }
+        throw new Error(`unexpected url ${url}`);
+      }),
+    );
+
+    const { events, opts } = makeOpts({ maxRounds: 2, clientOnlyTools: new Set(['fs_list', 'fs_read', 'fs_write', 'fs_search']) });
+    const result = await runEmulatedLoop(opts);
+
+    // Call được ghi nhận (chip hiển thị) chứ không bị parser vứt.
+    const phases = events.annotations.filter((a) => (a.tool as { phase?: string })?.phase);
+    expect(phases.map((a) => (a.tool as { phase: string }).phase)).toEqual(['start', 'done']);
+    // Kết quả trả về model là note giải thích — model không retry mù.
+    expect(result.totalCalls).toBe(1);
+    expect(events.usage.length).toBe(2);
+  });
+
   it('protocol header có đủ quy tắc chống hallucination + chống loop', () => {
     const p = buildProtocolHeader();
     expect(p).toContain('KHÔNG có kênh tool-call native');

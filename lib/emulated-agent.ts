@@ -203,6 +203,12 @@ export interface EmulatedLoopOptions {
   maxTokens?: number;
   abortSignal?: AbortSignal;
   maxRounds?: number;
+  /**
+   * Tool khai báo phía server nhưng CHẠY CLIENT (fs_* — agent coding). Ở chế
+   * độ giả lập không có đường client-execution: nếu model vẫn gọi, trả note
+   * giải thích ngay thay vì drop im lặng khiến model retry vô ích.
+   */
+  clientOnlyTools?: ReadonlySet<string>;
   /* Callbacks xuống route (ghi stream/annotation) */
   onTextDelta: (delta: string) => void;
   onReasoningLine: (line: string) => void;
@@ -223,7 +229,10 @@ export interface EmulatedLoopResult {
  */
 export async function runEmulatedLoop(opts: EmulatedLoopOptions): Promise<EmulatedLoopResult> {
   const maxRounds = Math.max(1, opts.maxRounds ?? EMU_MAX_ROUNDS);
-  const knownTools = new Set(Object.keys(opts.tools));
+  const knownTools = new Set([
+    ...Object.keys(opts.tools),
+    ...(opts.clientOnlyTools ?? []),
+  ]);
   const protocol = buildProtocolHeader();
   const messages: Array<{ role: 'user' | 'assistant'; content: string }> = opts.messages.filter(
     (m): m is { role: 'user' | 'assistant'; content: string } => m.role !== 'system',
@@ -277,14 +286,22 @@ export async function runEmulatedLoop(opts: EmulatedLoopOptions): Promise<Emulat
       opts.onAnnotation({
         tool: { id, name: call.name, phase: 'start', args: summarizeToolArgs(call.name, call.args) },
       });
-      const toolDef = opts.tools[call.name as keyof AgentToolSet];
       let result: unknown;
-      try {
-        result = toolDef?.execute
-          ? await toolDef.execute(call.args as never, {} as never)
-          : { note: 'Công cụ không tồn tại.' };
-      } catch {
-        result = { note: 'Công cụ tạm thời không khả dụng.' };
+      if (opts.clientOnlyTools?.has(call.name)) {
+        result = {
+          note:
+            'Công cụ này thao tác file trên máy người dùng và chỉ khả dụng ở chế độ function calling ' +
+            'native — hiện đang ở chế độ giả lập. Đừng gọi lại; hãy trả lời bằng kiến thức có sẵn.',
+        };
+      } else {
+        const toolDef = opts.tools[call.name as keyof AgentToolSet];
+        try {
+          result = toolDef?.execute
+            ? await toolDef.execute(call.args as never, {} as never)
+            : { note: 'Công cụ không tồn tại.' };
+        } catch {
+          result = { note: 'Công cụ tạm thời không khả dụng.' };
+        }
       }
       totalCalls += 1;
       opts.onAnnotation({

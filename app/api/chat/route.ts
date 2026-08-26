@@ -1431,6 +1431,7 @@ export async function POST(req: Request) {
                       memories: chatMemories,
                       allowedHosts: provenanceUrls,
                     }),
+                    clientOnlyTools: CLIENT_TOOL_NAMES,
                     ...(modelConfig.supportsTemperature === false
                       ? {}
                       : { temperature: temperature ?? 0.7 }),
