@@ -37,6 +37,11 @@ const TABLE: readonly PriceEntry[] = [
   { fragment: 'claude-3-5-sonnet', in: 3.0, out: 15.0 },
   { fragment: 'claude-3-haiku', in: 0.25, out: 1.25 },
   // DeepSeek
+  /* V4 Pro chạy qua backend Notion của crax và tính theo giá đỉnh của
+     DeepSeek ($0.435 in / $0.87 out). Trước đây id này rơi vào fragment
+     'deepseek' chung nên bị báo rẻ hơn 3 lần so với thực tế. */
+  { fragment: 'deepseek-v4-pro', in: 0.435, out: 0.87 },
+  { fragment: 'deepseek-v4', in: 0.435, out: 0.87 },
   { fragment: 'deepseek-reasoner', in: 0.55, out: 2.19 },
   { fragment: 'deepseek-r1', in: 0.55, out: 2.19 },
   { fragment: 'deepseek-chat', in: 0.14, out: 0.28 },
@@ -52,6 +57,9 @@ const TABLE: readonly PriceEntry[] = [
   { fragment: 'qwen-max', in: 1.6, out: 6.4 },
   { fragment: 'qwen-plus', in: 0.4, out: 1.2 },
   { fragment: 'qwen-turbo', in: 0.05, out: 0.2 },
+  /* crax đã gỡ GLM/ChatGLM khỏi danh mục, nhưng GIỮ bảng giá: người dùng
+     BYOK vẫn có thể trỏ tới gateway khác còn phục vụ các model này. Bảng giá
+     là tra cứu theo tên, không phải danh mục model khả dụng. */
   { fragment: 'glm-4-plus', in: 1.4, out: 1.4 },
   { fragment: 'glm-4', in: 0.14, out: 0.14 },
   { fragment: 'kimi', in: 0.6, out: 2.5 },

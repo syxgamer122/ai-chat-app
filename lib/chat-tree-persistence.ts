@@ -155,6 +155,13 @@ export function toChatMessage(
     status: row.status,
     finishReason: row.finishReason,
     annotations: row.annotations as Message['annotations'],
+    /* Kết quả fs_* đã lưu: phải trả lại useChat để lượt gửi sau còn
+       toolInvocations gửi lên route (attachToolResultParts dựng tool-call
+       parts từ đây). Thiếu nó, sau khi tải lại trang model mất kết quả cũ
+       và gọi lại tool từ đầu; ContextMeter cũng đếm hụt ngân sách. */
+    ...(row.toolInvocations?.length
+      ? { toolInvocations: row.toolInvocations as NonNullable<Message['toolInvocations']> }
+      : {}),
     experimental_attachments: row.attachments?.map(
       (attachment) => ({
         name: attachment.name,
@@ -303,8 +310,35 @@ function hasStoredMessageChanged(
     ) !==
       attachmentMetadataSignature(
         next.attachments,
-      )
+      ) ||
+    /* Không so sánh trường này thì kết quả fs_* KHÔNG BAO GIỜ được ghi:
+       content của assistant message thường không đổi ở step chỉ có tool
+       call, nên reconcile sẽ coi row là "không thay đổi" và bỏ qua. */
+    toolInvocationSignature(previous.toolInvocations) !==
+      toolInvocationSignature(next.toolInvocations)
   );
+}
+
+/**
+ * Chữ ký rẻ cho danh sách tool invocation: chỉ id + tên + trạng thái + độ dài
+ * kết quả. Không hash toàn bộ payload (có thể tới 24k ký tự mỗi cái) vì hàm
+ * này chạy mỗi lần reconcile trong lúc stream.
+ */
+function toolInvocationSignature(
+  list: StoredMessage['toolInvocations'],
+): string {
+  if (!list?.length) return '';
+  return list
+    .map((inv) => {
+      let size = 0;
+      try {
+        size = JSON.stringify(inv.result ?? null)?.length ?? 0;
+      } catch {
+        size = -1;
+      }
+      return `${inv.toolCallId}:${inv.toolName}:${inv.state}:${size}`;
+    })
+    .join('|');
 }
 
 export async function reconcileActiveMessages(
@@ -404,6 +438,12 @@ export async function reconcileActiveMessages(
         finishReason: nextFinishReason,
         status: nextStatus,
         annotations: (message.annotations as any[]) ?? existing.annotations,
+        /* Kết quả fs_* điền dần qua các step của maxSteps — cập nhật theo
+           bản mới nhất, giữ bản cũ khi lượt này không mang gì (tránh xoá
+           trắng lịch sử tool của message đang stream). */
+        toolInvocations:
+          (message as { toolInvocations?: StoredMessage['toolInvocations'] })
+            .toolInvocations ?? existing.toolInvocations,
       };
 
       if (
@@ -496,6 +536,10 @@ export async function reconcileActiveMessages(
       branchTieBreaker: message.id,
 
       annotations: (message.annotations as any[]) ?? undefined,
+
+      toolInvocations:
+        (message as { toolInvocations?: StoredMessage['toolInvocations'] })
+          .toolInvocations ?? undefined,
 
       finishReason:
         isStreamingAssistant

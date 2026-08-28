@@ -68,6 +68,16 @@ function newSnapshotId(now: number): string {
 export function captureFile(turn: TurnCapture, input: CaptureInput): void {
   if (turn.files.some((f) => f.path === input.path)) return;
 
+  /* Trần số file mỗi snapshot: hằng số này TỪNG được khai báo nhưng không nơi
+     nào áp, nên một lượt agent sửa hàng chục file sẽ nhồi cả đống nội dung
+     vào một record IndexedDB. Vượt trần thì đánh dấu incomplete — rollback bị
+     CHẶN, đúng nguyên tắc "restore nửa vời nguy hiểm hơn không restore".
+     (Trần BYTE mỗi file đã được áp ở fsReadFull → status 'too-large'.) */
+  if (turn.files.length >= WS_MAX_FILES_PER_SNAPSHOT) {
+    turn.incomplete = true;
+    return;
+  }
+
   if (input.status === 'ok') {
     turn.files.push({ path: input.path, content: input.content, existedBefore: true });
     return;

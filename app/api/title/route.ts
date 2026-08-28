@@ -1,4 +1,5 @@
 import { createOpenAI } from '@ai-sdk/openai';
+import { nonStreamingFetch } from '@/lib/non-streaming-fetch';
 import { generateText, APICallError } from 'ai';
 import { z } from 'zod';
 import { getKeyCandidates, markKeyFailure, markKeySuccess, getKeyLabel } from '@/lib/api-keys';
@@ -22,7 +23,9 @@ const TitleSchema = z.object({
 const SECRET_REGEX = /\b(sk|sk-proj|sk-ant|Bearer)\s*[:=]?\s*[A-Za-z0-9_\-]{4,}/gi;
 
 const TITLE_MODEL_CHAIN: readonly string[] = Object.freeze(
-  (process.env.TITLE_MODEL_CHAIN ?? 'gpt-4o-mini,gpt-4.1-mini,gpt-5.6-terra,deepseek-chat')
+  /* Tên gửi THẲNG lên upstream, không qua catalog — phải khớp tên thật của
+     gateway. crax dùng gạch ngang (`gpt-5-4-nano`), không phải dấu chấm. */
+  (process.env.TITLE_MODEL_CHAIN ?? 'gpt-5-4-nano,gpt-4o-mini,gpt-5-6-terra,deepseek-v4-flash')
     .split(',')
     .map((m) => m.trim())
     .filter(Boolean),
@@ -205,6 +208,8 @@ export async function POST(req: Request) {
       const openai = createOpenAI({
         apiKey: key,
         baseURL: providerBase ?? (process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1'),
+        /* crax tra SSE khi thieu stream - xem lib/non-streaming-fetch.ts. */
+        fetch: nonStreamingFetch,
       });
 
       for (const modelName of titleModelChain) {

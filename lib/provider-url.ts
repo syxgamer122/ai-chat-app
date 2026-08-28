@@ -100,20 +100,19 @@ export function supportsMediaGeneration(baseUrl: string | null | undefined): boo
 }
 
 /**
- * Gateway miễn phí KHÔNG kiểm tra API key — xác thực bằng IP, không bằng key.
- * Kiểm chứng thực tế: `GET /v1/models` và `POST /v1/chat/completions` của
- * gpt.crax.lol trả 200 với key bất kỳ, key rác, hoặc không có header
- * Authorization; giới hạn tốc độ áp theo IP (bắn 8 request với 8 key khác nhau
- * vẫn nhận 429 từ request thứ 6). Kilgore hành xử giống vậy.
+ * Gateway KHÔNG kiểm tra API key — xác thực bằng IP/cookie, không bằng key.
+ * Ô nhập key bị ẩn cho các host này vì bắt dán key chỉ gây hiểu nhầm.
  *
- * Hệ quả UX: bắt người dùng dán key cho 2 host này là gây hiểu nhầm — họ tưởng
- * thiếu key nên mới bị 429, trong khi key không liên quan. Ô nhập key bị ẩn cho
- * các host này, và ngân sách dùng chung được quản ở `lib/upstream-queue.ts`.
+ * LỊCH SỬ:
+ *  - gpt.crax.lol TỪNG nằm trong danh sách (trả 200 với key rác). Bản cập
+ *    nhật "User Accounts + API Keys" đã đổi hẳn: mọi endpoint trả 401
+ *    auth_required cho cả request không key lẫn key rác → đã GỠ khỏi đây.
+ *  - kilgoreai.freesrv.com từng miễn phí theo IP. Kilgore đã chuyển sang
+ *    kilgoreai.xyz và hỗ trợ Bearer key (`sk-kilg-…`). Server proxy của app
+ *    không giữ cookie giữa các request nên mỗi lượt là phiên mới; người dùng
+ *    NÊN tạo key để có danh tính ổn định → đã GỠ khỏi đây, ô nhập key hiện lại.
  */
-const NO_AUTH_HOSTS: readonly string[] = Object.freeze([
-  'gpt.crax.lol',
-  'kilgoreai.freesrv.com',
-]);
+const NO_AUTH_HOSTS: readonly string[] = Object.freeze([]);
 
 /**
  * false = gateway không cần API key (miễn phí, chặn theo IP). Dùng để ẩn ô nhập

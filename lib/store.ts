@@ -13,6 +13,20 @@ export const SERVER_PROVIDER_ID = '__server__';
 
 export type ThemePreference = 'light' | 'dark' | 'system';
 
+/**
+ * Chế độ agent coding:
+ *  - 'act' (mặc định): agent đọc + ghi file, chạy lệnh bình thường.
+ *  - 'plan': agent CHỈ được explore (read/list/search) và hỏi clarifying
+ *    questions. Mọi write tool (fs_write, fs_edit) bị vô hiệu hóa cả phía
+ *    server lẫn client. User chuyển sang 'act' khi sẵn sàng cho agent thực thi.
+ * Port từ Cline "Plan and Act" mode (Apache-2.0).
+ */
+export type AgentMode = 'plan' | 'act';
+
+export function isAgentMode(v: unknown): v is AgentMode {
+  return v === 'plan' || v === 'act';
+}
+
 export function isThemePreference(v: unknown): v is ThemePreference {
   return v === 'light' || v === 'dark' || v === 'system';
 }
@@ -45,6 +59,27 @@ export interface Settings {
   autoCompact: boolean;
   /** Bật tra cứu web cho tin nhắn tiếp theo (nút Globe trong composer). */
   webSearch: boolean;
+  /**
+   * Cho phép model tự gọi công cụ (web_search, fs_* của agent coding...).
+   * TẮT khi người dùng chỉ muốn chat thuần: model yếu đôi khi cố gọi tool
+   * thay vì trả lời, hoặc gọi công cụ đọc file mà không cần thiết.
+   */
+  agentTools: boolean;
+  /**
+   * Ép gọi tool qua đường GIẢ LẬP (protocol text) thay vì function calling
+   * gốc của API. Dành cho gateway nhận tham số `tools` (200 OK) rồi âm thầm
+   * bỏ qua — model chỉ thấy tên tool trong prompt, cố gọi thì JSON args leaked
+   * ra text thuần và không bao giờ được thực thi.
+   */
+  forceEmulatedTools: boolean;
+  /** Chế độ agent coding: 'plan' (chỉ explore) hoặc 'act' (đọc + ghi). */
+  agentMode: AgentMode;
+  /**
+   * Staging sandbox (port Plandex, MIT): fs_edit/fs_write ghi vào bộ đệm
+   * thay vì đĩa; user review cả batch trong staging panel rồi Apply/Reject.
+   * Tắt → hành vi cũ: diff modal phê duyệt từng edit, ghi đĩa ngay.
+   */
+  stagingSandbox: boolean;
   apiKey?: string;
   accessCode?: string;
 }
@@ -84,6 +119,10 @@ const DEFAULT_SETTINGS: Settings = {
   sendOnEnter: true,
   autoCompact: true,
   webSearch: false,
+  agentTools: true,
+  forceEmulatedTools: false,
+  agentMode: 'act',
+  stagingSandbox: true,
   apiKey: '',
   accessCode: '',
 };
@@ -127,6 +166,8 @@ export const useAppStore = create<AppState>()(
           sendOnEnter: s.settings.sendOnEnter,
           autoCompact: s.settings.autoCompact,
           webSearch: s.settings.webSearch,
+          agentMode: s.settings.agentMode,
+          stagingSandbox: s.settings.stagingSandbox,
         },
       }),
       merge: (persisted, current) => {
@@ -153,6 +194,12 @@ export const useAppStore = create<AppState>()(
               ? p.settings.thinkingLevel
               : DEFAULT_THINKING_LEVEL,
             perf: { ...current.settings.perf, ...(p.settings?.perf ?? {}) },
+            agentMode: isAgentMode(p.settings?.agentMode) ? p.settings.agentMode : current.settings.agentMode,
+            /* Boolean khôi phục an toàn: giá trị lạ/rác → giữ mặc định hiện tại. */
+            stagingSandbox:
+              typeof p.settings?.stagingSandbox === 'boolean'
+                ? p.settings.stagingSandbox
+                : current.settings.stagingSandbox,
             apiKey: '',
             accessCode: '',
           },

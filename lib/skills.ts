@@ -76,9 +76,19 @@ function keywordsOf(skill: SkillLike): string[] {
 }
 
 /**
+ * Điểm tối thiểu để kích hoạt một skill.
+ *
+ * Ngưỡng cũ `> 0` quá nhạy: keywordsOf lấy từ khóa từ CẢ description, nên chỉ
+ * cần một từ ≥3 ký tự trùng là skill được nạp — skill tên "Viết code" khớp
+ * mọi câu có chữ "code" và đốt tới 4.000 ký tự body vô ích. Ngưỡng 2 buộc
+ * phải có hai tín hiệu độc lập, hoặc một lần khớp nguyên tên (được +2).
+ */
+export const SKILL_MIN_SCORE = 2;
+
+/**
  * Chọn skill kích hoạt cho tin nhắn: mỗi từ khóa xuất hiện trong tin nhắn
  * (đã fold dấu) tính 1 điểm; tên skill khớp nguyên cụm được +2 điểm ưu tiên.
- * Trả tối đa maxPerTurn skill điểm cao nhất — không ai đạt điểm thì rỗng
+ * Trả tối đa maxPerTurn skill đạt SKILL_MIN_SCORE — không ai đạt thì rỗng
  * (tức là lượt này không đốt token cho body nào).
  */
 export function matchActiveSkills(
@@ -100,7 +110,7 @@ export function matchActiveSkills(
   });
 
   return scored
-    .filter((s) => s.score > 0)
+    .filter((s) => s.score >= SKILL_MIN_SCORE)
     .sort((a, b) => b.score - a.score || a.skill.id.localeCompare(b.skill.id))
     .slice(0, max)
     .map((s) => s.skill);

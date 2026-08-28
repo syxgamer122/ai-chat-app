@@ -36,12 +36,23 @@ export interface ChatSession {
    * dọc nhánh hiện tại đã được thay thế bằng `summary` khi gửi lên model.
    * summary rỗng = hard-trim (tóm tắt thất bại, bỏ tin cũ không tóm tắt).
    * Tính hợp lệ theo nhánh: upToId không còn trong projection → marker bỏ qua.
+   *
+   * `state` là dữ kiện tích lũy qua các lần nén (file đã chạm, yêu cầu đã nêu).
+   * Field không index → mở rộng không cần bump Dexie schema. Bản nén cũ trước
+   * khi nâng cấp sẽ thiếu field này — code đọc phải xử lý undefined.
    */
   compaction?: {
     upToId: string;
     summary: string;
     compactedCount: number;
     createdAt: number;
+    state?: {
+      filesRead: string[];
+      filesWritten: string[];
+      filesEdited: string[];
+      completedRequests: string[];
+      generation: number;
+    };
   };
 }
 
@@ -73,6 +84,26 @@ export interface StoredMessage {
   tokens?: string[];
   /** Annotation từ data stream (requestId, attempt, key, model...). */
   annotations?: Array<Record<string, unknown>>;
+  /**
+   * Kết quả tool client-executed (fs_*) do useChat gắn vào assistant message.
+   * PHẢI persist: route.attachToolResultParts() dựng lại tool-call parts từ
+   * đây, thiếu nó thì sau khi tải lại trang model mất sạch kết quả đã đọc và
+   * gọi lại từ đầu; đồng thời estimateContextTokens() đếm hụt ngân sách.
+   * Trường không index → không cần bump version Dexie.
+   */
+  toolInvocations?: StoredToolInvocation[];
+}
+
+/**
+ * Bản thu gọn của ToolInvocation (AI SDK) đủ để tái tạo tool-call parts.
+ * `result` được cắt trần trước khi ghi (xem sanitizeToolInvocations).
+ */
+export interface StoredToolInvocation {
+  toolCallId: string;
+  toolName: string;
+  args?: unknown;
+  state: string;
+  result?: unknown;
 }
 
 /** Mẫu prompt cho thư viện "/" trong composer. */
@@ -180,6 +211,55 @@ function sanitizeAttachments(list?: StoredAttachment[]): StoredAttachment[] | un
     });
   }
   return cleaned.length ? cleaned : undefined;
+}
+
+/**
+ * Trần ký tự (JSON) cho `result` của một tool invocation khi persist.
+ * Khớp TOOL_RESULT_MAX_CHARS ở lib/tool-limits.ts — giữ số ở đây độc lập để
+ * db.ts không phụ thuộc module runtime của agent.
+ */
+export const STORED_TOOL_RESULT_CHARS = 24_000;
+/** Số invocation tối đa giữ lại trên MỘT message (khớp trần zod của route). */
+export const STORED_TOOL_INVOCATIONS_MAX = 12;
+
+/**
+ * Chuẩn hoá tool invocation trước khi ghi: chỉ giữ invocation đã có kết quả
+ * (state 'result' — pending không tái tạo được part hợp lệ), cắt trần result
+ * quá lớn thành ghi chú, và giới hạn số lượng để một lượt agent coding dài
+ * không thổi phồng một record IndexedDB.
+ */
+export function sanitizeToolInvocations(
+  list?: StoredToolInvocation[],
+): StoredToolInvocation[] | undefined {
+  if (!list?.length) return undefined;
+  const cleaned: StoredToolInvocation[] = [];
+  for (const inv of list) {
+    if (!inv || typeof inv.toolName !== 'string' || inv.state !== 'result') continue;
+    let result = inv.result;
+    try {
+      const raw = JSON.stringify(result ?? null) ?? 'null';
+      if (raw.length > STORED_TOOL_RESULT_CHARS) {
+        result = {
+          truncated: true,
+          note: `[kết quả ${raw.length} ký tự đã bị cắt khi lưu — gọi lại công cụ nếu cần đầy đủ]`,
+          preview: raw.slice(0, STORED_TOOL_RESULT_CHARS),
+        };
+      }
+    } catch {
+      // Kết quả không serialize được (circular/BigInt) → không thể persist.
+      result = { note: '[kết quả không lưu được]' };
+    }
+    cleaned.push({
+      toolCallId: String(inv.toolCallId ?? ''),
+      toolName: inv.toolName,
+      ...(inv.args !== undefined ? { args: inv.args } : {}),
+      state: 'result',
+      result,
+    });
+  }
+  if (!cleaned.length) return undefined;
+  // Giữ những invocation MỚI NHẤT khi vượt trần: chúng gần câu hỏi hiện tại nhất.
+  return cleaned.slice(-STORED_TOOL_INVOCATIONS_MAX);
 }
 
 export class ChatAppDatabase extends Dexie {
@@ -311,11 +391,36 @@ export class ChatAppDatabase extends Dexie {
       ws_snapshots: 'id, chatId, createdAt',
     });
 
+    // v10: sửa bug đặt tên — schema v9 khai báo 'ws_snapshots' (snake_case)
+    // nhưng code truy cập db.wsSnapshots (camelCase) → undefined.where() crash.
+    // Tạo bảng đúng tên và migrate snapshot cũ; bảng snake_case sẽ bị Dexie tự xoá.
+    this.version(10)
+      .stores({
+        chats: 'id, createdAt, updatedAt, pinned, activeLeafId, *titleTokens',
+        messages:
+          'id, chatId, role, createdAt, seq, parentId, ' +
+          '[chatId+parentId], [chatId+createdAt], [chatId+seq], ' +
+          '[chatId+parentId+branchOrder], *tokens',
+        prompts: 'id, updatedAt',
+        kv: 'key',
+        providers: 'id, updatedAt',
+        memories: 'id, createdAt',
+        wsSnapshots: 'id, chatId, createdAt',
+      })
+      .upgrade(async (tx) => {
+        const legacy = tx.table<WorkspaceSnapshot>('ws_snapshots');
+        const rows = await legacy.toArray();
+        if (rows.length) {
+          await tx.table<WorkspaceSnapshot>('wsSnapshots').bulkPut(rows);
+        }
+      });
+
     this.messages.hook('creating', (_primKey, obj) => {
       obj.parentId = toParentKey(obj.parentId as string | null);
       if (typeof obj.branchTieBreaker !== 'string') obj.branchTieBreaker = obj.id;
       if (typeof obj.branchOrder !== 'number') obj.branchOrder = 0;
       obj.attachments = sanitizeAttachments(obj.attachments);
+      obj.toolInvocations = sanitizeToolInvocations(obj.toolInvocations);
       if (obj.status !== 'streaming' && (!obj.tokens || obj.tokens.length === 0)) {
         obj.tokens = tokenize(obj.content || '');
       }
@@ -337,6 +442,9 @@ export class ChatAppDatabase extends Dexie {
       }
       if ('attachments' in mods) {
         patch.attachments = sanitizeAttachments(mods.attachments);
+      }
+      if ('toolInvocations' in mods) {
+        patch.toolInvocations = sanitizeToolInvocations(mods.toolInvocations);
       }
       return Object.keys(patch).length ? { ...mods, ...patch } : mods;
     });
@@ -446,6 +554,7 @@ export async function appendMessage(input: AppendMessageInput): Promise<StoredMe
       branchTieBreaker: input.id,
       createdAt: input.createdAt ?? Date.now(),
       attachments: sanitizeAttachments(input.attachments),
+      toolInvocations: sanitizeToolInvocations(input.toolInvocations),
     };
 
     await db.messages.add(record);

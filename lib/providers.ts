@@ -62,6 +62,13 @@ export async function deleteProvider(id: string): Promise<void> {
 /**
  * Đọc provider theo id từ DB rồi ghi snapshot vào store. id = server hoặc
  * không tìm thấy → snapshot null (dùng cấu hình env của server).
+ *
+ * KHÔNG BAO GIỜ ném: caller gọi kiểu fire-and-forget (`void sync…()` trong
+ * effect của chat-interface), nên một lỗi IndexedDB (hết quota, chế độ ẩn
+ * danh, DB bị khoá vì tab khác đang nâng version) sẽ thành unhandled promise
+ * rejection — nổi lên như lỗi toàn cục mà người dùng không hiểu gì.
+ * Đọc DB hỏng thì rơi về provider mặc định của server: mất preset còn hơn
+ * mất cả ứng dụng.
  */
 export async function syncActiveProviderSnapshot(providerId: string): Promise<void> {
   const store = useAppStore.getState();
@@ -69,18 +76,23 @@ export async function syncActiveProviderSnapshot(providerId: string): Promise<vo
     store.setActiveProviderSnapshot(null);
     return;
   }
-  const p = await db.providers.get(providerId);
-  if (!p) {
-    store.setActiveProvider(SERVER_PROVIDER_ID);
-    return;
+  try {
+    const p = await db.providers.get(providerId);
+    if (!p) {
+      store.setActiveProvider(SERVER_PROVIDER_ID);
+      return;
+    }
+    store.setActiveProviderSnapshot({
+      id: p.id,
+      name: p.name,
+      baseUrl: p.baseUrl,
+      apiKey: p.apiKey,
+      models: p.models ?? [],
+    });
+  } catch (err) {
+    console.error('[providers] Không đọc được provider từ IndexedDB:', err);
+    store.setActiveProviderSnapshot(null);
   }
-  store.setActiveProviderSnapshot({
-    id: p.id,
-    name: p.name,
-    baseUrl: p.baseUrl,
-    apiKey: p.apiKey,
-    models: p.models ?? [],
-  });
 }
 
 /* ------------------------------------------------------------------ */
@@ -97,13 +109,23 @@ let seedPromise: Promise<void> | null = null;
 
 const DEFAULT_PROVIDER_SEEDS: Array<Pick<ProviderConfig, 'name' | 'baseUrl' | 'apiKey'>> = [
   {
+    /* Từ bản cập nhật "User Accounts + API Keys", crax BẮT BUỘC key: mọi
+       endpoint trả 401 auth_required kể cả với key rác. Đăng ký tài khoản
+       (hoặc vào bằng guest) tại https://gpt.crax.lol rồi lấy key crk_live_…
+       ở Settings → API keys. Seed vẫn để trống — không nhúng credential. */
     name: 'crax-gpt',
     baseUrl: 'https://gpt.crax.lol/v1',
     apiKey: '',
   },
   {
+    /* Kilgore đã chuyển sang tên miền mới (kilgoreai.xyz) và hỗ trợ cả cookie
+       lẫn Bearer API key (`sk-kilg-…`). Server proxy của app không giữ được
+       cookie giữa các request nên mỗi lượt sẽ là phiên mới — mất lịch sử hội
+       thoại phía gateway và có thể bị giới hạn theo IP chung. Khuyến nghị
+       người dùng tạo key qua POST /v1/auth/api-keys rồi dán vào đây để có
+       danh tính ổn định; ô nhập key vẫn cho phép bỏ trống nếu muốn dùng tạm. */
     name: 'KilgoreAI',
-    baseUrl: 'https://kilgoreai.freesrv.com/v1',
+    baseUrl: 'https://kilgoreai.xyz/v1',
     apiKey: '',
   },
   {
@@ -137,12 +159,40 @@ const DEFAULT_PROVIDER_SEEDS: Array<Pick<ProviderConfig, 'name' | 'baseUrl' | 'a
 /** Thêm sẵn các nhà cung cấp user định dùng + dọn trùng lặp — chỉ chạy lần đầu. */
 export async function ensureProviderSeed(): Promise<void> {
   if (!seedPromise) {
-    seedPromise = seedOnce().catch((err) => {
-      seedPromise = null; // lỗi (vd 2 tab write-conflict) → cho phép thử lại lần sau
-      throw err;
-    });
+    seedPromise = seedOnce()
+      .then(() => migrateKiloreDomain())
+      .catch((err) => {
+        seedPromise = null; // lỗi (vd 2 tab write-conflict) → cho phép thử lại lần sau
+        throw err;
+      });
   }
   return seedPromise;
+}
+
+/**
+ * Migration Kilgore domain: freesrv.com → xyz. Chạy MỖI LẦN app khởi động
+ * (idempotent), KHÔNG phụ thuộc seed flag. Nếu user đã seed từ trước khi
+ * migration được thêm, seed flag đã tồn tại nên seedOnce skip — nhưng migration
+ * này vẫn chạy để update preset cũ.
+ */
+async function migrateKiloreDomain(): Promise<void> {
+  const OLD_HOST = 'kilgoreai.freesrv.com';
+  const NEW_BASE = 'https://kilgoreai.xyz/v1';
+  try {
+    const existing = await db.providers.toArray();
+    const hasNew = existing.some((p) => {
+      try { return new URL(p.baseUrl).hostname.toLowerCase() === 'kilgoreai.xyz'; } catch { return false; }
+    });
+    if (hasNew) return; // Đã có preset mới → không cần migrate
+    for (const p of existing) {
+      try {
+        if (new URL(p.baseUrl).hostname.toLowerCase() !== OLD_HOST) continue;
+      } catch { continue; }
+      await db.providers.update(p.id, { baseUrl: NEW_BASE, updatedAt: Date.now() });
+    }
+  } catch {
+    // Migration thất bại không được chặn app khởi động.
+  }
 }
 
 async function seedOnce(): Promise<void> {
