@@ -279,6 +279,20 @@ async function describeImageBatch(
 }
 
 /**
+ * Mô tả MỘT ảnh data-URL — dùng bởi /api/vision cho luồng "agent đọc ảnh trong
+ * workspace" (fs_read trên file ảnh). Dùng chung chuỗi model + retry với
+ * bridge tin nhắn; trả null khi không bridge được (caller tự quyết fallback).
+ */
+export async function describeImageDataUrl(
+  dataUrl: string,
+  deps: BridgeDeps,
+): Promise<string | null> {
+  const payload = extractImageDataUrl(dataUrl);
+  if (!payload) return null;
+  return describeImageBatch([payload], deps);
+}
+
+/**
  * Thay mọi ảnh data-URL trong messages bằng mô tả Gemini. Message không có
  * ảnh data-URL được giữ nguyên tham chiếu; có ảnh mà Gemini fail → giữ nguyên
  * message đó (không bridge nửa chừng). Không đổi gì khi không cần bridge.

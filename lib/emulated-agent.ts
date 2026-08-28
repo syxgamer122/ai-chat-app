@@ -34,37 +34,33 @@ import {
   type AgentToolSet,
 } from '@/lib/agent-tools';
 import { stripEmulatedToolMarkup } from '@/lib/text-tool-guard';
+import {
+  EMU_MAX_CALLS_PER_ROUND,
+  EMU_MAX_ROUNDS,
+  TOOL_RESULT_MAX_CHARS,
+  serializeToolResult,
+} from '@/lib/tool-limits';
 
-export const EMU_MAX_ROUNDS = 3;
-export const EMU_MAX_CALLS_PER_ROUND = 3;
-/** Trần ký tự mỗi tool-result đưa vào transcript (middle-truncate ở caller). */
-export const EMU_MAX_RESULT_CHARS = 6000;
+export { EMU_MAX_ROUNDS, EMU_MAX_CALLS_PER_ROUND };
+/**
+ * Trần ký tự mỗi tool-result đưa vào transcript. Trước đây là 6.000 trong khi
+ * đường native không cắt gì (24.000) — cùng một tác vụ, hai model nhận lượng
+ * thông tin lệch 4 lần. Nay dùng chung một hằng số.
+ */
+export const EMU_MAX_RESULT_CHARS = TOOL_RESULT_MAX_CHARS;
 
 /* ------------------------------------------------------------------ */
 /* Protocol prompt                                                     */
 /* ------------------------------------------------------------------ */
 
-const TOOLS_MANUAL = [
-  '- web_search: tìm web hiện tại. args: {"query": string (từ khóa chính), "count"?: number}',
-  '- web_fetch: đọc nội dung một URL public. args: {"url": string} — CHỈ URL do người dùng',
-  '  cung cấp hoặc xuất hiện trong kết quả web_search.',
-  '- weather: thời tiết theo nơi. args: {"location": string, vd "Hà Nội"}',
-  '- exchange_rates: tỷ giá hôm nay. args: {} (không cần tham số)',
-  '- memory_search: tra ghi nhớ dài hạn của người dùng. args: {"query": string}',
-  '- memory_save: lưu thông tin dài hạn khi người dùng YÊU CẦU NHỚ rõ ràng. args: {"text": string (một câu ngắn)}',
-  '- fs_list: liệt kê MỘT cấp thư mục trong workspace trên MÁY NGƯỜI DÙNG. args: {"path": string (rỗng = gốc)}',
-  '- fs_read: đọc một file text trong workspace. args: {"path": string, vd "src/index.ts"}',
-  '- fs_search: tìm chuỗi/regex trong workspace (bỏ node_modules/.git/dist). args: {"query": string, "is_regex"?: boolean}',
-  '- fs_edit: SỬA file bằng khối SEARCH/REPLACE (ưa hơn fs_write với file lớn). args: {"path": string,',
-  '  "blocks": string} — blocks gồm một/nhiều khối:\n<<<<<<< SEARCH\n(đoạn cần tìm, khớp NGUYÊN VĂN, duy nhất)\n=======\n(nội dung thay)\n>>>>>>> REPLACE',
-  '- fs_write: ghi TOÀN BỘ file — người dùng thấy diff và phê duyệt; bị từ chối thì đừng ghi lại y nguyên.',
-  '  args: {"path": string, "content": string}',
-].join('\n');
-
-export function buildProtocolHeader(toolNames?: Iterable<string>): string {
-  // Runtime luôn truyền danh sách tool thực tế. Giữ fallback legacy chỉ cho
-  // callers cũ; nhờ đó catalog emulated không còn quảng bá tool vắng mặt.
-  const manual = toolNames ? formatToolProtocolManual(toolNames) : TOOLS_MANUAL;
+/**
+ * Manual LUÔN sinh từ schema thật qua formatToolProtocolManual — bản viết tay
+ * trước đây đã drift (thiếu start_line/line_count của fs_read, khiến model
+ * emulated luôn đọc full file). Không còn fallback: caller bắt buộc truyền
+ * danh sách tool thực tế của request.
+ */
+export function buildProtocolHeader(toolNames: Iterable<string>): string {
+  const manual = formatToolProtocolManual(toolNames);
   return [
     '# Tool calling protocol',
     '',
@@ -342,14 +338,8 @@ export async function runEmulatedLoop(opts: EmulatedLoopOptions): Promise<Emulat
       ) {
         opts.onMemoryProposal?.((result as { text: string }).text);
       }
-      let serialized = JSON.stringify(result) ?? 'null';
-      if (serialized.length > EMU_MAX_RESULT_CHARS) {
-        // Middle-truncate kiểu emutools: giữ đầu + đuôi (đầu thường là meta,
-        // đuôi thường chứa kết quả chính).
-        const head = serialized.slice(0, EMU_MAX_RESULT_CHARS * 0.7);
-        const tail = serialized.slice(-EMU_MAX_RESULT_CHARS * 0.25);
-        serialized = `${head}\n...[đã cắt bớt phần giữa]...\n${tail}`;
-      }
+      // Middle-truncate dùng chung với đường native (lib/tool-limits.ts).
+      const serialized = serializeToolResult(result, EMU_MAX_RESULT_CHARS);
       resultBlocks.push(`[TOOL_RESULT name=${call.name}]\n${serialized}\n[/TOOL_RESULT]`);
     }
 

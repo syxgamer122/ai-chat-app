@@ -171,12 +171,14 @@ function prep(text: string): { text: string; lines: string[] } {
   return { text: withNl, lines: withNl.split('\n').slice(0, -1) };
 }
 
-function perfectReplace(
-  wholeLines: string[],
-  partLines: string[],
-  replaceLines: string[],
-): string | null {
+/**
+ * Đếm mọi vị trí khớp NGUYÊN VĂN (không chồng lấn) của `partLines`.
+ * Cần cho kiểm tra tính duy nhất — xem ghi chú ở perfectReplace.
+ */
+function findExactMatches(wholeLines: string[], partLines: string[]): number[] {
   const partLen = partLines.length;
+  const hits: number[] = [];
+  if (partLen === 0) return [0]; // SEARCH rỗng = chèn ở đầu (tạo file mới)
   for (let i = 0; i <= wholeLines.length - partLen; i++) {
     let match = true;
     for (let j = 0; j < partLen; j++) {
@@ -186,10 +188,37 @@ function perfectReplace(
       }
     }
     if (match) {
-      return [...wholeLines.slice(0, i), ...replaceLines, ...wholeLines.slice(i + partLen)].join('\n');
+      hits.push(i);
+      i += partLen - 1; // không đếm chồng lấn
     }
   }
-  return null;
+  return hits;
+}
+
+/**
+ * Thay đoạn khớp nguyên văn.
+ *
+ * QUAN TRỌNG — tính duy nhất: mô tả của tool `fs_edit` nói với model rằng
+ * SEARCH "phải khớp NGUYÊN VĂN và DUY NHẤT". Bản cũ `return` ngay ở lần khớp
+ * ĐẦU TIÊN, nên khi đoạn SEARCH xuất hiện nhiều nơi (rất thường gặp với các
+ * dòng như `  return 1;` hay `}`), nó âm thầm sửa nhầm chỗ — người dùng chỉ
+ * thấy diff của một chỗ và bấm duyệt. Nay khớp >1 lần thì TỪ CHỐI để model
+ * mở rộng ngữ cảnh SEARCH.
+ */
+function perfectReplace(
+  wholeLines: string[],
+  partLines: string[],
+  replaceLines: string[],
+): string | null | 'ambiguous' {
+  const hits = findExactMatches(wholeLines, partLines);
+  if (hits.length === 0) return null;
+  if (hits.length > 1) return 'ambiguous';
+  const i = hits[0];
+  return [
+    ...wholeLines.slice(0, i),
+    ...replaceLines,
+    ...wholeLines.slice(i + partLines.length),
+  ].join('\n');
 }
 
 /** Cả ORIG lẫn UPD bị outdent/indent ĐỀU nhất — bù lại prefix tìm được. */
@@ -246,8 +275,11 @@ function perfectOrWhitespace(
   wholeLines: string[],
   partLines: string[],
   replaceLines: string[],
-): { text: string; strategy: string } | null {
+): { text: string; strategy: string } | 'ambiguous' | null {
   const perfect = perfectReplace(wholeLines, partLines, replaceLines);
+  // Khớp nhiều chỗ: KHÔNG rơi xuống chiến lược lỏng hơn — chúng cũng lấy
+  // chỗ đầu tiên, tức vẫn sửa nhầm nhưng khó phát hiện hơn.
+  if (perfect === 'ambiguous') return 'ambiguous';
   if (perfect !== null) return { text: perfect, strategy: 'exact' };
   const flex = replacePartWithMissingLeadingWhitespace(wholeLines, partLines, replaceLines);
   if (flex !== null) return { text: flex, strategy: 'whitespace' };
@@ -328,12 +360,18 @@ export function replaceMostSimilarChunk(
   let { lines: partLines } = prep(part);
   let { lines: replaceLines } = prep(replace);
 
+  const ambiguousHint =
+    'Đoạn SEARCH khớp NHIỀU vị trí trong file nên không biết sửa chỗ nào. ' +
+    'Hãy mở rộng khối SEARCH (thêm dòng phía trên/dưới) cho tới khi nó chỉ khớp DUY NHẤT một chỗ.';
+
   let res = perfectOrWhitespace(wholeLines, partLines, replaceLines);
+  if (res === 'ambiguous') return { ok: false, hint: ambiguousHint };
   if (res !== null) return { ok: true, text: res.text, strategy: res.strategy };
 
   // GPT hay tự thêm dòng trắng đầu khối (aider issue #25).
   if (partLines.length > 2 && !partLines[0].trim()) {
     res = perfectOrWhitespace(wholeLines, partLines.slice(1), replaceLines);
+    if (res === 'ambiguous') return { ok: false, hint: ambiguousHint };
     if (res !== null) return { ok: true, text: res.text, strategy: `skip-blank+${res.strategy}` };
   }
 

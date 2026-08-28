@@ -25,6 +25,8 @@ import { capHits, fetchReadablePage, searchWeb } from '@/lib/web-backend';
 import { fetchRates, fetchWeather } from '@/lib/live-tools';
 import { WEB_LIMITS } from '@/lib/web-context';
 import { judgeInjection } from '@/lib/injection-guard';
+import { getToolCallBudget, checkDoomLoop } from '@/lib/tool-call-budget';
+import { MAX_TOOL_CALLS_PER_TURN, TOOL_RESULT_MAX_CHARS } from '@/lib/tool-limits';
 
 export type AgentToolSet = ReturnType<typeof buildAgentTools>;
 
@@ -43,10 +45,15 @@ export interface AgentToolsOptions {
   includeWeather?: boolean;
   /** Tắt riêng khi client đã lấy được tỷ giá cho lượt này. */
   includeExchangeRates?: boolean;
+  /**
+   * Id hội thoại — khoá ngân sách gọi tool sống xuyên các resubmit của
+   * client tool. Thiếu id thì rơi về hành vi cũ (đếm theo từng request).
+   */
+  conversationId?: string | null;
 }
 
 /** Trần số lần gọi tool MỌI LOẠI trong một lượt chat. */
-export const MAX_TOOL_CALLS_PER_TURN = 8;
+export { MAX_TOOL_CALLS_PER_TURN };
 
 /* ------------------------------------------------------------------ */
 /* Tìm ghi nhớ (thuần, test được không cần Dexie)                      */
@@ -93,6 +100,14 @@ export function summarizeToolArgs(name: string, args: unknown): string {
       return String(a.location ?? '').slice(0, 60);
     case 'memory_search':
       return String(a.query ?? '').slice(0, 60);
+    case 'shell_run':
+      return String(a.command ?? '').slice(0, 80);
+    case 'git_commit':
+      return String(a.message ?? '').slice(0, 60);
+    case 'git_add':
+      return Array.isArray(a.paths) ? (a.paths as string[]).join(', ').slice(0, 80) : '';
+    case 'git_diff':
+      return String(a.path ?? (a.staged ? 'staged' : '')).slice(0, 60);
     default:
       return '';
   }
@@ -126,8 +141,21 @@ export function summarizeToolResult(name: string, result: unknown): string {
       }
       return String(r.note ?? 'Từ chối');
     }
+    case 'shell_run': {
+      if (typeof r.error === 'string') return r.error.slice(0, 80);
+      const code = r.code;
+      return code === 0 ? 'thành công' : `exit ${String(code ?? '?')}`;
+    }
+    case 'git_status': {
+      const entries = Array.isArray((r as { entries?: unknown[] }).entries) ? (r as { entries: unknown[] }).entries : [];
+      return `${entries.length} thay đổi${r.branch ? ` (${String(r.branch)})` : ''}`;
+    }
+    case 'git_diff':
+      return typeof r === 'string' ? `${(r as string).split('\n').length} dòng diff` : 'có diff';
+    case 'git_log':
+      return typeof r === 'string' ? `${(r as string).split('\n').filter(Boolean).length} commit` : 'có log';
     default:
-      return typeof r.note === 'string' ? r.note.slice(0, 80) : '';
+      return typeof r.note === 'string' ? r.note.slice(0, 80) : typeof r.error === 'string' ? (r.error as string).slice(0, 80) : '';
   }
 }
 
@@ -147,6 +175,38 @@ function hostOf(url: string): string | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Áp trần kích thước cho kết quả tool ở ĐƯỜNG NATIVE. Trước đây chỉ đường
+ * emulated cắt (6k) còn native để nguyên — một web_fetch trang dài có thể
+ * đẩy cả chục nghìn token vào context mà ContextMeter không kịp phản ánh.
+ *
+ * Cắt trên TỪNG trường string dài thay vì stringify cả object, để shape kết
+ * quả (results[], content, note...) không đổi — model vẫn đọc được cấu trúc.
+ */
+function capToolResult(result: Record<string, unknown>): Record<string, unknown> {
+  let raw: string;
+  try {
+    raw = JSON.stringify(result) ?? '';
+  } catch {
+    return { note: 'Kết quả công cụ không đọc được.' };
+  }
+  if (raw.length <= TOOL_RESULT_MAX_CHARS) return result;
+
+  const out: Record<string, unknown> = {};
+  let remaining = TOOL_RESULT_MAX_CHARS;
+  for (const [key, value] of Object.entries(result)) {
+    if (typeof value === 'string' && value.length > remaining) {
+      out[key] = `${value.slice(0, Math.max(0, remaining))}\n…[đã cắt bớt vì quá dài]`;
+      remaining = 0;
+    } else {
+      out[key] = value;
+      if (typeof value === 'string') remaining -= value.length;
+    }
+  }
+  out.truncated = true;
+  return out;
 }
 
 function stableKey(name: string, args: unknown): string {
@@ -172,12 +232,13 @@ export function buildAgentTools(
     : memoriesOrOptions ?? {};
   const memories = opts.memories ?? [];
 
-  // Trạng thái theo LƯỢT GỢI (mỗi request tạo bộ tool mới): log chống lặp +
-  // tập host hợp lệ cho provenance. Không state toàn cục để hai request song
-  // song không ảnh hưởng nhau.
-  const callCounts = new Map<string, number>();
-  let totalCalls = 0;
-  const knownHosts = new Set<string>();
+  /* Ngân sách theo HỘI THOẠI (không phải theo request): mỗi lần client thực
+     thi fs_* xong, useChat resubmit tạo request mới — nếu đếm theo request
+     thì trần và dedupe reset sạch, đúng kịch bản vòng lặp fs_list vô hạn đã
+     gặp. Không có conversationId → bucket dùng-một-lần (hành vi cũ). */
+  const budget = getToolCallBudget(opts.conversationId);
+  const callCounts = budget.callCounts;
+  const knownHosts = budget.knownHosts;
   for (const h of opts.allowedHosts ?? []) {
     const host = hostOf(h);
     if (host) knownHosts.add(host);
@@ -196,8 +257,9 @@ export function buildAgentTools(
     run: () => Promise<Record<string, unknown>>,
     errorFallback: Record<string, unknown> = {},
   ): Promise<Record<string, unknown>> {
-    totalCalls += 1;
-    if (totalCalls > MAX_TOOL_CALLS_PER_TURN) {
+    budget.totalCalls += 1;
+    budget.touchedAt = Date.now();
+    if (budget.totalCalls > MAX_TOOL_CALLS_PER_TURN) {
       return {
         ...errorFallback,
         note:
@@ -205,6 +267,21 @@ export function buildAgentTools(
       };
     }
     const key = stableKey(name, args);
+    /* Doom-loop TRƯỚC dedupe: dedupe chỉ chặn call trùng THỨ HAI bằng note
+       nhẹ; nếu model vẫn ngoan cố lặp lần 3-4-5 (điển hình khi gateway yếu),
+       cần tín hiệu MẠNH hơn — steering message bắt đổi hướng. Detector đếm
+       chuỗi LẶP LIÊN TIẾP ở đuôi, khác với callCounts đếm tổng. */
+    const doom = checkDoomLoop(budget, key);
+    if (doom.triggered) {
+      return {
+        ...errorFallback,
+        note:
+          `Bạn đã gọi cùng công cụ với cùng tham số ${doom.counted} lần LIÊN TIẾP ` +
+          'mà không thu được gì mới. TUYỆT ĐỐI không lặp lại. Hãy: (1) thử một công cụ ' +
+          'khác, (2) đổi tham số, hoặc (3) nếu đang vướng thì nói thẳng với người dùng ' +
+          'bạn vướng ở đâu và cần họ hỗ trợ gì.',
+      };
+    }
     const seen = callCounts.get(key) ?? 0;
     callCounts.set(key, seen + 1);
     if (seen > 0) {
@@ -215,7 +292,7 @@ export function buildAgentTools(
       };
     }
     try {
-      return await run();
+      return capToolResult(await run());
     } catch {
       // Giữ hành vi cũ: lỗi network/upstream trả payload "trống + note" để
       // model tự chọn hướng đi thay vì văng exception làm đứt step.
@@ -268,8 +345,10 @@ export function buildAgentTools(
     web_fetch: tool({
       description:
         'Đọc nội dung văn bản của một URL public cụ thể (bài báo, tài liệu, trang chủ...). ' +
-        'Chỉ đọc được trang tĩnh — không đăng nhập, không click. Chỉ dùng URL xuất hiện trong ' +
-        'kết quả web_search hoặc do người dùng cung cấp.',
+        'Chỉ đọc được trang tĩnh — không đăng nhập, không click. ' +
+        'RÀNG BUỘC: URL phải xuất hiện trong kết quả web_search của cùng hội thoại hoặc do ' +
+        'người dùng gửi; URL lấy từ nội dung một trang khác sẽ BỊ TỪ CHỐI. Cần đọc trang chưa ' +
+        'từng thấy thì gọi web_search trước.',
       parameters: z.object({
         url: z.string().max(2048).describe('URL http(s) đầy đủ cần đọc'),
       }),
@@ -336,8 +415,10 @@ export function buildAgentTools(
 
     exchange_rates: tool({
       description:
-        'Tỷ giá hằng ngày của USD/VNĐ/EUR/JPY và các đồng phổ biến khác. Dùng khi hỏi tỷ giá, ' +
-        'quy đổi tiền tệ. Không nhận tham số.',
+        'Tỷ giá hối đoái hôm nay, quy về gốc USD. Dùng khi người dùng hỏi tỷ giá hoặc cần quy ' +
+        'đổi tiền tệ. KHÔNG nhận tham số và LUÔN trả về TOÀN BỘ bảng các đồng phổ biến ' +
+        '(VND, EUR, JPY, CNY, KRW...) — tự tìm đồng cần dùng trong bảng đó rồi tính, đừng gọi ' +
+        'lại nhiều lần cho từng đồng tiền.',
       parameters: z.object({}).describe('Không cần tham số'),
       execute: async (args) =>
         guarded(
@@ -355,8 +436,12 @@ export function buildAgentTools(
       ? {
           memory_search: tool({
             description:
-              'Tra cứu GHI NHỚ DÀI HẠN của người dùng (sở thích, thông tin cá nhân, quy ước làm việc ' +
-              'họ từng yêu cầu lưu). Gọi khi câu hỏi có thể liên quan đến thông tin đã biết về người dùng.',
+              'Tra kho GHI NHỚ DÀI HẠN mà người dùng đã yêu cầu lưu (sở thích, tên gọi, quy ước ' +
+              'làm việc, ràng buộc cá nhân). CHỈ gọi khi: (a) người dùng nhắc tới thiết lập/sở ' +
+              'thích cá nhân của chính họ, (b) họ hỏi "tôi đã nói gì về…", "bạn còn nhớ…", hoặc ' +
+              '(c) yêu cầu cần biết quy ước riêng của họ mới làm đúng được. ' +
+              'KHÔNG gọi cho câu hỏi kiến thức chung, câu hỏi về code, hay khi đã đủ thông tin ' +
+              'để trả lời — kho ghi nhớ nhỏ và không liên quan tới kiến thức phổ thông.',
             parameters: z.object({
               query: z.string().min(1).max(200).describe('Từ khóa cần tra, ví dụ "ngôn ngữ ưa thích"'),
             }),
@@ -416,9 +501,10 @@ export function buildAgentTools(
     }),
   };
 
-  // Những capability đã có dữ liệu đáng tin cậy trong prompt của CHÍNH lượt
-  // này không cần xuất hiện thêm trong catalog tool. Vẫn giữ implementation để
-  // dùng làm fallback khi prefetch thất bại hoặc không được bật.
+  /* Cờ include* CHỈ còn hiệu lực khi caller yêu cầu tường minh. Mặc định
+     KHÔNG gỡ tool nữa dù lượt này đã prefetch dữ liệu: regex đoán ý định có
+     thể trích sai địa điểm/truy vấn, gỡ tool đi thì model mất đường sửa sai.
+     Route hiện dùng ghi chú trong system prompt thay cho việc gỡ. */
   if (opts.includeWeb === false) {
     Reflect.deleteProperty(serverTools, 'web_search');
     Reflect.deleteProperty(serverTools, 'web_fetch');
@@ -444,43 +530,160 @@ export function buildAgentTools(
  * Chỉ hoạt động trên đường NATIVE function calling. Đường emulated lọc các
  * tool này ra (xem route) vì client-execution protocol của nó khác.
  */
+/* ------------------------------------------------------------------ */
+/* Manual sinh TỰ ĐỘNG từ schema thật                                  */
+/* ------------------------------------------------------------------ */
+
 /**
- * Emulated Agent cần schema ở dạng text; native function-calling không cần
- * block này. Giữ mô tả ở cạnh registry tool để không drift với runtime.
+ * Trước đây danh mục tool được viết tay ở 3 nơi (bảng TOOL_PROTOCOL_LINES,
+ * TOOLS_MANUAL trong emulated-agent, chuỗi [Tools] trong route) và đã drift
+ * thật — bản emulated thiếu hẳn start_line/line_count của fs_read khiến model
+ * luôn đọc full file. Giờ mọi mô tả đều sinh từ CHÍNH object tool đang chạy.
  */
-const TOOL_PROTOCOL_LINES: Record<string, readonly string[]> = {
-  web_search: [
-    '- web_search: tìm thông tin hiện tại trên web. args: {"query": string, "count"?: number}',
-  ],
-  web_fetch: [
-    '- web_fetch: đọc URL public do người dùng cung cấp hoặc xuất hiện từ web_search. args: {"url": string}',
-  ],
-  weather: ['- weather: thời tiết theo nơi. args: {"location": string, vd "Hà Nội"}'],
-  exchange_rates: ['- exchange_rates: tỷ giá hôm nay. args: {}'],
-  memory_search: ['- memory_search: tra ghi nhớ dài hạn. args: {"query": string}'],
-  memory_save: [
-    '- memory_save: chỉ lưu fact dài hạn khi người dùng yêu cầu nhớ rõ ràng. args: {"text": string}',
-  ],
-  fs_list: ['- fs_list: liệt kê MỘT cấp thư mục workspace. args: {"path"?: string}'],
-  fs_read: [
-    '- fs_read: đọc file text. args: {"path": string, "start_line"?: number, "line_count"?: number}',
-  ],
-  fs_search: ['- fs_search: tìm chuỗi hoặc regex trong workspace. args: {"query": string, "is_regex"?: boolean}'],
-  fs_edit: [
-    '- fs_edit: sửa cục bộ file bằng khối SEARCH/REPLACE; ưa hơn fs_write với file lớn. args: {"path": string, "blocks": string}',
-  ],
-  fs_write: [
-    '- fs_write: tạo mới hoặc ghi toàn bộ file; người dùng luôn duyệt diff. args: {"path": string, "content": string}',
-  ],
+
+/** Tên kiểu ngắn gọn cho một zod schema, phục vụ dòng `args: {...}`. */
+function zodTypeName(schema: unknown): string {
+  const def = (schema as { _def?: { typeName?: string; innerType?: unknown; type?: unknown } })?._def;
+  switch (def?.typeName) {
+    case 'ZodString':
+      return 'string';
+    case 'ZodNumber':
+      return 'number';
+    case 'ZodBoolean':
+      return 'boolean';
+    case 'ZodArray':
+      return `${zodTypeName(def.type)}[]`;
+    case 'ZodObject':
+      return 'object';
+    case 'ZodOptional':
+    case 'ZodDefault':
+    case 'ZodNullable':
+      return zodTypeName(def.innerType);
+    default:
+      return 'any';
+  }
+}
+
+function isOptionalSchema(schema: unknown): boolean {
+  const typeName = (schema as { _def?: { typeName?: string } })?._def?.typeName;
+  return typeName === 'ZodOptional' || typeName === 'ZodDefault';
+}
+
+/** `{"path": string, "start_line"?: number}` từ schema z.object thật. */
+function formatArgsSignature(parameters: unknown): string {
+  const def = (parameters as { _def?: { typeName?: string; shape?: () => Record<string, unknown> } })?._def;
+  if (def?.typeName !== 'ZodObject' || typeof def.shape !== 'function') return '{}';
+  const shape = def.shape();
+  const parts = Object.entries(shape).map(
+    ([key, value]) => `"${key}"${isOptionalSchema(value) ? '?' : ''}: ${zodTypeName(value)}`,
+  );
+  return `{${parts.join(', ')}}`;
+}
+
+interface ToolLikeForDocs {
+  description?: string;
+  parameters?: unknown;
+}
+
+/**
+ * Registry dùng CHO TÀI LIỆU: chính các object tool sẽ chạy lúc runtime.
+ * Server tool dựng một lần với memories giả để memory_search có mặt — chỉ
+ * đọc `.description`/`.parameters` nên không chạm mạng.
+ */
+let docRegistryCache: Record<string, ToolLikeForDocs> | null = null;
+function getDocRegistry(): Record<string, ToolLikeForDocs> {
+  if (docRegistryCache) return docRegistryCache;
+  docRegistryCache = {
+    ...(buildAgentTools({
+      memories: [{ id: '__doc__', text: '__doc__' }],
+    }) as unknown as Record<string, ToolLikeForDocs>),
+    ...(CLIENT_TOOL_DEFS as unknown as Record<string, ToolLikeForDocs>),
+  };
+  return docRegistryCache;
+}
+
+export const ALL_TOOL_PROTOCOL_NAMES: readonly string[] = Object.freeze([
+  'web_search',
+  'web_fetch',
+  'weather',
+  'exchange_rates',
+  'memory_search',
+  'memory_save',
+  'fs_list',
+  'fs_read',
+  'fs_search',
+  'fs_edit',
+  'fs_write',
+  'shell_run',
+  'git_status',
+  'git_diff',
+  'git_log',
+  'git_add',
+  'git_commit',
+  'plan_create',
+  'plan_update',
+  'lesson_save',
+]);
+
+/**
+ * Render manual ĐẦY ĐỦ (mô tả + chữ ký args) cho các tool khả dụng.
+ *
+ * CHỈ dùng cho đường EMULATED: ở đó không có kênh tool-call native nên toàn
+ * bộ schema phải nằm trong text. Mô tả lấy nguyên văn từ object tool đang
+ * chạy nên ràng buộc (provenance của web_fetch, ngưỡng dòng của
+ * fs_edit/fs_write...) luôn tới được model.
+ *
+ * KHÔNG dùng cho đường native: SDK đã gửi name/description/parameters qua
+ * trường `tools` của API, chèn thêm manual là trả tiền token hai lần (~960
+ * token mỗi request). Đường đó dùng formatToolNameList().
+ */
+export function formatToolProtocolManual(toolNames: Iterable<string>): string {
+  const registry = getDocRegistry();
+  const lines: string[] = [];
+  for (const name of toolNames) {
+    const def = registry[name];
+    if (!def) continue;
+    const description = (def.description ?? '').replace(/\s+/g, ' ').trim();
+    lines.push(`- ${name}: ${description} args: ${formatArgsSignature(def.parameters)}`);
+  }
+  return lines.join('\n');
+}
+
+/**
+ * Danh sách TÊN tool kèm nhãn cực ngắn — dùng cho đường native, nơi mô tả
+ * đầy đủ đã đi qua trường `tools` của API. Chỉ để nhắc model rằng những
+ * capability này tồn tại và nên chủ động dùng.
+ */
+const TOOL_SHORT_LABELS: Record<string, string> = {
+  web_search: 'tìm web',
+  web_fetch: 'đọc URL',
+  weather: 'thời tiết',
+  exchange_rates: 'tỷ giá',
+  memory_search: 'tra ghi nhớ',
+  memory_save: 'lưu ghi nhớ',
+  fs_list: 'liệt kê thư mục',
+  fs_read: 'đọc file',
+  fs_search: 'tìm trong workspace',
+  fs_edit: 'sửa file (ưu tiên)',
+  fs_write: 'ghi cả file',
+  shell_run: 'chạy shell',
+  git_status: 'git status',
+  git_diff: 'git diff',
+  git_log: 'git log',
+  git_add: 'git add',
+  git_commit: 'git commit',
+  plan_create: 'tạo plan',
+  plan_update: 'cập nhật plan',
+  lesson_save: 'lưu bài học',
 };
 
-export const ALL_TOOL_PROTOCOL_NAMES = Object.freeze(Object.keys(TOOL_PROTOCOL_LINES));
-
-/** Chỉ render tool thực sự khả dụng trong request hiện tại. */
-export function formatToolProtocolManual(toolNames: Iterable<string>): string {
-  const lines: string[] = [];
-  for (const name of toolNames) lines.push(...(TOOL_PROTOCOL_LINES[name] ?? []));
-  return lines.join('\n');
+export function formatToolNameList(toolNames: Iterable<string>): string {
+  const parts: string[] = [];
+  for (const name of toolNames) {
+    const label = TOOL_SHORT_LABELS[name];
+    parts.push(label ? `${name} (${label})` : name);
+  }
+  return parts.join(', ');
 }
 
 export const CLIENT_TOOL_DEFS = {
@@ -494,8 +697,14 @@ export const CLIENT_TOOL_DEFS = {
   }),
   fs_read: tool({
     description:
-      'Đọc nội dung một FILE text trong workspace (mã nguồn, cấu hình, tài liệu...). Trần ~24k ký tự, ' +
-      'dài hơn sẽ báo truncated — dùng start_line/line_count để đọc phần cần thiết.',
+      'Đọc nội dung một FILE trong workspace của người dùng (trên máy họ). ' +
+      'File TEXT (mã nguồn, cấu hình, tài liệu...): trả nội dung, tối đa 24.000 ký tự tính TỪ start_line ' +
+      'trở đi; vượt trần thì kết quả có `truncated: true` — đọc tiếp bằng cách gọi lại với start_line lớn hơn. ' +
+      'File ẢNH (.png/.jpg/.webp/.heic): trả `description` — bản mô tả chi tiết do Gemini vision tạo, ' +
+      'kèm transcribe nguyên văn mọi chữ trong ảnh; dùng để xem ảnh, screenshot, diagram trong workspace. ' +
+      'Định dạng khác (PDF, font, video, file nén) bị từ chối — với PDF/tài liệu hãy bảo người dùng đính kèm vào khung chat. ' +
+      'Với file text lớn, nên dùng fs_search để định vị trước rồi đọc quanh vùng đó bằng ' +
+      'start_line/line_count thay vì đọc cả file.',
     parameters: z.object({
       path: z.string().min(1).max(500).describe('Đường dẫn tương đối tới file, vd "src/index.ts"'),
       start_line: z.number().int().min(1).max(1_000_000).optional().describe('Dòng bắt đầu, đánh số từ 1; mặc định 1'),
@@ -513,10 +722,13 @@ export const CLIENT_TOOL_DEFS = {
   }),
   fs_edit: tool({
     description:
-      'Sửa CỤC BỘ một file trong workspace bằng khối SEARCH/REPLACE. Người dùng LUÔN xem diff và PHẢI phê duyệt. ' +
-      'Ưu tiên tool này cho file lớn hoặc chỉ cần thay vài đoạn; SEARCH phải khớp nguyên văn, duy nhất, và copy từ fs_read. ' +
-      'Sửa nhiều chỗ bằng nhiều khối liên tiếp; nếu không tìm thấy thì đọc lại file rồi copy nguyên văn. ' +
-      'Nếu bị từ chối, đừng gửi lại y nguyên — hỏi người dùng muốn điều chỉnh gì.',
+      'Sửa CỤC BỘ một file ĐÃ TỒN TẠI bằng khối SEARCH/REPLACE. Người dùng LUÔN xem diff và PHẢI phê duyệt. ' +
+      'BẮT BUỘC gọi fs_read TRƯỚC khi sửa — tool sẽ TỪ CHỐI nếu file chưa được đọc. ' +
+      'ĐÂY LÀ LỰA CHỌN MẶC ĐỊNH cho mọi thay đổi trên file đã có — chỉ dùng fs_write khi tạo file mới ' +
+      'hoặc khi phải viết lại gần như toàn bộ một file ngắn (dưới ~100 dòng). ' +
+      'SEARCH phải khớp NGUYÊN VĂN và DUY NHẤT trong file, copy trực tiếp từ kết quả fs_read. ' +
+      'Sửa nhiều chỗ bằng nhiều khối liên tiếp trong một lần gọi. Nếu báo không khớp thì đọc lại file ' +
+      'rồi copy nguyên văn, đừng đoán. Nếu bị từ chối, đừng gửi lại y nguyên — hỏi người dùng muốn điều chỉnh gì.',
     parameters: z.object({
       path: z.string().min(1).max(500).describe('Đường dẫn tương đối tới file cần sửa'),
       blocks: z
@@ -530,12 +742,112 @@ export const CLIENT_TOOL_DEFS = {
   }),
   fs_write: tool({
     description:
-      'Tạo mới hoặc ghi toàn bộ một file trong workspace. Người dùng LUÔN xem diff và PHẢI phê duyệt. ' +
-      'Dùng cho file mới, file nhỏ, hoặc tái cấu trúc lớn khi fs_edit không phù hợp. ' +
-      'Nếu bị từ chối, đừng gửi lại y nguyên — hỏi người dùng muốn điều chỉnh gì.',
+      'Ghi TOÀN BỘ nội dung một file trong workspace (ghi đè nếu đã tồn tại). Người dùng LUÔN xem diff ' +
+      'và PHẢI phê duyệt. File ĐÃ TỒN TẠI: BẮT BUỘC gọi fs_read TRƯỚC — tool sẽ TỪ CHỐI nếu chưa đọc. ' +
+      'File >200 dòng: BỊ CHẶN ghi đè toàn bộ — PHẢI dùng fs_edit để sửa cục bộ thay vì ghi đè cả file lớn. ' +
+      'CHỈ dùng khi: (a) tạo file MỚI, hoặc (b) viết lại gần như toàn bộ một file ' +
+      'ngắn dưới ~100 dòng. Với file đã tồn tại và dài hơn thế, PHẢI dùng fs_edit — ghi đè cả file lớn ' +
+      'dễ làm mất nội dung bạn chưa đọc tới. Nếu bị từ chối, đừng gửi lại y nguyên — hỏi người dùng muốn điều chỉnh gì.',
     parameters: z.object({
       path: z.string().min(1).max(500).describe('Đường dẫn tương đối tới file cần ghi'),
       content: z.string().max(100_000).describe('Toàn bộ nội dung file sau khi ghi'),
+    }),
+  }),
+  // ── Desktop-only tools (chỉ chạy khi window.koda.desktop === true) ──
+  // Trên web thuần các tool này không có mặt — route lọc theo CLIENT_TOOL_NAMES
+  // và chat-interface trả lỗi mạch lạc nếu thiếu bridge.
+  shell_run: tool({
+    description:
+      'Chạy LỆNH SHELL trong workspace của người dùng (CHỈ trong Koda desktop). Dùng để build/test/lint/chạy script. ' +
+      'Người dùng LUÔN xem lệnh và PHẢI phê duyệt trước khi chạy. Lệnh chạy qua cmd.exe / sh, timeout 120s, output cap 400k. ' +
+      'AUTO-DEBUG: khi lệnh test/build/lint thất bại, kết quả sẽ kèm retryGuidance hướng dẫn bạn sửa và chạy lại. ' +
+      'KHÔNG dùng để đọc/ghi file — dùng fs_* cho việc đó. Trên web thuần tool này sẽ báo lỗi.',
+    parameters: z.object({
+      command: z.string().min(1).max(4000).describe('Lệnh shell, vd "npm test" hoặc "npm run build"'),
+      cwd: z.string().max(500).optional().describe('Thư mục làm việc tương đối trong workspace, mặc định gốc'),
+    }),
+  }),
+  git_status: tool({
+    description: 'Xem trạng thái git của workspace (CHỈ trong Koda desktop). Trả branch + danh sách file staged/unstaged.',
+    parameters: z.object({}),
+  }),
+  git_diff: tool({
+    description: 'Xem diff git của workspace (CHỈ trong Koda desktop). Mặc định diff unstaged; staged=true để xem staged.',
+    parameters: z.object({
+      path: z.string().max(500).optional().describe('Đường dẫn tương đối cần diff; bỏ trống = toàn workspace'),
+      staged: z.boolean().optional().describe('True = diff staged (git diff --cached)'),
+    }),
+  }),
+  git_log: tool({
+    description: 'Xem lịch sử commit git (CHỈ trong Koda desktop).',
+    parameters: z.object({
+      limit: z.number().int().min(1).max(100).optional().describe('Số commit, mặc định 20'),
+    }),
+  }),
+  git_add: tool({
+    description:
+      'Stage file vào git index (CHỈ trong Koda desktop). Người dùng KHÔNG cần phê duyệt riêng — git_add an toàn. ' +
+      'Chỉ stage đường dẫn người dùng đã thấy qua fs_* trước đó.',
+    parameters: z.object({
+      paths: z.array(z.string().min(1).max(500)).min(1).max(20).describe('Danh sách đường dẫn tương đối cần stage, vd ["src/index.ts"]'),
+    }),
+  }),
+  git_commit: tool({
+    description: 'Tạo commit git (CHỈ trong Koda desktop). Người dùng PHẢI phê duyệt message trước khi commit.',
+    parameters: z.object({
+      message: z.string().min(1).max(2000).describe('Commit message'),
+    }),
+  }),
+
+  /* ------------------------------------------------------------------ */
+  /* Sub-task Plan — phân rã task phức tạp thành subtask trackable        */
+  /* ------------------------------------------------------------------ */
+
+  plan_create: tool({
+    description:
+      'Tạo PLAN phân rã task phức tạp thành các subtask nhỏ hơn. Dùng khi nhận task lớn ' +
+      '(nhiều file, nhiều bước, refactor toàn bộ...). Mỗi subtask có title, mô tả ngắn, ' +
+      'và danh sách file liên quan. Plan giúp bạn và người dùng theo dõi tiến độ. ' +
+      'Sau khi tạo plan, bắt đầu làm từng subtask và gọi plan_update để cập nhật trạng thái.',
+    parameters: z.object({
+      title: z.string().min(1).max(200).describe('Tên plan, vd "Refactor auth module"'),
+      subtasks: z
+        .array(
+          z.object({
+            title: z.string().min(1).max(200),
+            description: z.string().max(500).optional(),
+            files: z.array(z.string().max(500)).max(10).optional(),
+          }),
+        )
+        .min(1)
+        .max(20)
+        .describe('Danh sách subtask, mỗi cái có title + mô tả ngắn + file liên quan'),
+    }),
+  }),
+
+  plan_update: tool({
+    description:
+      'Cập nhật trạng thái một subtask trong plan hiện tại. Gọi SAU KHI hoàn thành hoặc thất bại ' +
+      'một subtask. Status: "in_progress" (đang làm), "done" (xong), "failed" (thất bại), "skipped" (bỏ qua).',
+    parameters: z.object({
+      subtaskId: z.string().min(1).max(20).describe('ID subtask, vd "st-1", "st-2"'),
+      status: z.enum(['in_progress', 'done', 'failed', 'skipped']).describe('Trạng thái mới'),
+    }),
+  }),
+
+  /* ------------------------------------------------------------------ */
+  /* Self-Improvement Lessons — lưu bài học từ các phiên trước           */
+  /* ------------------------------------------------------------------ */
+
+  lesson_save: tool({
+    description:
+      'Lưu BÀI HỌC từ kinh nghiệm coding để các phiên sau không lặp lại lỗi. ' +
+      'Category: "rule" (quy tắc luôn tuân theo), "pattern" (cách làm hiệu quả), ' +
+      '"gotcha" (lỗi/thứ cần tránh). Gọi khi: sửa xong bug khó, phát hiện pattern tốt, ' +
+      'hoặc nhận ra gotcha. Text ngắn gọn, actionable, tối đa 400 ký tự.',
+    parameters: z.object({
+      category: z.enum(['rule', 'pattern', 'gotcha']).describe('Loại bài học'),
+      text: z.string().min(5).max(400).describe('Nội dung bài học, vd "Luôn chạy tsc --noEmit trước khi commit TypeScript"'),
     }),
   }),
 } as const;

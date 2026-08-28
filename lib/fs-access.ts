@@ -127,6 +127,25 @@ export async function restoreWorkspaceRoot(): Promise<{ ok: boolean; needsGestur
   }
 }
 
+/**
+ * NGẮT kết nối thư mục làm việc: xoá handle khỏi bộ nhớ VÀ khỏi IndexedDB.
+ *
+ * Thiếu hàm này thì người dùng không có cách nào bỏ thư mục đã chọn — handle
+ * được persist trong kv nên nó tự khôi phục ở mọi phiên sau, kể cả khi họ
+ * không còn muốn agent đụng vào máy mình nữa. Xoá cả hai nơi để lần mở app
+ * kế tiếp không âm thầm kết nối lại.
+ */
+export async function disconnectWorkspace(): Promise<void> {
+  cachedRoot = null;
+  cachedName = null;
+  try {
+    await db.kv.delete(KV_KEY);
+  } catch (err) {
+    // Xoá kv hỏng thì bộ nhớ đã sạch — phiên hiện tại vẫn ngắt đúng.
+    console.warn('[fs-access] Không xoá được handle khỏi IndexedDB:', err);
+  }
+}
+
 /** Lấy root đã kết nối cho các tool call; chưa có/quyền chưa cấp → lỗi mạch lạc. */
 export async function requireWorkspace(): Promise<{ ok: true; deps: FsDeps } | { ok: false; error: string }> {
   if (!cachedRoot) {
@@ -154,16 +173,34 @@ function sanitizeFsError(e: unknown): string {
 /**
  * Chuẩn hóa đường dẫn tương đối. Trả null khi nguy hiểm: tuyệt đối, chứa '..',
  * drive letter, backdot trá hình. Dấu `\` chuẩn hóa thành `/`.
+ *
+ * LỖ HỔNG ĐÃ SỬA (path traversal): bản cũ kiểm tra theo thứ tự
+ *     if (segs.some(s => s === '.')) return <đã lọc '.'>;   // ← RETURN SỚM
+ *     if (p.split('/').includes('..')) return null;         // không bao giờ chạy
+ * nên mọi path vừa có `.` vừa có `..` đều thoát được:
+ *     'a/./../../b'  -> 'a/../../b'
+ *     './../../x'    -> '../../x'
+ * Ngoài ra `....//x` co lại thành `..../x` và `a/...././b` -> `a/..../b`,
+ * tức segment toàn dấu chấm cũng lọt.
+ *
+ * Cách sửa: duyệt TỪNG segment theo danh sách trắng — bỏ `.`, từ chối `..`,
+ * từ chối mọi segment chỉ gồm dấu chấm. Không có đường return sớm nào bỏ qua
+ * được bước kiểm tra.
  */
 export function normalizeRelPath(raw: string): string | null {
   if (!raw) return '';
-  let p = String(raw).replace(/\\/g, '/').trim();
+  const p = String(raw).replace(/\\/g, '/').trim();
   if (/^[a-zA-Z]:/.test(p) || p.startsWith('//')) return null;
-  p = p.replace(/^\/+/, '').replace(/\/+$/, '');
-  const segs = p.split('/').filter((s) => s.length > 0);
-  if (segs.some((s) => s === '.' )) return segs.filter((s) => s !== '.').join('/') || '';
-  if (p.split('/').includes('..')) return null;
-  return segs.join('/');
+
+  const out: string[] = [];
+  for (const seg of p.split('/')) {
+    if (seg === '' || seg === '.') continue; // bỏ qua rỗng và thư mục hiện tại
+    // Mọi segment chỉ gồm dấu chấm ('..', '...', '....') đều đáng ngờ:
+    // '..' là leo thư mục, phần còn lại là biến thể trá hình.
+    if (/^\.+$/.test(seg)) return null;
+    out.push(seg);
+  }
+  return out.join('/');
 }
 
 /* ------------------------------------------------------------------ */
@@ -239,7 +276,34 @@ export async function fsRead(
   const dir = await resolveDir(deps, segs.join('/'), false);
   const handle = await dir.getFileHandle(fileName);
   const file = await handle.getFile();
+
+  /* Chặn file NHỊ PHÂN trước khi decode.
+     Lỗi thật đã gặp: agent gọi fs_read("image.png") → file.text() decode ảnh
+     PNG thành chuỗi rác đầy byte NUL và U+FFFD → gửi thẳng cho model → model
+     không hiểu và tự bịa ra thông báo kiểu
+     `ERROR: Cannot read "image.png" (this model does not support image input)`.
+     Người dùng tưởng app hỏng phần ảnh, trong khi thực chất là tool đọc nhầm
+     file nhị phân như file text.
+
+     BINARY_EXT_RE vốn chỉ dùng cho fs_search; fs_read hoàn toàn bỏ qua nó. */
+  if (BINARY_EXT_RE.test(fileName)) {
+    throw new Error(
+      `"${path}" là file nhị phân (ảnh/font/video/tài liệu nén), không đọc được bằng fs_read. ` +
+        'Nếu cần xem ảnh, hãy yêu cầu người dùng đính kèm ảnh đó trực tiếp vào khung chat.',
+    );
+  }
+
   const text = await file.text();
+
+  /* Lưới cuối cho file nhị phân KHÔNG có đuôi nhận diện được (vd `a.out`,
+     file không đuôi): byte NUL gần như không bao giờ xuất hiện trong file
+     text thật. Chỉ soi 1KB đầu để không tốn kém với file lớn. */
+  if (text.slice(0, 1024).includes('\u0000')) {
+    throw new Error(
+      `"${path}" trông như file nhị phân (chứa byte NUL), không đọc được bằng fs_read.`,
+    );
+  }
+
   const opts = typeof options === 'number' ? { maxChars: options } : options;
   const maxChars = opts.maxChars ?? MAX_READ_CHARS;
   const allLines = text.split('\n');
@@ -258,6 +322,84 @@ export async function fsRead(
     size: file.size,
     startLine: startIndex + 1,
     endLine: endIndex,
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/* Đọc ảnh cho luồng vision (fs_read trên file ảnh)                     */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Chỉ các đuôi ảnh Gemini API nhận inline (image/png, image/jpeg, image/webp,
+ * image/heic, image/heif). GIF/AVIF/bmp… không nằm trong danh sách mime chính
+ * thức nên cố ý loại — rơi về thông báo từ chối của fs_read thường.
+ */
+export const IMAGE_VISION_EXT_RE = /\.(png|jpe?g|webp|heic|heif)$/i;
+
+const IMAGE_MIME_BY_EXT: Record<string, string> = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  webp: 'image/webp',
+  heic: 'image/heic',
+  heif: 'image/heif',
+};
+
+/** Trần bytes cho một ảnh đọc qua vision — dư cho ảnh chụp màn hình/máy ảnh. */
+export const IMAGE_VISION_MAX_BYTES = 4_500_000;
+
+export interface FsImageReadResult {
+  path: string;
+  mimeType: string;
+  dataUrl: string;
+  size: number;
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let bin = '';
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    bin += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(bin);
+}
+
+/**
+ * Đọc file ảnh trong workspace thành data URL để gửi /api/vision mô tả giúp
+ * agent. KHÔNG trả nội dung nhị phân về cho model — model chỉ nhận bản mô tả
+ * text do Gemini tạo (ngăn chặn chính xác lỗi "binary garbage → model bịa
+ * ERROR: this model does not support image input" người dùng từng gặp).
+ */
+export async function fsReadImage(
+  deps: FsDeps,
+  rawPath: string,
+  maxBytes: number = IMAGE_VISION_MAX_BYTES,
+): Promise<FsImageReadResult> {
+  const path = normalizeRelPath(rawPath);
+  if (path === null || !path) throw new Error(`Đường dẫn không hợp lệ: "${rawPath}"`);
+  const segs = path.split('/').filter(Boolean);
+  const fileName = segs.pop();
+  if (!fileName) throw new Error('Thiếu tên file.');
+
+  const extMatch = /\.([a-z0-9]+)$/i.exec(fileName);
+  const mime = extMatch ? IMAGE_MIME_BY_EXT[extMatch[1].toLowerCase()] : undefined;
+  if (!mime) throw new Error(`"${path}" không phải định dạng ảnh đọc được qua vision.`);
+
+  const dir = await resolveDir(deps, segs.join('/'), false);
+  const handle = await dir.getFileHandle(fileName);
+  const file = await handle.getFile();
+  if (file.size > maxBytes) {
+    throw new Error(
+      `Ảnh "${path}" quá lớn (${file.size} bytes > trần ${maxBytes}). ` +
+        'Hãy yêu cầu người dùng đính kèm ảnh trực tiếp vào khung chat.',
+    );
+  }
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  return {
+    path,
+    mimeType: mime,
+    dataUrl: `data:${mime};base64,${bytesToBase64(bytes)}`,
+    size: file.size,
   };
 }
 

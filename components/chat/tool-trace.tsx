@@ -100,7 +100,7 @@ export const ToolTrace = memo(function ToolTrace({
   if (events.length === 0) return null;
 
   return (
-    <div className="mb-2 flex flex-col gap-1" role="list" aria-label="Các công cụ AI đã dùng">
+    <div className="mb-3 flex flex-wrap gap-1.5" role="list" aria-label="Các công cụ AI đã dùng">
       {events.map((ev) => {
         const meta = LABELS[ev.name] ?? { label: ev.name, Icon: Wrench };
         const { Icon } = meta;
@@ -110,23 +110,16 @@ export const ToolTrace = memo(function ToolTrace({
             key={ev.id}
             role="listitem"
             title={detail || undefined}
-            className="relative flex max-w-full items-center gap-1.5 overflow-hidden rounded-lg border border-zinc-200/70 bg-surface-muted px-2 py-1 text-[11px] text-zinc-600"
+            className={`relative flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[11px] transition-all ${
+              ev.done
+                ? 'border-zinc-200 bg-zinc-50 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/50 dark:text-zinc-400'
+                : 'border-brand/20 bg-brand/[0.04] text-zinc-700 aurora-shimmer dark:border-aurora-from/20 dark:bg-aurora-from/[0.06] dark:text-zinc-300'
+            }`}
           >
-            {!ev.done && <ShimmerLine />}
-            <Icon size={12} className="flex-shrink-0 text-brand" aria-hidden />
-            <span className="flex-shrink-0 font-medium text-zinc-700">{meta.label}</span>
-            {ev.args && !ev.done && (
-              <span className="min-w-0 truncate text-zinc-500">{ev.args}</span>
-            )}
-            {ev.done && (
-              <>
-                {ev.summary && <span className="min-w-0 truncate">{ev.summary}</span>}
-                <Check size={12} className="ml-auto flex-shrink-0 text-emerald-600 dark:text-emerald-400" aria-hidden />
-              </>
-            )}
-            {!ev.done && (
-              <Loader2 size={11} className="ml-auto flex-shrink-0 animate-spin text-zinc-400" aria-hidden />
-            )}
+            <Icon size={12} className={`flex-shrink-0 ${ev.done ? 'text-zinc-400' : 'text-brand dark:text-aurora-from'}`} aria-hidden />
+            <span className="font-medium">{meta.label}</span>
+            {ev.done && <Check size={11} className="flex-shrink-0 text-emerald-500 dark:text-aurora-from" aria-hidden />}
+            {!ev.done && <Loader2 size={11} className="flex-shrink-0 animate-spin text-zinc-400 dark:text-aurora-via" aria-hidden />}
           </div>
         );
       })}

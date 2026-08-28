@@ -41,10 +41,16 @@ import {
   supportsThinkingLevel,
   type ThinkingLevel,
 } from '@/lib/provider-url';
-import { estimatePromptTokens, shouldCompact, splitForCompaction } from '@/lib/context-budget';
+import { estimatePromptTokens, shouldCompact, evaluateUsageTrigger, splitForCompaction } from '@/lib/context-budget';
+import { CLIENT_MAX_STEPS } from '@/lib/tool-limits';
 import {
   resolveContextWindow,
   serializeForCompaction,
+  buildEmergencySummary,
+  extractFileOps,
+  extractUserRequests,
+  mergeCompactionState,
+  formatCompactContextBlock,
   findActiveCompaction,
   type CompactionMarker,
 } from '@/lib/context-compaction';
@@ -68,14 +74,31 @@ import {
   fsList,
   fsRead,
   fsReadFull,
+  fsReadImage,
   fsSearch,
   fsWrite,
+  disconnectWorkspace,
   getWorkspaceInfo,
   pickWorkspaceRoot,
   requireWorkspace,
   restoreWorkspaceRoot,
   type FsDeps,
 } from '@/lib/fs-access';
+import { isKodaDesktop } from '@/lib/desktop-bridge';
+import {
+  desktopFsList,
+  desktopFsRead,
+  desktopFsReadImage,
+  desktopFsSearch,
+  desktopFsWrite,
+  desktopFsDelete,
+  desktopFsReadFull,
+  desktopGetWorkspaceInfo,
+  desktopPickWorkspaceRoot,
+  desktopDisconnectWorkspace,
+  desktopRequireWorkspace,
+} from '@/lib/desktop-fs';
+import { describeWorkspaceImage, isImagePath } from '@/lib/fs-vision';
 import {
   captureFile,
   newTurnCapture,
@@ -84,7 +107,46 @@ import {
   type TurnCapture,
 } from '@/lib/workspace-checkpoints';
 import { CLIENT_TOOL_NAMES } from '@/lib/agent-tools';
+import {
+  stageFile,
+  unstageFile,
+  clearStaging,
+  stagingCount,
+  stagingStats,
+  serializeStaging,
+  parseStaging,
+  STAGING_KV_KEY,
+  type StagingStore,
+} from '@/lib/staging';
+import {
+  recordDebugAttempt,
+  clearDebugSession,
+  isSafeDebugCommand,
+  buildRetryGuidance,
+  emptyDebugStore,
+  AUTO_DEBUG_MAX_ATTEMPTS_DEFAULT,
+  normalizeDebugCommand,
+  type DebugStore,
+} from '@/lib/debug-loop';
+import {
+  emptyPlan,
+  addSubtask,
+  updateSubtaskStatus,
+  planProgress,
+  formatPlanSummary,
+  parsePlan,
+  type SubtaskStatus,
+} from '@/lib/subtask-plan';
+import {
+  serializeLesson,
+  validateLessonText,
+  suggestLessonFromDebug,
+  type LessonCategory,
+} from '@/lib/lessons';
+import { normalizePathKey } from '@/lib/path-utils';
 import { DiffConfirm, type DiffConfirmState } from '@/components/diff-confirm';
+import { ShellConfirm } from '@/components/shell-confirm';
+import { StagingPanel, type StagingPanelState } from '@/components/staging-panel';
 import { toSkills } from '@/lib/prompt-library';
 import { matchActiveSkills } from '@/lib/skills';
 import { gatherPdfContexts } from '@/lib/use-pdf-context';
@@ -96,6 +158,12 @@ import { MessageList } from './chat/message-list';
 import { ContextMeter } from '@/components/context-meter';
 import { WorkspaceCheckpointBar } from '@/components/workspace-checkpoints';
 import type { BranchInfo } from './chat/message-item';
+
+/* Trần đính kèm. Đặt ở MODULE scope: trước đây khai báo trong thân component
+   nên tạo lại mỗi render và làm eslint cảnh báo thiếu dependency ở
+   useCallback bên dưới (hằng số thì không thể là dependency hợp lệ). */
+const MAX_TOTAL_ATTACHMENT_BYTES = 3 * 1024 * 1024;
+const MAX_FILES = 4;
 
 /* ------------------------------------------------------------------ */
 /* Main ChatInterface Orchestrator                                     */
@@ -117,6 +185,14 @@ export default function ChatInterface() {
   const sendOnEnter = useAppStore((s) => s.settings.sendOnEnter);
   const autoCompactEnabled = useAppStore((s) => s.settings.autoCompact);
   const webSearchEnabled = useAppStore((s) => s.settings.webSearch);
+  /** Tắt = model không nhận tool nào (chat thuần, không agent coding). */
+  const agentToolsEnabled = useAppStore((s) => s.settings.agentTools ?? true);
+  /** Ép đường tool giả lập — gateway strip `tools` im lặng (vd crax). */
+  const forceEmulatedTools = useAppStore((s) => s.settings.forceEmulatedTools ?? false);
+  /** Chế độ agent: 'plan' = chỉ explore, 'act' = đọc + ghi. */
+  const agentMode = useAppStore((s) => s.settings.agentMode ?? 'act');
+  /** Staging sandbox: fs_edit/fs_write ghi vào bộ đệm thay vì đĩa. */
+  const stagingEnabled = useAppStore((s) => s.settings.stagingSandbox ?? true);
   /** Capability suy luận của model đang chọn (metadata kiểu OpenRouter). */
   const modelReasoningCap = activeProvider?.models?.find((m) => m.id === model)?.reasoning ?? null;
   const throttleMs = useAppStore((s) => s.settings.perf.throttleMs);
@@ -338,8 +414,44 @@ export default function ChatInterface() {
 
   const createdObjectUrls = useRef<Set<string>>(new Set());
 
-  const MAX_TOTAL_ATTACHMENT_BYTES = 3 * 1024 * 1024;
-  const MAX_FILES = 4;
+  /**
+   * Read-before-edit guard: tập hợp file đã được fs_read thành công trong
+   * phiên này. fs_edit/fs_write từ chối nếu path chưa nằm trong set.
+   * Sống theo component mount (không reset khi gửi tin mới) — agent không
+   * phải đọc lại file chỉ vì user hỏi tiếp. Port từ Wove (Apache-2.0).
+   */
+  const readFilesRef = useRef<Set<string>>(new Set());
+
+  /**
+   * Staging sandbox state: overlay thay đổi của agent TRƯỚC KHI chạm đĩa.
+   * stagingVersion tăng mỗi lần store thay đổi để trigger UI re-render
+   * (ref không trigger render). Persist vào Dexie kv khi thay đổi.
+   */
+  const stagingRef = useRef<StagingStore>({});
+  const [stagingVersion, setStagingVersion] = useState(0);
+  const [stagingPanelOpen, setStagingPanelOpen] = useState(false);
+
+  /** Auto-debug loop state: track retry attempts per command. */
+  const debugLoopRef = useRef<DebugStore>(emptyDebugStore());
+
+  /** Ghi overlay + persist + bump version. Gọi sau mọi stage/unstage/clear. */
+  const updateStaging = useCallback((next: StagingStore) => {
+    stagingRef.current = next;
+    setStagingVersion((v) => v + 1);
+    db.kv.put({ key: STAGING_KV_KEY, value: serializeStaging(next) }).catch(() => {});
+  }, []);
+
+  /** Khôi phục staging từ kv khi mount hoặc đổi chat. */
+  useEffect(() => {
+    db.kv.get(STAGING_KV_KEY).then((row) => {
+      if (!row?.value) return;
+      const restored = parseStaging(row.value);
+      if (stagingCount(restored) > 0) {
+        stagingRef.current = restored;
+        setStagingVersion((v) => v + 1);
+      }
+    }).catch(() => {});
+  }, []);
 
   // Đếm thế hệ attachment: mỗi lần clear (gửi/xóa) tăng 1 — đợt nén ảnh chạy
   // nền khởi động trước đó sẽ tự hủy kết quả nếu giữa chừng list đã bị clear
@@ -363,8 +475,8 @@ export default function ChatInterface() {
   /** Đọc "trước khi ghi" cho snapshot — nội dung ĐẦY ĐỦ (fsRead thường trần
       24k ký tự để đớn context; restore bản truncated là hỏng file user). */
   const readCaptureForPath = useCallback(
-    async (deps: FsDeps, rawPath: string): Promise<CaptureInput> => {
-      const r = await fsReadFull(deps, rawPath);
+    async (deps: FsDeps | null, rawPath: string): Promise<CaptureInput> => {
+      const r = isKodaDesktop() ? await desktopFsReadFull(rawPath) : await fsReadFull(deps!, rawPath);
       switch (r.status) {
         case 'ok':
           return { status: 'ok', path: r.path, content: r.content };
@@ -378,6 +490,65 @@ export default function ChatInterface() {
     },
     [],
   );
+
+  /**
+   * Apply tất cả staged changes: checkpoint disk state → ghi đĩa → clear overlay.
+   * Checkpoint dùng workspace-checkpoints (first-wins per path, incomplete blocks rollback).
+   */
+  const applyAllStaged = useCallback(async () => {
+    const store = stagingRef.current;
+    const files = Object.values(store);
+    if (!files.length) return;
+
+    const isDesktop = typeof window !== 'undefined' && (window as any).koda?.desktop === true;
+    const wsForFs = !isDesktop ? await requireWorkspace().then((r) => (r.ok ? r.deps : null)) : null;
+    const capChatId = useAppStore.getState().currentChatId;
+
+    /* Capture disk state TRƯỚC KHI ghi — một capture cho cả batch. */
+    const capture = capChatId ? newTurnCapture(capChatId) : null;
+    for (const file of files) {
+      if (capture) {
+        try {
+          captureFile(capture, await readCaptureForPath(isDesktop ? null : wsForFs!, file.path));
+        } catch {
+          /* File không đọc được để capture — đánh dấu incomplete. */
+        }
+      }
+    }
+
+    /* Ghi từng file vào đĩa. */
+    for (const file of files) {
+      try {
+        if (isDesktop) {
+          await desktopFsWrite(file.path, file.content);
+        } else if (wsForFs) {
+          await fsWrite(wsForFs, file.path, file.content);
+        }
+      } catch (e) {
+        showNotice(`Lỗi ghi file ${file.path}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+
+    /* Lưu checkpoint (cho undo sau này). */
+    if (capture) void saveTurnCapture(capture);
+
+    /* Clear overlay + persist. */
+    updateStaging(clearStaging(store));
+    setStagingPanelOpen(false);
+    showNotice(`Đã apply ${files.length} file vào đĩa.`);
+  }, [readCaptureForPath, showNotice, updateStaging]);
+
+  /** Reject từng file — chỉ xóa khỏi overlay, đĩa không bị đụng. */
+  const rejectStagedFile = useCallback((path: string) => {
+    updateStaging(unstageFile(stagingRef.current, path));
+  }, [updateStaging]);
+
+  /** Reject all — clear overlay, đĩa không bị đụng. */
+  const rejectAllStaged = useCallback(() => {
+    updateStaging(clearStaging(stagingRef.current));
+    setStagingPanelOpen(false);
+    showNotice('Đã hủy tất cả thay đổi staged (đĩa không bị ảnh hưởng).');
+  }, [updateStaging, showNotice]);
 
   const addFiles = useCallback((files: FileList | File[] | null) => {
     if (!files) return;
@@ -418,6 +589,8 @@ export default function ChatInterface() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const hydratedFor = useRef<string | null>(null);
   const finishRef = useRef<'stop' | 'abort' | 'error'>('stop');
+  /** Auto-retry emulated khi gateway strip tools im lặng (xem onFinish). */
+  const emulatedRetryCountRef = useRef(0);
   const switchLockRef = useRef(false);
 
   const [isSwitchingBranch, setIsSwitchingBranch] = useState(false);
@@ -477,10 +650,66 @@ export default function ChatInterface() {
     diffOpenRef.current = false;
     setDiffState(null);
   }, []);
+  // Shell approval — tương tự diff queue để không ghi đè khi model gọi
+  // liên tiếp 2 shell_run trong cùng step.
+  type ShellConfirmState = { command: string; cwd?: string; open: true; resolve: (v: boolean) => void };
+  const [shellState, setShellState] = useState<ShellConfirmState | null>(null);
+  const shellOpenRef = useRef(false);
+  const shellQueueRef = useRef<ShellConfirmState[]>([]);
+  const showShellModal = useCallback(
+    (s: Omit<ShellConfirmState, 'open' | 'resolve'>): Promise<boolean> =>
+      new Promise((resolve) => {
+        const item: ShellConfirmState = { ...s, open: true, resolve };
+        if (shellOpenRef.current) {
+          shellQueueRef.current.push(item);
+          return;
+        }
+        shellOpenRef.current = true;
+        setShellState(item);
+      }),
+    [],
+  );
+  const closeShellModal = useCallback(() => {
+    const next = shellQueueRef.current.shift();
+    if (next) {
+      setShellState(next);
+      return;
+    }
+    shellOpenRef.current = false;
+    setShellState(null);
+  }, []);
   useEffect(() => {
-    void restoreWorkspaceRoot(); // khôi phục handle phiên trước, im lặng
+    /* Khôi phục handle phiên trước. PHẢI đồng bộ lại state sau khi xong:
+       restoreWorkspaceRoot() chỉ nạp handle vào biến module của fs-access,
+       còn `workspace` được khởi tạo bằng getWorkspaceInfo() ở lần render ĐẦU
+       — lúc đó handle chưa nạp nên luôn là {connected:false}. Thiếu bước này,
+       nút 📁 mãi hiện "chưa kết nối" dù thư mục đã sẵn sàng, và người dùng
+       tưởng tính năng hỏng. */
+    let alive = true;
+    if (isKodaDesktop()) {
+      void desktopGetWorkspaceInfo().then((info) => {
+        if (alive) setWorkspace(info);
+      });
+    } else {
+      void restoreWorkspaceRoot().then(() => {
+        if (alive) setWorkspace(getWorkspaceInfo());
+      });
+    }
+    return () => {
+      alive = false;
+    };
   }, []);
   const pickFolder = useCallback(async () => {
+    if (isKodaDesktop()) {
+      const r = await desktopPickWorkspaceRoot();
+      if (!r.ok) {
+        showNotice(r.error);
+      } else {
+        showNotice(`Đã kết nối thư mục: ${r.name}`, 3000);
+      }
+      setWorkspace(await desktopGetWorkspaceInfo());
+      return;
+    }
     const r = await pickWorkspaceRoot();
     if (!r.ok) {
       showNotice(r.error);
@@ -491,46 +720,153 @@ export default function ChatInterface() {
   }, [showNotice]);
 
   /**
-   * fs_* tools chạy NGAY TRÊN MÁY USER — server không thể chạm file. onToolCall
-   * trả kết quả (JSON string) → useChat đặt state 'result' → sau stream,
+   * Ngắt kết nối workspace: xoá handle khỏi bộ nhớ + IndexedDB (web) hoặc
+   * gọi IPC clear (desktop). Sync lại state ngay để nút 📁/FolderX phản ánh
+   * đúng trạng thái — thiếu bước này UI vẫn tưởng còn kết nối.
+   */
+  const disconnectFolder = useCallback(async () => {
+    if (isKodaDesktop()) {
+      try {
+        await desktopDisconnectWorkspace();
+      } catch (e) {
+        showNotice(e instanceof Error ? e.message : 'Không ngắt được kết nối workspace.');
+        return;
+      }
+      setWorkspace(await desktopGetWorkspaceInfo());
+    } else {
+      await disconnectWorkspace();
+      setWorkspace(getWorkspaceInfo());
+    }
+    showNotice('Đã ngắt kết nối thư mục làm việc.', 3000);
+  }, [showNotice]);
+
+  /**
+   * fs_*, shell, git tools chạy NGAY TRÊN MÁY USER — server không thể chạm file.
+   * onToolCall trả kết quả (JSON string) → useChat đặt state 'result' → sau stream,
    * maxSteps phía client tự resubmit cho model đọc kết quả tiếp.
-   * fs_write PHẢI qua DiffConfirm: người dùng duyệt mới ghi đĩa.
+   * fs_write/shell_run PHẢI qua confirm: người dùng duyệt mới ghi/chạy.
    */
   const handleClientToolCall = useCallback(
     async ({ toolCall }: { toolCall: { toolName: string; args?: unknown } }) => {
       if (!CLIENT_TOOL_NAMES.has(toolCall.toolName)) return undefined;
-      const ws = await requireWorkspace();
-      if (!ws.ok) {
-        showNotice(ws.error);
-        return JSON.stringify({ error: ws.error });
+      const isDesktop = isKodaDesktop();
+      const desktopOnly = new Set(['shell_run', 'git_status', 'git_diff', 'git_log', 'git_add', 'git_commit']);
+      if (desktopOnly.has(toolCall.toolName) && !isDesktop) {
+        return JSON.stringify({ error: 'Tool này chỉ khả dụng trong Koda desktop (Electron). Hãy chạy app bằng npm run app:dev / app:prod.' });
       }
+      // Workspace check — rẽ nhánh desktop/web
+      if (isDesktop) {
+        const wsD = await desktopRequireWorkspace();
+        if (!wsD.ok) {
+          showNotice(wsD.error);
+          return JSON.stringify({ error: wsD.error });
+        }
+      } else {
+        const ws = await requireWorkspace();
+        if (!ws.ok) {
+          showNotice(ws.error);
+          return JSON.stringify({ error: ws.error });
+        }
+      }
+      // Lấy deps cho web path (desktop không cần)
+      const wsForFs = !isDesktop ? await requireWorkspace().then((r) => (r.ok ? r.deps : null)) : null;
       const args = (toolCall.args ?? {}) as Record<string, unknown>;
       try {
         switch (toolCall.toolName) {
-          case 'fs_list':
-            return JSON.stringify(await fsList(ws.deps, String(args.path ?? '')));
-          case 'fs_read':
-            return JSON.stringify(
-              await fsRead(ws.deps, String(args.path ?? ''), {
-                ...(typeof args.start_line === 'number' ? { startLine: args.start_line } : {}),
-                ...(typeof args.line_count === 'number' ? { lineCount: args.line_count } : {}),
-              }),
-            );
-          case 'fs_search':
-            return JSON.stringify(
-              await fsSearch(ws.deps, String(args.query ?? ''), { isRegex: args.is_regex === true }),
-            );
+          case 'fs_list': {
+            const rel = String(args.path ?? '');
+            const data = isDesktop ? await desktopFsList(rel) : await fsList(wsForFs!, rel);
+            return JSON.stringify(data);
+          }
+          case 'fs_read': {
+            const rel = String(args.path ?? '');
+            /* Staging overlay: nếu file đang staged, trả nội dung staged thay
+               vì đĩa. Agent tự thấy kết quả sửa của mình → tránh doom-loop
+               "sửa rồi đọc lại vẫn cũ". Port từ Plandex sandbox model. */
+            const normRel = normalizePathKey(rel);
+            const stagedEntry = stagingRef.current[normRel];
+            if (stagedEntry && !isImagePath(rel)) {
+              readFilesRef.current.add(normRel);
+              const content = stagedEntry.content;
+              const lines = content.split('\n');
+              const startLine = typeof args.start_line === 'number' ? Math.max(1, args.start_line) : 1;
+              const lineCount = typeof args.line_count === 'number' ? args.line_count : undefined;
+              const sliced = lineCount !== undefined
+                ? lines.slice(startLine - 1, startLine - 1 + lineCount)
+                : lines.slice(startLine - 1);
+              const truncated = lineCount !== undefined
+                ? startLine - 1 + lineCount < lines.length
+                : false;
+              return JSON.stringify({
+                content: sliced.join('\n'),
+                size: content.length,
+                truncated,
+                staged: true,
+              });
+            }
+            /* Ảnh trong workspace: đọc bytes → /api/vision mô tả → model nhận
+               bản mô tả text thay vì bị từ chối (lỗi "image input" người dùng
+               từng gặp khi bytes nhị phân đi thẳng vào context). */
+            if (isImagePath(rel)) {
+              const result = await describeWorkspaceImage(
+                rel,
+                isDesktop ? desktopFsReadImage : (p) => fsReadImage(wsForFs!, p),
+              );
+              return JSON.stringify(result);
+            }
+            const opts = {
+              ...(typeof args.start_line === 'number' ? { startLine: args.start_line } : {}),
+              ...(typeof args.line_count === 'number' ? { lineCount: args.line_count } : {}),
+            };
+            const data = isDesktop ? await desktopFsRead(rel, opts) : await fsRead(wsForFs!, rel, opts);
+            /* Read-before-edit: ghi nhận file đã đọc để fs_edit/fs_write cho phép. */
+            if (!(data as unknown as Record<string, unknown>)?.error) {
+              readFilesRef.current.add(normalizePathKey(rel));
+            }
+            return JSON.stringify(data);
+          }
+          case 'fs_search': {
+            const query = String(args.query ?? '');
+            const isRegex = args.is_regex === true;
+            const data = isDesktop ? await desktopFsSearch(query, { isRegex }) : await fsSearch(wsForFs!, query, { isRegex });
+            return JSON.stringify(data);
+          }
           case 'fs_edit': {
             const path = String(args.path ?? '');
+            /* Read-before-edit guard: từ chối sửa file chưa đọc. Guard cứng ở
+               tầng tool — model PHẢI fs_read trước khi fs_edit. Port từ Wove. */
+            const normPath = normalizePathKey(path);
+            if (normPath && !readFilesRef.current.has(normPath)) {
+              return JSON.stringify({
+                applied: false,
+                error:
+                  `File "${path}" chưa được đọc. Bạn PHẢI gọi fs_read để đọc nội dung file này ` +
+                  'trước khi sửa. Điều này đảm bảo bạn hiểu rõ nội dung hiện tại và tránh ghi đè ' +
+                  'nội dung quan trọng mà bạn chưa xem.',
+              });
+            }
+            /* Plan mode guard: chặn write ở client dù server đã lọc. Lớp bảo vệ
+               kép — model yếu đôi khi vẫn hallucinate tool call dù không thấy
+               tool trong schema. */
+            if (agentMode === 'plan') {
+              return JSON.stringify({
+                applied: false,
+                error:
+                  'PLAN MODE đang bật — không được phép sửa file. Hãy trình bày kế hoạch ' +
+                  'và chờ người dùng chuyển sang ACT mode trước khi thực thi.',
+              });
+            }
             const blocksText = String(args.blocks ?? '');
             const { parseEditBlocks, replaceMostSimilarChunk } = await import('@/lib/edit-blocks');
             const parsed = parseEditBlocks(blocksText);
             if (parsed.error || parsed.blocks.length === 0) {
               return JSON.stringify({ applied: false, error: parsed.error ?? 'Không parse được khối edit.' });
             }
-            // Tất cả khối phải áp thành công TRƯỚC khi hiện diff — một khối
-            // hỏng thì trả hint để model tự sửa, không ghi nửa chừng.
-            const beforeText = (await fsRead(ws.deps, path)).content;
+            /* Staging path: base content từ overlay nếu có, nếu không thì từ đĩa. */
+            const existingStaged = stagingRef.current[normPath];
+            const beforeText = existingStaged
+              ? existingStaged.content
+              : isDesktop ? (await desktopFsRead(path)).content : (await fsRead(wsForFs!, path)).content;
             let current = beforeText;
             const applied = [];
             for (const block of parsed.blocks) {
@@ -546,6 +882,15 @@ export default function ChatInterface() {
               current = r.text!;
               applied.push(r.strategy);
             }
+            /* Staging path: ghi vào overlay thay vì đĩa. Agent tiếp tục làm
+               việc bình thường; user review batch trong staging panel. */
+            if (stagingEnabled) {
+              const diskOriginal = existingStaged ? existingStaged.original : beforeText;
+              updateStaging(stageFile(stagingRef.current, path, diskOriginal, current));
+              readFilesRef.current.add(normPath);
+              return JSON.stringify({ applied: true, staged: true, blocks: applied.length, strategies: applied });
+            }
+            /* Legacy path: diff modal + ghi đĩa ngay + checkpoint. */
             const approved = await showDiffModal({ path, oldText: beforeText, newText: current });
             if (!approved) {
               return JSON.stringify({
@@ -554,28 +899,88 @@ export default function ChatInterface() {
                 note: 'Người dùng TỪ CHỐI bản sửa này. Hỏi họ muốn điều chỉnh gì trước khi thử lại.',
               });
             }
-            /* Checkpoint: chụp nội dung TRƯỚC khi ghi (full content). Thất
-               bại chụp không chặn việc ghi — chỉ là lượt này mất điểm undo. */
             const capChatId = useAppStore.getState().currentChatId;
             if (capChatId) {
               if (!turnCaptureRef.current) {
                 turnCaptureRef.current = newTurnCapture(capChatId);
               }
-              captureFile(turnCaptureRef.current, await readCaptureForPath(ws.deps, path));
+              captureFile(turnCaptureRef.current, await readCaptureForPath(isDesktop ? null : wsForFs!, path));
             }
-            const res = await fsWrite(ws.deps, path, current);
+            const res = isDesktop ? await desktopFsWrite(path, current) : await fsWrite(wsForFs!, path, current);
             if (turnCaptureRef.current) void saveTurnCapture(turnCaptureRef.current);
             return JSON.stringify({ applied: true, blocks: applied.length, strategies: applied, ...res });
           }
           case 'fs_write': {
             const path = String(args.path ?? '');
+            /* Read-before-edit guard cho FILE ĐÃ TỒN TẠI: tạo file mới thì OK,
+               nhưng ghi đè file cũ mà chưa đọc → từ chối. Kiểm tra bằng cách
+               thử đọc: nếu file tồn tại mà chưa nằm trong readFilesRef → chặn. */
+             const normPath = normalizePathKey(path);
+            if (normPath && !readFilesRef.current.has(normPath)) {
+              let fileExists = false;
+              try {
+                const probe = isDesktop
+                  ? await desktopFsRead(path)
+                  : await fsRead(wsForFs!, path);
+                fileExists = !(probe as unknown as Record<string, unknown>)?.error;
+              } catch {
+                fileExists = false;
+              }
+              if (fileExists) {
+                return JSON.stringify({
+                  applied: false,
+                  error:
+                    `File "${path}" đã tồn tại nhưng chưa được đọc. Bạn PHẢI gọi fs_read trước ` +
+                    'khi ghi đè để đảm bảo không mất nội dung quan trọng. Nếu muốn tạo file MỚI, ' +
+                    'đảm bảo đường dẫn chưa tồn tại.',
+                });
+              }
+              /* File chưa tồn tại → tạo mới, cho phép. Tự động mark là đã "đọc"
+                 (biết rõ nội dung vì chính agent viết). */
+              readFilesRef.current.add(normPath);
+            }
+            if (agentMode === 'plan') {
+              return JSON.stringify({
+                applied: false,
+                error:
+                  'PLAN MODE đang bật — không được phép ghi file. Hãy trình bày kế hoạch ' +
+                  'và chờ người dùng chuyển sang ACT mode trước khi thực thi.',
+              });
+            }
             const content = String(args.content ?? '');
             let oldText = '';
             try {
-              oldText = (await fsRead(ws.deps, path)).content;
+              oldText = isDesktop ? (await desktopFsRead(path)).content : (await fsRead(wsForFs!, path)).content;
             } catch {
               /* file mới — diff toàn bộ là add */
             }
+            /* Large file protection (port Wove, Apache-2.0): chặn full rewrite
+               file >200 dòng. Ghi đè file lớn dễ mất nội dung agent chưa đọc
+               tới; buộc dùng fs_edit để sửa cục bộ. Tạo file mới (oldText='')
+               không bị chặn. */
+            const LARGE_FILE_LINE_LIMIT = 200;
+            if (oldText) {
+              const lineCount = oldText.split('\n').length;
+              if (lineCount > LARGE_FILE_LINE_LIMIT) {
+                return JSON.stringify({
+                  written: false,
+                  error:
+                    `File "${path}" có ${lineCount} dòng — quá lớn để ghi đè toàn bộ (trần ${LARGE_FILE_LINE_LIMIT} dòng). ` +
+                    'Dùng fs_edit để sửa CỤC BỘ thay vì ghi đè cả file. Điều này tránh mất nội dung ' +
+                    'bạn chưa đọc tới và giảm rủi ro lỗi. Nếu thực sự cần viết lại toàn bộ, hãy chia ' +
+                    'nhỏ thành nhiều lần fs_edit.',
+                });
+              }
+            }
+            /* Staging path: ghi vào overlay thay vì đĩa. */
+            if (stagingEnabled) {
+              const existing = stagingRef.current[normPath];
+              const diskOriginal = existing ? existing.original : (oldText || null);
+              updateStaging(stageFile(stagingRef.current, path, diskOriginal, content));
+              readFilesRef.current.add(normPath);
+              return JSON.stringify({ written: true, staged: true, size: content.length });
+            }
+            /* Legacy path: diff modal + ghi đĩa ngay + checkpoint. */
             const approved = await showDiffModal({ path, oldText, newText: content });
             if (!approved) {
               return JSON.stringify({
@@ -584,28 +989,198 @@ export default function ChatInterface() {
                 note: 'Người dùng TỪ CHỐI ghi file này. Đừng ghi lại y nguyên — hỏi họ muốn điều chỉnh gì.',
               });
             }
-            /* Checkpoint — như fs_edit: chụp trước khi ghi, lưu sau khi xong. */
             const capChatId = useAppStore.getState().currentChatId;
             if (capChatId) {
               if (!turnCaptureRef.current) {
                 turnCaptureRef.current = newTurnCapture(capChatId);
               }
-              captureFile(turnCaptureRef.current, await readCaptureForPath(ws.deps, path));
+              captureFile(turnCaptureRef.current, await readCaptureForPath(isDesktop ? null : wsForFs!, path));
             }
-            const writeRes = await fsWrite(ws.deps, path, content);
+            const writeRes = isDesktop ? await desktopFsWrite(path, content) : await fsWrite(wsForFs!, path, content);
             if (turnCaptureRef.current) void saveTurnCapture(turnCaptureRef.current);
             return JSON.stringify({ written: true, ...writeRes });
           }
+          case 'shell_run': {
+            const command = String(args.command ?? '');
+            const cwd = args.cwd ? String(args.cwd) : undefined;
+            const approved = await showShellModal({ command, cwd });
+            if (!approved) {
+              return JSON.stringify({ approved: false, note: 'Người dùng TỪ CHỐI chạy lệnh này.' });
+            }
+            const bridge = (await import('@/lib/desktop-bridge')).kodaDesktop()!;
+            const result = await bridge.shell.run({ command, cwd });
+
+            /* Auto-debug loop: khi lệnh fail + safe command → track attempts và
+               chèn retry guidance vào result để model tự sửa và retry. Port từ
+               Plandex `plandex debug` (MIT). */
+            const exitCode = result.code;
+            const failed = exitCode !== null && exitCode !== 0;
+            if (failed && isSafeDebugCommand(command)) {
+              const maxAttempts = AUTO_DEBUG_MAX_ATTEMPTS_DEFAULT;
+              const { store: nextStore, result: debugResult } = recordDebugAttempt(
+                debugLoopRef.current,
+                command,
+                exitCode,
+                result.stderr?.slice(0, 500) ?? '',
+                maxAttempts,
+              );
+              debugLoopRef.current = nextStore;
+
+              if (debugResult.shouldStop) {
+                // Dừng retry — clear session
+                debugLoopRef.current = clearDebugSession(debugLoopRef.current, command);
+              }
+
+              const guidance = buildRetryGuidance(
+                command,
+                exitCode,
+                debugResult.session.attempts,
+                maxAttempts,
+                debugResult.stopReason,
+              );
+              return JSON.stringify({ ...result, retryGuidance: guidance });
+            }
+            // Lệnh thành công → clear debug session nếu có + gợi ý lưu bài học
+            if (!failed) {
+              const session = debugLoopRef.current[normalizeDebugCommand(command)];
+              debugLoopRef.current = clearDebugSession(debugLoopRef.current, command);
+              // Nếu đã retry nhiều lần rồi mới thành công → gợi ý model lưu lesson
+              if (session && session.attempts > 1) {
+                const suggestion = suggestLessonFromDebug(command, session.attempts);
+                if (suggestion) {
+                  return JSON.stringify({ ...result, lessonSuggestion: suggestion });
+                }
+              }
+            }
+            return JSON.stringify(result);
+          }
+          case 'git_status': {
+            const bridge = (await import('@/lib/desktop-bridge')).kodaDesktop()!;
+            const result = await bridge.git.status();
+            return JSON.stringify(result);
+          }
+          case 'git_diff': {
+            const bridge = (await import('@/lib/desktop-bridge')).kodaDesktop()!;
+            const result = await bridge.git.diff({ relPath: args.path ? String(args.path) : undefined, staged: args.staged === true });
+            return JSON.stringify({ diff: result });
+          }
+          case 'git_log': {
+            const bridge = (await import('@/lib/desktop-bridge')).kodaDesktop()!;
+            const limit = typeof args.limit === 'number' ? args.limit : 20;
+            const result = await bridge.git.log({ limit });
+            return JSON.stringify({ log: result });
+          }
+          case 'git_add': {
+            const bridge = (await import('@/lib/desktop-bridge')).kodaDesktop()!;
+            const paths = Array.isArray(args.paths) ? (args.paths as string[]) : [];
+            const result = await bridge.git.add(paths);
+            return JSON.stringify(result);
+          }
+          case 'git_commit': {
+            const message = String(args.message ?? '');
+            const approved = await showShellModal({ command: `git commit -m "${message.slice(0, 80)}"`, cwd: undefined });
+            if (!approved) {
+              return JSON.stringify({ approved: false, note: 'Người dùng TỪ CHỐI commit này.' });
+            }
+            const bridge = (await import('@/lib/desktop-bridge')).kodaDesktop()!;
+            const result = await bridge.git.commit(message);
+            return JSON.stringify(result);
+          }
+
+          /* ------------------------------------------------------------------ */
+          /* Sub-task Plan                                                       */
+          /* ------------------------------------------------------------------ */
+
+          case 'plan_create': {
+            const title = String(args.title ?? 'Untitled plan');
+            const rawSubtasks = Array.isArray(args.subtasks) ? args.subtasks : [];
+            let plan = emptyPlan(title);
+            for (const st of rawSubtasks) {
+              if (!st || typeof st.title !== 'string') continue;
+              plan = addSubtask(plan, st.title, {
+                description: typeof st.description === 'string' ? st.description : undefined,
+                files: Array.isArray(st.files) ? st.files.filter((f: unknown): f is string => typeof f === 'string') : undefined,
+              });
+            }
+            // Persist plan vào kv
+            await db.kv.put({ key: `plan:${currentChatId}`, value: JSON.stringify(plan) }).catch(() => {});
+            showNotice(`Đã tạo plan "${title}" với ${plan.subtasks.length} subtask.`);
+            return JSON.stringify({ ok: true, plan: formatPlanSummary(plan), subtaskCount: plan.subtasks.length });
+          }
+
+          case 'plan_update': {
+            const subtaskId = String(args.subtaskId ?? '');
+            const status = String(args.status ?? '') as SubtaskStatus;
+            // Load plan từ kv
+            const row = await db.kv.get(`plan:${currentChatId}`).catch(() => null);
+            const plan = row?.value ? parsePlan(typeof row.value === 'string' ? JSON.parse(row.value) : row.value) : null;
+            if (!plan) {
+              return JSON.stringify({ ok: false, error: 'Không tìm thấy plan hiện tại. Gọi plan_create trước.' });
+            }
+            const updated = updateSubtaskStatus(plan, subtaskId, status);
+            if (!updated) {
+              return JSON.stringify({ ok: false, error: `Subtask "${subtaskId}" không tồn tại trong plan.` });
+            }
+            await db.kv.put({ key: `plan:${currentChatId}`, value: JSON.stringify(updated) }).catch(() => {});
+            const prog = planProgress(updated);
+            return JSON.stringify({
+              ok: true,
+              plan: formatPlanSummary(updated),
+              progress: `${prog.done}/${prog.total} (${prog.percentComplete}%)`,
+            });
+          }
+
+          /* ------------------------------------------------------------------ */
+          /* Self-Improvement Lessons                                            */
+          /* ------------------------------------------------------------------ */
+
+          case 'lesson_save': {
+            const category = String(args.category ?? '') as LessonCategory;
+            const text = String(args.text ?? '');
+            const validated = validateLessonText(text);
+            if (!validated) {
+              return JSON.stringify({ ok: false, error: 'Bài học quá ngắn hoặc rỗng (tối thiểu 5 ký tự).' });
+            }
+            if (!['rule', 'pattern', 'gotcha'].includes(category)) {
+              return JSON.stringify({ ok: false, error: 'Category phải là rule, pattern, hoặc gotcha.' });
+            }
+            const serialized = serializeLesson({ category, text: validated });
+            // Lưu vào memories table (reuse existing infrastructure)
+            try {
+              const record = await addMemory(serialized);
+              if (!record) {
+                return JSON.stringify({ ok: false, error: 'Bài học trùng lặp hoặc không lưu được.' });
+              }
+              showNotice(`Đã lưu bài học [${category}]: ${validated.slice(0, 60)}…`);
+              return JSON.stringify({ ok: true, id: record.id, category, text: validated });
+            } catch (e) {
+              return JSON.stringify({ ok: false, error: `Lỗi lưu bài học: ${e instanceof Error ? e.message : String(e)}` });
+            }
+          }
+
           default:
             return JSON.stringify({ error: 'Tool không hỗ trợ phía client.' });
         }
       } catch (err) {
-        const msg = err instanceof Error ? err.message.slice(0, 200) : 'Lỗi hệ thống tệp.';
+        const msg = err instanceof Error ? err.message.slice(0, 300) : 'Lỗi hệ thống tệp.';
         return JSON.stringify({ error: msg });
       }
     },
-    [showNotice, showDiffModal, readCaptureForPath],
+    [showNotice, showDiffModal, showShellModal, readCaptureForPath],
   );
+
+  /** Build API headers cho fetch calls — gộp logic trùng lặp từ useChat + performCompaction. */
+  const buildApiHeaders = useCallback((): Record<string, string> => ({
+    ...(accessCode ? { 'x-access-code': accessCode } : {}),
+    ...(activeProvider?.baseUrl
+      ? {
+          'x-api-base': activeProvider.baseUrl,
+          ...(activeProvider.apiKey ? { 'x-api-key': activeProvider.apiKey } : {}),
+        }
+      : apiKey
+        ? { 'x-api-key': apiKey }
+        : {}),
+  }), [accessCode, activeProvider, apiKey]);
 
   const {
     messages, setMessages, input, setInput, handleInputChange,
@@ -618,22 +1193,28 @@ export default function ChatInterface() {
      * đó — không fallback sang settings.apiKey, vì như vậy là gửi credential
      * của gateway A tới gateway B do người dùng tự khai.
      */
-    headers: {
-      ...(accessCode ? { 'x-access-code': accessCode } : {}),
-      ...(activeProvider?.baseUrl
-        ? {
-            'x-api-base': activeProvider.baseUrl,
-            ...(activeProvider.apiKey ? { 'x-api-key': activeProvider.apiKey } : {}),
-          }
-        : apiKey
-          ? { 'x-api-key': apiKey }
-          : {}),
-    },
+    headers: buildApiHeaders(),
     body: {
       model,
       temperature,
       thinkingLevel,
       system: systemPrompt,
+      /* Cho phép tắt hẳn tool-calling. Server mặc định `?? true`, nên TRƯỚC
+         ĐÂY không gửi trường này đồng nghĩa tool luôn bật và người dùng
+         không có cách nào huỷ. */
+      agentTools: agentToolsEnabled,
+      /* Plan/Act mode: server lọc write tools + chèn chỉ thị vào system prompt. */
+      ...(agentMode !== 'act' ? { agentMode } : {}),
+      /* Staging sandbox: server chèn ghi chú vào system prompt. */
+      ...(stagingEnabled ? { staging: true } : {}),
+      /* Trạng thái workspace: server chèn khối [Workspace] vào system prompt
+         để model biết fs_* có thư mục làm việc — không gửi thì model tưởng
+         không truy cập được máy user và không bao giờ gọi fs_list (lỗi thật
+         "agent coding không nhận diện được workspace"). */
+      workspace: {
+        connected: Boolean(workspace?.connected),
+        name: workspace?.name ?? null,
+      },
       /* Compaction: chỉ gửi khi marker còn hợp lệ trên nhánh hiện tại. */
       ...(requestCompaction
         ? {
@@ -646,7 +1227,7 @@ export default function ChatInterface() {
     /* Client-executed tools (fs_*): onToolCall chạy trên máy user, trả kết quả
        tại chỗ; sau stream, maxSteps phía useChat tự resubmit để model đọc
        kết quả — vòng lặp agent coding chạy xuyên nhiều request. */
-    maxSteps: 8,
+    maxSteps: CLIENT_MAX_STEPS,
     onToolCall: handleClientToolCall,
     onFinish: (message, { finishReason, usage }) => {
       // Đóng checkpoint turn — các snapshot của response này đã được lưu
@@ -655,6 +1236,36 @@ export default function ChatInterface() {
       // Guard markup tool-call model tự nhả vào kênh text — strip TRƯỚC khi
       // sanitize/lưu để nội dung trong DB cũng sạch (tokens + search index).
       const clean = sanitizeContent(stripEmulatedToolMarkup(message.content).text);
+
+      /**
+       * Gateway nhận request có `tools` nhưng BỎ QUA IM LẶNG: model không bao
+       * giờ nhận schema tool, chỉ thấy tên tool qua khối [Tools]/[Workspace] —
+       * các model từng được train tool-calling (GLM, Qwen...) sẽ nhả khối
+       * <tool_call> dạng TEXT thường. Đường native không parse khối này,
+       * client strip markup → bubble rỗng/không tool nào chạy, người dùng
+       * thấy "agent không đọc/sửa được file".
+       *
+       * Phát hiện: raw content chứa khối tool-call + KHÔNG có toolInvocation
+       * nào được populates + finish không phải 'tool-calls' → tự thử lại MỘT
+       * lần bằng đường giả lập (forceEmulatedTools); server nhận cờ này rồi
+       * ghim cache tool-unsupported cho các lượt sau của cùng upstream.
+       */
+      const invocations = ((message as { toolInvocations?: unknown[] }).toolInvocations ?? []) as unknown[];
+      const textToolCalls =
+        /<\s*(?:tool_call|tool-call|toolcall|function_call|function-call|tool_use|tooluse|invoke)\b/i.test(
+          message.content,
+        );
+      if (
+        textToolCalls &&
+        invocations.length === 0 &&
+        finishReason !== 'tool-calls' &&
+        emulatedRetryCountRef.current < 1
+      ) {
+        emulatedRetryCountRef.current += 1;
+        showNotice('Model gọi tool dạng văn bản (gateway không hỗ trợ function calling) — thử lại bằng đường giả lập…', 6000);
+        void reload({ body: { forceEmulatedTools: true } });
+        return;
+      }
 
       /**
        * Gateway đôi khi trả stream rỗng (502 ngầm, quá tải, model reasoning
@@ -686,6 +1297,13 @@ export default function ChatInterface() {
       // Gateway không báo usage ra → ước lượng từ độ dài câu trả lời.
       const completionTokens =
         Number(usage?.completionTokens ?? 0) || Math.ceil(clean.length / 4);
+
+      /* Lưu usage thật cho auto-compact trigger — chỉ ghi khi có số liệu thật
+         từ upstream (promptTokens > 0). Ước lượng fallback KHÔNG được dùng ở
+         đây vì nó sẽ khiến evaluateUsageTrigger đọc sai silent overflow. */
+      if (promptTokens > 0) {
+        lastUsageRef.current = { promptTokens, completionTokens, finishReason };
+      }
       if (promptTokens > 0 || completionTokens > 0) {
         // Ghi usage vào annotation để thống kê token có dữ liệu trong DB.
         const anns = (message.annotations ?? []) as Array<Record<string, unknown>>;
@@ -716,6 +1334,14 @@ export default function ChatInterface() {
     },
     onError: (err) => console.error('[useChat]', err),
   });
+
+  /* Reset bộ đếm auto-retry emulated khi user gửi tin nhắn MỚI — reload()
+     của lượt thử giữ nguyên user message nên không đụng effect này, tránh
+     vòng lặp retry vô hạn trong khi mỗi lượt user vẫn được cấp lại lượt thử. */
+  useEffect(() => {
+    const last = messages[messages.length - 1];
+    if (last?.role === 'user') emulatedRetryCountRef.current = 0;
+  }, [messages]);
 
   /* ------------------------------------------------------------------ */
   /* Compaction hội thoại dài                                            */
@@ -760,9 +1386,19 @@ export default function ChatInterface() {
   const compactBusyRef = useRef(false);
 
   /**
-   * Nén phần cũ: gọi /api/compact rồi lưu marker vào ChatSession. Thất bại
-   * tóm tắt (gateway bận/hỏng/mạng) thì CHỈ hard-trim khi đang cứu lỗi tràn
-   * context; auto/manual bỏ qua để hẹn lần sau — không mất ngữ cảnh âm thầm.
+   * Usage thật từ lần stream CUỐI — để auto-compact trigger dùng số đo chính
+   * xác thay vì ước lượng chars/4. Reset mỗi khi stream mới bắt đầu (isLoading
+   * chuyển true) để không đọc usage cũ của lượt trước.
+   */
+  const lastUsageRef = useRef<{ promptTokens: number; completionTokens: number; finishReason?: string } | null>(null);
+
+  /**
+   * Nén phần cũ: gọi /api/compact rồi lưu marker vào ChatSession.
+   *
+   * Khi gateway không tạo được tóm tắt, KHÔNG còn hard-trim trắng: dựng bản
+   * tóm tắt TẤT ĐỊNH từ chính phần bị nén (yêu cầu đã nêu, file đã đọc/sửa,
+   * kết luận cuối — xem buildEmergencySummary). Nhờ vậy đường `overflow` vẫn
+   * cứu được lượt chat mà model không mất dấu công việc đã làm.
    * Nén lần thứ hai sẽ ghép tóm tắt cũ vào đầu payload để không đứt mạch
    * ngữ cảnh giữa hai marker.
    */
@@ -773,22 +1409,46 @@ export default function ChatInterface() {
       if (reason === 'auto' && !autoCompactEnabled) return false;
       if (activeCompaction && Date.now() - activeCompaction.createdAt < 60_000) return false;
 
-      const split = splitForCompaction(messages);
+      /* Ranh giới cắt phải tính theo NGÂN SÁCH TOKEN của model đang dùng, chứ
+         không chỉ theo số lượng tin: 8 tin cuối của một lượt agent coding có
+         thể là 8 tool result đầy trần 24k ký tự. */
+      const split = splitForCompaction(
+        messages,
+        resolveContextWindow(model, activeProvider?.models),
+      );
       if (!split) return false;
       const upToId = split.older[split.older.length - 1]?.id ?? '';
       if (!upToId) return false;
 
       const payload = serializeForCompaction(split.older);
-      if (
+      const previousSummary =
         activeCompaction &&
         split.older.some((m) => m.id === activeCompaction.upToId) &&
         activeCompaction.summary
-      ) {
+          ? activeCompaction.summary
+          : undefined;
+      if (previousSummary) {
         payload.unshift({
           role: 'system',
-          content: `[Tóm tắt các lượt nén trước đó]\n${activeCompaction.summary}`,
+          content: `[Tóm tắt các lượt nén trước đó]\n${previousSummary}`,
         });
       }
+
+      /* Trích dữ liệu CÓ CẤU TRÚC từ phần bị nén để gửi kèm cho LLM và lưu
+         tích lũy. Transcript prose một mình không đủ: tool trace rút gọn thành
+         "[đã gọi fs_edit src/a.ts]" dễ bị LLM bỏ qua hoặc diễn giải sai. */
+      const currentFileOps = extractFileOps(split.older);
+      const currentRequests = extractUserRequests(split.older);
+      const splitTurnPrefixText =
+        split.splitTurnStart !== undefined
+          ? extractUserRequests(messages.slice(split.splitTurnStart, split.firstKept)).slice(-1)[0]
+          : undefined;
+      const compactContext = formatCompactContextBlock(
+        currentFileOps,
+        currentRequests,
+        splitTurnPrefixText,
+        activeCompaction?.state,
+      );
 
       compactBusyRef.current = true;
       setCompactBusy(true);
@@ -799,27 +1459,48 @@ export default function ChatInterface() {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              ...(accessCode ? { 'x-access-code': accessCode } : {}),
-              ...(activeProvider?.baseUrl
-                ? {
-                    'x-api-base': activeProvider.baseUrl,
-                    ...(activeProvider.apiKey ? { 'x-api-key': activeProvider.apiKey } : {}),
-                  }
-                : apiKey
-                  ? { 'x-api-key': apiKey }
-                  : {}),
+              ...buildApiHeaders(),
             },
-            body: JSON.stringify({ messages: payload }),
+            body: JSON.stringify({
+              messages: payload,
+              ...(compactContext ? { context: compactContext } : {}),
+            }),
           });
           const j = (await res.json().catch(() => null)) as { summary?: unknown } | null;
           if (typeof j?.summary === 'string' && j.summary.trim()) {
             summary = j.summary.trim().slice(0, 16_000);
           }
         } catch {
-          /* mạng/gateway lỗi → summary rỗng, quyết định ở dưới. */
+          /* mạng/gateway lỗi → summary rỗng, fallback tất định ở dưới. */
         }
 
+        /* LLM thất bại → tóm tắt tất định. Nó không cần mạng và không bao giờ
+           lỗi, nên chỉ rỗng khi phần bị nén thực sự không có gì đáng giữ. */
+        let deterministic = false;
+        if (!summary) {
+          summary = buildEmergencySummary({
+            messages: split.older,
+            previousSummary,
+            ...(split.splitTurnStart !== undefined
+              ? { splitTurnPrefix: messages.slice(split.splitTurnStart, split.firstKept) }
+              : {}),
+          });
+          deterministic = Boolean(summary);
+        }
+
+        /* Auto/manual vẫn hẹn lần sau khi KHÔNG có tóm tắt nào (kể cả tất
+           định) — không lược ngữ cảnh âm thầm. Đường overflow buộc phải cắt
+           vì lượt chat đang bị gateway từ chối. */
         if (!summary && reason !== 'overflow') return false;
+
+        /* Merge state tích lũy: dữ kiện file/request của lần nén này được hợp
+           nhất với state từ lần trước. State sống trong ChatSession.compaction
+           (field không index) nên mở rộng không cần bump Dexie schema. */
+        const newState = mergeCompactionState(
+          activeCompaction?.state,
+          currentFileOps,
+          currentRequests,
+        );
 
         await db.chats.update(chatId, {
           compaction: {
@@ -827,12 +1508,15 @@ export default function ChatInterface() {
             summary,
             compactedCount: split.older.length,
             createdAt: Date.now(),
+            state: newState,
           },
           updatedAt: Date.now(),
         });
         showNotice(
           summary
-            ? `Đã nén ${split.older.length} tin nhắn cũ thành tóm tắt — chat tiếp nhẹ hơn.`
+            ? deterministic
+              ? `Đã nén ${split.older.length} tin nhắn cũ (tóm tắt tự động — gateway không tạo được bản tóm tắt bằng AI).`
+              : `Đã nén ${split.older.length} tin nhắn cũ thành tóm tắt — chat tiếp nhẹ hơn.`
             : `Đã lược bỏ ${split.older.length} tin nhắn cũ (không tạo được tóm tắt).`,
         );
         return true;
@@ -843,7 +1527,7 @@ export default function ChatInterface() {
     },
     [
       currentChatId, isLoading, activeCompaction, autoCompactEnabled, messages,
-      accessCode, activeProvider, apiKey, showNotice,
+      buildApiHeaders, showNotice, model,
     ],
   );
 
@@ -853,30 +1537,68 @@ export default function ChatInterface() {
    * đếm cả tin cũ và kích hoạt nén lại vô hạn.
    *
    * contextUsage được tách thành useMemo dùng chung với ContextMeter (render).
+   *
+   * HIỆU NĂNG: `messages` đổi theo TỪNG token khi stream, mà estimate quét
+   * toàn bộ nội dung + tool result (đo được ~0,73 ms với hội thoại 300 tin).
+   * Khoá lại `messagesForUsage` trong lúc đang stream: thanh đo giữ nguyên giá
+   * trị cuối rồi cập nhật một lần khi stream xong — người dùng không đọc kịp
+   * con số nhảy từng token, còn nhánh auto-compact vốn đã bỏ qua khi
+   * `isLoading` nên không hề bị ảnh hưởng.
    */
+  const frozenUsageMessagesRef = useRef(messages);
+  if (!isLoading) frozenUsageMessagesRef.current = messages;
+  const messagesForUsage = isLoading ? frozenUsageMessagesRef.current : messages;
+
   const contextUsage = useMemo(() => {
-    if (!messages.length) return null;
+    if (!messagesForUsage.length) return null;
     const boundaryIndex = activeCompaction
-      ? messages.findIndex((m) => m.id === activeCompaction.upToId)
+      ? messagesForUsage.findIndex((m) => m.id === activeCompaction.upToId)
       : -1;
     const effective =
-      boundaryIndex >= 0 ? messages.slice(boundaryIndex + 1) : messages;
+      boundaryIndex >= 0 ? messagesForUsage.slice(boundaryIndex + 1) : messagesForUsage;
     const tokens = estimatePromptTokens(effective, [
       activeCompaction?.summary,
       systemPrompt,
     ]);
     return { tokens, max: resolveContextWindow(model, activeProvider?.models) };
-  }, [messages, activeCompaction, model, activeProvider, systemPrompt]);
+  }, [messagesForUsage, activeCompaction, model, activeProvider, systemPrompt]);
 
   useEffect(() => {
     if (isLoading || !currentChatId || !contextUsage) return;
-    const { tokens, max } = contextUsage;
-    if (!shouldCompact(tokens, max)) return;
+    const { max } = contextUsage;
+
+    /* Ưu tiên usage THẬT từ upstream (chính xác hơn ước lượng chars/4).
+       Chỉ fallback sang estimate khi gateway không trả usage. */
+    const lastUsage = lastUsageRef.current;
+    let trigger = false;
+    if (lastUsage && lastUsage.promptTokens > 0) {
+      const decision = evaluateUsageTrigger({
+        promptTokens: lastUsage.promptTokens,
+        completionTokens: lastUsage.completionTokens,
+        finishReason: lastUsage.finishReason,
+        windowTokens: max,
+      });
+      trigger = decision.kind !== 'skip';
+    } else {
+      trigger = shouldCompact(contextUsage.tokens, max);
+    }
+
+    if (!trigger) return;
     const timer = setTimeout(() => {
       void performCompaction('auto');
     }, 3_000);
     return () => clearTimeout(timer);
   }, [contextUsage, isLoading, currentChatId, performCompaction]);
+
+  /**
+   * Có gì đáng nén thủ công không. Dùng `messagesForUsage` (đã đóng băng khi
+   * stream) vì splitForCompaction giờ phải tích token phần đuôi — chạy lại
+   * theo từng token của stream là vô ích, và nút nén vốn đã tắt khi isLoading.
+   */
+  const canCompactNow = useMemo(
+    () => !isLoading && !!splitForCompaction(messagesForUsage, contextUsage?.max),
+    [isLoading, messagesForUsage, contextUsage?.max],
+  );
 
   /**
    * Recovery khi upstream trả UPSTREAM_CONTEXT_OVERFLOW: nén rồi gửi lại đúng
@@ -1193,9 +1915,17 @@ export default function ChatInterface() {
 
     return () => {
       cancelled = true;
+      /* CỐ Ý đọc .current tại thời điểm cleanup, không snapshot ở đầu effect:
+         `createdObjectUrls` giữ NGUYÊN một Set suốt vòng đời component (chỉ
+         .add/.clear, không bao giờ gán lại), và ta cần revoke đúng những URL
+         ĐANG tồn tại lúc dọn. Snapshot theo gợi ý của lint sẽ bỏ sót mọi URL
+         tạo sau khi effect chạy → rò rỉ blob thật. */
+      // eslint-disable-next-line react-hooks/exhaustive-deps
       revokeObjectUrls(createdObjectUrls.current);
     };
-  }, [currentChatId, setMessages]);
+    // showNotice là useCallback([]) — ổn định vĩnh viễn, thêm vào không gây
+    // chạy lại effect nhưng làm lint kiểm tra được đầy đủ.
+  }, [currentChatId, setMessages, showNotice]);
 
   useEffect(() => {
     return () => {
@@ -1204,9 +1934,9 @@ export default function ChatInterface() {
 
       pendingAssistantForkRef.current = null;
 
-      revokeObjectUrls(
-        createdObjectUrls.current,
-      );
+      /* Như trên: Set giữ nguyên danh tính, phải đọc tại lúc unmount. */
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      revokeObjectUrls(createdObjectUrls.current);
 
       if (noticeTimer.current) {
         clearTimeout(noticeTimer.current);
@@ -1637,7 +2367,12 @@ export default function ChatInterface() {
     });
 
     return unsubscribe;
-  }, [setMessages]);
+    /* Cả ba đều ỔN ĐỊNH nên thêm vào không làm effect chạy lại:
+       - setCurrentChatId: selector Zustand
+       - showNotice: useCallback([])
+       - stop: useCallback của useChat (chỉ đọc abortControllerRef)
+       Khai báo đầy đủ để lint kiểm tra được thật, thay vì tắt cảnh báo. */
+  }, [setMessages, setCurrentChatId, showNotice, stop]);
 
   useEffect(() => {
     if (!currentChatId) return;
@@ -2455,6 +3190,36 @@ export default function ChatInterface() {
         /* bỏ qua */
       }
 
+      /* Workspace agent coding: đọc TƯƠI lúc submit (web = cache module-level
+         của fs-access; desktop = hỏi main qua IPC) rồi gửi qua per-call body.
+         KHÔNG gửi qua hook body — nó bị chốt ở mount, khi restore handle chưa
+         xong nên luôn connected:false → model mãi không biết workspace tồn tại
+         (lỗi thật "đã kết nối folder nhưng agent coding không nhận diện"). */
+      if (userText) {
+        try {
+          const wsInfo = isKodaDesktop()
+            ? await desktopGetWorkspaceInfo()
+            : getWorkspaceInfo();
+          options.body = { ...options.body, workspace: wsInfo };
+        } catch {
+          /* bridge lỗi — gửi không workspace, server giữ prompt như thường */
+        }
+      }
+
+      /* Per-call body cho 2 cờ tool: gửi TƯƠI mỗi lượt (hook body bị chốt ở
+         mount — toggle trong settings sẽ không có tác dụng nếu đi đường đó). */
+      if (!modelOverride) {
+        options.body = {
+          ...options.body,
+      agentTools: agentToolsEnabled,
+      /* Plan/Act mode: server lọc write tools + chèn chỉ thị vào system prompt. */
+      ...(agentMode !== 'act' ? { agentMode } : {}),
+      /* Staging sandbox: server chèn ghi chú vào system prompt. */
+      ...(stagingEnabled ? { staging: true } : {}),
+          ...(forceEmulatedTools ? { forceEmulatedTools: true } : {}),
+        };
+      }
+
       /* Chat với PDF: attachment PDF được trích text qua /api/pdf rồi gửi kèm
          body. Không trích được (scan/lỗi) vẫn gửi như cũ. */
       if (attachments.length > 0) {
@@ -2477,7 +3242,7 @@ export default function ChatInterface() {
     } catch (err) {
       console.error('[onSubmit]', err);
     }
-  }, [input, attachments, isLoading, mediaBusy, currentChatId, draftId, setCurrentChatId, handleSubmit, pin, generateTitle, messages.length, showNotice, webSearchEnabled, promptTemplates]);
+  }, [input, attachments, isLoading, mediaBusy, currentChatId, draftId, setCurrentChatId, handleSubmit, pin, generateTitle, messages.length, showNotice, webSearchEnabled, promptTemplates, agentToolsEnabled, forceEmulatedTools, agentMode, stagingEnabled]);
 
   const onSubmit = useCallback(
     async (e?: React.FormEvent) => {
@@ -2734,7 +3499,7 @@ export default function ChatInterface() {
   return (
     <div
       {...swipeHandlers}
-      className="flex h-full flex-col overflow-hidden bg-surface touch-pan-y"
+      className="flex h-full flex-col overflow-hidden bg-transparent touch-pan-y"
     >
       <ChatHeader
         title={currentChat?.title}
@@ -2745,7 +3510,7 @@ export default function ChatInterface() {
         onOpenSidebar={onOpenSidebar}
         sidebarCollapsed={isSidebarCollapsed}
         currentChatId={currentChatId}
-        canCompact={!!splitForCompaction(messages) && !isLoading}
+        canCompact={canCompactNow}
         compactBusy={compactBusy}
         onCompact={() => void performCompaction('manual')}
       />
@@ -2832,9 +3597,14 @@ export default function ChatInterface() {
         onGenerateMedia={handleGenerateMedia}
         webSearch={webSearchEnabled}
         onToggleWebSearch={() => updateSettings({ webSearch: !webSearchEnabled })}
+        agentMode={agentMode}
+        onToggleAgentMode={() => updateSettings({ agentMode: agentMode === 'plan' ? 'act' : 'plan' })}
+        stagedFileCount={stagingVersion >= 0 ? stagingCount(stagingRef.current) : 0}
+        onOpenStaging={() => setStagingPanelOpen(true)}
         webBusy={webBusy}
         workspace={workspace}
         onPickWorkspace={pickFolder}
+        onDisconnectWorkspace={disconnectFolder}
         canContinue={canContinue}
         onContinue={continueGenerating}
         thinkingLevel={
@@ -2853,6 +3623,16 @@ export default function ChatInterface() {
 
       {/* Thông báo lỗi/cảnh báo từ showNotice() — trước đây không hề được render. */}
       <DiffConfirm state={diffState} onClose={closeDiffModal} />
+      <ShellConfirm state={shellState} onClose={closeShellModal} />
+      {stagingPanelOpen && (
+        <StagingPanel
+          store={stagingRef.current}
+          onClose={() => setStagingPanelOpen(false)}
+          onApplyAll={applyAllStaged}
+          onRejectFile={rejectStagedFile}
+          onRejectAll={rejectAllStaged}
+        />
+      )}
       <Toast message={notice} onClose={onClearNotice} />
     </div>
   );
