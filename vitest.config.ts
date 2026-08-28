@@ -10,5 +10,8 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['tests/**/*.test.ts'],
+    /* Dọn env backend tìm kiếm trước mỗi file — nếu không, key thật trên máy
+       dev đổi thứ tự engine và làm test đỏ (xem tests/setup-env.ts). */
+    setupFiles: ['./tests/setup-env.ts'],
   },
 });
