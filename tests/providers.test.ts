@@ -54,14 +54,23 @@ describe('providers — provider presets', () => {
  * request dùng key khác nhau). Ô nhập key phải bị ẩn cho các host này.
  */
 describe('providerNeedsApiKey — gateway free không dùng key', () => {
-  it('crax và Kilgore: không cần key', () => {
-    expect(providerNeedsApiKey('https://gpt.crax.lol/v1')).toBe(false);
-    expect(providerNeedsApiKey('https://kilgoreai.freesrv.com/v1')).toBe(false);
+  /* crax ĐÃ RỜI nhóm này: bản cập nhật "User Accounts + API Keys" khiến mọi
+     endpoint trả 401 auth_required cho cả request không key lẫn key rác
+     (kiểm chứng bằng request thật tới /v1/models). Ô nhập key phải HIỆN lại,
+     nếu không người dùng không có chỗ dán key crk_live_… và sẽ kẹt ở 401. */
+  it('crax: NAY cần key (gateway đã chuyển sang mô hình tài khoản)', () => {
+    expect(providerNeedsApiKey('https://gpt.crax.lol/v1')).toBe(true);
+    expect(providerNeedsApiKey('https://GPT.CRAX.LOL/v1/')).toBe(true);
+    expect(providerNeedsApiKey('https://gpt.crax.lol')).toBe(true);
+  });
+
+  it('Kilgore: NAY cần key (chuyển sang kilgoreai.xyz + hỗ trợ Bearer)', () => {
+    expect(providerNeedsApiKey('https://kilgoreai.xyz/v1')).toBe(true);
+    expect(providerNeedsApiKey('https://kilgoreai.xyz')).toBe(true);
   });
 
   it('không phân biệt hoa thường và dung sai path/slash', () => {
-    expect(providerNeedsApiKey('https://GPT.CRAX.LOL/v1/')).toBe(false);
-    expect(providerNeedsApiKey('https://gpt.crax.lol')).toBe(false);
+    expect(providerNeedsApiKey('https://KILGOREAI.XYZ/v1/')).toBe(true);
   });
 
   it('gateway key cá nhân: vẫn cần key', () => {

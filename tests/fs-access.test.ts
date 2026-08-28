@@ -41,7 +41,6 @@ function fakeDir(name: string, children: Array<any>): FsDirHandleLike {
   const self: FsDirHandleLike = {
     kind: 'directory',
     name,
-    // eslint-disable-next-line require-yield
     values: async function* () {
       for (const c of children) yield c;
     },

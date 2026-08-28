@@ -265,7 +265,8 @@ describe('runEmulatedLoop — e2e với upstream giả lập', () => {
   });
 
   it('protocol header có đủ quy tắc chống hallucination + chống loop', () => {
-    const p = buildProtocolHeader();
+    // Danh sách tool không liên quan tới các quy tắc dưới đây — truyền rỗng.
+    const p = buildProtocolHeader([]);
     expect(p).toContain('KHÔNG có kênh tool-call native');
     expect(p).toContain('TUYỆT ĐỐI KHÔNG tự viết <tool_result>');
     expect(p).toContain('Không lặp lại một call với tham số y hệt');
@@ -281,6 +282,6 @@ describe('runEmulatedLoop — e2e với upstream giả lập', () => {
   });
 
   it(`số round mặc định = ${EMU_MAX_ROUNDS}`, () => {
-    expect(EMU_MAX_ROUNDS).toBe(3);
+    expect(EMU_MAX_ROUNDS).toBe(10);
   });
 });

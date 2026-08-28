@@ -2,10 +2,14 @@ import { describe, expect, it } from 'vitest';
 import {
   estimateContextTokens,
   estimatePromptTokens,
+  evaluateUsageTrigger,
   isContextOverflowError,
+  retainedTailBudget,
   shouldCompact,
   splitForCompaction,
   KEEP_RECENT_MESSAGES,
+  KEEP_RECENT_TOKENS,
+  MIN_KEEP_RECENT_TOKENS,
   MIN_MESSAGES_TO_COMPACT,
   FALLBACK_CONTEXT_WINDOW,
   IMAGE_TOKEN_ESTIMATE,
@@ -92,23 +96,90 @@ describe('shouldCompact — tokens > window − reserve', () => {
   });
 });
 
-describe('splitForCompaction — cắt tại ranh giới giữ tin cuối', () => {
+describe('retainedTailBudget — nửa ngưỡng, kẹp trong [MIN, KEEP_RECENT_TOKENS]', () => {
+  it('window nhỏ: một nửa ngưỡng (window − reserve)', () => {
+    // 32k − 6k = 26k -> 13k
+    expect(retainedTailBudget(32_000)).toBe(13_000);
+  });
+
+  it('window lớn: chạm trần tuyệt đối', () => {
+    // 128k − 6k = 122k -> 61k, bị kẹp về KEEP_RECENT_TOKENS
+    expect(retainedTailBudget(128_000)).toBe(KEEP_RECENT_TOKENS);
+  });
+
+  it('window tí hon vẫn giữ được sàn', () => {
+    expect(retainedTailBudget(7_000)).toBe(MIN_KEEP_RECENT_TOKENS);
+  });
+
+  it('window không hợp lệ -> dùng FALLBACK', () => {
+    expect(retainedTailBudget(undefined)).toBe(retainedTailBudget(FALLBACK_CONTEXT_WINDOW));
+    expect(retainedTailBudget(0)).toBe(retainedTailBudget(FALLBACK_CONTEXT_WINDOW));
+  });
+});
+
+describe('splitForCompaction — cắt theo SỐ LƯỢNG và NGÂN SÁCH TOKEN', () => {
   it('hội thoại ngắn -> null (không đáng nén)', () => {
     const few = Array.from({ length: MIN_MESSAGES_TO_COMPACT }, (_, i) => msg(`m${i}`));
     expect(splitForCompaction(few)).toBeNull();
   });
 
-  it('đủ dài -> older = trước KEEP_RECENT, keep = KEEP_RECENT tin cuối', () => {
+  it('tin nhắn nhẹ -> vẫn cắt theo KEEP_RECENT_MESSAGES như trước', () => {
     const list = Array.from({ length: MIN_MESSAGES_TO_COMPACT + KEEP_RECENT_MESSAGES + 2 }, (_, i) =>
       msg(`m${i}`),
     );
     const out = splitForCompaction(list)!;
     expect(out.older).toHaveLength(list.length - KEEP_RECENT_MESSAGES);
     expect(out.keep).toHaveLength(KEEP_RECENT_MESSAGES);
+    expect(out.firstKept).toBe(list.length - KEEP_RECENT_MESSAGES);
     expect((out.older[0] as ReturnType<typeof msg>).content).toBe('m0');
-    expect((out.keep[out.keep.length - 1] as ReturnType<typeof msg>).content).toContain(
-      `m${list.length - 1}`,
-    );
+  });
+
+  it('tool result khổng lồ: evict SÂU HƠN trần số lượng', () => {
+    /* Kịch bản agent coding thật: 12 tin, mỗi tin một tool result 24k ký tự
+       (~6k token). Trần số lượng giữ 8 tin => ~48k token, vẫn tràn window 32k.
+       Ngân sách token (13k) chỉ cho giữ 2 tin. */
+    const heavy = Array.from({ length: 12 }, (_, i) => ({
+      role: 'assistant',
+      content: '',
+      toolInvocations: [
+        { state: 'result', args: { path: `f${i}.ts` }, result: { content: 'x'.repeat(24_000) } },
+      ],
+    }));
+    const out = splitForCompaction(heavy, 32_000)!;
+    expect(out.firstKept).toBeGreaterThan(heavy.length - KEEP_RECENT_MESSAGES);
+    expect(out.keptTokens).toBeLessThanOrEqual(retainedTailBudget(32_000));
+  });
+
+  it('luôn giữ lại ít nhất MỘT tin dù tin đó vượt ngân sách', () => {
+    const giant = Array.from({ length: 10 }, () => msg('y'.repeat(400_000)));
+    const out = splitForCompaction(giant, 32_000)!;
+    expect(out.keep).toHaveLength(1);
+    expect(out.firstKept).toBe(giant.length - 1);
+  });
+
+  it('điểm cắt giữa lượt -> splitTurnStart trỏ vào tin user mở lượt', () => {
+    /* 15 tin, trần số lượng giữ 8 cuối => firstKept = 7 (một assistant giữa
+       lượt). Phải truy ngược ra tin user mở lượt ở index 6. */
+    const list = [
+      ...Array.from({ length: 6 }, (_, i) => msg(`cũ ${i}`)),
+      { role: 'user', content: 'sửa file cho tôi' },
+      ...Array.from({ length: 8 }, (_, i) => ({ role: 'assistant', content: `bước ${i}` })),
+    ];
+    const out = splitForCompaction(list)!;
+    expect(out.firstKept).toBe(7);
+    expect(list[out.firstKept].role).toBe('assistant');
+    expect(out.splitTurnStart).toBe(6);
+    expect((list[out.splitTurnStart!] as { content: string }).content).toBe('sửa file cho tôi');
+  });
+
+  it('điểm cắt đúng ranh giới lượt user -> không có splitTurnStart', () => {
+    const list = [
+      ...Array.from({ length: 8 }, (_, i) => msg(`cũ ${i}`)),
+      ...Array.from({ length: 8 }, () => ({ role: 'user', content: 'hỏi' })),
+    ];
+    const out = splitForCompaction(list)!;
+    expect(list[out.firstKept].role).toBe('user');
+    expect(out.splitTurnStart).toBeUndefined();
   });
 });
 
@@ -135,5 +206,76 @@ describe('isContextOverflowError — regex theo provider', () => {
     expect(isContextOverflowError(500, '')).toBe(false);
     expect(isContextOverflowError(undefined, 'Internal Server Error')).toBe(false);
     expect(isContextOverflowError(401, 'Unauthorized')).toBe(false);
+  });
+});
+
+describe('evaluateUsageTrigger — trigger theo usage thật từ upstream', () => {
+  const base = (overrides: Record<string, unknown> = {}) => ({
+    promptTokens: 20_000,
+    completionTokens: 500,
+    finishReason: 'stop',
+    windowTokens: 32_000,
+    ...overrides,
+  });
+
+  it('dưới ngưỡng → skip', () => {
+    expect(evaluateUsageTrigger(base({ promptTokens: 10_000 })).kind).toBe('skip');
+  });
+
+  it('threshold: promptTokens > window − reserve → trigger', () => {
+    // 32k − 6k = 26k; 27k > 26k
+    const d = evaluateUsageTrigger(base({ promptTokens: 27_000 }));
+    expect(d.kind).toBe('threshold');
+  });
+
+  it('silent overflow: stop + promptTokens > window → trigger', () => {
+    // promptTokens 35k > window 32k nhưng finishReason vẫn 'stop'
+    const d = evaluateUsageTrigger(base({ promptTokens: 35_000, finishReason: 'stop' }));
+    expect(d.kind).toBe('silent_overflow');
+  });
+
+  it('length-stop zero-output: input ≥ 99% window → trigger', () => {
+    const d = evaluateUsageTrigger(base({
+      promptTokens: 31_800, // ≥ 32k * 0.99 = 31_680
+      completionTokens: 0,
+      finishReason: 'length',
+    }));
+    expect(d.kind).toBe('length_stop_zero_output');
+  });
+
+  it('length-stop có output + dưới ngưỡng threshold → skip', () => {
+    // promptTokens 25k < threshold 26k; length + output → không phải overflow
+    const d = evaluateUsageTrigger(base({
+      promptTokens: 25_000,
+      completionTokens: 100,
+      finishReason: 'length',
+    }));
+    expect(d.kind).toBe('skip');
+  });
+
+  it('length-stop dưới 99% window + dưới ngưỡng threshold → skip', () => {
+    const d = evaluateUsageTrigger(base({
+      promptTokens: 20_000, // < 31_680 và < 26_000
+      completionTokens: 0,
+      finishReason: 'length',
+    }));
+    expect(d.kind).toBe('skip');
+  });
+
+  it('window = 0 hoặc undefined → skip (gate an toàn)', () => {
+    expect(evaluateUsageTrigger(base({ windowTokens: 0 })).kind).toBe('skip');
+    expect(evaluateUsageTrigger(base({ windowTokens: undefined })).kind).toBe('skip');
+    expect(evaluateUsageTrigger(base({ windowTokens: null })).kind).toBe('skip');
+  });
+
+  it('promptTokens = 0 → skip (usage không tin cậy)', () => {
+    expect(evaluateUsageTrigger(base({ promptTokens: 0 })).kind).toBe('skip');
+  });
+
+  it('reserve tuỳ chỉnh', () => {
+    // window 32k, reserve 2k → ngưỡng 30k; 29k < 30k → skip
+    expect(evaluateUsageTrigger(base({ promptTokens: 29_000, reserveTokens: 2_000 })).kind).toBe('skip');
+    // 31k > 30k → threshold
+    expect(evaluateUsageTrigger(base({ promptTokens: 31_000, reserveTokens: 2_000 })).kind).toBe('threshold');
   });
 });

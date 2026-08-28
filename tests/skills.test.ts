@@ -47,6 +47,22 @@ describe('matchActiveSkills — matcher fold dấu tiếng Việt', () => {
     const r = matchActiveSkills(many, 'phân tích báo cáo tài chính cho mọi chủ đề');
     expect(r.length).toBeLessThanOrEqual(SKILL_LIMITS.maxPerTurn);
   });
+
+  /* Ngưỡng cũ `score > 0` khiến MỘT từ khóa trùng là đủ kích hoạt, đốt tới
+     4.000 ký tự body vô ích. Nay cần 2 tín hiệu độc lập (hoặc khớp tên). */
+  it('một từ khóa lẻ KHÔNG đủ kích hoạt (chống dương tính giả)', () => {
+    // "code" chỉ khớp đúng 1 keyword của s2, không khớp tên nguyên cụm.
+    expect(matchActiveSkills(SKILLS, 'cho tôi xin cái code giảm giá shopee')).toEqual([]);
+  });
+
+  it('hai tín hiệu độc lập thì vẫn kích hoạt bình thường', () => {
+    const r = matchActiveSkills(SKILLS, 'giải thích thuật toán trong đoạn code này');
+    expect(r[0]?.id).toBe('s2');
+  });
+
+  it('khớp nguyên tên skill vẫn thắng ngay (được +2 điểm)', () => {
+    expect(matchActiveSkills(SKILLS, 'dùng kỹ năng Giải thích code')[0]?.id).toBe('s2');
+  });
 });
 
 describe('formatSkillsBlock — khối system phía server', () => {

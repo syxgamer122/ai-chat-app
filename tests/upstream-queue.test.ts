@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { acquireUpstreamSlot, sharedFreeBudget } from '@/lib/upstream-queue';
 
 const CRAX = 'https://gpt.crax.lol/v1';
-const KILGORE = 'https://kilgoreai.freesrv.com/v1';
+const KILGORE = 'https://kilgoreai.xyz/v1';
 
 function fakeClock(start = 1_000_000) {
   let t = start;

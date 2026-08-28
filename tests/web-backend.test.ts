@@ -1,5 +1,11 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { WebOpError, capHits, fetchReadablePage, searchWeb } from '@/lib/web-backend';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  WebOpError,
+  capHits,
+  fetchReadablePage,
+  searchWeb,
+  __clearSearchCache,
+} from '@/lib/web-backend';
 
 const DDG_LITE_HTML =
   '<table><tr><td><a class="result-link" href="https://example.com/a">Kết quả A</a></td>' +
@@ -13,25 +19,56 @@ function htmlRes(body: string, status = 200): Response {
   });
 }
 
-afterEach(() => vi.unstubAllGlobals());
+/* Cache search sống giữa các ca test — không dọn thì ca sau nhận kết quả của
+   ca trước và mọi assertion về engine trở nên vô nghĩa. */
+beforeEach(() => __clearSearchCache());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  __clearSearchCache();
+});
 
 describe('searchWeb', () => {
-  it('engine lite sống → trả hits từ lite', async () => {
+  /* Thứ tự engine ĐÃ ĐỔI: html chạy trước lite. Dạng URL `html?q=…&kp=1`
+     (port từ Firecrawl) đo được 200 + kết quả, trong khi dạng cũ nhận 202. */
+  it('engine html sống → trả hits từ html', async () => {
     const spy = vi.fn(async (_url: string) => htmlRes(DDG_LITE_HTML));
     vi.stubGlobal('fetch', spy);
     const r = await searchWeb('test');
-    expect(r.engine).toBe('ddg-lite');
+    expect(r.engine).toBe('ddg-html');
     expect(r.hits[0].title).toBe('Kết quả A');
-    expect(spy.mock.calls[0][0]).toContain('lite.duckduckgo.com');
+    expect(spy.mock.calls[0][0]).toContain('html.duckduckgo.com');
   });
 
-  it('lite rỗng (bot-challenge) → rơi sang html endpoint', async () => {
+  it('html rỗng → rơi sang lite endpoint', async () => {
     const spy = vi.fn(async (url: string) =>
-      String(url).includes('lite.') ? htmlRes(DDG_HTML_EMPTY) : htmlRes(DDG_LITE_HTML),
+      String(url).includes('html.') ? htmlRes(DDG_HTML_EMPTY) : htmlRes(DDG_LITE_HTML),
     );
     vi.stubGlobal('fetch', spy);
     const r = await searchWeb('test');
-    expect(r.engine).toBe('ddg-html');
+    expect(r.engine).toBe('ddg-lite');
+  });
+
+  it('HTTP 202 = bị chặn, KHÔNG phải "không có kết quả"', async () => {
+    // Đây là phản hồi thật của DDG khi IP bị gắn cờ: 202 + trang rỗng.
+    vi.stubGlobal('fetch', vi.fn(async () => htmlRes('<html></html>', 202)));
+    await expect(searchWeb('x')).rejects.toMatchObject({ code: 'SEARCH_UNAVAILABLE' });
+  });
+
+  it('trang anomaly-modal của DDG được nhận là bị chặn', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => htmlRes('<div class="anomaly-modal__modal">bot?</div>')),
+    );
+    await expect(searchWeb('x')).rejects.toMatchObject({ code: 'SEARCH_UNAVAILABLE' });
+  });
+
+  it('kết quả được cache — truy vấn lặp không gọi lại engine', async () => {
+    const spy = vi.fn(async (_url: string) => htmlRes(DDG_LITE_HTML));
+    vi.stubGlobal('fetch', spy);
+    await searchWeb('lặp lại');
+    const callsAfterFirst = spy.mock.calls.length;
+    await searchWeb('lặp lại');
+    expect(spy.mock.calls.length).toBe(callsAfterFirst);
   });
 
   it('cả hai hỏng → WebOpError SEARCH_UNAVAILABLE', async () => {

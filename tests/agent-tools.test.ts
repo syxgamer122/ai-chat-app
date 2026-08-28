@@ -1,4 +1,6 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { __clearSearchCache } from '@/lib/web-backend';
+import { __clearAllToolCallBudgets } from '@/lib/tool-call-budget';
 import {
   buildAgentTools,
   MAX_TOOL_CALLS_PER_TURN,
@@ -22,7 +24,17 @@ const SEARCH_FIXTURE =
   '<a class="result-link" href="https://example.com/a">Tiêu đề</a>' +
   '<td class="result-snippet">snippet</td>';
 
-afterEach(() => vi.unstubAllGlobals());
+/* searchWeb có cache TTL dùng chung: không dọn thì ca sau nhận kết quả đã
+   cache của ca trước (cùng query 'q') và fetch stub không hề được gọi. */
+beforeEach(() => {
+  __clearSearchCache();
+  __clearAllToolCallBudgets();
+});
+afterEach(() => {
+  vi.unstubAllGlobals();
+  __clearSearchCache();
+  __clearAllToolCallBudgets();
+});
 
 describe('agent tools', () => {
   it('web_search trả kết quả đã cap', async () => {
