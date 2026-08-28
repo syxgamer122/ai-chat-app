@@ -1,21 +1,35 @@
 /**
  * Hàng đợi + cửa sổ trượt cho các gateway miễn phí dùng chung (crax, Kilgore).
  * Mọi request của toàn bộ user đều ra từ IP server, nên giới hạn "mỗi IP" của
- * gateway là бюджет CHUNG — module này giữ tổng lưu lượng trong ngưỡng công bố.
+ * gateway là ngân sách CHUNG — module này giữ tổng lưu lượng trong ngưỡng công bố.
  * Thuần module (không Dexie) để edge route import được. State theo isolate —
  * same caveat với rate-limit in-memory hiện có.
  */
 
 interface Budget {
-  /** tối đa trong 10s (crax: 5 — để 4 cho dư địa) */
+  /** tối đa trong 10s (crax công bố 5 — để 4 cho dư địa) */
   per10: number;
-  /** tối đa trong 60s (crax: 20 — để 18) */
+  /** tối đa trong 60s (crax công bố 20 — để 18) */
   per60: number;
 }
 
+/**
+ * crax công bố "20 requests / 60s, 5 / 10s burst, per-IP". Tài khoản có liên
+ * kết Discord được 60/min + 15 burst, nhưng app KHÔNG biết tài khoản của user
+ * thuộc hạng nào — giữ ngưỡng bảo thủ theo mức nền để không bị 429 hàng loạt.
+ *
+ * Lưu ý: từ khi crax bắt buộc API key, giới hạn có thể tính theo tài khoản chứ
+ * không còn thuần theo IP; ngân sách dùng chung ở đây vẫn đúng hướng vì mọi
+ * request của một deployment đều đi ra từ cùng IP server.
+ *
+ * Kilgore (kilgoreai.xyz): docs chỉ nói "fair use per-user", không nêu con số
+ * cụ thể. Giữ ngưỡng rất thấp (1/10s, 5/60s) như bản cũ trên freesrv.com để
+ * không phá quota chung; khi người dùng có Bearer key riêng thì giới hạn sẽ
+ * tính theo tài khoản họ thay vì IP server.
+ */
 const FREE_HOST_BUDGETS: Record<string, Budget> = {
   'gpt.crax.lol': { per10: 4, per60: 18 },
-  'kilgoreai.freesrv.com': { per10: 1, per60: 5 },
+  'kilgoreai.xyz': { per10: 1, per60: 5 },
 };
 
 function hostOfUrl(url: string): string | null {

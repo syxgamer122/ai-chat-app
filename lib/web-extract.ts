@@ -37,6 +37,41 @@ const ENTITIES: Record<string, string> = {
   middot: '\u00b7',
   laquo: '\u00ab',
   raquo: '\u00bb',
+  /* Nguyên âm Latin có dấu: Yahoo mã hoá tên tiếng Việt kiểu `H&agrave; Nội`
+     (một phần entity, một phần UTF-8 thô). Thiếu nhóm này thì tiêu đề và mô
+     tả tiếng Việt hiện ra lẫn mã entity. */
+  agrave: '\u00e0',
+  aacute: '\u00e1',
+  acirc: '\u00e2',
+  atilde: '\u00e3',
+  egrave: '\u00e8',
+  eacute: '\u00e9',
+  ecirc: '\u00ea',
+  igrave: '\u00ec',
+  iacute: '\u00ed',
+  ograve: '\u00f2',
+  oacute: '\u00f3',
+  ocirc: '\u00f4',
+  otilde: '\u00f5',
+  ugrave: '\u00f9',
+  uacute: '\u00fa',
+  yacute: '\u00fd',
+  Agrave: '\u00c0',
+  Aacute: '\u00c1',
+  Acirc: '\u00c2',
+  Atilde: '\u00c3',
+  Egrave: '\u00c8',
+  Eacute: '\u00c9',
+  Ecirc: '\u00ca',
+  Igrave: '\u00cc',
+  Iacute: '\u00cd',
+  Ograve: '\u00d2',
+  Oacute: '\u00d3',
+  Ocirc: '\u00d4',
+  Otilde: '\u00d5',
+  Ugrave: '\u00d9',
+  Uacute: '\u00da',
+  Yacute: '\u00dd',
 };
 
 export function decodeHtmlEntities(input: string): string {
@@ -50,7 +85,9 @@ export function decodeHtmlEntities(input: string): string {
       const code = parseInt(body.slice(1), 10);
       return Number.isFinite(code) ? String.fromCodePoint(code) : whole;
     }
-    return ENTITIES[body.toLowerCase()] ?? whole;
+    /* Tra ĐÚNG CHỮ trước: `&Agrave;` (À) và `&agrave;` (à) là hai ký tự khác
+       nhau — lowercase vô điều kiện sẽ biến chữ hoa thành chữ thường. */
+    return ENTITIES[body] ?? ENTITIES[body.toLowerCase()] ?? whole;
   });
 }
 
@@ -185,11 +222,24 @@ function isDdgSelfUrl(url: string): boolean {
   return /^https?:\/\/([a-z0-9-]+\.)*duckduckgo\.com(\/|$)/i.test(url);
 }
 
+/**
+ * Link nội bộ của chính công cụ tìm kiếm (điều hướng, mail, trang chủ) —
+ * không phải kết quả. Sau khi unwrap redirect, mọi URL còn trỏ về host của
+ * engine đều là hạ tầng của engine đó.
+ */
+function isEngineSelfUrl(url: string): boolean {
+  return (
+    isDdgSelfUrl(url) ||
+    /^https?:\/\/([a-z0-9-]+\.)*yahoo\.com(\/|$)/i.test(url) ||
+    /^https?:\/\/([a-z0-9-]+\.)*yimg\.com(\/|$)/i.test(url)
+  );
+}
+
 function dedupe(hits: WebSearchHit[]): WebSearchHit[] {
   const seen = new Set<string>();
   const out: WebSearchHit[] = [];
   for (const hit of hits) {
-    if (!hit.title || !/^https?:\/\//i.test(hit.url) || isDdgSelfUrl(hit.url)) continue;
+    if (!hit.title || !/^https?:\/\//i.test(hit.url) || isEngineSelfUrl(hit.url)) continue;
     const key = hit.url.replace(/[?#].*$/, '').toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
@@ -230,4 +280,63 @@ export function parseDdgHtml(html: string): WebSearchHit[] {
       snippet: capText(snippets[i] ?? '', 500),
     }));
   return dedupe(hits);
+}
+
+/**
+ * Gỡ lớp bọc redirect của Yahoo:
+ *   https://r.search.yahoo.com/_ylt=…/RU=<url-encoded>/RK=2/RS=…
+ * Trả nguyên văn khi không phải dạng bọc.
+ */
+export function unwrapYahooRedirect(href: string): string {
+  const m = /\/RU=([^/]+)\/R[KS]=/.exec(href ?? '');
+  if (!m) return href ?? '';
+  try {
+    const decoded = decodeURIComponent(m[1]);
+    return /^https?:\/\//i.test(decoded) ? decoded : href;
+  } catch {
+    return href;
+  }
+}
+
+/**
+ * search.yahoo.com/search?p= — engine dự phòng KHÔNG cần API key.
+ *
+ * Vì sao cần: khi IP bị DuckDuckGo gắn cờ, mọi endpoint DDG trả 202 rỗng.
+ * Đo thực tế cho thấy Yahoo vẫn phục vụ bình thường (kể cả truy vấn tiếng
+ * Việt) trong cùng thời điểm đó. Mojeek/Startpage/Brave đều trả trang chặn
+ * nên không đưa vào — chỉ giữ engine đã kiểm chứng chạy được.
+ *
+ * Kết quả nằm trong `<ol class="reg searchCenterMiddle">`; cắt theo mốc này
+ * để loại thanh điều hướng và khối quảng cáo hai bên.
+ */
+export function parseYahoo(html: string): WebSearchHit[] {
+  const start = html.indexOf('searchCenterMiddle');
+  const region = start >= 0 ? html.slice(start) : html;
+  const end = region.indexOf('searchRightTop');
+  const body = end > 0 ? region.slice(0, end) : region;
+
+  const hits: WebSearchHit[] = [];
+  // Mỗi kết quả: một anchor bọc redirect, theo sau là đoạn mô tả.
+  const anchorRe = /<a\b[^>]*href="(https?:\/\/r\.search\.yahoo\.com\/[^"]+)"[^>]*>([\s\S]{0,600}?)<\/a>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = anchorRe.exec(body)) !== null) {
+    const url = unwrapYahooRedirect(m[1]);
+    const title = collapseWs(decodeHtmlEntities(m[2].replace(/<[^>]+>/g, ' ')));
+    if (!title) continue;
+    hits.push({ title: capText(title, 200), url, snippet: '' });
+  }
+
+  /* Snippet nằm trong `<p>` LỒNG bên trong `div.compText` — quét theo class
+     đơn thuần không lấy được vì thẻ đóng khớp sai cấp. Bắt trực tiếp cặp
+     compText → p. */
+  const snippets: string[] = [];
+  const snipRe = /class="compText[^"]*"[^>]*>\s*<p\b[^>]*>([\s\S]{0,1200}?)<\/p>/gi;
+  let s: RegExpExecArray | null;
+  while ((s = snipRe.exec(body)) !== null) {
+    snippets.push(collapseWs(decodeHtmlEntities(s[1].replace(/<[^>]+>/g, ' '))));
+  }
+
+  return dedupe(
+    hits.map((h, i) => ({ ...h, snippet: capText(snippets[i] ?? '', 500) })),
+  );
 }

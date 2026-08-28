@@ -151,10 +151,23 @@ export async function POST(req: Request) {
         });
       } catch (e) {
         console.warn(`[web:${requestId}] search hết.engine: ${e instanceof Error ? e.message : e}`);
+        /* Nói rõ CÁCH KHẮC PHỤC thay vì "không tra cứu được": nguyên nhân phổ
+           biến nhất hiện nay là DuckDuckGo chặn scrape (403), và người vận
+           hành phải cấu hình một engine có API key mới dùng ổn định được. */
+        const hasEngineKey = Boolean(
+          (process.env.TINYFISH_API_KEY ?? '').trim() ||
+            (process.env.BRAVE_SEARCH_KEY ?? '').trim() ||
+            (process.env.TAVILY_API_KEY ?? '').trim() ||
+            (process.env.SEARXNG_URL ?? '').trim(),
+        );
         return Response.json(
           {
             results: [],
-            error: 'Không tra cứu được công cụ tìm kiếm lúc này.',
+            error: hasEngineKey
+              ? 'Công cụ tìm kiếm đang lỗi hoặc không có kết quả cho truy vấn này.'
+              : 'Chưa cấu hình công cụ tìm kiếm. Các engine miễn phí đã chặn truy cập tự động — ' +
+                'người vận hành cần đặt TINYFISH_API_KEY (miễn phí), BRAVE_SEARCH_KEY, ' +
+                'TAVILY_API_KEY hoặc SEARXNG_URL.',
             code: 'SEARCH_UNAVAILABLE',
             requestId,
           },
