@@ -7,8 +7,9 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { ArrowDown, ArrowUp } from 'lucide-react';
 import { ChatErrorBoundary } from '@/components/chat-error-boundary';
 import { KodaLogo } from '@/components/koda-logo';
-import { TextShimmer, TypingIndicator } from '@/components/effects';
+import { TextShimmer } from '@/components/effects';
 import { MessageItem, AssistantAvatar, type BranchInfo } from './message-item';
+import { motion } from 'framer-motion';
 
 /* ------------------------------------------------------------------ */
 /* Subcomponent 2: Memoized MessageList with Virtualization           */
@@ -65,14 +66,27 @@ function ThinkingIndicator() {
   }, []);
 
   return (
-    <div className="mx-auto flex max-w-thread items-start gap-3 px-2 pb-6 md:px-4">
+    <div className="mx-auto flex max-w-thread items-start gap-3 px-4 py-3 md:px-4">
       <AssistantAvatar />
-      <div className="flex items-center gap-2.5 py-1.5" role="status" aria-live="polite">
-        <TypingIndicator />
-        <TextShimmer
-          text={`Đang suy nghĩ${elapsedSec >= 3 ? `… ${elapsedSec}s` : '…'}`}
-          className="text-[13px] tabular-nums text-zinc-500"
-        />
+      <div className="flex items-center gap-3" role="status" aria-live="polite">
+        <div className="grid grid-cols-3 gap-[3px]" aria-hidden="true">
+          {[0, 1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
+            <motion.div
+              key={i}
+              className="h-1.5 w-1.5 rounded-[1px] bg-brand dark:bg-aurora-from"
+              animate={{ opacity: [0.2, 1, 0.2] }}
+              transition={{
+                duration: 1.2,
+                repeat: Infinity,
+                delay: i * 0.08,
+                ease: 'easeInOut',
+              }}
+            />
+          ))}
+        </div>
+        <span className="text-[13px] tabular-nums text-zinc-500 dark:text-zinc-400">
+          <TextShimmer text={`Đang suy nghĩ${elapsedSec >= 2 ? ` · ${elapsedSec}s` : '…'}`} className="" />
+        </span>
         <span className="sr-only">AI đang xử lý câu trả lời của bạn</span>
       </div>
     </div>

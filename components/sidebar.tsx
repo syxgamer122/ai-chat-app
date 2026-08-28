@@ -92,35 +92,35 @@ const ChatItem = memo(function ChatItem({
           ref={menuRef}
           role="menu"
           style={{ position: 'fixed', top: menuRect.top, right: menuRect.right }}
-          className="surface-panel z-[100] w-48 animate-pop-in p-1"
+          className="z-[100] w-48 animate-pop-in rounded-lg border border-zinc-200 bg-white p-1 shadow-lg dark:border-zinc-800 dark:bg-zinc-950"
         >
           <button
             type="button" role="menuitem"
             onClick={() => { onTogglePin(chat.id, (chat.pinned ?? 0) as 0 | 1); closeMenu(); }}
-            className="menu-item"
+            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[12px] text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-900 dark:hover:text-zinc-100"
           >
-            <Pin size={13} className="text-zinc-500" />
+            <Pin size={13} className="text-zinc-400" />
             {chat.pinned ? 'Bỏ ghim' : 'Ghim lên đầu'}
           </button>
           <button
             type="button" role="menuitem"
             onClick={() => { onExport(chat.id, 'json'); closeMenu(); }}
-            className="menu-item"
+            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[12px] text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-900 dark:hover:text-zinc-100"
           >
-            <FileJson size={13} className="text-zinc-500" /> Xuất JSON
+            <FileJson size={13} className="text-zinc-400" /> Xuất JSON
           </button>
           <button
             type="button" role="menuitem"
             onClick={() => { onExport(chat.id, 'md'); closeMenu(); }}
-            className="menu-item"
+            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[12px] text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-900 dark:hover:text-zinc-100"
           >
-            <FileText size={13} className="text-zinc-500" /> Xuất Markdown
+            <FileText size={13} className="text-zinc-400" /> Xuất Markdown
           </button>
-          <div className="my-1 h-px bg-zinc-200" />
+          <div className="my-1 h-px bg-zinc-100 dark:bg-zinc-900" />
           <button
             type="button" role="menuitem"
             onClick={() => { onDelete(chat.id); closeMenu(); }}
-            className="menu-item menu-item-danger"
+            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[12px] text-red-600 transition-colors hover:bg-red-50 hover:text-red-700 dark:text-red-400 dark:hover:bg-red-500/10 dark:hover:text-red-300"
           >
             <Trash2 size={13} /> Xóa cuộc trò chuyện
           </button>
@@ -131,55 +131,55 @@ const ChatItem = memo(function ChatItem({
 
   return (
     <div
-      className={`group relative flex w-full flex-col rounded-lg text-left ${
+      className={`group relative flex w-full flex-col rounded-lg text-left transition-all duration-100 ease-out ${
         isActive
-          ? 'bg-zinc-200/80 before:absolute before:left-0 before:top-1/2 before:h-5 before:w-[3px] before:-translate-y-1/2 before:rounded-full before:bg-brand'
-          : 'hover:bg-zinc-200/40'
+          ? 'bg-white/10 shadow-[0_0_8px_rgba(16,185,129,0.08)]'
+          : 'hover:bg-white/5'
       }`}
     >
-      <div className="flex w-full items-center justify-between gap-1 pr-1">
+      <div className="flex w-full items-center justify-between gap-1 px-2 py-1.5">
         <button
           type="button"
           onClick={() => onSelect(chat.id)}
           aria-current={isActive ? 'true' : undefined}
-          className={`flex min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2.5 py-2 text-left outline-none focus-visible:ring-1 focus-visible:ring-brand ${
-            isActive ? 'text-zinc-800' : 'text-zinc-600 group-hover:text-zinc-800'
-          }`}
+          className="flex min-w-0 flex-1 items-center gap-2 text-left outline-none"
         >
           <MessageSquare
             size={14}
-            className={`flex-shrink-0 ${isActive ? 'text-brand' : 'text-zinc-400'}`}
+            className={`flex-shrink-0 ${isActive ? 'text-emerald-400' : 'text-slate-500'}`}
           />
-          <span className="truncate text-[13px] font-medium">
+          <span className={`truncate text-[13px] ${isActive ? 'font-medium text-slate-100' : 'text-slate-400'}`}>
             {titleSegments ? <Highlight segments={titleSegments} /> : chat.title}
           </span>
-          {chat.pinned ? <Pin size={11} className="flex-shrink-0 rotate-45 text-zinc-500" /> : null}
         </button>
 
-        <button
-          ref={triggerRef}
-          type="button"
-          aria-label="Tùy chọn cuộc trò chuyện"
-          aria-haspopup="menu"
-          aria-expanded={menuOpen}
-          onClick={() => (menuOpen ? closeMenu() : openMenu())}
-          className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-zinc-300/60 hover:text-zinc-800 ${
-            menuOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100'
-          }`}
-        >
-          <MoreHorizontal size={14} />
-        </button>
+        <div className="flex items-center gap-0.5">
+          {chat.pinned && <Pin size={10} className="rotate-45 text-zinc-400" />}
+          <button
+            ref={triggerRef}
+            type="button"
+            aria-label="Tùy chọn cuộc trò chuyện"
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            onClick={() => (menuOpen ? closeMenu() : openMenu())}
+            className={`flex h-6 w-6 flex-shrink-0 items-center justify-center rounded text-zinc-400 transition-all hover:bg-zinc-200 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200 ${
+              menuOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100'
+            }`}
+          >
+            <MoreHorizontal size={14} />
+          </button>
+        </div>
       </div>
 
       {snippets?.length ? (
-        <div className="px-2.5 pb-2 pl-[30px]">
+        <div className="px-2 pb-1.5 pl-8">
           {snippets.slice(0, 2).map((seg, i) => (
-            <p key={i} className="truncate text-[11px] leading-relaxed text-zinc-500">
+            <p key={i} className="truncate text-[11px] leading-relaxed text-zinc-500 dark:text-zinc-500">
               <Highlight segments={seg} />
             </p>
           ))}
           {extraHits ? (
-            <p className="text-[11px] text-zinc-500">+{extraHits} kết quả khác</p>
+            <p className="text-[11px] text-zinc-400">+{extraHits} kết quả khác</p>
           ) : null}
         </div>
       ) : null}
@@ -204,7 +204,6 @@ export function Sidebar() {
   const theme = useAppStore((s) => s.theme);
   const setTheme = useAppStore((s) => s.setTheme);
 
-  /** light -> dark -> system -> light. */
   const cycleTheme = useCallback(() => {
     const next = theme === 'light' ? 'dark' : theme === 'dark' ? 'system' : 'light';
     setTheme(next);
@@ -215,15 +214,8 @@ export function Sidebar() {
   const themeLabel =
     theme === 'light' ? 'Sáng' : theme === 'dark' ? 'Tối' : 'Hệ thống';
 
-  /*
-   * Từ `md` trở lên sidebar là một cột tĩnh, luôn hiển thị. Trạng thái
-   * `isSidebarOpen` chỉ điều khiển drawer trên mobile — nếu không phân biệt
-   * hai chế độ thì desktop bị gắn `aria-hidden` sai (screen reader mất luôn
-   * danh sách chat) và drawer đóng vẫn Tab vào được.
-   */
   const isDesktop = useMediaQuery(MD_QUERY);
   const isDrawerHidden = !isDesktop && !isSidebarOpen;
-  /** Rail thu gọn chỉ áp dụng trên desktop — mobile luôn là drawer đầy đủ. */
   const collapsed = isDesktop && isSidebarCollapsed;
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -272,7 +264,6 @@ export function Sidebar() {
     }
   }, []);
 
-  /** Đang chạy — chặn double-click tạo 2 chat rỗng song song. */
   const newChatBusyRef = useRef(false);
 
   const handleNewChat = useCallback(async () => {
@@ -303,8 +294,6 @@ export function Sidebar() {
   const handleDelete = useCallback(async (id: string) => {
     if (!window.confirm('Bạn có chắc muốn xóa cuộc trò chuyện này?')) return;
     await deleteChatCascade(id);
-    /* B5: báo các tab khác — tab đang mở chat này phải stop + thoát,
-       không thì persist tiếp tục ghi message vào chat đã mất (mồ côi). */
     chatBroadcast.publish({
       type: 'chat-deleted',
       sessionId: id,
@@ -325,7 +314,6 @@ export function Sidebar() {
     [chats, showingSearch],
   );
 
-  /* Drawer mobile: Escape để đóng — tương đương bấm ra ngoài. */
   useEffect(() => {
     if (!isSidebarOpen || isDesktop) return;
     const onEsc = (e: KeyboardEvent) => {
@@ -339,12 +327,11 @@ export function Sidebar() {
 
   return (
     <>
-      {/* Lớp phủ mobile: bấm ra ngoài để đóng drawer (trước đây không có). */}
       {isSidebarOpen && !isDesktop && (
         <div
           role="presentation"
           onClick={() => setSidebarOpen(false)}
-          className="fixed inset-0 z-30 bg-zinc-900/30 backdrop-blur-[2px] animate-fade-in md:hidden dark:bg-black/50"
+          className="fixed inset-0 z-30 bg-black/20 backdrop-blur-sm animate-fade-in md:hidden dark:bg-black/40"
         />
       )}
 
@@ -352,186 +339,182 @@ export function Sidebar() {
         <aside
           aria-label="Danh sách cuộc trò chuyện"
           aria-hidden={isDrawerHidden ? true : undefined}
-          // Drawer đóng vẫn nằm trong DOM: chặn tab/chuột để không focus "ẩn".
           inert={isDrawerHidden ? true : undefined}
-          className={`fixed inset-y-0 left-0 z-40 flex w-[17rem] max-w-[85vw] flex-col border-r border-zinc-200/80 bg-surface-raised pt-safe transition-transform duration-200 ease-out md:static md:w-64 md:max-w-none md:translate-x-0 ${
-            isSidebarOpen ? 'translate-x-0 shadow-panel md:shadow-none' : '-translate-x-full'
+          className={`fixed inset-y-0 left-0 z-40 flex w-[17rem] max-w-[85vw] flex-col border-r border-white/10 bg-slate-900/40 backdrop-blur-xl pt-safe transition-transform duration-200 ease-out md:static md:w-64 md:max-w-none md:translate-x-0 ${
+            isSidebarOpen ? 'translate-x-0 shadow-2xl md:shadow-none' : '-translate-x-full'
           }`}
         >
-        {/* Brand */}
-        <div className="flex items-center justify-between px-4 pb-1 pt-4">
-          <KodaLogo size="sm" />
-          <div className="flex items-center gap-1">
-            <button
-              type="button"
-              aria-label="Thu gọn thanh bên"
-              title="Thu gọn (Ctrl+\\)"
-              onClick={() => setSidebarCollapsed(true)}
-              className="icon-btn-sm hidden md:inline-flex"
-            >
-              <PanelLeftClose size={15} />
-            </button>
-            <button
-              type="button"
-              aria-label="Đóng thanh bên"
-              onClick={() => setSidebarOpen(false)}
-              className="icon-btn-sm md:hidden"
-            >
-              <X size={16} />
-            </button>
-          </div>
-        </div>
-
-        <div className="p-3 pt-2">
-          <button
-            type="button"
-            onClick={handleNewChat}
-            className="flex w-full items-center justify-center gap-2 rounded-xl bg-brand px-3 py-2 text-[13px] font-semibold text-white shadow-brand transition hover:bg-brand-hover active:scale-[0.98]"
-          >
-            <Plus size={15} />
-            <span>Đoạn chat mới</span>
-          </button>
-        </div>
-
-        <BackupReminder chatCount={chats.length} />
-
-        <div className="px-3 pb-2">
-          <div className="relative flex items-center">
-            <Search size={14} aria-hidden="true" className="pointer-events-none absolute left-2.5 text-zinc-400" />
-            <input
-              type="search"
-              aria-label="Tìm trong các cuộc trò chuyện"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Tìm kiếm..."
-              className="w-full rounded-lg border border-zinc-200/80 bg-surface-raised py-1.5 pl-8 pr-8 text-[13px] text-zinc-700 outline-none transition placeholder:text-zinc-400 focus:border-brand/50 focus:ring-2 focus:ring-brand/15"
-            />
-            {isSearching ? (
-              <Loader2 size={13} aria-hidden="true" className="absolute right-2.5 animate-spin text-zinc-400" />
-            ) : searchQuery ? (
+          <div className="flex items-center justify-between px-3 pb-2 pt-3">
+            <KodaLogo size="sm" />
+            <div className="flex items-center gap-0.5">
               <button
                 type="button"
-                aria-label="Xóa từ khóa"
-                onClick={() => setSearchQuery('')}
-                className="absolute right-2 flex h-5 w-5 items-center justify-center rounded text-zinc-500 transition-colors hover:bg-zinc-200 hover:text-zinc-800"
+                aria-label="Thu gọn thanh bên"
+                title="Thu gọn (Ctrl+\\)"
+                onClick={() => setSidebarCollapsed(true)}
+                className="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-white/10 hover:text-slate-200 hidden md:inline-flex"
               >
-                <X size={13} />
+                <PanelLeftClose size={15} />
               </button>
-            ) : null}
-          </div>
-        </div>
-
-        <div className="no-scrollbar flex-1 overflow-y-auto px-2 py-1">
-          {showingSearch ? (
-            <div aria-busy={isSearching} className="flex flex-col gap-1">
-              {visibleResults === null ? (
-                <div className="py-8 text-center text-[13px] text-zinc-500">
-                  <Loader2 size={16} className="mx-auto animate-spin" />
-                  <span className="sr-only">Đang tìm kiếm…</span>
-                </div>
-              ) : visibleResults.length === 0 ? (
-                <div className="py-8 text-center text-[13px] text-zinc-500">
-                  {searchError ? 'Tìm kiếm gặp lỗi' : 'Không tìm thấy kết quả'}
-                </div>
-              ) : (
-                visibleResults.map((res) => (
-                  <ChatItem
-                    key={res.chat.id}
-                    chat={res.chat}
-                    isActive={res.chat.id === currentChatId}
-                    titleSegments={res.titleSegments}
-                    snippets={res.snippets}
-                    extraHits={res.extraHits}
-                    onSelect={handleSelect}
-                    onTogglePin={handleTogglePin}
-                    onDelete={handleDelete}
-                    onExport={handleExport}
-                  />
-                ))
-              )}
+              <button
+                type="button"
+                aria-label="Đóng thanh bên"
+                onClick={() => setSidebarOpen(false)}
+                className="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-white/10 hover:text-slate-200 md:hidden"
+              >
+                <X size={16} />
+              </button>
             </div>
-          ) : (
-            groups.map((g) => (
-              <div key={g.label} className="mb-4 last:mb-0">
-                <div className="px-2 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
-                  {g.label}
-                </div>
-                <div className="flex flex-col gap-0.5">
-                  {g.chats.map((c) => (
+          </div>
+
+          <div className="px-3 pb-2">
+            <button
+              type="button"
+              onClick={handleNewChat}
+              className="flex w-full items-center justify-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-600/20 px-3 py-1.5 text-[13px] font-medium text-emerald-300 shadow-[0_0_12px_rgba(16,185,129,0.15)] backdrop-blur-sm transition-all hover:bg-emerald-600/30 hover:shadow-[0_0_20px_rgba(16,185,129,0.25)] active:scale-[0.98]"
+            >
+              <Plus size={14} />
+              <span>Chat mới</span>
+            </button>
+          </div>
+
+          <BackupReminder chatCount={chats.length} />
+
+          <div className="px-3 pb-2">
+            <div className="relative flex items-center">
+              <Search size={13} aria-hidden="true" className="pointer-events-none absolute left-2.5 text-zinc-400" />
+              <input
+                type="search"
+                aria-label="Tìm trong các cuộc trò chuyện"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Tìm kiếm..."
+                className="w-full rounded-md border border-white/10 bg-white/5 py-1.5 pl-8 pr-7 text-[12px] text-slate-200 outline-none transition-all placeholder:text-slate-500 focus:border-emerald-500/30 focus:bg-white/10 focus:shadow-[0_0_8px_rgba(16,185,129,0.1)]"
+              />
+              {isSearching ? (
+                <Loader2 size={12} aria-hidden="true" className="absolute right-2 animate-spin text-zinc-400" />
+              ) : searchQuery ? (
+                <button
+                  type="button"
+                  aria-label="Xóa từ khóa"
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-1.5 flex h-4 w-4 items-center justify-center rounded text-zinc-400 transition-colors hover:text-zinc-700 dark:hover:text-zinc-200"
+                >
+                  <X size={11} />
+                </button>
+              ) : null}
+            </div>
+          </div>
+
+          <div className="no-scrollbar flex-1 overflow-y-auto px-2 py-0.5">
+            {showingSearch ? (
+              <div aria-busy={isSearching} className="flex flex-col gap-0.5">
+                {visibleResults === null ? (
+                  <div className="py-8 text-center text-[12px] text-zinc-400">
+                    <Loader2 size={14} className="mx-auto animate-spin" />
+                    <span className="sr-only">Đang tìm kiếm…</span>
+                  </div>
+                ) : visibleResults.length === 0 ? (
+                  <div className="py-8 text-center text-[12px] text-zinc-400">
+                    {searchError ? 'Tìm kiếm gặp lỗi' : 'Không tìm thấy kết quả'}
+                  </div>
+                ) : (
+                  visibleResults.map((res) => (
                     <ChatItem
-                      key={c.id}
-                      chat={c}
-                      isActive={c.id === currentChatId}
+                      key={res.chat.id}
+                      chat={res.chat}
+                      isActive={res.chat.id === currentChatId}
+                      titleSegments={res.titleSegments}
+                      snippets={res.snippets}
+                      extraHits={res.extraHits}
                       onSelect={handleSelect}
                       onTogglePin={handleTogglePin}
                       onDelete={handleDelete}
                       onExport={handleExport}
                     />
-                  ))}
-                </div>
+                  ))
+                )}
               </div>
-            ))
-          )}
-        </div>
+            ) : (
+              groups.map((g) => (
+                <div key={g.label} className="mb-3 last:mb-0">
+                  <div className="px-2 pb-1 pt-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
+                    {g.label}
+                  </div>
+                  <div className="flex flex-col gap-0.5">
+                    {g.chats.map((c) => (
+                      <ChatItem
+                        key={c.id}
+                        chat={c}
+                        isActive={c.id === currentChatId}
+                        onSelect={handleSelect}
+                        onTogglePin={handleTogglePin}
+                        onDelete={handleDelete}
+                        onExport={handleExport}
+                      />
+                    ))}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
 
-        <div className="border-t border-zinc-200/80 px-2 pb-safe-2 pt-2">
-          {/* Giao diện: Sáng -> Tối -> Hệ thống (theo OS). */}
-          <button
-            type="button"
-            onClick={cycleTheme}
-            aria-label={`Giao diện: ${themeLabel}`}
-            title={`Giao diện: ${themeLabel} (bấm để đổi)`}
-            className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] text-zinc-600 transition-colors hover:bg-zinc-200/60 hover:text-zinc-800"
-          >
-            <ThemeIcon size={15} />
-            <span>Giao diện: {themeLabel}</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setSettingsOpen(true)}
-            className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] text-zinc-600 transition-colors hover:bg-zinc-200/60 hover:text-zinc-800"
-          >
-            <SettingsIcon size={15} />
-            <span>Cài đặt</span>
-          </button>
-        </div>
-      </aside>
+          <div className="border-t border-white/10 px-2 pb-safe-2 pt-1.5">
+            <button
+              type="button"
+              onClick={cycleTheme}
+              aria-label={`Giao diện: ${themeLabel}`}
+              title={`Giao diện: ${themeLabel} (bấm để đổi)`}
+              className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-[12px] text-slate-400 transition-colors hover:bg-white/5 hover:text-slate-200"
+            >
+              <ThemeIcon size={14} />
+              <span>{themeLabel}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setSettingsOpen(true)}
+              className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-[12px] text-slate-400 transition-colors hover:bg-white/5 hover:text-slate-200"
+            >
+              <SettingsIcon size={14} />
+              <span>Cài đặt</span>
+            </button>
+          </div>
+        </aside>
       )}
 
-      {/* Rail thu gọn (desktop): chỉ còn các hành động icon, ẩn danh sách chat. */}
       {collapsed && (
         <aside
           aria-label="Thanh bên thu gọn"
-          className="fixed inset-y-0 left-0 z-40 hidden w-14 flex-col items-center border-r border-zinc-200/80 bg-surface-raised pt-safe transition-colors duration-200 md:flex"
+          className="fixed inset-y-0 left-0 z-40 hidden w-12 flex-col items-center border-r border-white/10 bg-slate-900/40 backdrop-blur-xl pt-safe transition-colors duration-200 md:flex"
         >
-          <div className="flex flex-col items-center gap-1 py-3">
+          <div className="flex flex-col items-center gap-1 py-2">
             <button
               type="button"
               aria-label="Mở rộng thanh bên"
               title="Mở rộng (Ctrl+\\)"
               onClick={() => setSidebarCollapsed(false)}
-              className="icon-btn-sm"
+              className="flex h-8 w-8 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-white/10 hover:text-slate-200"
             >
               <PanelLeftOpen size={15} />
             </button>
-              <button
-                type="button"
-                aria-label="Đoạn chat mới"
-                title="Đoạn chat mới (Ctrl+Alt+N)"
-                onClick={() => void handleNewChat()}
-                className="icon-btn-sm mt-2"
-              >
+            <button
+              type="button"
+              aria-label="Đoạn chat mới"
+              title="Đoạn chat mới (Ctrl+Alt+N)"
+              onClick={() => void handleNewChat()}
+              className="flex h-8 w-8 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-white/10 hover:text-slate-200"
+            >
               <Plus size={16} />
             </button>
           </div>
           <div className="flex-1" />
-          <div className="flex flex-col items-center gap-1 py-3 pb-safe-2">
+          <div className="flex flex-col items-center gap-1 py-2 pb-safe-2">
             <button
               type="button"
               aria-label={`Giao diện: ${themeLabel}`}
               title={`Giao diện: ${themeLabel} (bấm để đổi)`}
               onClick={cycleTheme}
-              className="icon-btn-sm"
+              className="flex h-8 w-8 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-white/10 hover:text-slate-200"
             >
               <ThemeIcon size={15} />
             </button>
@@ -540,7 +523,7 @@ export function Sidebar() {
               aria-label="Cài đặt"
               title="Cài đặt"
               onClick={() => setSettingsOpen(true)}
-              className="icon-btn-sm"
+              className="flex h-8 w-8 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-white/10 hover:text-slate-200"
             >
               <SettingsIcon size={15} />
             </button>

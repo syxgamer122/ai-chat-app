@@ -6,18 +6,22 @@ import {
   ArrowUp,
   BookmarkPlus,
   CornerDownLeft,
+  FileText,
   Film,
   FolderOpen,
+  FolderX,
   Globe,
   ImagePlus,
   Mic,
   Paperclip,
+  Pencil,
   Square,
   X,
 } from 'lucide-react';
 import { ModelSelector, type ModelOption } from '@/components/model-selector';
 import { ThinkingSlider } from '@/components/thinking-slider';
 import { MorphIcon, SiriWave, TextShimmer, useHaptics } from '@/components/effects';
+import { motion, AnimatePresence } from 'framer-motion';
 import type { ThinkingLevel } from '@/lib/provider-url';
 import { useSpeechRecognition } from '@/lib/use-speech-recognition';
 import { filterPrompts } from '@/lib/prompt-library';
@@ -34,13 +38,9 @@ export interface SlashPrompt {
   content: string;
 }
 
-/** Model sinh media khả dụng của nhà cung cấp hiện tại (cho 2 nút cạnh mic). */
 export interface MediaAction {
-  /** Model id gửi lên gateway cho lượt này. */
   modelId: string;
-  /** Tên model, dùng cho tooltip. */
   label: string;
-  /** true = chạy thẳng từ trình duyệt (không giới hạn thời gian function). */
   direct: boolean;
 }
 
@@ -59,39 +59,102 @@ interface ComposerProps {
   attachments: Attachment[];
   onAddFiles: (files: FileList | File[] | null) => void;
   onRemoveAttachment: (id: string) => void;
-  /** Nhận đoạn text hoàn chỉnh từ voice input — nối vào cuối input hiện tại. */
   onAppendText?: (text: string) => void;
-  /** Thư viện prompt: gõ "/" để mở menu, chọn sẽ thay toàn bộ input. */
   slashPrompts?: SlashPrompt[];
   onApplyPrompt?: (content: string) => void;
-  /** Lưu nhanh prompt mới từ nội dung đang gõ. */
   onSavePrompt?: (title: string, content: string) => void | Promise<void>;
   models: ModelOption[];
   model: string;
   onModelChange: (id: string) => void;
-  /** Mức suy luận — hiển thị khi provider/model hỗ trợ (crax hoặc metadata). */
   thinkingLevel?: ThinkingLevel;
-  /** Mức model hỗ trợ (null = không ràng buộc) — mờ các mức ngoài danh sách. */
   thinkingSupportedLevels?: ThinkingLevel[] | null;
   onThinkingLevelChange?: (level: ThinkingLevel) => void;
-  /** Nút tạo ảnh / tạo video — chỉ hiện khi provider có model tương ứng. */
   mediaActions?: MediaActions;
-  /** Tạo media cho lượt này (model media chỉ định, không đổi model đang chọn). */
   onGenerateMedia?: (action: MediaAction, kind: 'image' | 'video') => void;
-  /** Toggle "Tìm kiếm web" — bật thì lượt gửi kế tiếp kèm kết quả tra cứu. */
   webSearch?: boolean;
   onToggleWebSearch?: () => void;
-  /** Đang tra cứu web phía client trước khi gửi — hiện trạng thái chờ. */
+  agentMode?: 'plan' | 'act';
+  onToggleAgentMode?: () => void;
+  stagedFileCount?: number;
+  onOpenStaging?: () => void;
   webBusy?: boolean;
-  /** Workspace agent coding: trạng thái kết nối thư mục + nút chọn/cấp quyền. */
   workspace?: { connected: boolean; name: string | null };
   onPickWorkspace?: () => void;
+  onDisconnectWorkspace?: () => void;
   canContinue?: boolean;
   onContinue?: () => void;
   maxFileBytes?: number;
 }
 
 const DEFAULT_MAX_FILE_BYTES = 20 * 1024 * 1024;
+
+function ToolbarButton({
+  icon: Icon,
+  active,
+  disabled,
+  onClick,
+  label,
+  badge,
+}: {
+  icon: React.ElementType;
+  active?: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+  label: string;
+  badge?: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={label}
+      title={label}
+      className={`relative flex h-8 w-8 items-center justify-center rounded-lg transition-all duration-150 ${
+        active
+          ? 'bg-emerald-500/20 text-emerald-400 shadow-[inset_0_0_0_1px_rgba(16,185,129,0.3)]'
+          : 'text-slate-400 hover:bg-white/10 hover:text-slate-200'
+      } disabled:cursor-not-allowed disabled:opacity-40`}
+    >
+      <Icon size={16} />
+      {badge && (
+        <span className="absolute -right-0.5 -top-0.5 flex h-3.5 min-w-[14px] items-center justify-center rounded-full bg-brand px-0.5 text-[9px] font-bold text-white">
+          {badge}
+        </span>
+      )}
+    </button>
+  );
+}
+
+function SendButton({
+  isStreaming,
+  canSubmit,
+  onStop,
+}: {
+  isStreaming: boolean;
+  canSubmit: boolean;
+  onStop: () => void;
+}) {
+  return (
+    <button
+      type={isStreaming ? 'button' : 'submit'}
+      onClick={isStreaming ? onStop : undefined}
+      disabled={!isStreaming && !canSubmit}
+      aria-label={isStreaming ? 'Dừng tạo' : 'Gửi tin nhắn'}
+      className={`flex h-8 w-8 items-center justify-center rounded-lg transition-all duration-150 ${
+        isStreaming
+          ? 'bg-slate-700 text-slate-200 hover:bg-slate-600'
+          : canSubmit
+            ? 'bg-emerald-600 text-white shadow-[0_0_12px_rgba(16,185,129,0.3)] hover:bg-emerald-500 active:scale-95'
+            : 'bg-white/5 text-slate-600'
+      }`}
+    >
+      <MorphIcon active={isStreaming} inactive={<ArrowUp size={16} strokeWidth={2.5} />}>
+        <Square size={12} className="fill-current" />
+      </MorphIcon>
+    </button>
+  );
+}
 
 export function Composer({
   input,
@@ -117,9 +180,14 @@ export function Composer({
   onGenerateMedia,
   webSearch,
   onToggleWebSearch,
+  agentMode,
+  onToggleAgentMode,
+  stagedFileCount,
+  onOpenStaging,
   webBusy,
   workspace,
   onPickWorkspace,
+  onDisconnectWorkspace,
   canContinue,
   onContinue,
   maxFileBytes = DEFAULT_MAX_FILE_BYTES,
@@ -139,7 +207,6 @@ export function Composer({
     ),
   });
 
-  /* ---------------- Slash menu "/" ---------------- */
   const [slashIndex, setSlashIndex] = useState(0);
   const [slashDismissed, setSlashDismissed] = useState(false);
 
@@ -154,7 +221,6 @@ export function Composer({
   const slashOpen =
     slashQuery !== null && !slashDismissed && slashMatches.length > 0;
 
-  // Đổi từ khoá → reset highlight + mở lại menu nếu từng đóng.
   useEffect(() => {
     setSlashIndex(0);
     setSlashDismissed(false);
@@ -177,8 +243,6 @@ export function Composer({
 
   const hasContent = input.trim().length > 0 || attachments.length > 0;
   const canSubmit = hasContent && !isStreaming;
-
-  /** Media cần mô tả bằng chữ — tệp đính kèm không thay được prompt. */
   const canGenerateMedia = Boolean(onGenerateMedia) && input.trim().length > 0 && !isStreaming;
 
   const startMedia = useCallback(
@@ -205,7 +269,6 @@ export function Composer({
     [maxFileBytes, onAddFiles],
   );
 
-  /** Guard IME: Enter khi đang compose là xác nhận ký tự, không phải gửi. */
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
       const native = e.nativeEvent as KeyboardEvent & { isComposing?: boolean };
@@ -214,7 +277,6 @@ export function Composer({
         return;
       }
 
-      // Slash menu: điều hướng/phím tắt ăn trước hành vi mặc định của textarea.
       if (slashOpen && slashMatches.length > 0) {
         if (e.key === 'ArrowDown') {
           e.preventDefault();
@@ -259,14 +321,14 @@ export function Composer({
   );
 
   return (
-    <div className="pb-composer w-full bg-gradient-to-t from-surface via-surface to-transparent px-4 pt-2">
+    <div className="pb-composer w-full px-4 pt-3">
       <div className="mx-auto w-full max-w-thread">
         {canContinue && !isStreaming && (
-          <div className="mb-2 flex justify-center">
+          <div className="mb-3 flex justify-center">
             <button
               type="button"
               onClick={onContinue}
-              className="flex items-center gap-1.5 rounded-full border border-zinc-300/60 bg-surface-raised px-3 py-1.5 text-[12px] text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900"
+              className="flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[12px] font-medium text-slate-300 backdrop-blur-sm transition-all hover:bg-white/10 hover:text-white"
             >
               <CornerDownLeft size={12} />
               Viết tiếp
@@ -274,11 +336,19 @@ export function Composer({
           </div>
         )}
 
-        {fileError && (
-          <div role="status" className="notice-warn mb-2 text-center">
-            {fileError}
-          </div>
-        )}
+        <AnimatePresence>
+          {fileError && (
+            <motion.div
+              initial={{ opacity: 0, y: -4 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -4 }}
+              role="status"
+              className="notice-warn mb-2 text-center"
+            >
+              {fileError}
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         <form
           onSubmit={handleSubmit}
@@ -292,16 +362,15 @@ export function Composer({
             setDragging(false);
             acceptFiles(e.dataTransfer?.files ?? null);
           }}
-          className={`relative rounded-2xl border bg-surface-raised shadow-panel transition-all duration-150 focus-within:border-brand/50 focus-within:shadow-[0_0_0_3px_rgb(var(--brand)/0.10),0_12px_32px_-16px_rgb(15_23_42/0.18)] ${
-            dragging ? 'border-brand' : 'border-zinc-300/60'
+          className={`group relative rounded-2xl border border-white/10 bg-slate-800/50 shadow-[0_0_15px_rgba(16,185,129,0.1)] backdrop-blur-lg transition-all duration-200 focus-within:border-emerald-500/30 focus-within:shadow-[0_0_20px_rgba(16,185,129,0.15)] ${
+            dragging ? 'border-emerald-500/40 ring-2 ring-emerald-500/10' : ''
           }`}
         >
           {slashOpen && (
             <div
               role="listbox"
               aria-label="Danh sách prompt"
-              className="surface-panel absolute bottom-full left-0 right-0 z-30 mb-2 max-h-64 animate-slide-up overflow-y-auto py-1"
-              // Giữ focus textarea khi click vào menu
+              className="absolute bottom-full left-0 right-0 z-30 mb-2 max-h-64 overflow-y-auto rounded-xl border border-zinc-200 bg-white p-1 shadow-lg dark:border-zinc-800 dark:bg-zinc-950"
               onMouseDown={(e) => e.preventDefault()}
             >
               {slashMatches.map((p, i) => (
@@ -313,12 +382,12 @@ export function Composer({
                   id={`slash-opt-${p.id}`}
                   onClick={() => applyPrompt(p)}
                   onMouseEnter={() => setSlashIndex(i)}
-                  className={`flex w-full flex-col items-start gap-0.5 px-3 py-2 text-left transition-colors ${
-                    i === slashIndex ? 'bg-zinc-100' : ''
+                  className={`flex w-full flex-col items-start gap-0.5 rounded-lg px-3 py-2 text-left transition-colors ${
+                    i === slashIndex ? 'bg-zinc-100 dark:bg-zinc-900' : ''
                   }`}
                 >
-                  <span className="text-[13px] font-medium text-zinc-800">{p.title}</span>
-                  <span className="line-clamp-1 w-full text-[11px] text-zinc-500">
+                  <span className="text-[13px] font-medium text-zinc-900 dark:text-zinc-100">{p.title}</span>
+                  <span className="line-clamp-1 w-full text-[11px] text-zinc-500 dark:text-zinc-400">
                     {p.content.replace(/\n+/g, ' ').trim()}
                   </span>
                 </button>
@@ -327,7 +396,7 @@ export function Composer({
                 <button
                   type="button"
                   onClick={() => void quickSavePrompt()}
-                  className="flex w-full items-center gap-1.5 border-t border-zinc-200 px-3 py-2 text-left text-[12px] text-zinc-600 transition hover:text-zinc-900"
+                  className="flex w-full items-center gap-1.5 border-t border-zinc-100 px-3 py-2 text-left text-[12px] text-zinc-600 transition-colors hover:text-zinc-900 dark:border-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
                 >
                   <BookmarkPlus size={13} />
                   Lưu nhanh &quot;/{slashQuery}&quot; làm mẫu
@@ -335,24 +404,28 @@ export function Composer({
               )}
             </div>
           )}
+
           {attachments.length > 0 && (
-            <div className="flex flex-wrap gap-2 px-3 pt-3">
+            <div className="flex flex-wrap gap-1.5 px-3 pt-3">
               {attachments.map((a) => (
-                <span
+                <motion.span
                   key={a.id}
-                  className="flex max-w-[220px] items-center gap-1.5 rounded-lg border border-zinc-300/60 bg-surface-muted px-2 py-1 text-[11px] text-zinc-700"
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.95 }}
+                  className="flex max-w-[200px] items-center gap-1.5 rounded-md border border-zinc-200 bg-zinc-50 px-2 py-1 text-[11px] text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300"
                 >
-                  <Paperclip size={11} className="flex-shrink-0 text-zinc-500" />
+                  <Paperclip size={10} className="flex-shrink-0 text-zinc-400" />
                   <span className="truncate">{a.name}</span>
                   <button
                     type="button"
                     onClick={() => onRemoveAttachment(a.id)}
                     aria-label={`Gỡ ${a.name}`}
-                    className="text-zinc-500 transition-colors hover:text-zinc-900"
+                    className="ml-0.5 rounded p-0.5 text-zinc-400 transition-colors hover:bg-zinc-200 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
                   >
-                    <X size={11} />
+                    <X size={10} />
                   </button>
-                </span>
+                </motion.span>
               ))}
             </div>
           )}
@@ -360,13 +433,13 @@ export function Composer({
           {(voice.listening || voice.error || webBusy) && (
             <div className="flex items-center gap-3 px-4 pt-3 text-[12px] leading-relaxed">
               {webBusy && (
-                <span className="flex min-w-0 items-center gap-1.5 text-zinc-600">
+                <span className="flex min-w-0 items-center gap-1.5 text-zinc-500 dark:text-zinc-400">
                   <span className="h-1.5 w-1.5 flex-shrink-0 animate-pulse rounded-full bg-brand" />
                   <TextShimmer text="Đang tra cứu web…" className="truncate" />
                 </span>
               )}
               {voice.listening && (
-                <span className="flex min-w-0 items-center gap-2 text-zinc-600">
+                <span className="flex min-w-0 items-center gap-2 text-zinc-500 dark:text-zinc-400">
                   <SiriWave active />
                   <span className="truncate">
                     {voice.interim || 'Đang nghe… nói tiếng Việt nhé'}
@@ -374,7 +447,7 @@ export function Composer({
                 </span>
               )}
               {voice.error && (
-                <span role="alert" className="text-amber-700 dark:text-amber-400">
+                <span role="alert" className="text-amber-600 dark:text-amber-400">
                   {voice.error}
                 </span>
               )}
@@ -405,22 +478,17 @@ export function Composer({
             aria-activedescendant={
               slashOpen ? `slash-opt-${slashMatches[slashIndex]?.id}` : undefined
             }
-            placeholder="Gửi tin nhắn cho AI... (gõ / để chèn prompt mẫu)"
-            className="w-full resize-none bg-transparent px-4 pb-2 pt-3.5 text-[15px] leading-relaxed text-zinc-800 outline-none placeholder:text-zinc-400"
+            placeholder="Nhắn tin cho AI..."
+            className="w-full resize-none bg-transparent px-4 pb-1 pt-3 text-[15px] leading-relaxed text-slate-100 outline-none placeholder:text-slate-500"
           />
 
-          <div className="flex flex-col items-stretch gap-2 px-2 pb-2 pb-safe-2 sm:flex-row sm:items-center sm:justify-between sm:gap-2 sm:px-2.5">
-            {/* Trái: đính kèm / voice / thinking */}
-            <div className="flex min-w-0 flex-wrap items-center gap-1">
-              <button
-                type="button"
+          <div className="flex items-center justify-between gap-2 px-2 pb-2 pb-safe-2 pt-1">
+            <div className="flex items-center gap-0.5">
+              <ToolbarButton
+                icon={Paperclip}
                 onClick={() => fileInputRef.current?.click()}
-                aria-label="Đính kèm tệp"
-                title="Đính kèm tệp"
-                className="icon-btn h-9 w-9 rounded-full"
-              >
-                <Paperclip size={16} />
-              </button>
+                label="Đính kèm tệp"
+              />
               <input
                 ref={fileInputRef}
                 type="file"
@@ -431,114 +499,86 @@ export function Composer({
                   e.target.value = '';
                 }}
               />
+
               {voice.supported && (
-                <button
-                  type="button"
+                <ToolbarButton
+                  icon={voice.listening ? Square : Mic}
+                  active={voice.listening}
                   onClick={() => {
                     voice.clearError();
                     voice.toggle();
                   }}
-                  aria-label={voice.listening ? 'Dừng nhận diện giọng nói' : 'Nhập bằng giọng nói'}
-                  aria-pressed={voice.listening}
-                  title={voice.listening ? 'Dừng nhận diện giọng nói' : 'Nhập bằng giọng nói'}
-                  className={
-                    voice.listening
-                      ? 'flex h-9 w-9 items-center justify-center rounded-full bg-brand text-white transition-colors'
-                      : 'icon-btn h-9 w-9 rounded-full'
-                  }
-                >
-                  <MorphIcon active={voice.listening} inactive={<Mic size={16} />}>
-                    <Square size={11} className="fill-current" />
-                  </MorphIcon>
-                </button>
+                  label={voice.listening ? 'Dừng nhận diện giọng nói' : 'Nhập bằng giọng nói'}
+                />
               )}
 
-              {/* Workspace agent coding: kết nối thư mục làm việc (FS Access
-                  API — cần Chrome/Edge). Bấm lại để cấp quyền khi trình duyệt
-                  thu hồi. */}
               {onPickWorkspace && (
-                <button
-                  type="button"
+                <ToolbarButton
+                  icon={FolderOpen}
+                  active={workspace?.connected}
                   onClick={onPickWorkspace}
-                  aria-label={workspace?.connected ? 'Thư mục làm việc đã kết nối' : 'Kết nối thư mục làm việc'}
-                  aria-pressed={Boolean(workspace?.connected)}
-                  title={
-                    workspace?.connected
-                      ? `Workspace: ${workspace.name} — bấm để chọn thư mục khác`
-                      : 'Kết nối thư mục làm việc cho agent đọc/ghi code'
-                  }
-                  className={
-                    workspace?.connected
-                      ? 'flex h-9 w-9 items-center justify-center rounded-full bg-brand text-white transition-colors'
-                      : 'icon-btn h-9 w-9 rounded-full'
-                  }
-                >
-                  <FolderOpen size={16} />
-                </button>
+                  label={workspace?.connected ? `Workspace: ${workspace.name}` : 'Kết nối thư mục làm việc'}
+                />
               )}
 
-              {/* Tìm kiếm web: bật/tắt tra cứu cho LƯỢT GỬI KẾ TIẾP.
-                  Giống nút mic — trạng thái bật tô màu brand. */}
-              {onToggleWebSearch && (
-                <button
-                  type="button"
-                  onClick={onToggleWebSearch}
+              {onDisconnectWorkspace && workspace?.connected && (
+                <ToolbarButton
+                  icon={FolderX}
                   disabled={isStreaming}
-                  aria-label={webSearch ? 'Tắt tìm kiếm web' : 'Bật tìm kiếm web'}
-                  aria-pressed={Boolean(webSearch)}
-                  title={
-                    webSearch
-                      ? 'Đang BẬT: lượt gửi kế tiếp sẽ kèm kết quả web (bấm để tắt)'
-                      : 'Bật tìm kiếm web cho tin nhắn tiếp theo'
-                  }
-                  className={
-                    webSearch
-                      ? 'flex h-9 w-9 items-center justify-center rounded-full bg-brand text-white transition-colors'
-                      : 'icon-btn h-9 w-9 rounded-full disabled:cursor-not-allowed disabled:opacity-40'
-                  }
-                >
-                  <Globe size={16} />
-                </button>
+                  onClick={onDisconnectWorkspace}
+                  label={`Ngắt kết nối: ${workspace.name ?? 'workspace'}`}
+                />
               )}
 
-              {/* Tạo ảnh / tạo video: gửi lượt này bằng model media, giữ
-                  nguyên model chat đang chọn cho các lượt sau. */}
-              {mediaActions?.image && (
-                <button
-                  type="button"
-                  onClick={() => startMedia(mediaActions.image, 'image')}
-                  disabled={!canGenerateMedia}
-                  aria-label={`Tạo ảnh bằng ${mediaActions.image.label}`}
-                  title={
-                    canGenerateMedia
-                      ? `Tạo ảnh bằng ${mediaActions.image.label}`
-                      : 'Nhập mô tả ảnh trước khi tạo'
-                  }
-                  className="icon-btn h-9 w-9 rounded-full disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  <ImagePlus size={16} />
-                </button>
+              {onToggleWebSearch && (
+                <ToolbarButton
+                  icon={Globe}
+                  active={webSearch}
+                  disabled={isStreaming}
+                  onClick={onToggleWebSearch}
+                  label={webSearch ? 'Tắt tìm kiếm web' : 'Bật tìm kiếm web'}
+                />
               )}
-              {mediaActions?.video && (
-                <button
-                  type="button"
-                  onClick={() => startMedia(mediaActions.video, 'video')}
+
+              {onToggleAgentMode && (
+                <ToolbarButton
+                  icon={Pencil}
+                  active={agentMode === 'plan'}
+                  disabled={isStreaming}
+                  onClick={onToggleAgentMode}
+                  label={agentMode === 'plan' ? 'Chuyển sang ACT mode' : 'Chuyển sang PLAN mode'}
+                />
+              )}
+
+              {onOpenStaging && (stagedFileCount ?? 0) > 0 && (
+                <ToolbarButton
+                  icon={FileText}
+                  onClick={onOpenStaging}
+                  label={`${stagedFileCount} file đang staged`}
+                  badge={String(stagedFileCount)}
+                />
+              )}
+
+              {mediaActions?.image && (
+                <ToolbarButton
+                  icon={ImagePlus}
                   disabled={!canGenerateMedia}
-                  aria-label={`Tạo video bằng ${mediaActions.video.label}`}
-                  title={
-                    canGenerateMedia
-                      ? `Tạo video bằng ${mediaActions.video.label} (mất vài phút)`
-                      : 'Nhập mô tả video trước khi tạo'
-                  }
-                  className="icon-btn h-9 w-9 rounded-full disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  <Film size={16} />
-                </button>
+                  onClick={() => startMedia(mediaActions.image, 'image')}
+                  label={`Tạo ảnh bằng ${mediaActions.image.label}`}
+                />
+              )}
+
+              {mediaActions?.video && (
+                <ToolbarButton
+                  icon={Film}
+                  disabled={!canGenerateMedia}
+                  onClick={() => startMedia(mediaActions.video, 'video')}
+                  label={`Tạo video bằng ${mediaActions.video.label}`}
+                />
               )}
             </div>
 
-            {/* Giữa: chọn model — đặt giữa để panel mở lên không đè vào sidebar. */}
-            <div className="order-last flex min-w-0 items-center justify-start sm:order-none sm:min-w-[9rem] sm:flex-1 sm:justify-center">
+            <div className="flex items-center gap-2">
               {thinkingLevel && onThinkingLevelChange && (
                 <ThinkingSlider
                   value={thinkingLevel}
@@ -553,26 +593,12 @@ export function Composer({
                 onChange={onModelChange}
                 disabled={isStreaming}
               />
-            </div>
-
-            <div className="flex flex-shrink-0 items-center justify-end gap-1">
-              <button
-                type={isStreaming ? 'button' : 'submit'}
-                onClick={isStreaming ? onStop : undefined}
-                disabled={!isStreaming && !canSubmit}
-                aria-label={isStreaming ? 'Dừng tạo' : 'Gửi tin nhắn'}
-                className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full transition-all ${
-                  isStreaming
-                    ? 'bg-zinc-800 text-white hover:bg-zinc-900 dark:bg-zinc-200 dark:text-zinc-900 dark:hover:bg-zinc-300'
-                    : canSubmit
-                      ? 'bg-brand text-white shadow-brand hover:bg-brand-hover active:scale-95'
-                      : 'cursor-not-allowed bg-zinc-200 text-zinc-400'
-                }`}
-              >
-                <MorphIcon active={isStreaming} inactive={<ArrowUp size={17} />}>
-                  <Square size={13} className="fill-current" />
-                </MorphIcon>
-              </button>
+              <div className="h-4 w-px bg-white/10" />
+              <SendButton
+                isStreaming={isStreaming}
+                canSubmit={canSubmit}
+                onStop={onStop}
+              />
             </div>
           </div>
         </form>

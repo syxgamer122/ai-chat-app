@@ -10,25 +10,25 @@
    * (`bg-brand/20`) và CSS thuần (`rgb(var(--brand))`).
    */
   :root {
-    --surface: 247 249 252; /* #F7F9FC — canvas */
+    --surface: 250 250 251; /* #FAFAFB — canvas */
     --surface-raised: 255 255 255; /* #FFFFFF — sidebar, composer, panel */
-    --surface-bubble: 232 241 239; /* #E8F1EF — bong bóng người dùng */
-    --surface-muted: 241 245 249; /* #F1F5F9 — hover nhẹ */
-    --surface-code: 13 13 16; /* #0D0D10 — khối code */
-    --surface-code-header: 23 23 27; /* #17171B — thanh công cụ khối code */
-    --brand: 10 126 140; /* #0A7E8C */
-    --brand-hover: 8 110 122; /* #086E7A */
-    --brand-accent: 78 203 113; /* #4ECB71 */
-    --brand-border: 143 191 183; /* #8FBFB7 */
-    --foreground: 39 39 42; /* zinc-800 */
-    --foreground-strong: 17 17 19; /* tiêu đề trong prose */
-    --muted-foreground: 100 116 139; /* slate-500 — blockquote, caption */
-    --line: 227 232 239; /* #E3E8EF — kẻ bảng, hr */
-    --line-strong: 214 221 230; /* #D6DDE6 — vạch blockquote */
-    --scrollbar: 198 207 218; /* #C6CFDA */
-    --scrollbar-hover: 174 185 199; /* #AEB9C7 */
-    --code-inline-bg: 234 243 245; /* #EAF3F5 */
-    --code-inline-border: 207 227 230; /* #CFE3E6 */
+    --surface-bubble: 235 245 243; /* #EBF5F3 — bong bóng người dùng */
+    --surface-muted: 244 247 250; /* #F4F7FA — hover nhẹ */
+    --surface-code: 15 15 18; /* #0F0F12 — khối code */
+    --surface-code-header: 25 25 30; /* #19191E — thanh công cụ khối code */
+    --brand: 14 116 144; /* #0E7490 — teal-700, professional */
+    --brand-hover: 12 100 126; /* #0C647E */
+    --brand-accent: 56 189 148; /* #38BD94 — mint accent */
+    --brand-border: 165 210 205; /* #A5D2CD */
+    --foreground: 35 35 40; /* zinc-800 softened */
+    --foreground-strong: 20 20 24; /* tiêu đề trong prose */
+    --muted-foreground: 110 125 145; /* slate-500 refined */
+    --line: 230 235 242; /* #E6EBF2 — kẻ bảng, hr */
+    --line-strong: 218 226 236; /* #DAE2EC — vạch blockquote */
+    --scrollbar: 200 210 222; /* #C8D2DE */
+    --scrollbar-hover: 178 190 206; /* #B2BECE */
+    --code-inline-bg: 237 247 249; /* #EDF7F9 */
+    --code-inline-border: 212 232 236; /* #D4E8EC */
 
     /* Ramp zinc gốc (đúng hex Tailwind) — theme sáng. */
     --zinc-50: 250 250 250;
@@ -58,25 +58,31 @@
    * UI viết bằng zinc tự thích ứng mà không cần sửa từng component.
    */
   .dark {
-    --surface: 9 9 11; /* zinc-950 */
-    --surface-raised: 24 24 27; /* zinc-900 */
-    --surface-bubble: 26 46 43; /* teal đậm — cùng tông brand với bubble sáng */
-    --surface-muted: 39 39 42; /* zinc-800 */
-    --surface-code: 13 13 16;
-    --surface-code-header: 23 23 27;
-    --brand: 34 178 193; /* #22B2C1 — sáng hơn bản light để nổi trên nền tối */
-    --brand-hover: 52 196 212;
-    --brand-accent: 78 203 113;
-    --brand-border: 70 110 104;
-    --foreground: 228 228 231; /* zinc-200 */
-    --foreground-strong: 250 250 250;
-    --muted-foreground: 148 163 184; /* slate-400 */
-    --line: 39 39 42;
-    --line-strong: 63 63 70;
-    --scrollbar: 52 52 58;
-    --scrollbar-hover: 82 82 91;
-    --code-inline-bg: 24 39 41;
-    --code-inline-border: 45 74 71;
+    --surface: 8 8 12; /* #08080C — deep aurora canvas */
+    --surface-raised: 16 16 22; /* #101016 — sidebar, composer, panel */
+    --surface-bubble: 18 35 45; /* aurora teal bubble */
+    --surface-muted: 24 24 32; /* #181820 — hover nhẹ */
+    --surface-code: 10 10 14;
+    --surface-code-header: 18 18 24;
+    --brand: 34 211 167; /* #22D3A7 — aurora green-cyan */
+    --brand-hover: 6 182 212; /* #06B6D4 — aurora cyan */
+    --brand-accent: 139 92 246; /* #8B5CF6 — aurora violet */
+    --brand-border: 34 80 70;
+    --foreground: 225 228 235;
+    --foreground-strong: 245 247 252;
+    --muted-foreground: 140 150 170;
+    --line: 30 30 40;
+    --line-strong: 50 50 65;
+    --scrollbar: 45 45 58;
+    --scrollbar-hover: 70 70 88;
+    --code-inline-bg: 16 28 35;
+    --code-inline-border: 30 55 60;
+
+    /* Aurora gradient tokens */
+    --aurora-from: 34 211 167; /* green */
+    --aurora-via: 6 182 212; /* cyan */
+    --aurora-to: 139 92 246; /* violet */
+    --aurora-accent: 217 70 239; /* magenta */
 
     --zinc-50: 9 9 11; /* ↔ zinc-950 */
     --zinc-100: 24 24 27; /* ↔ zinc-900 */
@@ -105,19 +111,17 @@
   /* Ánh sáng ambient rất nhẹ phía trên — không khí thương hiệu KODA. */
   body {
     background-image: radial-gradient(
-      900px 420px at 50% -180px,
-      rgb(var(--brand) / 0.06),
+      800px 350px at 50% -150px,
+      rgb(var(--brand) / 0.04),
       transparent 70%
     );
     background-repeat: no-repeat;
   }
-  /* Theme tối: glow yếu hơn nữa để không gây chói trên nền đen. */
   .dark body {
-    background-image: radial-gradient(
-      900px 420px at 50% -180px,
-      rgb(var(--brand) / 0.09),
-      transparent 70%
-    );
+    background-image:
+      radial-gradient(600px 300px at 20% -100px, rgb(var(--aurora-from) / 0.08), transparent 70%),
+      radial-gradient(500px 250px at 80% -80px, rgb(var(--aurora-to) / 0.06), transparent 70%),
+      radial-gradient(400px 200px at 50% -60px, rgb(var(--aurora-via) / 0.05), transparent 70%);
   }
 
   button,
@@ -160,7 +164,7 @@ html[data-animations='off'] *::after {
 
 * {
   scrollbar-width: thin;
-  scrollbar-color: rgb(var(--scrollbar)) transparent;
+  scrollbar-color: rgb(50 60 75) transparent;
 }
 ::-webkit-scrollbar {
   width: 6px;
@@ -170,11 +174,11 @@ html[data-animations='off'] *::after {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgb(var(--scrollbar));
+  background: rgb(50 60 75);
   border-radius: 10px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgb(var(--scrollbar-hover));
+  background: rgb(70 85 100);
 }
 
 @layer utilities {
@@ -215,8 +219,8 @@ html[data-animations='off'] *::after {
 @layer components {
   /** Nút chỉ có icon trong header/composer/menu. */
   .icon-btn {
-    @apply flex flex-shrink-0 items-center justify-center rounded-lg text-zinc-500
-      transition-colors hover:bg-zinc-200/70 hover:text-zinc-700
+    @apply flex flex-shrink-0 items-center justify-center rounded-lg text-slate-400
+      transition-all hover:bg-white/10 hover:text-emerald-400
       disabled:pointer-events-none disabled:opacity-50;
   }
   .icon-btn-sm {
@@ -231,41 +235,41 @@ html[data-animations='off'] *::after {
 
   /** Mặt phẳng nổi cho dropdown/menu/popover. */
   .surface-panel {
-    @apply rounded-xl border border-zinc-200 bg-surface-raised shadow-panel;
+    @apply rounded-xl border border-white/10 bg-slate-900/80 shadow-[0_8px_32px_-12px_rgb(0_0_0/0.4)] backdrop-blur-xl;
   }
 
   /** Dòng lệnh trong menu. */
   .menu-item {
-    @apply flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-[12px]
-      text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-800;
+    @apply flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[12px]
+      text-slate-400 transition-all hover:bg-white/10 hover:text-slate-200;
   }
   .menu-item-danger {
-    @apply text-red-600 hover:bg-red-50 hover:text-red-700;
+    @apply text-red-400 hover:bg-red-500/10 hover:text-red-300;
   }
 
   /** Input/select/textarea trong form cài đặt. */
   .field {
-    @apply w-full rounded-xl border border-zinc-200 bg-surface-raised p-2.5 text-sm
-      text-zinc-700 outline-none transition placeholder:text-zinc-400
-      focus:border-brand/60 focus:ring-2 focus:ring-brand/15;
+    @apply w-full rounded-xl border border-white/10 bg-white/5 p-2.5 text-sm
+      text-slate-200 outline-none transition-all placeholder:text-slate-500
+      focus:border-emerald-500/30 focus:bg-white/10 focus:shadow-[0_0_8px_rgba(16,185,129,0.1)];
   }
   .field-sm {
-    @apply w-full rounded-lg border border-zinc-300 bg-surface-raised px-2.5 py-1.5
-      text-sm text-zinc-800 outline-none transition placeholder:text-zinc-400
-      focus:border-brand/60 focus:ring-2 focus:ring-brand/15;
+    @apply w-full rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5
+      text-sm text-slate-200 outline-none transition-all placeholder:text-slate-500
+      focus:border-emerald-500/30 focus:bg-white/10 focus:shadow-[0_0_8px_rgba(16,185,129,0.1)];
   }
 
   /** Nút hành động chính. */
   .btn-primary {
-    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-brand px-4
-      py-2.5 text-sm font-medium text-white shadow-brand transition
-      hover:bg-brand-hover active:scale-[0.99] disabled:pointer-events-none
+    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4
+      py-2.5 text-sm font-medium text-white shadow-[0_0_15px_rgba(16,185,129,0.25)] transition-all
+      hover:bg-emerald-500 hover:shadow-[0_0_25px_rgba(16,185,129,0.35)] active:scale-[0.98] disabled:pointer-events-none
       disabled:opacity-50;
   }
   .btn-secondary {
     @apply inline-flex items-center justify-center gap-2 rounded-xl border
-      border-zinc-200 bg-surface-raised px-3 py-2.5 text-sm font-medium
-      text-zinc-700 transition hover:bg-zinc-100 disabled:pointer-events-none
+      border-white/10 bg-white/5 px-3 py-2.5 text-sm font-medium
+      text-slate-300 transition-all hover:bg-white/10 hover:text-white disabled:pointer-events-none
       disabled:opacity-50;
   }
 
@@ -274,10 +278,10 @@ html[data-animations='off'] *::after {
     @apply rounded-xl border px-3 py-2 text-xs leading-relaxed;
   }
   .notice-warn {
-    @apply notice border-amber-300 bg-amber-50 text-amber-800;
+    @apply notice border-amber-500/20 bg-amber-500/10 text-amber-300 backdrop-blur-sm;
   }
   .notice-error {
-    @apply notice border-red-300 bg-red-50 text-red-700;
+    @apply notice border-red-500/20 bg-red-500/10 text-red-300 backdrop-blur-sm;
   }
 
   /**
@@ -294,15 +298,6 @@ html[data-animations='off'] *::after {
    * phiên bản trong suốt đậm (amber/red-500/10 trên nền tối) thay vì hex
    * sáng chói, chữ nâng lên bậc -300/-400 cho đủ tương phản.
    */
-  .dark .notice-warn {
-    @apply border-amber-500/30 bg-amber-500/10 text-amber-300;
-  }
-  .dark .notice-error {
-    @apply border-red-500/30 bg-red-500/10 text-red-300;
-  }
-  .dark .menu-item-danger {
-    @apply text-red-400 hover:bg-red-500/10 hover:text-red-300;
-  }
   .dark .icon-btn-danger {
     @apply hover:bg-red-500/10 hover:text-red-400;
   }
@@ -353,7 +348,7 @@ html[data-animations='off'] *::after {
 .claude-prose {
   font-size: 15px;
   line-height: 1.75;
-  color: rgb(var(--foreground));
+  color: rgb(203 213 225);
   word-break: break-word;
   overflow-wrap: anywhere;
 }
@@ -376,7 +371,7 @@ html[data-animations='off'] *::after {
 .claude-prose h3 {
   font-weight: 600;
   line-height: 1.35;
-  color: rgb(var(--foreground-strong));
+  color: rgb(241 245 249);
   margin-top: 1.75rem;
 }
 .claude-prose h1 { font-size: 1.4rem; }
@@ -394,17 +389,23 @@ html[data-animations='off'] *::after {
 .claude-prose ol { list-style: decimal; }
 .claude-prose li + li { margin-top: 0.35rem; }
 .claude-prose a {
-  color: rgb(var(--brand));
+  color: rgb(34 211 238);
   text-decoration: underline;
   text-underline-offset: 2px;
+  filter: drop-shadow(0 0 5px rgba(34, 211, 238, 0.5));
+  transition: all 150ms ease;
+}
+.claude-prose a:hover {
+  color: rgb(103 232 249);
+  filter: drop-shadow(0 0 8px rgba(34, 211, 238, 0.7));
 }
 .claude-prose blockquote {
-  border-left: 2px solid rgb(var(--line-strong));
+  border-left: 2px solid rgb(16 185 129 / 0.4);
   padding-left: 0.9rem;
-  color: rgb(var(--muted-foreground));
+  color: rgb(148 163 184);
 }
 .claude-prose hr {
-  border-color: rgb(var(--line));
+  border-color: rgb(255 255 255 / 0.08);
   margin: 1.5rem 0;
 }
 
@@ -418,14 +419,14 @@ html[data-animations='off'] *::after {
 .claude-prose td,
 .claude-table th,
 .claude-table td {
-  border: 1px solid rgb(var(--line));
+  border: 1px solid rgb(255 255 255 / 0.08);
   padding: 0.5rem 0.75rem;
   text-align: left;
   vertical-align: top;
 }
 .claude-prose th,
 .claude-table th {
-  background: rgb(var(--surface-muted));
+  background: rgb(255 255 255 / 0.05);
   font-weight: 600;
   white-space: nowrap;
 }
@@ -454,12 +455,12 @@ html[data-animations='off'] *::after {
 
 .claude-inline-code,
 .claude-prose :not(pre) > code {
-  background: rgb(var(--code-inline-bg));
-  border: 1px solid rgb(var(--code-inline-border));
+  background: rgb(16 185 129 / 0.1);
+  border: 1px solid rgb(16 185 129 / 0.2);
   border-radius: 5px;
   padding: 0.12em 0.38em;
   font-size: 0.875em;
-  color: rgb(var(--brand));
+  color: rgb(52 211 153);
   white-space: pre-wrap;
 }
 
@@ -476,8 +477,8 @@ html[data-animations='off'] *::after {
 }
 
 .claude-code-block {
-  background: rgb(var(--surface-code));
-  border: 1px solid rgb(var(--surface-code-header));
+  background: rgb(10 10 16);
+  border: 1px solid rgb(255 255 255 / 0.08);
   border-radius: 10px;
   overflow: hidden;
 }
@@ -487,7 +488,7 @@ html[data-animations='off'] *::after {
   overflow-x: auto;
   font-size: 13px !important;
   line-height: 1.6 !important;
-  background: rgb(var(--surface-code)) !important;
+  background: rgb(10 10 16) !important;
 }
 
 /* ------------------------------------------------------------------ */
@@ -502,7 +503,7 @@ html[data-animations='off'] *::after {
   height: 1em;
   margin-left: 2px;
   vertical-align: text-bottom;
-  background: rgb(var(--muted-foreground));
+  background: rgb(16 185 129);
   animation: caret-blink 1s steps(2, start) infinite;
 }
 .streaming-caret > div > :last-child::after {
@@ -530,9 +531,9 @@ html[data-animations='off'] *::after {
 .fx-shimmer-text {
   background: linear-gradient(
     90deg,
-    rgb(113 113 122 / 0.6) 42%,
-    var(--brand) 50%,
-    rgb(113 113 122 / 0.6) 58%
+    rgb(148 163 184 / 0.6) 42%,
+    rgb(16 185 129) 50%,
+    rgb(148 163 184 / 0.6) 58%
   );
   background-size: 200% 100%;
   -webkit-background-clip: text;
@@ -546,7 +547,7 @@ html[data-animations='off'] *::after {
     animation: none;
     background: none;
     -webkit-text-fill-color: currentColor;
-    color: rgb(113 113 122 / 0.85);
+    color: rgb(148 163 184 / 0.85);
   }
 }
 
@@ -568,4 +569,49 @@ html[data-animations='off'] *::after {
 .katex {
   font-size: 1.05em;
   text-rendering: auto;
+}
+
+/* ------------------------------------------------------------------ */
+/* Aurora utilities — dark mode only                                    */
+/* ------------------------------------------------------------------ */
+
+.dark .aurora-text {
+  background: linear-gradient(135deg, rgb(var(--aurora-from)), rgb(var(--aurora-via)), rgb(var(--aurora-to)));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+
+.dark .aurora-border {
+  border-image: linear-gradient(135deg, rgb(var(--aurora-from) / 0.4), rgb(var(--aurora-via) / 0.3), rgb(var(--aurora-to) / 0.4)) 1;
+}
+
+.dark .aurora-glow {
+  box-shadow:
+    0 0 20px rgb(var(--aurora-from) / 0.15),
+    0 0 40px rgb(var(--aurora-via) / 0.08),
+    0 0 60px rgb(var(--aurora-to) / 0.05);
+}
+
+.dark .aurora-shimmer {
+  background: linear-gradient(
+    90deg,
+    rgb(var(--aurora-from) / 0.08) 0%,
+    rgb(var(--aurora-via) / 0.12) 50%,
+    rgb(var(--aurora-to) / 0.08) 100%
+  );
+  background-size: 200% 100%;
+  animation: aurora-shimmer 3s ease-in-out infinite;
+}
+
+@keyframes aurora-shimmer {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dark .aurora-shimmer {
+    animation: none;
+  }
 }

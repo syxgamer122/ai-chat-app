@@ -1,11 +1,25 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import dynamic from 'next/dynamic';
 import { Sidebar } from '@/components/sidebar';
 import ChatInterface from '@/components/chat-interface';
 import { ChatErrorBoundary } from '@/components/chat-error-boundary';
-import { SettingsDialog } from '@/components/settings-dialog';
 import { useAppStore } from '@/lib/store';
+
+/**
+ * Settings tách khỏi bundle khởi động: đây là màn hình LỚN NHẤT (~40KB nguồn,
+ * kéo theo provider-manager + prompt library + usage-stats) nhưng chỉ mở khi
+ * người dùng bấm vào. Trước đây nó nằm trong chunk chính nên ai cũng phải tải
+ * dù không bao giờ mở.
+ *
+ * `ssr: false` là đúng ngữ nghĩa ở đây: toàn bộ nội dung đọc từ IndexedDB nên
+ * không render được phía server; hơn nữa page này đã nằm sau cổng `isMounted`.
+ */
+const SettingsDialog = dynamic(
+  () => import('@/components/settings-dialog').then((m) => m.SettingsDialog),
+  { ssr: false },
+);
 
 export default function Home() {
   const [isMounted, setIsMounted] = useState(false);
@@ -35,6 +49,13 @@ export default function Home() {
     return () => mq.removeEventListener('change', apply);
   }, [theme]);
 
+  /* Trạng thái mới nhất cho handler phím tắt. Đọc qua ref để listener KHÔNG
+     phải gắn/gỡ lại mỗi lần thu gọn sidebar hay mở settings — trước đây
+     effect phụ thuộc `isSidebarCollapsed` + `isSettingsOpen` nên cứ đổi là
+     removeEventListener + addEventListener một vòng. */
+  const latest = useRef({ isSettingsOpen, isSidebarCollapsed });
+  latest.current = { isSettingsOpen, isSidebarCollapsed };
+
   useEffect(() => {
     setIsMounted(true);
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -49,13 +70,14 @@ export default function Home() {
       // Ctrl+\ — thu gọn/mở rộng sidebar trên desktop.
       if (mod && e.key === '\\') {
         e.preventDefault();
-        setSidebarCollapsed(!isSidebarCollapsed);
+        setSidebarCollapsed(!latest.current.isSidebarCollapsed);
       }
-      if (e.key === 'Escape' && isSettingsOpen) setSettingsOpen(false);
+      if (e.key === 'Escape' && latest.current.isSettingsOpen) setSettingsOpen(false);
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [setCurrentChatId, isSettingsOpen, setSettingsOpen, setSidebarCollapsed, isSidebarCollapsed]);
+    // Các setter của Zustand ổn định — effect này chạy đúng MỘT lần.
+  }, [setCurrentChatId, setSettingsOpen, setSidebarCollapsed]);
 
   /* Cờ tắt hiệu ứng — CSS trong globals.css đọc qua html[data-animations]. */
   useEffect(() => {

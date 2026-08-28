@@ -59,6 +59,12 @@ const config: Config = {
           DEFAULT: 'rgb(var(--line) / <alpha-value>)',
           strong: 'rgb(var(--line-strong) / <alpha-value>)',
         },
+        aurora: {
+          from: 'rgb(var(--aurora-from) / <alpha-value>)',
+          via: 'rgb(var(--aurora-via) / <alpha-value>)',
+          to: 'rgb(var(--aurora-to) / <alpha-value>)',
+          accent: 'rgb(var(--aurora-accent) / <alpha-value>)',
+        },
       },
       boxShadow: {
         /** Nút/chip mang màu thương hiệu. */

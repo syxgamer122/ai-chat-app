@@ -56,7 +56,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       className={inter.variable}
       suppressHydrationWarning
     >
-      <body className="min-h-dvh bg-surface font-sans text-foreground antialiased overscroll-none selection:bg-brand/20 selection:text-foreground-strong">
+      <body className="relative min-h-dvh bg-slate-950 font-sans text-slate-200 antialiased overscroll-none selection:bg-emerald-500/30 selection:text-white">
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-emerald-700/20 via-cyan-900/10 to-slate-950 blur-3xl -z-10" />
         <script dangerouslySetInnerHTML={{ __html: THEME_NO_FLASH_SCRIPT }} />
         <PWARegister />
         {children}

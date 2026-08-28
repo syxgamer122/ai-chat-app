@@ -8,45 +8,54 @@ import React, {
   useRef,
   useState,
 } from 'react';
+import dynamic from 'next/dynamic';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
-import rehypeKatex from 'rehype-katex';
 import { Check, Copy } from 'lucide-react';
-import { PrismLight as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { useThrottledValue } from '@/lib/use-throttled-value';
 import { preprocessMarkdown } from '@/lib/markdown-preprocess';
 
-import ts from 'react-syntax-highlighter/dist/esm/languages/prism/typescript';
-import js from 'react-syntax-highlighter/dist/esm/languages/prism/javascript';
-import jsx from 'react-syntax-highlighter/dist/esm/languages/prism/jsx';
-import tsx from 'react-syntax-highlighter/dist/esm/languages/prism/tsx';
-import python from 'react-syntax-highlighter/dist/esm/languages/prism/python';
-import bash from 'react-syntax-highlighter/dist/esm/languages/prism/bash';
-import json from 'react-syntax-highlighter/dist/esm/languages/prism/json';
-import css from 'react-syntax-highlighter/dist/esm/languages/prism/css';
-import markup from 'react-syntax-highlighter/dist/esm/languages/prism/markup';
-import sql from 'react-syntax-highlighter/dist/esm/languages/prism/sql';
-import markdown from 'react-syntax-highlighter/dist/esm/languages/prism/markdown';
-import yaml from 'react-syntax-highlighter/dist/esm/languages/prism/yaml';
-import go from 'react-syntax-highlighter/dist/esm/languages/prism/go';
-import rust from 'react-syntax-highlighter/dist/esm/languages/prism/rust';
-import cpp from 'react-syntax-highlighter/dist/esm/languages/prism/cpp';
-import c from 'react-syntax-highlighter/dist/esm/languages/prism/c';
-import java from 'react-syntax-highlighter/dist/esm/languages/prism/java';
-import csharp from 'react-syntax-highlighter/dist/esm/languages/prism/csharp';
+/** Khối code thuần — dùng cho cả nhánh không tô màu lẫn lúc chờ nạp chunk. */
+function PlainCode({ value }: { value: string }) {
+  return (
+    <pre className="m-0 overflow-x-auto bg-surface-code px-4 py-[0.9rem] font-mono text-[13px] leading-[1.6] text-[rgb(212,212,216)]">
+      <code>{value}</code>
+    </pre>
+  );
+}
 
-const LANGS: Array<[string, any]> = [
-  ['typescript', ts], ['ts', ts], ['javascript', js], ['js', js],
-  ['jsx', jsx], ['tsx', tsx], ['python', python], ['py', python],
-  ['bash', bash], ['sh', bash], ['shell', bash], ['json', json],
-  ['css', css], ['html', markup], ['xml', markup], ['markup', markup],
-  ['sql', sql], ['markdown', markdown], ['md', markdown],
-  ['yaml', yaml], ['yml', yaml], ['go', go], ['rust', rust], ['rs', rust],
-  ['cpp', cpp], ['c', c], ['java', java], ['csharp', csharp], ['cs', csharp],
-];
-for (const [name, mod] of LANGS) SyntaxHighlighter.registerLanguage(name, mod);
+/**
+ * Tô màu cú pháp nạp ĐỘNG (xem components/syntax-highlight.tsx): thư viện này
+ * cộng 18 gói ngôn ngữ Prism từng nằm trong chunk khởi động, tải cho cả người
+ * dùng chưa từng xem khối code nào.
+ *
+ * An toàn vì trong lúc chunk đang về, `SyntaxHighlightGate` hiện <PlainCode>
+ * với ĐÚNG nội dung — người dùng đọc được code ngay, chỉ chưa có màu; không
+ * có khoảng trống hay nháy mất chữ.
+ */
+const SyntaxHighlight = dynamic(() => import('@/components/syntax-highlight'), {
+  ssr: false,
+  loading: () => null,
+});
+
+/**
+ * Bọc bản nạp động: hiện code THUẦN cho tới khi chunk highlight sẵn sàng.
+ * Không dùng `loading` của next/dynamic vì nó không nhận được `value`.
+ */
+function SyntaxHighlightGate({ language, value }: { language: string; value: string }) {
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    void import('@/components/syntax-highlight').then(() => {
+      if (alive) setReady(true);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+  return ready ? <SyntaxHighlight language={language} value={value} /> : <PlainCode value={value} />;
+}
 
 /**
  * Macro mặc định. KaTeX GHI vào object macros khi gặp \gdef của user,
@@ -63,6 +72,38 @@ const KATEX_MACRO_TEMPLATE: Record<string, string> = {
 };
 
 const REMARK_PLUGINS: any[] = [remarkGfm, [remarkMath, { singleDollarTextMath: true }]];
+
+/* ------------------------------------------------------------------ */
+/* KaTeX — nạp theo yêu cầu                                            */
+/* ------------------------------------------------------------------ */
+
+/**
+ * KaTeX là gói NẶNG NHẤT trong bundle (3.9 MB trên đĩa) nhưng chỉ cần khi tin
+ * nhắn thực sự có công thức toán — phần lớn hội thoại thì không.
+ *
+ * Không dùng `next/dynamic` được vì đây là plugin của unified/rehype, không
+ * phải component. Thay vào đó: nhận diện dấu hiệu toán trong nội dung → nếu
+ * có thì `import()` module rồi re-render với plugin đã nạp.
+ *
+ * An toàn: khi chưa nạp xong, `rehypePlugins` rỗng nên `remark-math` vẫn
+ * parse ra node `math`/`inlineMath` và ReactMarkdown bỏ qua chúng — công thức
+ * hiện dạng chữ thuần trong tích tắc rồi thành công thức. Không mất nội dung.
+ */
+const MATH_HINT_RE = /\$[^$\n]+\$|\$\$|\\\(|\\\[|\\begin\{/;
+
+let katexModulePromise: Promise<any> | null = null;
+let katexModule: any = null;
+
+function loadKatex(): Promise<any> {
+  if (katexModule) return Promise.resolve(katexModule);
+  if (!katexModulePromise) {
+    katexModulePromise = import('rehype-katex').then((m) => {
+      katexModule = m.default ?? m;
+      return katexModule;
+    });
+  }
+  return katexModulePromise;
+}
 
 /**
  * CDN media của Qwen (cdn.qwenlm.ai) chặn hotlink theo `Referer`: mọi request
@@ -186,26 +227,9 @@ const CodeBlock = memo(function CodeBlock({
       </div>
 
       {highlight ? (
-        <SyntaxHighlighter
-          style={vscDarkPlus}
-          language={language || 'text'}
-          PreTag="pre"
-          CodeTag="code"
-          customStyle={{
-            margin: 0,
-            padding: '0.9rem 1rem',
-            background: 'rgb(var(--surface-code))',
-            fontSize: '13px',
-            lineHeight: '1.6',
-          }}
-          codeTagProps={{ style: { fontSize: '13px', lineHeight: '1.6' } }}
-        >
-          {value}
-        </SyntaxHighlighter>
+        <SyntaxHighlightGate language={language} value={value} />
       ) : (
-        <pre className="m-0 overflow-x-auto bg-surface-code px-4 py-[0.9rem] font-mono text-[13px] leading-[1.6] text-[rgb(212,212,216)]">
-          <code>{value}</code>
-        </pre>
+        <PlainCode value={value} />
       )}
     </div>
   );
@@ -240,12 +264,34 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
     }
   }, [effective, isStreaming]);
 
+  /* Chỉ nạp KaTeX khi nội dung có dấu hiệu công thức (xem loadKatex).
+     `katexModule` là biến module-level nên tin nhắn thứ hai trở đi dùng lại
+     ngay, không chờ thêm lần nào. */
+  const needsMath = useMemo(() => MATH_HINT_RE.test(source), [source]);
+  const [katexReady, setKatexReady] = useState(() => katexModule !== null);
+
+  useEffect(() => {
+    if (!needsMath || katexReady) return;
+    let alive = true;
+    void loadKatex()
+      .then(() => {
+        if (alive) setKatexReady(true);
+      })
+      .catch((err) => {
+        console.error('[MarkdownRenderer] không nạp được KaTeX:', err);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [needsMath, katexReady]);
+
   /* Sửa C1: mỗi instance có bản macros riêng, KaTeX ghi \gdef vào đây thì
      cũng không ảnh hưởng tin nhắn khác. */
-  const rehypePlugins = useMemo<any[]>(
-    () => [
+  const rehypePlugins = useMemo<any[]>(() => {
+    if (!needsMath || !katexReady || !katexModule) return [];
+    return [
       [
-        rehypeKatex,
+        katexModule,
         {
           throwOnError: false,
           errorColor: '#a1a1aa',
@@ -258,9 +304,8 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
           output: 'htmlAndMathml', // sửa C5: giữ MathML cho screen reader
         },
       ],
-    ],
-    [],
-  );
+    ];
+  }, [needsMath, katexReady]);
 
   const streamingRef = useRef(isStreaming);
   streamingRef.current = isStreaming;

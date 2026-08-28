@@ -726,6 +726,75 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                     className="field resize-y"
                   />
                 </div>
+
+                <label htmlFor="agent-tools-toggle" className="flex items-start justify-between gap-3">
+                  <span className="min-w-0">
+                    <span className="block text-sm font-medium text-zinc-700">
+                      Cho phép AI dùng công cụ
+                    </span>
+                    <span className="mt-0.5 block text-[11px] leading-relaxed text-zinc-600">
+                      Bật: AI tự tra web, đọc và sửa file trong thư mục bạn kết nối (agent coding).
+                      Tắt: chat thuần — AI chỉ trả lời bằng kiến thức sẵn có, không gọi công cụ nào.
+                    </span>
+                  </span>
+                  <input
+                    id="agent-tools-toggle"
+                    type="checkbox"
+                    checked={settings.agentTools ?? true}
+                    onChange={(e) => updateSettings({ agentTools: e.target.checked })}
+                    className="mt-0.5 h-4 w-4 flex-shrink-0 rounded accent-brand"
+                  />
+                </label>
+
+                {(settings.agentTools ?? true) && (
+                  <label
+                    htmlFor="force-emulated-tools"
+                    className="flex items-start justify-between gap-3 border-l-2 border-zinc-200 pl-3"
+                  >
+                    <span className="min-w-0">
+                      <span className="block text-sm font-medium text-zinc-700">
+                        Đường tool giả lập (gateway không hỗ trợ tools)
+                      </span>
+                      <span className="mt-0.5 block text-[11px] leading-relaxed text-zinc-600">
+                        Bật khi model cố gọi công cụ nhưng JSON hiện ra dạng chữ trong câu trả lời
+                        (gateway âm thầm bỏ qua tham số tools). Tool sẽ chạy qua protocol text thay vì
+                        function calling gốc.
+                      </span>
+                    </span>
+                    <input
+                      id="force-emulated-tools"
+                      type="checkbox"
+                      checked={settings.forceEmulatedTools ?? false}
+                      onChange={(e) => updateSettings({ forceEmulatedTools: e.target.checked })}
+                      className="mt-0.5 h-4 w-4 flex-shrink-0 rounded accent-brand"
+                    />
+                  </label>
+                )}
+
+                {(settings.agentTools ?? true) && (
+                  <label
+                    htmlFor="staging-sandbox-toggle"
+                    className="flex items-start justify-between gap-3 border-l-2 border-zinc-200 pl-3"
+                  >
+                    <span className="min-w-0">
+                      <span className="block text-sm font-medium text-zinc-700">
+                        Staging Sandbox (review batch trước khi ghi đĩa)
+                      </span>
+                      <span className="mt-0.5 block text-[11px] leading-relaxed text-zinc-600">
+                        Agent ghi thay đổi vào bộ đệm thay vì đĩa. Bạn review toàn bộ diff rồi bấm
+                        Apply để ghi thật hoặc Reject để hủy. Đĩa không bị đụng cho tới khi Apply.
+                        Tắt → hành vi cũ: phê duyệt từng edit qua diff modal, ghi đĩa ngay.
+                      </span>
+                    </span>
+                    <input
+                      id="staging-sandbox-toggle"
+                      type="checkbox"
+                      checked={settings.stagingSandbox ?? true}
+                      onChange={(e) => updateSettings({ stagingSandbox: e.target.checked })}
+                      className="mt-0.5 h-4 w-4 flex-shrink-0 rounded accent-brand"
+                    />
+                  </label>
+                )}
               </div>
 
               <div className="space-y-3">

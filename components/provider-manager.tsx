@@ -23,6 +23,14 @@ import { useAppStore, SERVER_PROVIDER_ID } from '@/lib/store';
  */
 const KEY_GUIDES: Array<{ test: RegExp; url: string; note: string }> = [
   {
+    /* crax đã chuyển sang mô hình tài khoản: gateway trả 401 auth_required
+       nếu không có key hợp lệ. Đăng ký (hoặc vào bằng guest) rồi lấy key ở
+       Settings → API keys. Liên kết Discord để được 60 req/phút. */
+    test: /(^|\.)crax\.lol$/i,
+    url: 'https://gpt.crax.lol',
+    note: 'Nay bắt buộc key: đăng ký rồi lấy key crk_live_… ở Settings → API keys.',
+  },
+  {
     test: /(^|\.)openrouter\.ai$/i,
     url: 'https://openrouter.ai/keys',
     note: 'Chọn model đuôi :free để dùng miễn phí.',
@@ -84,7 +92,9 @@ export function ProviderManager() {
     }
     const p = await db.providers.get(id);
     if (!p) return;
-    // Gateway free (crax, Kilgore) không dùng key — bỏ qua mọi cảnh báo về key.
+    // Gateway free (Kilgore) không dùng key — bỏ qua mọi cảnh báo về key.
+    // crax KHÔNG còn thuộc nhóm này: từ bản cập nhật tài khoản, nó trả 401
+    // auth_required nên vẫn phải nhắc người dùng dán key như gateway thường.
     if (!p.apiKey && !p.models?.length && providerNeedsApiKey(p.baseUrl)) {
       // Gateway key cá nhân (OpenRouter, OrcaRouter…) trả 401 khi chưa có key —
       // nói rõ để user dán key thay vì thấy "lỗi kết nối" không hiểu vì sao.
@@ -241,7 +251,8 @@ export function ProviderManager() {
         const active = activeProviderId === p.id;
         const guide = keyGuideFor(p.baseUrl);
         const draft = keyDraft[p.id];
-        // crax/Kilgore: gateway free chặn theo IP, key không có tác dụng.
+        // Kilgore: gateway free chặn theo IP, key không có tác dụng.
+        // (crax đã chuyển sang mô hình tài khoản → needsKey = true.)
         const needsKey = providerNeedsApiKey(p.baseUrl);
         return (
           <div

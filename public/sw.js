@@ -6,7 +6,7 @@
  *  - navigation        → network-first, fallback cache rồi /offline.html
  *  - asset tĩnh khác   → stale-while-revalidate
  */
-const VERSION = 'v3';
+const VERSION = 'v4';
 const STATIC_CACHE = `aichat-static-${VERSION}`;
 const PAGES_CACHE = `aichat-pages-${VERSION}`;
 const OFFLINE_URL = '/offline.html';
@@ -69,9 +69,16 @@ async function cacheFirst(req, cacheName) {
   const cached = await caches.match(req);
   if (cached) return cached;
   const res = await fetch(req);
-  if (res.ok) {
-    const cache = await caches.open(cacheName);
-    await cache.put(req, res.clone());
+  if (res.ok && (res.type === 'basic' || res.type === 'cors')) {
+    try {
+      const body = await res.blob();
+      const cloned = new Response(body, { status: res.status, statusText: res.statusText, headers: res.headers });
+      const cache = await caches.open(cacheName);
+      await cache.put(req, cloned);
+      return new Response(body, { status: res.status, statusText: res.statusText, headers: res.headers });
+    } catch {
+      return new Response(null, { status: res.status });
+    }
   }
   return res;
 }
@@ -79,14 +86,16 @@ async function cacheFirst(req, cacheName) {
 async function networkFirstPage(req, event) {
   try {
     const res = await fetch(req);
-    if (res.ok) {
-      const cache = await caches.open(PAGES_CACHE);
-      // waitUntil: nếu không giữ SW sống đến khi ghi xong, lần offline đầu
-      // sau khi online có thể chưa thấy trang trong cache → rơi ra offline.html.
-      if (event) event.waitUntil(cache.put(req, res.clone()));
-      else await cache.put(req, res.clone());
+    if (!(res.ok && (res.type === 'basic' || res.type === 'cors'))) {
+      return res;
     }
-    return res;
+    const cache = await caches.open(PAGES_CACHE);
+    const body = await res.blob();
+    const cloned = new Response(body, { status: res.status, statusText: res.statusText, headers: res.headers });
+    const put = cache.put(req, cloned);
+    if (event && event.waitUntil) event.waitUntil(put);
+    else await put;
+    return new Response(body, { status: res.status, statusText: res.statusText, headers: res.headers });
   } catch {
     const cached = (await caches.match(req)) || (await caches.match('/'));
     return cached || caches.match(OFFLINE_URL);
@@ -96,15 +105,48 @@ async function networkFirstPage(req, event) {
 async function staleWhileRevalidate(req, cacheName, event) {
   const cached = await caches.match(req);
   const network = fetch(req)
-    .then((res) => {
-      if (res.ok) {
-        const put = caches.open(cacheName).then((cache) => cache.put(req, res.clone()));
-        // Revalidate chạy nền — phải báo cho browser đợi, nếu không SW bị
-        // kill giữa chừng là cache mãi cũ.
-        if (event && event.waitUntil) event.waitUntil(put);
+    .then(async (res) => {
+      if (res.ok && (res.type === 'basic' || res.type === 'cors')) {
+        try {
+          const body = await res.blob();
+          const cloned = new Response(body, {
+            status: res.status,
+            statusText: res.statusText,
+            headers: res.headers,
+          });
+          const put = caches.open(cacheName).then((cache) => cache.put(req, cloned));
+          // Revalidate chạy nền — phải báo cho browser đợi, nếu không SW bị
+          // kill giữa chừng là cache mãi cũ.
+          if (event && event.waitUntil) event.waitUntil(put);
+          return new Response(body, { status: res.status, statusText: res.statusText, headers: res.headers });
+        } catch {
+          return new Response(null, { status: res.status, statusText: res.statusText });
+        }
       }
       return res;
     })
     .catch(() => cached);
   return cached || network;
+}
+
+async function cacheFirstSafe(req, cacheName) {
+  const cached = await caches.match(req);
+  if (cached) return cached;
+  const res = await fetch(req);
+  if (res.ok && (res.type === 'basic' || res.type === 'cors')) {
+    try {
+      const body = await res.blob();
+      const cloned = new Response(body, {
+        status: res.status,
+        statusText: res.statusText,
+        headers: res.headers,
+      });
+      const cache = await caches.open(cacheName);
+      await cache.put(req, cloned);
+      return new Response(body, { status: res.status, statusText: res.statusText, headers: res.headers });
+    } catch {
+      return new Response(null, { status: res.status });
+    }
+  }
+  return res;
 }
