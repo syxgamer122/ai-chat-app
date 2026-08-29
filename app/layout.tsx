@@ -43,17 +43,20 @@ export const viewport: Viewport = {
 };
 
 /**
- * Chống FOUC: đọc theme từ zustand persist (localStorage) và gắn class
- * `dark` lên <html> TRƯỚC first-paint. Phải là script inline đồng bộ đặt
- * đầu <body> — nếu đợi React hydrate thì theme sáng sẽ chớp một nhịp.
+ * Chống FOUC: gắn cứng class `dark` lên <html> trước first-paint. KODA đã
+ * commit dark-only (aurora dark là bản sắc, 18/32 component hardcode màu
+ * tối, việc hỗ trợ light mode đòi đập đi viết lại nửa codebase). Phải là
+ * script inline đồng bộ đặt đầu <body> — class đã có sẵn trên <html> rồi
+ * nhưng giữ script này phòng React mount chậm hoặc streaming SSR làm nhịp
+ * repaint chớp giữa nền sáng/tối.
  */
-const THEME_NO_FLASH_SCRIPT = `(function(){try{var raw=localStorage.getItem('ai-chat-settings');var t='system';if(raw){var p=JSON.parse(raw);if(p&&p.state&&(p.state.theme==='light'||p.state.theme==='dark'||p.state.theme==='system'))t=p.state.theme;}var d=t==='dark'||(t!=='light'&&window.matchMedia('(prefers-color-scheme: dark)').matches);document.documentElement.classList.toggle('dark',d);}catch(e){}})();`;
+const THEME_NO_FLASH_SCRIPT = `(document.documentElement.classList.add('dark'));`;
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html
       lang="vi"
-      className={inter.variable}
+      className={`dark ${inter.variable}`}
       suppressHydrationWarning
     >
       <body className="relative min-h-dvh bg-slate-950 font-sans text-slate-200 antialiased overscroll-none selection:bg-emerald-500/30 selection:text-white">

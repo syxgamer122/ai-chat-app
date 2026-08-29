@@ -333,12 +333,12 @@ export const MessageList = memo(function MessageList({
         tabIndex={0}
         role="log"
         aria-label="Danh sách tin nhắn"
-        className="chat-scroll h-full overflow-y-auto px-4 md:px-8"
+        className="chat-scroll h-full overflow-hidden overflow-y-auto px-4 md:px-8"
       >
         {!hasMessages ? (
           <div className="mx-auto flex h-full max-w-thread flex-col items-center justify-center px-4 pb-16 pt-10">
             <KodaLogo size="lg" className="mb-5" />
-            <h1 className="text-center text-[22px] font-semibold leading-tight tracking-tight text-zinc-800 md:text-[26px]">
+            <h1 className="w-full min-w-0 text-center text-[20px] font-semibold leading-tight tracking-tight text-zinc-800 md:text-[26px]">
               Hôm nay mình giúp gì cho bạn?
             </h1>
             <p className="mt-2 text-center text-[13px] text-zinc-500">

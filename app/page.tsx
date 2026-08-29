@@ -32,21 +32,12 @@ export default function Home() {
   const theme = useAppStore((s) => s.theme);
 
   /*
-   * Gắn class `dark` lên <html> theo lựa chọn của user. 'system' nghe thêm
-   * matchMedia để đổi realtime khi OS đổi theme. Script inline trong layout
-   * đã đặt class đúng từ trước first-paint — effect này chỉ giữ đồng bộ.
+   * KODA đã commit dark-only (xem app/layout.tsx). Effect này giữ cứng
+   * class `dark` lên <html> cho mọi lần re-render, phòng extension hoặc
+   * mã khác gỡ nhầm. Có thể xoá khi nào `theme` bị gỡ khỏi store.
    */
   useEffect(() => {
-    const mq = window.matchMedia('(prefers-color-scheme: dark)');
-    const apply = () => {
-      const dark =
-        theme === 'dark' || (theme === 'system' && mq.matches);
-      document.documentElement.classList.toggle('dark', dark);
-    };
-    apply();
-    if (theme !== 'system') return;
-    mq.addEventListener('change', apply);
-    return () => mq.removeEventListener('change', apply);
+    document.documentElement.classList.add('dark');
   }, [theme]);
 
   /* Trạng thái mới nhất cho handler phím tắt. Đọc qua ref để listener KHÔNG

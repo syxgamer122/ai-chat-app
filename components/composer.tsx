@@ -13,6 +13,7 @@ import {
   Globe,
   ImagePlus,
   Mic,
+  Network,
   Paperclip,
   Pencil,
   Square,
@@ -77,6 +78,9 @@ interface ComposerProps {
   onToggleAgentMode?: () => void;
   stagedFileCount?: number;
   onOpenStaging?: () => void;
+  /** Orchestrator: panel quét tham số đang mở? */
+  orchestratorOpen?: boolean;
+  onOpenOrchestrator?: () => void;
   webBusy?: boolean;
   workspace?: { connected: boolean; name: string | null };
   onPickWorkspace?: () => void;
@@ -110,7 +114,7 @@ function ToolbarButton({
       disabled={disabled}
       aria-label={label}
       title={label}
-      className={`relative flex h-8 w-8 items-center justify-center rounded-lg transition-all duration-150 ${
+      className={`relative flex h-10 w-10 sm:h-8 sm:w-8 items-center justify-center rounded-lg transition-all duration-150 ${
         active
           ? 'bg-emerald-500/20 text-emerald-400 shadow-[inset_0_0_0_1px_rgba(16,185,129,0.3)]'
           : 'text-slate-400 hover:bg-white/10 hover:text-slate-200'
@@ -141,7 +145,7 @@ function SendButton({
       onClick={isStreaming ? onStop : undefined}
       disabled={!isStreaming && !canSubmit}
       aria-label={isStreaming ? 'Dừng tạo' : 'Gửi tin nhắn'}
-      className={`flex h-8 w-8 items-center justify-center rounded-lg transition-all duration-150 ${
+      className={`flex h-10 w-10 sm:h-8 sm:w-8 items-center justify-center rounded-lg transition-all duration-150 ${
         isStreaming
           ? 'bg-slate-700 text-slate-200 hover:bg-slate-600'
           : canSubmit
@@ -184,6 +188,12 @@ export function Composer({
   onToggleAgentMode,
   stagedFileCount,
   onOpenStaging,
+  /**
+   * Orchestrator: mở panel quét tham số — chạy N agent theo N cấu hình khác
+   * nhau rồi tổng hợp. Không thay đổi luồng gửi tin nhắn.
+   */
+  orchestratorOpen,
+  onOpenOrchestrator,
   webBusy,
   workspace,
   onPickWorkspace,
@@ -547,6 +557,15 @@ export function Composer({
                   disabled={isStreaming}
                   onClick={onToggleAgentMode}
                   label={agentMode === 'plan' ? 'Chuyển sang ACT mode' : 'Chuyển sang PLAN mode'}
+                />
+              )}
+
+              {onOpenOrchestrator && (
+                <ToolbarButton
+                  icon={Network}
+                  active={orchestratorOpen}
+                  onClick={onOpenOrchestrator}
+                  label="Orchestrator — chạy nhiều agent theo lưới tham số rồi tổng hợp"
                 />
               )}
 
