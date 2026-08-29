@@ -389,7 +389,7 @@ export function Sidebar() {
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Tìm kiếm..."
-                className="w-full rounded-md border border-white/10 bg-white/5 py-1.5 pl-8 pr-7 text-[12px] text-slate-200 outline-none transition-all placeholder:text-slate-500 focus:border-emerald-500/30 focus:bg-white/10 focus:shadow-[0_0_8px_rgba(16,185,129,0.1)]"
+                className="w-full rounded-md border border-white/10 bg-white/5 py-1.5 pl-8 pr-7 text-[16px] text-slate-200 outline-none transition-all placeholder:text-slate-500 focus:border-emerald-500/30 focus:bg-white/10 focus:shadow-[0_0_8px_rgba(16,185,129,0.1)] sm:text-[12px]"
               />
               {isSearching ? (
                 <Loader2 size={12} aria-hidden="true" className="absolute right-2 animate-spin text-zinc-400" />

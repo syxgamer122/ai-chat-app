@@ -5,6 +5,7 @@ import TextareaAutosize from 'react-textarea-autosize';
 import {
   ArrowUp,
   BookmarkPlus,
+  Check,
   CornerDownLeft,
   FileText,
   Film,
@@ -13,6 +14,7 @@ import {
   Globe,
   ImagePlus,
   Mic,
+  MoreHorizontal,
   Network,
   Paperclip,
   Pencil,
@@ -99,6 +101,8 @@ function ToolbarButton({
   onClick,
   label,
   badge,
+  className,
+  ariaExpanded,
 }: {
   icon: React.ElementType;
   active?: boolean;
@@ -106,6 +110,8 @@ function ToolbarButton({
   onClick: () => void;
   label: string;
   badge?: string;
+  className?: string;
+  ariaExpanded?: boolean;
 }) {
   return (
     <button
@@ -113,12 +119,13 @@ function ToolbarButton({
       onClick={onClick}
       disabled={disabled}
       aria-label={label}
+      aria-expanded={ariaExpanded}
       title={label}
-      className={`relative flex h-10 w-10 sm:h-8 sm:w-8 items-center justify-center rounded-lg transition-all duration-150 ${
+      className={`relative flex h-10 w-10 flex-none sm:h-8 sm:w-8 items-center justify-center rounded-lg transition-all duration-150 ${
         active
           ? 'bg-emerald-500/20 text-emerald-400 shadow-[inset_0_0_0_1px_rgba(16,185,129,0.3)]'
           : 'text-slate-400 hover:bg-white/10 hover:text-slate-200'
-      } disabled:cursor-not-allowed disabled:opacity-40`}
+      } disabled:cursor-not-allowed disabled:opacity-40 ${className ?? ''}`}
     >
       <Icon size={16} />
       {badge && (
@@ -145,7 +152,7 @@ function SendButton({
       onClick={isStreaming ? onStop : undefined}
       disabled={!isStreaming && !canSubmit}
       aria-label={isStreaming ? 'Dừng tạo' : 'Gửi tin nhắn'}
-      className={`flex h-10 w-10 sm:h-8 sm:w-8 items-center justify-center rounded-lg transition-all duration-150 ${
+      className={`flex h-10 w-10 flex-none sm:h-8 sm:w-8 items-center justify-center rounded-lg transition-all duration-150 ${
         isStreaming
           ? 'bg-slate-700 text-slate-200 hover:bg-slate-600'
           : canSubmit
@@ -157,6 +164,112 @@ function SendButton({
         <Square size={12} className="fill-current" />
       </MorphIcon>
     </button>
+  );
+}
+
+/**
+ * Mô tả một nút công cụ trên thanh dưới khung nhập.
+ *
+ * `primary: true` = luôn hiện thẳng trên thanh (kể cả mobile). Các nút còn lại
+ * vẫn hiện thẳng từ `sm` trở lên, nhưng bị gom vào menu "⋯" trên mobile — nếu
+ * không, 10 nút × 40px = 400px sẽ đẩy cụm [model][gửi] ra khỏi thanh trên màn
+ * hình 375px.
+ */
+interface ToolSpec {
+  key: string;
+  icon: React.ElementType;
+  /** Nhãn đầy đủ — dùng cho tooltip/aria và làm dự phòng trong menu. */
+  label: string;
+  /**
+   * Nhãn gọn dùng trong menu "⋯". Label gốc nhiều nút viết theo dạng hành động
+   * ("Tắt tìm kiếm web", "Chuyển sang ACT mode") nên không hợp để liệt kê.
+   */
+  shortLabel?: string;
+  active?: boolean;
+  disabled?: boolean;
+  badge?: string;
+  onClick: () => void;
+  primary?: boolean;
+}
+
+/**
+ * Menu "⋯" chứa các công cụ không đủ chỗ trên mobile.
+ * Chỉ render ở kích thước < sm (`sm:hidden`); từ sm trở lên các nút này hiện
+ * thẳng trên thanh.
+ */
+function OverflowMenu({ tools }: { tools: ToolSpec[] }) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (e: PointerEvent) => {
+      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('pointerdown', onPointerDown, true);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown, true);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  const activeCount = tools.filter((t) => t.active).length;
+
+  return (
+    <div ref={wrapRef} className="relative sm:hidden">
+      <ToolbarButton
+        icon={open ? X : MoreHorizontal}
+        active={activeCount > 0}
+        onClick={() => setOpen((v) => !v)}
+        label="Công cụ khác"
+        badge={activeCount > 1 ? String(activeCount) : undefined}
+        ariaExpanded={open}
+      />
+      {open && (
+        <div
+          role="menu"
+          aria-label="Công cụ khác"
+          className="surface-panel absolute bottom-full left-0 z-40 mb-2 w-[min(15rem,calc(100vw-2rem))] animate-slide-up overflow-hidden p-1.5"
+        >
+          {tools.map((t) => {
+            const Icon = t.icon;
+            return (
+              <button
+                key={t.key}
+                type="button"
+                role="menuitem"
+                disabled={t.disabled}
+                onClick={() => {
+                  t.onClick();
+                  setOpen(false);
+                }}
+                className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <Icon
+                  size={15}
+                  className={`flex-none ${t.active ? 'text-emerald-400' : 'text-slate-400'}`}
+                />
+                <span className="min-w-0 flex-1 truncate text-[13px] text-slate-200">
+                  {t.shortLabel ?? t.label}
+                </span>
+                {t.badge && (
+                  <span className="flex-none rounded-full bg-brand px-1.5 text-[10px] font-bold text-white">
+                    {t.badge}
+                  </span>
+                )}
+                {t.active && !t.badge && (
+                  <Check size={13} className="flex-none text-emerald-400" />
+                )}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -330,6 +443,129 @@ export function Composer({
     [canSubmit, onSubmit, haptics],
   );
 
+  /**
+   * Danh sách công cụ — khai báo thành data (thay vì JSX rải rác) để có thể
+   * render 2 lần: hiện thẳng trên thanh, và gom vào menu "⋯" trên mobile.
+   * Thứ tự trong mảng = thứ tự trong menu.
+   */
+  const tools: ToolSpec[] = [
+    {
+      key: 'attach',
+      icon: Paperclip,
+      label: 'Đính kèm tệp',
+      onClick: () => fileInputRef.current?.click(),
+      primary: true,
+    },
+  ];
+
+  if (voice.supported) {
+    tools.push({
+      key: 'voice',
+      icon: voice.listening ? Square : Mic,
+      active: voice.listening,
+      label: voice.listening ? 'Dừng nhận diện giọng nói' : 'Nhập bằng giọng nói',
+      shortLabel: voice.listening ? 'Dừng ghi âm' : 'Giọng nói',
+      onClick: () => {
+        voice.clearError();
+        voice.toggle();
+      },
+      primary: true,
+    });
+  }
+
+  if (onToggleWebSearch) {
+    tools.push({
+      key: 'web',
+      icon: Globe,
+      active: webSearch,
+      disabled: isStreaming,
+      label: webSearch ? 'Tắt tìm kiếm web' : 'Bật tìm kiếm web',
+      shortLabel: 'Tìm kiếm web',
+      onClick: onToggleWebSearch,
+    });
+  }
+
+  if (onToggleAgentMode) {
+    tools.push({
+      key: 'agent-mode',
+      icon: Pencil,
+      active: agentMode === 'plan',
+      disabled: isStreaming,
+      label: agentMode === 'plan' ? 'Chuyển sang ACT mode' : 'Chuyển sang PLAN mode',
+      shortLabel: 'PLAN mode',
+      onClick: onToggleAgentMode,
+    });
+  }
+
+  if (onOpenOrchestrator) {
+    tools.push({
+      key: 'orchestrator',
+      icon: Network,
+      active: orchestratorOpen,
+      label: 'Orchestrator — chạy nhiều agent theo lưới tham số rồi tổng hợp',
+      shortLabel: 'Orchestrator',
+      onClick: onOpenOrchestrator,
+    });
+  }
+
+  if (onPickWorkspace) {
+    tools.push({
+      key: 'workspace',
+      icon: FolderOpen,
+      active: workspace?.connected,
+      label: workspace?.connected ? `Workspace: ${workspace.name}` : 'Kết nối thư mục làm việc',
+      shortLabel: 'Thư mục làm việc',
+      onClick: onPickWorkspace,
+    });
+  }
+
+  if (onDisconnectWorkspace && workspace?.connected) {
+    tools.push({
+      key: 'workspace-disconnect',
+      icon: FolderX,
+      disabled: isStreaming,
+      label: `Ngắt kết nối: ${workspace.name ?? 'workspace'}`,
+      shortLabel: 'Ngắt thư mục làm việc',
+      onClick: onDisconnectWorkspace,
+    });
+  }
+
+  if (onOpenStaging && (stagedFileCount ?? 0) > 0) {
+    tools.push({
+      key: 'staging',
+      icon: FileText,
+      label: `${stagedFileCount} file đang staged`,
+      shortLabel: 'File đã staged',
+      badge: String(stagedFileCount),
+      onClick: onOpenStaging,
+    });
+  }
+
+  if (mediaActions?.image) {
+    tools.push({
+      key: 'image',
+      icon: ImagePlus,
+      disabled: !canGenerateMedia,
+      label: `Tạo ảnh bằng ${mediaActions.image.label}`,
+      shortLabel: 'Tạo ảnh',
+      onClick: () => startMedia(mediaActions.image, 'image'),
+    });
+  }
+
+  if (mediaActions?.video) {
+    tools.push({
+      key: 'video',
+      icon: Film,
+      disabled: !canGenerateMedia,
+      label: `Tạo video bằng ${mediaActions.video.label}`,
+      shortLabel: 'Tạo video',
+      onClick: () => startMedia(mediaActions.video, 'video'),
+    });
+  }
+
+  const primaryTools = tools.filter((t) => t.primary);
+  const overflowTools = tools.filter((t) => !t.primary);
+
   return (
     <div className="pb-composer w-full px-4 pt-3">
       <div className="mx-auto w-full max-w-thread">
@@ -489,122 +725,77 @@ export function Composer({
               slashOpen ? `slash-opt-${slashMatches[slashIndex]?.id}` : undefined
             }
             placeholder="Nhắn tin cho AI..."
-            className="w-full resize-none bg-transparent px-4 pb-1 pt-3 text-[15px] leading-relaxed text-slate-100 outline-none placeholder:text-slate-500"
+            className="w-full resize-none bg-transparent px-4 pb-1 pt-3 text-[16px] leading-relaxed text-slate-100 outline-none placeholder:text-slate-500 sm:text-[15px]"
           />
 
-          <div className="flex items-center justify-between gap-2 px-2 pb-2 pb-safe-2 pt-1">
-            <div className="flex items-center gap-0.5">
-              <ToolbarButton
-                icon={Paperclip}
-                onClick={() => fileInputRef.current?.click()}
-                label="Đính kèm tệp"
-              />
-              <input
-                ref={fileInputRef}
-                type="file"
-                multiple
-                hidden
-                onChange={(e) => {
-                  acceptFiles(e.target.files);
-                  e.target.value = '';
-                }}
-              />
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            hidden
+            onChange={(e) => {
+              acceptFiles(e.target.files);
+              e.target.value = '';
+            }}
+          />
 
-              {voice.supported && (
-                <ToolbarButton
-                  icon={voice.listening ? Square : Mic}
-                  active={voice.listening}
-                  onClick={() => {
-                    voice.clearError();
-                    voice.toggle();
-                  }}
-                  label={voice.listening ? 'Dừng nhận diện giọng nói' : 'Nhập bằng giọng nói'}
-                />
-              )}
+          <div className="flex items-center gap-2 px-2 pb-safe-2 pt-1">
+            {/*
+             * Cụm TRÁI (công cụ). Hai lớp bảo vệ để cụm phải không bao giờ bị
+             * đẩy ra khỏi thanh:
+             *  1. Vùng chứa nút là scroll container (`overflow-x-auto` +
+             *     `min-w-0`) → có thể co về 0 và cuộn ngang thay vì tràn.
+             *  2. Các công cụ phụ gom vào menu "⋯" trên mobile → cụm trái chỉ
+             *     còn 2–3 nút, hiếm khi phải cuộn.
+             * Dùng `grow` (basis auto) chứ không dùng `flex-1` (basis 0%):
+             * với basis 0 cụm này không báo kích thước nội dung, nên khi thiếu
+             * chỗ nó co về 0 và dồn toàn bộ phần thiếu hụt sang bên phải.
+             */}
+            <div className="flex min-w-0 grow shrink-0 items-center gap-0.5 sm:shrink">
+              <div className="no-scrollbar -mx-0.5 -my-1 flex min-w-0 grow items-center gap-0.5 overflow-x-auto overscroll-x-contain px-0.5 py-1">
+                {primaryTools.map((t) => (
+                  <ToolbarButton
+                    key={t.key}
+                    icon={t.icon}
+                    label={t.label}
+                    active={t.active}
+                    disabled={t.disabled}
+                    badge={t.badge}
+                    onClick={t.onClick}
+                  />
+                ))}
+                {overflowTools.map((t) => (
+                  <ToolbarButton
+                    key={t.key}
+                    icon={t.icon}
+                    label={t.label}
+                    active={t.active}
+                    disabled={t.disabled}
+                    badge={t.badge}
+                    onClick={t.onClick}
+                    className="hidden sm:flex"
+                  />
+                ))}
+              </div>
 
-              {onPickWorkspace && (
-                <ToolbarButton
-                  icon={FolderOpen}
-                  active={workspace?.connected}
-                  onClick={onPickWorkspace}
-                  label={workspace?.connected ? `Workspace: ${workspace.name}` : 'Kết nối thư mục làm việc'}
-                />
-              )}
-
-              {onDisconnectWorkspace && workspace?.connected && (
-                <ToolbarButton
-                  icon={FolderX}
-                  disabled={isStreaming}
-                  onClick={onDisconnectWorkspace}
-                  label={`Ngắt kết nối: ${workspace.name ?? 'workspace'}`}
-                />
-              )}
-
-              {onToggleWebSearch && (
-                <ToolbarButton
-                  icon={Globe}
-                  active={webSearch}
-                  disabled={isStreaming}
-                  onClick={onToggleWebSearch}
-                  label={webSearch ? 'Tắt tìm kiếm web' : 'Bật tìm kiếm web'}
-                />
-              )}
-
-              {onToggleAgentMode && (
-                <ToolbarButton
-                  icon={Pencil}
-                  active={agentMode === 'plan'}
-                  disabled={isStreaming}
-                  onClick={onToggleAgentMode}
-                  label={agentMode === 'plan' ? 'Chuyển sang ACT mode' : 'Chuyển sang PLAN mode'}
-                />
-              )}
-
-              {onOpenOrchestrator && (
-                <ToolbarButton
-                  icon={Network}
-                  active={orchestratorOpen}
-                  onClick={onOpenOrchestrator}
-                  label="Orchestrator — chạy nhiều agent theo lưới tham số rồi tổng hợp"
-                />
-              )}
-
-              {onOpenStaging && (stagedFileCount ?? 0) > 0 && (
-                <ToolbarButton
-                  icon={FileText}
-                  onClick={onOpenStaging}
-                  label={`${stagedFileCount} file đang staged`}
-                  badge={String(stagedFileCount)}
-                />
-              )}
-
-              {mediaActions?.image && (
-                <ToolbarButton
-                  icon={ImagePlus}
-                  disabled={!canGenerateMedia}
-                  onClick={() => startMedia(mediaActions.image, 'image')}
-                  label={`Tạo ảnh bằng ${mediaActions.image.label}`}
-                />
-              )}
-
-              {mediaActions?.video && (
-                <ToolbarButton
-                  icon={Film}
-                  disabled={!canGenerateMedia}
-                  onClick={() => startMedia(mediaActions.video, 'video')}
-                  label={`Tạo video bằng ${mediaActions.video.label}`}
-                />
-              )}
+              {overflowTools.length > 0 && <OverflowMenu tools={overflowTools} />}
             </div>
 
-            <div className="flex items-center gap-2">
+            {/*
+             * Cụm PHẢI (mức suy luận + model + gửi). Không có `shrink-0` ở đây:
+             * cụm được phép co lại (nhãn model tự truncate) nhưng nút gửi và
+             * thanh suy luận thì không — vậy chúng luôn nằm trong thanh.
+             */}
+            <div className="flex min-w-0 items-center gap-1.5 sm:gap-2">
               {thinkingLevel && onThinkingLevelChange && (
-                <ThinkingSlider
-                  value={thinkingLevel}
-                  onChange={onThinkingLevelChange}
-                  disabled={isStreaming}
-                  supportedLevels={thinkingSupportedLevels}
-                />
+                <div className="flex-none">
+                  <ThinkingSlider
+                    value={thinkingLevel}
+                    onChange={onThinkingLevelChange}
+                    disabled={isStreaming}
+                    supportedLevels={thinkingSupportedLevels}
+                  />
+                </div>
               )}
               <ModelSelector
                 models={models}
@@ -612,7 +803,7 @@ export function Composer({
                 onChange={onModelChange}
                 disabled={isStreaming}
               />
-              <div className="h-4 w-px bg-white/10" />
+              <div className="hidden h-4 w-px flex-none bg-white/10 sm:block" />
               <SendButton
                 isStreaming={isStreaming}
                 canSubmit={canSubmit}

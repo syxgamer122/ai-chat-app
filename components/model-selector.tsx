@@ -223,7 +223,7 @@ export function ModelSelector({
   };
 
   return (
-    <div ref={wrapRef} className="relative">
+    <div ref={wrapRef} className="relative min-w-0">
       <button
         ref={triggerRef}
         type="button"
@@ -239,11 +239,16 @@ export function ModelSelector({
         aria-expanded={open}
         aria-controls={open ? listId : undefined}
         aria-label={`Model: ${current?.label ?? 'chưa chọn'}`}
-        className="flex h-8 items-center gap-1.5 rounded-full px-2.5 text-[12px] font-medium text-zinc-600 transition-colors hover:bg-zinc-200/70 hover:text-zinc-900 disabled:opacity-50"
+        className="flex h-8 max-w-full items-center gap-1.5 rounded-full px-2.5 text-[12px] font-medium text-zinc-600 transition-colors hover:bg-zinc-200/70 hover:text-zinc-900 disabled:opacity-50"
       >
-        <Sparkles size={13} className="text-brand" />
-        <span className="max-w-[34vw] truncate sm:max-w-[160px]">{current?.label ?? 'Model'}</span>
-        <ChevronDown size={13} className="text-zinc-400" />
+        {/*
+         * Ẩn icon + chừa chỗ cho nhãn trên mobile: cụm [model][gửi] phải nhường
+         * chỗ cho công cụ, và nhãn model là thứ duy nhất được phép teo lại
+         * (`truncate`) chứ không được đẩy nút gửi ra ngoài thanh.
+         */}
+        <Sparkles size={13} className="hidden flex-none text-brand sm:block" />
+        <span className="min-w-0 max-w-[30vw] truncate sm:max-w-[160px]">{current?.label ?? 'Model'}</span>
+        <ChevronDown size={13} className="flex-none text-zinc-400" />
       </button>
 
       {open && (
@@ -271,7 +276,7 @@ export function ModelSelector({
                 }}
                 aria-label="Tìm model"
                 placeholder={`Tìm trong ${models.length} model…`}
-                className="w-full bg-transparent text-[13px] text-zinc-800 outline-none placeholder:text-zinc-500"
+                className="w-full bg-transparent text-[16px] text-zinc-800 outline-none placeholder:text-zinc-500 sm:text-[13px]"
               />
             </div>
           </div>

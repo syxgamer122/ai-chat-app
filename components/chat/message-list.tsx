@@ -338,10 +338,10 @@ export const MessageList = memo(function MessageList({
         {!hasMessages ? (
           <div className="mx-auto flex h-full max-w-thread flex-col items-center justify-center px-4 pb-16 pt-10">
             <KodaLogo size="lg" className="mb-5" />
-            <h1 className="w-full min-w-0 text-center text-[20px] font-semibold leading-tight tracking-tight text-zinc-800 md:text-[26px]">
+            <h1 className="w-full min-w-0 max-w-[16rem] text-balance text-center text-[20px] font-semibold leading-tight tracking-tight text-zinc-800 sm:max-w-none md:text-[26px]">
               Hôm nay mình giúp gì cho bạn?
             </h1>
-            <p className="mt-2 text-center text-[13px] text-zinc-500">
+            <p className="mt-2 w-full min-w-0 text-pretty text-center text-[13px] text-zinc-500">
               Hỏi bất cứ điều gì — nói bằng giọng nói, hoặc gõ / để chèn prompt mẫu.
             </p>
             <div className="mt-8 grid w-full grid-cols-1 gap-2.5 sm:grid-cols-2">
