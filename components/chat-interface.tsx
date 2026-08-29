@@ -28,6 +28,14 @@ import { useCrossTabChatSync } from '@/lib/use-cross-tab-chat-sync';
 import { chatBroadcast } from '@/lib/chat-broadcast';
 import { createMutationId } from '@/lib/client-identity';
 import { useStickToBottom } from '@/lib/use-stick-to-bottom';
+import { useRunLifecycle } from '@/lib/hooks/use-run-lifecycle';
+import {
+  RUN_LIFECYCLE_KV_KEY,
+  isTerminal,
+  parseRunState,
+  reconcileOnBoot,
+  serializeRunState,
+} from '@/lib/run-lifecycle';
 import { Composer, type MediaAction, type MediaActions } from '@/components/composer';
 import { Toast } from '@/components/toast';
 import type { ModelOption } from '@/components/model-selector';
@@ -147,6 +155,8 @@ import { normalizePathKey } from '@/lib/path-utils';
 import { DiffConfirm, type DiffConfirmState } from '@/components/diff-confirm';
 import { ShellConfirm } from '@/components/shell-confirm';
 import { StagingPanel, type StagingPanelState } from '@/components/staging-panel';
+import { OrchestratorPanel } from '@/components/orchestrator/orchestrator-panel';
+import { useOrchestrator } from '@/lib/use-orchestrator';
 import { toSkills } from '@/lib/prompt-library';
 import { matchActiveSkills } from '@/lib/skills';
 import { gatherPdfContexts } from '@/lib/use-pdf-context';
@@ -431,6 +441,17 @@ export default function ChatInterface() {
   const [stagingVersion, setStagingVersion] = useState(0);
   const [stagingPanelOpen, setStagingPanelOpen] = useState(false);
 
+  /**
+   * Orchestrator (port agent-orchestrator + vectorbt): chạy N agent theo lưới
+   * tham số, chấm điểm, tổng hợp.
+   *
+   * CỐ TÌNH là một mặt phẳng RIÊNG, không cắm vào luồng gửi tin nhắn: kết quả
+   * chỉ đi vào hội thoại khi người dùng bấm "Dùng kết quả" (đẩy text vào ô
+   * nhập). Nhờ vậy không đụng vào cây nhánh (seq/branchOrder/parentId).
+   */
+  const [orchestratorOpen, setOrchestratorOpen] = useState(false);
+  const orchestrator = useOrchestrator();
+
   /** Auto-debug loop state: track retry attempts per command. */
   const debugLoopRef = useRef<DebugStore>(emptyDebugStore());
 
@@ -628,10 +649,18 @@ export default function ChatInterface() {
   const [diffState, setDiffState] = useState<DiffConfirmState | null>(null);
   const diffOpenRef = useRef(false);
   const diffQueueRef = useRef<DiffConfirmState[]>([]);
+  /* Run lifecycle nằm ở phía DƯỚI file (phụ thuộc useChat), nên modal — vốn
+     được định nghĩa trước — đi qua ref. */
+  const awaitUserRef = useRef<() => void>(() => {});
+  const resumeRef = useRef<() => void>(() => {});
+
   const showDiffModal = useCallback(
     (s: Omit<DiffConfirmState, 'open' | 'resolve'>): Promise<boolean> =>
       new Promise((resolve) => {
         const item: DiffConfirmState = { ...s, open: true, resolve };
+        /* Run đậu lại chờ người dùng: KHÔNG được tính là stalled, nếu không
+           modal mở 2 phút là bị reconciler kết luận "stream đứt" và giết run. */
+        awaitUserRef.current();
         if (diffOpenRef.current) {
           diffQueueRef.current.push(item);
           return;
@@ -649,6 +678,7 @@ export default function ChatInterface() {
     }
     diffOpenRef.current = false;
     setDiffState(null);
+    resumeRef.current();
   }, []);
   // Shell approval — tương tự diff queue để không ghi đè khi model gọi
   // liên tiếp 2 shell_run trong cùng step.
@@ -660,6 +690,7 @@ export default function ChatInterface() {
     (s: Omit<ShellConfirmState, 'open' | 'resolve'>): Promise<boolean> =>
       new Promise((resolve) => {
         const item: ShellConfirmState = { ...s, open: true, resolve };
+        awaitUserRef.current();
         if (shellOpenRef.current) {
           shellQueueRef.current.push(item);
           return;
@@ -677,6 +708,7 @@ export default function ChatInterface() {
     }
     shellOpenRef.current = false;
     setShellState(null);
+    resumeRef.current();
   }, []);
   useEffect(() => {
     /* Khôi phục handle phiên trước. PHẢI đồng bộ lại state sau khi xong:
@@ -1182,6 +1214,69 @@ export default function ChatInterface() {
         : {}),
   }), [accessCode, activeProvider, apiKey]);
 
+  /* ------------------------------------------------------------------ */
+  /* Vòng đời run — desired/observed reconciler                          */
+  /* ------------------------------------------------------------------ */
+  /**
+   * `isLoading` của useChat là MỘT boolean: không phân biệt được "đang chạy
+   * khoẻ", "stream đứt" và "đã dừng có chủ đích", và không bao giờ tự kết
+   * luận. Reconciler này đặt trần thời gian lên từng giai đoạn và tự chốt
+   * trạng thái terminal khi run thực sự chết.
+   *
+   * `stop`/`reload`/`messages` do useChat cấp ở phía DƯỚI, nên đi qua ref —
+   * callback của hook không được phụ thuộc vào chúng (nếu không mỗi lần
+   * messages đổi là lịch reconcile bị giật lại).
+   */
+  const chatStopRef = useRef<() => void>(() => {});
+  const chatReloadRef = useRef<() => void>(() => {});
+  const messagesForRepairRef = useRef<Message[]>([]);
+
+  /**
+   * Object do hook trả về là MỚI mỗi render, nhưng từng hàm bên trong được
+   * useCallback nên ổn định. Tách ra để đưa vào dep array mà không làm
+   * submitTurn bị tạo lại mỗi lần re-render.
+   */
+  const {
+    snapshot: runSnapshot,
+    begin: beginRun,
+    touch: touchRun,
+    stop: stopRun,
+    succeed: succeedRun,
+    fail: failRun,
+    setRepairable,
+    awaitUser: awaitUserRun,
+    resume: resumeRun,
+    hydrate: hydrateRun,
+    current: currentRun,
+  } = useRunLifecycle({
+    onRepair: (attempt) => {
+      /**
+       * Tiếp tục một run đang kẹt bằng cách gửi lại. CHỈ làm khi bong bóng
+       * assistant chưa có nội dung — reload() vứt toàn bộ phần đã stream, nên
+       * nếu người dùng đang nhìn thấy văn bản thì "sửa" là huỷ kết quả, tệ hơn
+       * là để họ tự bấm Tiếp tục.
+       */
+      const last = messagesForRepairRef.current[messagesForRepairRef.current.length - 1];
+      const hasPartial =
+        last?.role === 'assistant' && String(last.content ?? '').trim().length > 0;
+      if (hasPartial) {
+        stopRun();
+        return;
+      }
+      showNotice(`Không nhận được phản hồi — thử lại lần ${attempt}…`, 4000);
+      void chatReloadRef.current();
+    },
+    onTerminate: (reason) => {
+      chatStopRef.current();
+      if (reason === 'user_stop') return;
+      const text =
+        reason === 'deadline'
+          ? 'Run vượt quá thời gian cho phép và đã bị dừng.'
+          : 'Không nhận được phản hồi từ nhà cung cấp — run đã bị gián đoạn. Bấm "Tạo lại" để thử lại.';
+      showNotice(text, 6000);
+    },
+  });
+
   const {
     messages, setMessages, input, setInput, handleInputChange,
     handleSubmit, stop, reload, append, isLoading, error, data,
@@ -1230,6 +1325,13 @@ export default function ChatInterface() {
     maxSteps: CLIENT_MAX_STEPS,
     onToolCall: handleClientToolCall,
     onFinish: (message, { finishReason, usage }) => {
+      /**
+       * Mỗi lần kết thúc một bước là một tiến triển — đẩy heartbeat để stall
+       * detector không kết luận oan trong lúc client đang thực thi tool rồi
+       * resubmit (khoảng lặng giữa hai request có thể dài).
+       */
+      touchRun();
+
       // Đóng checkpoint turn — các snapshot của response này đã được lưu
       // (fire-and-forget); lượt agent kế tiếp mở capture mới.
       closeTurnCapture();
@@ -1274,6 +1376,7 @@ export default function ChatInterface() {
        */
       if (!clean.trim() && finishReason !== 'tool-calls') {
         finishRef.current = 'error';
+        failRun();
         showNotice('Nhà cung cấp trả về phản hồi rỗng. Bấm "Tạo lại" hoặc đổi model khác thử lại.', 6000);
         setMessages((prev) =>
           prev.map((m) =>
@@ -1331,9 +1434,123 @@ export default function ChatInterface() {
       if (finishReason === 'length') {
         console.warn('[chat] câu trả lời bị cắt do giới hạn token');
       }
+
+      /**
+       * Kết thúc thật sự: chỉ khi bước cuối KHÔNG phải 'tool-calls'. Trường hợp
+       * còn lại là useChat đang resubmit để model đọc kết quả tool — run vẫn
+       * sống, tuyệt đối không chốt succeeded ở đây.
+       */
+      if (finishReason !== 'tool-calls' && finishRef.current !== 'error') {
+        succeedRun();
+      }
     },
-    onError: (err) => console.error('[useChat]', err),
+    onError: (err) => {
+      console.error('[useChat]', err);
+      failRun();
+    },
   });
+
+  /* Nối các ref mà reconciler dùng — dùng ref để callback ở trên không bị
+     phụ thuộc vào identity của hàm/mảng do useChat cấp. */
+  useEffect(() => {
+    chatStopRef.current = stop;
+    chatReloadRef.current = () => void reload();
+    messagesForRepairRef.current = messages;
+  }, [stop, reload, messages]);
+
+  useEffect(() => {
+    awaitUserRef.current = awaitUserRun;
+    resumeRef.current = resumeRun;
+  }, [awaitUserRun, resumeRun]);
+
+  /**
+   * KHÔI PHỤC RUN MỒ CÔI SAU RELOAD.
+   *
+   * Vấn đề: reconciler chỉ sống trong bộ nhớ tab. Reload = mất hết timer, trong
+   * khi upstream có thể vẫn đang stream. Không làm gì thì UI treo spinner ma
+   * (useChat `isLoading` tắt nhưng không ai giải thích vì sao không có câu
+   * trả lời).
+   *
+   * Cách xử lý — và lý do KHÔNG rescue: sau reload, mọi continuation đang kẹt
+   * đều đã mất cùng tab, nên `canRepair` bị ép về false. Run còn tươi
+   * (≤ ORPHAN_GRACE_MS) được giao lại cho vòng reconcile bình thường; run đã
+   * im lặng quá ngưỡng thì `reconcileOnBoot` chốt luôn là gián đoạn thay vì
+   * bắt người dùng chờ một thứ không bao giờ tới.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const saved = await (async () => {
+        try {
+          const row = await db.kv.get(RUN_LIFECYCLE_KV_KEY);
+          return parseRunState(row?.value);
+        } catch {
+          return null; // kv hỏng/private mode — coi như không có gì để khôi phục
+        }
+      })();
+      if (cancelled || !saved) return;
+
+      /* Run đã kết thúc từ trước → không có gì để khôi phục. Xoá để lần boot
+         sau không đọc nhầm (kv có thể còn sót từ bản cũ chưa biết xoá). */
+      if (isTerminal(saved.observed)) {
+        void db.kv.delete(RUN_LIFECYCLE_KV_KEY).catch(() => {});
+        return;
+      }
+
+      const { action, next } = reconcileOnBoot(saved);
+      /* Ép canRepair=false: repair sau reload là vô nghĩa (không còn
+         continuation để gửi lại), và nếu để true, vòng reconcile sẽ gọi
+         reload() trên một cuộc hội thoại chưa kịp nạp xong. */
+      hydrateRun({ ...next, canRepair: false });
+
+      if (action.kind === 'terminate') {
+        showNotice('Phiên trả lời trước bị gián đoạn do trang được tải lại.', 6000);
+        chatStopRef.current();
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [hydrateRun, showNotice]);
+
+  /**
+   * Ghi trạng thái run xuống kv để lần boot sau có cái mà khôi phục.
+   * Chỉ chạy khi `runSnapshot` đổi — tức là khi phần "đáng để vẽ lại" của
+   * state đổi, không phải mỗi token (heartbeat đi qua ref, không re-render).
+   */
+  useEffect(() => {
+    if (runSnapshot.observed === 'idle') return;
+    const state = currentRun();
+    /* Run đã xong → dọn kv, kẻo lần boot sau đọc phải trạng thái cũ và hiện
+       nhãn "Hoàn tất"/"Bị gián đoạn" oan. */
+    if (isTerminal(state.observed)) {
+      void db.kv.delete(RUN_LIFECYCLE_KV_KEY).catch(() => {});
+      return;
+    }
+    void db.kv.put({ key: RUN_LIFECYCLE_KV_KEY, value: serializeRunState(state) }).catch(() => {});
+  }, [runSnapshot, currentRun]);
+
+  /**
+   * Heartbeat của run suy ra từ NỘI DUNG stream.
+   *
+   * useChat KHÔNG có callback per-chunk, nên cách đáng tin duy nhất để biết
+   * "run vẫn đang sống" là xem chiều dài nội dung assistant có tăng không.
+   * Thiếu cái này thì một câu trả lời stream trong 60s sẽ bị STARTUP_GRACE_MS
+   * (25s) kết luận là đứt — giết oan run đang chạy bình thường.
+   *
+   * Rẻ: chỉ đọc chiều dài chuỗi rồi ghi ref, KHÔNG gây re-render.
+   */
+  const streamProgressRef = useRef('');
+  useEffect(() => {
+    const last = messages[messages.length - 1];
+    if (!last) return;
+    const content = String(last.content ?? '').length;
+    const reasoning = String((last as { reasoning?: string }).reasoning ?? '').length;
+    const sig = `${last.id}:${content}:${reasoning}`;
+    if (sig === streamProgressRef.current) return;
+    streamProgressRef.current = sig;
+    touchRun();
+  }, [messages, touchRun]);
 
   /* Reset bộ đếm auto-retry emulated khi user gửi tin nhắn MỚI — reload()
      của lượt thử giữ nguyên user message nên không đụng effect này, tránh
@@ -1753,6 +1970,10 @@ export default function ChatInterface() {
 
         if (isLoading && previousChatId.current) {
           finishRef.current = 'abort';
+          /* Báo reconciler TRƯỚC khi abort: nó chuyển desired='stopped' và tự
+             chốt terminated, nên UI hiện "Đã dừng" thay vì kẹt ở "Đang
+             trả lời" nếu abort() không làm isLoading rơi xuống ngay. */
+          stopRun();
           stop();
         }
 
@@ -1789,6 +2010,10 @@ export default function ChatInterface() {
 
   const handleStop = useCallback(() => {
     finishRef.current = 'abort';
+    /* Báo reconciler TRƯỚC khi abort: nó chuyển desired='stopped' và tự
+       chốt terminated, nên UI hiện "Đã dừng" thay vì kẹt ở "Đang
+       trả lời" nếu abort() không làm isLoading rơi xuống ngay. */
+    stopRun();
     stop();
     closeTurnCapture();
 
@@ -2311,6 +2536,10 @@ export default function ChatInterface() {
       if (event.type === 'chat-deleted') {
         if (event.sessionId !== currentChatIdRef.current) return;
         finishRef.current = 'abort';
+        /* Báo reconciler TRƯỚC khi abort: nó chuyển desired='stopped' và tự
+           chốt terminated, nên UI hiện "Đã dừng" thay vì kẹt ở "Đang
+           trả lời" nếu abort() không làm isLoading rơi xuống ngay. */
+        stopRun();
         stop();
         setCurrentChatId(null);
         showNotice('Cuộc trò chuyện này đã bị xoá ở tab khác.');
@@ -2463,6 +2692,10 @@ export default function ChatInterface() {
       try {
         if (isLoading) {
           finishRef.current = 'abort';
+          /* Báo reconciler TRƯỚC khi abort: nó chuyển desired='stopped' và tự
+             chốt terminated, nên UI hiện "Đã dừng" thay vì kẹt ở "Đang
+             trả lời" nếu abort() không làm isLoading rơi xuống ngay. */
+          stopRun();
           stop();
           /* B2: reset NGAY — nếu không, persist flush kế tiếp đẩy snapshot
              nhánh MỚI qua reconcile với finishReason 'abort' đứng sót →
@@ -3235,6 +3468,23 @@ export default function ChatInterface() {
 
       attachGenRef.current += 1;
       setAttachments([]);
+      /* Bắt đầu một run MỚI: reconciler chuyển idle → starting và bắt đầu đếm
+         STARTUP_GRACE_MS. Phải gọi TRƯỚC handleSubmit — nếu gọi sau, request
+         có thể đã xong trước khi bộ đếm kịp đặt. */
+      beginRun();
+      /**
+       * Bật quyền tự sửa CHO RUN NÀY. `canRepair=false` sẽ làm run bị kẹt đi
+       * thẳng tới terminate (run-lifecycle.ts:356) — tức là tính năng tự gửi
+       * lại không bao giờ chạy nếu thiếu dòng này.
+       *
+       * Chỉ bật khi `beginRun()` thật sự tạo run mới: nó là no-op nếu run trước
+       * chưa kết thúc, mà lúc đó thì không được phép gắn quyền sửa vào run cũ.
+       * `currentRun()` đọc state đồng bộ từ ref, nên thấy ngay kết quả.
+       *
+       * Khi run kết thúc, `settle()` tự trả `canRepair` về false — không cần
+       * tắt thủ công.
+       */
+      if (currentRun().observed === 'starting') setRepairable(true);
       handleSubmit(undefined, options);
       if (isFirstMessage && userText) {
         void generateTitle(chatId, userText);
@@ -3242,7 +3492,9 @@ export default function ChatInterface() {
     } catch (err) {
       console.error('[onSubmit]', err);
     }
-  }, [input, attachments, isLoading, mediaBusy, currentChatId, draftId, setCurrentChatId, handleSubmit, pin, generateTitle, messages.length, showNotice, webSearchEnabled, promptTemplates, agentToolsEnabled, forceEmulatedTools, agentMode, stagingEnabled]);
+    /* beginRun/currentRun/setRepairable là hàm ổn định (useCallback rỗng bên
+       trong hook), nên thêm vào đây không làm submitTurn bị tạo lại. */
+  }, [input, attachments, isLoading, mediaBusy, currentChatId, draftId, setCurrentChatId, handleSubmit, pin, generateTitle, messages.length, showNotice, webSearchEnabled, promptTemplates, agentToolsEnabled, forceEmulatedTools, agentMode, stagingEnabled, beginRun, currentRun, setRepairable]);
 
   const onSubmit = useCallback(
     async (e?: React.FormEvent) => {
@@ -3431,6 +3683,45 @@ export default function ChatInterface() {
     }
   }, []);
 
+  /**
+   * Chạy orchestrator. Ngữ cảnh gửi kèm là 8 tin gần nhất — đủ để lưới hiểu
+   * "đang nói về cái gì" mà không phình payload (mỗi tin bị cắt 8k ký tự ở
+   * server, nhưng client cũng tự cắt để không gửi thừa).
+   */
+  const handleOrchestratorRun = useCallback(
+    (opts: { goal: string; maxRuns: number; judge: boolean }) => {
+      const context = messages
+        .slice(-8)
+        .map((m) => ({
+          role: (m.role === 'assistant' ? 'assistant' : m.role === 'system' ? 'system' : 'user') as
+            | 'user'
+            | 'assistant'
+            | 'system',
+          content: typeof m.content === 'string' ? m.content.slice(0, 2_000) : '',
+        }))
+        .filter((m) => m.content.trim().length > 0);
+
+      void orchestrator.start({
+        goal: opts.goal,
+        context,
+        maxRuns: opts.maxRuns,
+        judge: opts.judge,
+        model,
+        headers: buildApiHeaders(),
+      });
+    },
+    [messages, model, orchestrator, buildApiHeaders],
+  );
+
+  /** "Dùng kết quả": đưa câu trả lời tổng hợp vào ô nhập, người dùng gửi thủ công. */
+  const handleOrchestratorAdopt = useCallback(
+    (text: string) => {
+      if (!text.trim()) return;
+      setInput(text.trim());
+    },
+    [setInput],
+  );
+
   const onTextareaKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if ((e.nativeEvent as any).isComposing || e.keyCode === 229) return;
     if (e.key === 'Escape') { handleStop(); return; }
@@ -3601,6 +3892,8 @@ export default function ChatInterface() {
         onToggleAgentMode={() => updateSettings({ agentMode: agentMode === 'plan' ? 'act' : 'plan' })}
         stagedFileCount={stagingVersion >= 0 ? stagingCount(stagingRef.current) : 0}
         onOpenStaging={() => setStagingPanelOpen(true)}
+        orchestratorOpen={orchestratorOpen}
+        onOpenOrchestrator={() => setOrchestratorOpen(true)}
         webBusy={webBusy}
         workspace={workspace}
         onPickWorkspace={pickFolder}
@@ -3631,6 +3924,18 @@ export default function ChatInterface() {
           onApplyAll={applyAllStaged}
           onRejectFile={rejectStagedFile}
           onRejectAll={rejectAllStaged}
+        />
+      )}
+      {orchestratorOpen && (
+        <OrchestratorPanel
+          open={orchestratorOpen}
+          state={orchestrator.state}
+          busy={orchestrator.busy}
+          initialGoal={input ?? ''}
+          onRun={handleOrchestratorRun}
+          onCancel={orchestrator.cancel}
+          onClose={() => setOrchestratorOpen(false)}
+          onAdopt={handleOrchestratorAdopt}
         />
       )}
       <Toast message={notice} onClose={onClearNotice} />
