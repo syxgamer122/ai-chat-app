@@ -93,3 +93,23 @@ export async function describeWorkspaceImage(
   }
   return { path: image.path, kind: 'image', size: image.size, description: r.description };
 }
+
+/**
+ * Mô tả MỘT data URL ảnh — dùng cho ảnh do tool MCP trả về (không có rel
+ * path trong workspace). Đặt tên khác `describeImageDataUrl` của
+ * lib/vision-bridge.ts (bản server-side, chữ ký khác) để không nhầm lẫn.
+ * Throw khi /api/vision lỗi để caller (lib/mcp/image-content) tự hóa lỗi
+ * thành khối text ghi chú.
+ *
+ * LƯU Ý chữ ký: tham số 2 là fetchImpl (test), KHÔNG khớp McpImageDescriber
+ * của lib/mcp/image-content (tham số 2 là mimeType) — caller PHẢI bọc lambda
+ * khi truyền làm describer.
+ */
+export async function describeMcpImage(
+  dataUrl: string,
+  fetchImpl: typeof fetch = fetch.bind(globalThis),
+): Promise<string> {
+  const r = await callVisionApi(dataUrl, fetchImpl);
+  if (!r.ok) throw new Error(r.error);
+  return r.description;
+}

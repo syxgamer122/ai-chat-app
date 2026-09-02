@@ -10,13 +10,14 @@
  * có từ 2 trục trở lên, các thẻ được tóm tắt thành heatmap.
  *
  * Chủ đích thiết kế: KHÔNG thay thế luồng chat chính. Orchestrator là một mặt
- * phẳng PHÂN TÍCH — chạy xong, người dùng bấm "Dùng kết quả" thì text mới được
- * đưa vào composer. Nhờ vậy panel này không đụng vào cây nhánh hội thoại
- * (seq/branchOrder/parentId), tức là không có rủi ro làm hỏng dữ liệu.
+ * phẳng PHÂN TÍCH — chạy xong, người dùng bấm "Thêm vào hội thoại" để ghi đáp
+ * án tổng hợp vào hội thoại như một message assistant (panel chỉ gọi callback,
+ * việc chạm cây nhánh seq/branchOrder/parentId thuộc về chat-interface), hoặc
+ * "Đưa vào ô nhập" để sửa tay trước khi gửi.
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, Check, Copy, Loader2, Network, Play, RotateCw, X } from 'lucide-react';
+import { AlertTriangle, Check, Copy, Loader2, MessageSquarePlus, Network, Play, RotateCw, X } from 'lucide-react';
 import { MarkdownRenderer } from '@/components/markdown-renderer';
 import { AxisBars, SweepHeatmap } from '@/components/orchestrator/sweep-heatmap';
 import { describeCell } from '@/lib/orchestrator/grid';
@@ -61,21 +62,29 @@ export function OrchestratorPanel({
   open,
   state,
   busy,
+  chatBusy,
   initialGoal,
   onRun,
   onCancel,
   onClose,
   onAdopt,
+  onAppendToChat,
 }: {
   open: boolean;
   state: OrchestratorState;
   busy: boolean;
+  /** Chat chính đang stream/tạo media — không được ghi message vào giữa. */
+  chatBusy: boolean;
   /** Gợi ý sẵn từ ô nhập — người dùng vẫn sửa được trước khi chạy. */
   initialGoal: string;
   onRun: (opts: { goal: string; maxRuns: number; judge: boolean }) => void;
   onCancel: () => void;
   onClose: () => void;
+  /** Đặt đáp án vào ô nhập (nút phụ) — người dùng sửa rồi tự gửi. */
   onAdopt: (text: string) => void;
+  /** Ghi đáp án vào hội thoại hiện tại như message assistant (nút chính).
+   *  Resolve false khi bị guard chặn (busy/đã khoá) — panel KHÔNG đóng. */
+  onAppendToChat: (text: string) => Promise<boolean>;
 }) {
   const [expanded, setExpanded] = useState<number | null>(null);
   const [copied, setCopied] = useState(false);
@@ -107,7 +116,7 @@ export function OrchestratorPanel({
       setCopied(true);
       setTimeout(() => setCopied(false), 1_500);
     } catch {
-      /* clipboard bị chặn — người dùng vẫn bấm "Dùng kết quả" được */
+      /* clipboard bị chặn — người dùng vẫn bấm "Thêm vào hội thoại" được */
     }
   };
 
@@ -418,9 +427,25 @@ export function OrchestratorPanel({
                   onClose();
                 }}
                 disabled={!state.answer}
-                className="rounded-lg bg-[rgb(var(--brand))] px-3 py-1.5 text-[12px] font-semibold text-white hover:bg-[rgb(var(--brand-hover))] disabled:opacity-40"
+                className="rounded-lg border border-zinc-300 px-3 py-1.5 text-[12px] font-medium text-zinc-700 hover:bg-zinc-100 disabled:opacity-40"
               >
-                Dùng kết quả
+                Đưa vào ô nhập
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  /* Chỉ đóng panel khi THÀNH công — guard bên handler từ chối
+                     (busy/race) thì panel ở lại, toast là dấu vết. */
+                  void (async () => {
+                    if (await onAppendToChat(state.answer)) onClose();
+                  })();
+                }}
+                disabled={!state.answer || chatBusy}
+                title={chatBusy ? 'Chờ hết lượt đang chạy của hội thoại rồi thêm' : undefined}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-[rgb(var(--brand))] px-3 py-1.5 text-[12px] font-semibold text-white hover:bg-[rgb(var(--brand-hover))] disabled:opacity-40"
+              >
+                <MessageSquarePlus size={13} />
+                Thêm vào hội thoại
               </button>
             </>
           )}

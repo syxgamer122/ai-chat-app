@@ -116,7 +116,8 @@ import {
   desktopDisconnectWorkspace,
   desktopRequireWorkspace,
 } from '@/lib/desktop-fs';
-import { describeWorkspaceImage, isImagePath } from '@/lib/fs-vision';
+import { describeWorkspaceImage, describeMcpImage, isImagePath } from '@/lib/fs-vision';
+import { hasMcpImages, describeMcpImageBlocks } from '@/lib/mcp/image-content';
 import {
   captureFile,
   newTurnCapture,
@@ -475,11 +476,14 @@ export default function ChatInterface() {
    * tham số, chấm điểm, tổng hợp.
    *
    * CỐ TÌNH là một mặt phẳng RIÊNG, không cắm vào luồng gửi tin nhắn: kết quả
-   * chỉ đi vào hội thoại khi người dùng bấm "Dùng kết quả" (đẩy text vào ô
-   * nhập). Nhờ vậy không đụng vào cây nhánh (seq/branchOrder/parentId).
+   * chỉ vào hội thoại khi người dùng chủ động bấm nút — "Thêm vào hội thoại"
+   * ghi message assistant xuống đúng nhánh đang xem (qua lớp persist sẵn có),
+   * "Đưa vào ô nhập" chỉ đặt text vào composer để người dùng sửa rồi tự gửi.
    */
   const [orchestratorOpen, setOrchestratorOpen] = useState(false);
   const orchestrator = useOrchestrator();
+  /** Chặn ghép 2 lần cùng một kết quả (double-click trước khi panel kịp đóng). */
+  const orchestratorAdoptLockRef = useRef(false);
 
   /** Auto-debug loop state: track retry attempts per command. */
   const debugLoopRef = useRef<DebugStore>(emptyDebugStore());
@@ -921,7 +925,18 @@ export default function ChatInterface() {
             target.toolName,
             (toolCall.args ?? {}) as Record<string, unknown>,
           );
-          return formatMcpResultForModel(result, toolCall.toolName);
+          /* Ảnh do MCP trả về → mô tả text qua pipeline vision TRƯỚC khi nén
+             thành string cho model (đường sync chỉ để placeholder). Bỏ qua
+             khi denied/isError — kết quả khi đó bị nén thành JSON lỗi, mô tả
+             ảnh chỉ tốn lệnh vision (~35s + ngân sách rate limit của route).
+             Tầng này phục vụ cả tool MCP của subagent (relay đi qua handler
+             này). Lambda bọc vì describeMcpImage nhận fetchImpl ở tham số 2,
+             không khớp McpImageDescriber (mimeType). */
+          let content = result.content;
+          if (!result.denied && !result.isError && hasMcpImages(content)) {
+            content = await describeMcpImageBlocks(content, (url) => describeMcpImage(url));
+          }
+          return formatMcpResultForModel({ ...result, content }, toolCall.toolName);
         } catch (err) {
           /* Lỗi GIAO THỨC (mất kết nối, timeout, người dùng từ chối ở tầng
              IPC) — khác với lỗi nghiệp vụ đã được format ở trên. */
@@ -4075,13 +4090,131 @@ export default function ChatInterface() {
     [messages, model, orchestrator, buildApiHeaders],
   );
 
-  /** "Dùng kết quả": đưa câu trả lời tổng hợp vào ô nhập, người dùng gửi thủ công. */
+  /** "Đưa vào ô nhập" (hành vi cũ của nút chính, giờ là nút phụ): người dùng sửa rồi tự gửi. */
   const handleOrchestratorAdopt = useCallback(
     (text: string) => {
       if (!text.trim()) return;
       setInput(text.trim());
     },
     [setInput],
+  );
+
+  /**
+   * "Thêm vào hội thoại": ghi đáp án tổng hợp của orchestrator vào hội thoại
+   * HIỆN TẠI như một message assistant (nguyên văn, không cắt), kèm annotation
+   * `orchestratorAdopted` làm provenance để UI sau này gắn huy hiệu cho đúng
+   * message kể cả sau reload.
+   *
+   * Persist đi qua đúng lớp đồng bộ sẵn có: setMessages → effect sync →
+   * reconcileActiveMessages → appendMessage (cấp seq/branchOrder nguyên tử
+   * trong transaction, parentId = message cuối nhánh đang xem). KHÔNG dùng
+   * append() của useChat — hook ai@4 trigger request /api/chat cho MỌI append,
+   * mà message "chép" này không được phép tốn token.
+   */
+  const handleOrchestratorAppendToChat = useCallback(
+    async (text: string): Promise<boolean> => {
+      const answer = text.trim();
+      /* Nút đã disable khi answer rỗng — guard này cho các đường gọi khác. */
+      if (!answer) return false;
+      /* Run đang sống (stream/media) → ghi giữa chừng phá projection persist. */
+      if (isLoading) {
+        showNotice('Đang trả lời — chờ hết lượt này rồi thêm kết quả nhé.');
+        return false;
+      }
+      if (mediaBusy) {
+        showNotice('Đang tạo media — đợi xong hoặc bấm Dừng đã nhé.');
+        return false;
+      }
+      if (orchestratorAdoptLockRef.current) return false;
+      orchestratorAdoptLockRef.current = true;
+
+      try {
+        /* Persist đọc finishRef làm finishReason cho assistant CUỐI projection —
+           reset để run lỗi/abort trước đó không dính status 'error' lên message mới. */
+        finishRef.current = 'stop';
+        /* Message này KHÔNG phải assistant fork của Edit/Regenerate. */
+        pendingAssistantForkRef.current = null;
+
+        /* Chưa có chat (mới là draftId): effect persist bỏ qua messages khi
+           currentChatId null, nên phải tạo chat trước — đúng pattern của
+           submitTurn / handleGenerateMedia. */
+        let chatId = currentChatId;
+        if (!chatId) {
+          chatId = draftId;
+          hydratedFor.current = chatId;
+          await db.chats.put({
+            id: chatId,
+            title: 'New Chat',
+            pinned: 0,
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          });
+          setCurrentChatId(chatId);
+        }
+
+        /* Hành động thủ công của user = đổi hướng — dừng goal loop như
+           submitTurn, tránh message adopt lọt vào giữa các steering turn
+           thành ngữ cảnh lạ cho lượt kế. */
+        if (getGoalLoop(chatId)?.status === 'active') {
+          setGoalLoop(stopGoalLoop(chatId));
+        }
+
+        const isFirstMessage = messages.length === 0;
+        const st = orchestrator.state;
+        const adopted: Message = {
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          content: answer,
+          createdAt: new Date(),
+          annotations: [
+            {
+              orchestratorAdopted: {
+                goal: st.plan?.goal ?? '',
+                runs: st.total,
+                ok: st.stats?.ok ?? null,
+                failed: st.stats?.failed ?? null,
+                model,
+                adoptedAt: Date.now(),
+              },
+            },
+          ] as Message['annotations'],
+        };
+
+        /* Không loading → effect persist flush NGAY (không đợi timer 250ms)
+           nhưng vẫn là eventual: ghi Dexie đi qua effect + promise chain,
+           KHÔNG await được — đóng tab ngay sau khi bấm có thể mất message. */
+        setMessages((prev) => [...prev, adopted]);
+        pin(1500);
+
+        /* Draft vừa thành chat: sinh title từ mục tiêu sweep (đầy đủ ý hơn
+           đáp án dài); plan hỏng thì fallback về chính đáp án. */
+        if (isFirstMessage) {
+          void generateTitle(chatId, st.plan?.goal || answer);
+        }
+        return true;
+      } catch (err) {
+        console.error('[orchestrator-adopt]', err);
+        showNotice('Không thêm được kết quả vào hội thoại. Thử lại giúp nhé.');
+        return false;
+      } finally {
+        orchestratorAdoptLockRef.current = false;
+      }
+    },
+    [
+      currentChatId,
+      draftId,
+      generateTitle,
+      isLoading,
+      mediaBusy,
+      messages.length,
+      model,
+      orchestrator,
+      pin,
+      setCurrentChatId,
+      setGoalLoop,
+      setMessages,
+      showNotice,
+    ],
   );
 
   const onTextareaKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -4316,11 +4449,13 @@ export default function ChatInterface() {
           open={orchestratorOpen}
           state={orchestrator.state}
           busy={orchestrator.busy}
+          chatBusy={isLoading || mediaBusy}
           initialGoal={input ?? ''}
           onRun={handleOrchestratorRun}
           onCancel={orchestrator.cancel}
           onClose={() => setOrchestratorOpen(false)}
           onAdopt={handleOrchestratorAdopt}
+          onAppendToChat={handleOrchestratorAppendToChat}
         />
       )}
       <Toast message={notice} onClose={onClearNotice} />
