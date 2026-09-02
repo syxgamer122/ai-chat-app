@@ -6,7 +6,7 @@
  * Toán nhẹ (fetch + regex), không DOM parser — cùng triết lý với lib/web-extract.
  */
 
-import { assertFetchableUrl } from '@/lib/web-url-guard';
+import { assertFetchableUrl, assertFetchableIp } from '@/lib/web-url-guard';
 import {
   capText,
   extractReadableText,
@@ -34,6 +34,23 @@ export const FETCH_TIMEOUT_MS = 12_000;
 export const SEARCH_TIMEOUT_MS = 8_000;
 /** Số hop redirect tối đa khi tự đi tay (để kiểm tra SSRF TỪNG hop). */
 const MAX_REDIRECTS = 4;
+
+/**
+ * PERF: Cache DNS lookup function để tránh dynamic import mỗi lần fetch.
+ * Edge runtime không có node:dns → cachedDnsLookup = null, check một lần.
+ */
+let cachedDnsLookup: ((hostname: string) => Promise<{ address: string }>) | null | undefined =
+  undefined;
+async function getDnsLookup() {
+  if (cachedDnsLookup !== undefined) return cachedDnsLookup;
+  try {
+    const dns = await import('node:dns/promises');
+    cachedDnsLookup = dns.lookup;
+  } catch {
+    cachedDnsLookup = null; // Edge runtime hoặc môi trường không hỗ trợ
+  }
+  return cachedDnsLookup;
+}
 /** Trần ký tự nội dung mỗi trang đưa vào context (~2k token). */
 const MAX_TEXT_CHARS = WEB_LIMITS.pageContentChars;
 
@@ -131,6 +148,23 @@ export async function guardedFetch(
     if (!trusted) {
       const check = assertFetchableUrl(current);
       if (!check.ok) throw new WebOpError(check.error, 400, 'WEB_URL_BLOCKED');
+      // FIX #1: Chặn DNS rebinding - hostname public nhưng DNS trả về IP private.
+      // assertFetchableUrl chỉ kiểm tra hostname string; fetch() resolve DNS độc lập
+      // nên evil.example.com có thể trỏ về 127.0.0.1/169.254.x.x lúc TCP connect.
+      // PERF: Dùng cached DNS lookup thay vì dynamic import mỗi lần fetch.
+      try {
+        const dnsLookup = await getDnsLookup();
+        if (dnsLookup) {
+          const hostname = new URL(current).hostname;
+          const resolved = await dnsLookup(hostname);
+          const ipCheck = assertFetchableIp(resolved.address);
+          if (!ipCheck.ok) throw new WebOpError(ipCheck.error, 400, 'WEB_URL_BLOCKED');
+        }
+        // dnsLookup === null → Edge runtime, bỏ qua gracefully (đã cache)
+      } catch (dnsErr) {
+        if (dnsErr instanceof WebOpError) throw dnsErr;
+        // Lỗi DNS khác (NXDOMAIN, timeout...) → bỏ qua, fetch() sẽ báo lỗi sau
+      }
     }
 
     const res = await fetch(current, {

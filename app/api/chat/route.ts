@@ -30,6 +30,8 @@ import { parseLooseJson } from '@/lib/json-repair';
 import { isContextOverflowError } from '@/lib/context-budget';
 import { restateUpstreamStatus } from '@/lib/upstream-status-rules';
 import { runEmulatedLoop } from '@/lib/emulated-agent';
+import { runSubagent } from '@/lib/subagent';
+import { mapMcpTools } from '@/lib/mcp/tool-mapper';
 import { formatSkillsBlock } from '@/lib/skills';
 import { formatWebContextBlock, type WebContextPayload } from '@/lib/web-context';
 import { filterSupportedModels, markModelUnsupported } from '@/lib/model-negative-cache';
@@ -43,6 +45,7 @@ import {
   formatToolNameList,
   CLIENT_TOOL_DEFS,
   CLIENT_TOOL_NAMES,
+  NATIVE_EXCLUDED_CLIENT_TOOLS,
 } from '@/lib/agent-tools';
 import { extractLessons, formatLessonsBlock } from '@/lib/lessons';
 import { SERVER_MAX_STEPS, TOOL_RESULT_MAX_CHARS, truncateToolResult } from '@/lib/tool-limits';
@@ -752,6 +755,29 @@ const BodySchema = z.object({
   /* Staging sandbox (Plandex-style): fs_edit/fs_write ghi vào bộ đệm thay vì
      đĩa; user review batch rồi Apply/Reject. Chỉ có ý nghĩa khi workspace đã kết nối. */
   staging: z.boolean().optional(),
+  /**
+   * Tool MCP mà renderer đang thấy qua Electron IPC.
+   *
+   * Server KHÔNG thể gọi MCP (chúng sống trong Electron main) nên renderer
+   * gửi kèm danh sách này ở MỖI request: route chỉ KHAI BÁO để model biết,
+   * còn thực thi xảy ra ở renderer rồi resubmit — đúng một đường đi.
+   *
+   * `.catch(undefined)`: danh sách lỗi (server MCP lạ, bản renderer cũ) không
+   * được phép làm hỏng cả cuộc trò chuyện — MCP là phần cộng thêm, hỏng thì tắt.
+   */
+  mcpTools: z
+    .array(
+      z.object({
+        name: z.string().min(1).max(200),
+        description: z.string().max(4000).default(''),
+        inputSchema: z.record(z.unknown()).default({}),
+        serverId: z.string().min(1).max(64).regex(/^[A-Za-z0-9_-]+$/),
+        serverName: z.string().max(200).default(''),
+      }),
+    )
+    .max(100)
+    .optional()
+    .catch(undefined),
   /* Ghi nhớ dài hạn client gửi kèm (Dexie) — memory_search tool đọc từ đây. */
   memories: z
     .array(
@@ -911,7 +937,7 @@ export async function POST(req: Request) {
       });
     }
 
-    const { model, temperature, system, thinkingLevel, contextSummary, compactBoundaryId, webContext, liveContext, pdfContexts, agentTools, memories, skills, workspace: workspaceState, forceEmulatedTools, agentMode, staging, id: conversationId } =
+    const { model, temperature, system, thinkingLevel, contextSummary, compactBoundaryId, webContext, liveContext, pdfContexts, agentTools, memories, skills, workspace: workspaceState, forceEmulatedTools, agentMode, staging, mcpTools: mcpToolList, id: conversationId } =
       parsed.data;
     const messages = attachToolResultParts(parsed.data.messages);
 
@@ -1604,13 +1630,39 @@ export async function POST(req: Request) {
                        conversationId,
                      })
                    : {};
+                 /**
+                  * Tool MCP do renderer gửi lên.
+                  *
+                  * Chỉ KHAI BÁO (không có execute): MCP sống trong Electron
+                  * main, route không có đường sang đó. Model gọi → stream kết
+                  * thúc bằng 'tool-calls' → forward sang renderer (cùng cơ chế
+                  * với fs_*) → renderer chạy IPC rồi resubmit kết quả.
+                  */
+                 const mcpTools = allowAgentTools
+                   ? mapMcpTools(mcpToolList ?? [])
+                   : mapMcpTools([]);
+                 /**
+                  * Tập tool client của request NÀY = tool client có sẵn + tool MCP
+                  * đang sống. Dùng chung cho cả đường native (forward tool-call)
+                  * lẫn emulated (yield sang renderer).
+                  */
+                 const clientToolNames = new Set<string>([
+                   ...(agentMode === 'plan'
+                     ? [...CLIENT_TOOL_NAMES].filter((n) => !PLAN_MODE_WRITE_TOOLS.has(n))
+                     : CLIENT_TOOL_NAMES),
+                   ...mcpTools.keys,
+                 ]);
+                 /**
+                  * Đường native không quảng cáo được mọi tool client: `delegate`
+                  * cần runSubagent chạy inline, mà cơ chế đó chỉ có ở
+                  * runEmulatedLoop. Bỏ nó khỏi cả khai báo lẫn forwarding để
+                  * model không gọi một tool trả về note vô nghĩa.
+                  */
+                 const nativeClientToolNames = new Set(
+                   [...clientToolNames].filter((n) => !NATIVE_EXCLUDED_CLIENT_TOOLS.has(n)),
+                 );
                  const activeToolNames = allowAgentTools
-                   ? [
-                       ...Object.keys(serverTools),
-                       ...(agentMode === 'plan'
-                         ? [...CLIENT_TOOL_NAMES].filter((n) => !PLAN_MODE_WRITE_TOOLS.has(n))
-                         : CLIENT_TOOL_NAMES),
-                     ]
+                   ? [...Object.keys(serverTools), ...nativeClientToolNames]
                    : [];
                 const prefetchedNotes = [
                   webContext
@@ -1725,6 +1777,38 @@ export async function POST(req: Request) {
                             'rồi chạy LẠI CHÍNH LỆNH ĐÓ để kiểm chứng. Đừng bỏ cuộc sau 1 lần fail. ' +
                             'Nếu retryGuidance nói "STOP" thì dừng và báo người dùng.'
                           : '',
+                        /* Shell output truncation (Goose-style): khi output quá dài,
+                           kết quả chỉ chứa phần CUỐI (preview) + đường dẫn temp file. */
+                        workspaceState?.connected
+                          ? '[SHELL OUTPUT] Khi shell_run trả truncated: true, output đã bị cắt (giữ phần cuối chứa lỗi). ' +
+                            'Full output nằm ở savedTo (đường dẫn temp file). Dùng fs_read với path=savedTo để đọc đầy đủ nếu cần phân tích chi tiết. ' +
+                            'Đừng yêu cầu chạy lại lệnh chỉ để xem output — đọc file trước.'
+                          : '',
+                        /* Auto-pilot: khi bật, agent chạy nhiều bước liên tiếp không cần duyệt từng bước. */
+                        workspaceState?.connected
+                          ? '[AUTO-PILOT] Khi auto-pilot đang bật, bạn có thể thực hiện NHIỀU tool calls liên tiếp ' +
+                            'mà KHÔNG cần chờ người dùng phê duyệt từng bước. Hãy tận dụng để hoàn thành task nhanh hơn: ' +
+                            'đọc file → sửa → chạy test → sửa lại nếu lỗi — tất cả trong một luồng liên tục. ' +
+                            'Vẫn phải tuân thủ safety: không chạy lệnh destructive, không ghi ngoài workspace.'
+                          : '',
+/* Delegation: giao task cho subagent độc lập. */
+                        workspaceState?.connected
+                          ? '[DELEGATION] Khi có task độc lập phức tạp (refactor file, research codebase, chạy test suite...), ' +
+                            'hãy gọ delegate để giao cho subagent. Subagent chạy với context RIÊNG (không thấy lịch sử chat), ' +
+                            'có đầy đủ tools (fs_*, shell_run, git_*) nhưng KHÔNG thể gọ delegate (không đế quy). ' +
+                            'Viết instructions chi tiết, rõ ràng. Subagent trả kết quả tóm tắt khi xong.'
+                          : '',
+                        /* MCP: tool từ server ngoài do người dùng tự cài. Tên có
+                           dạng mcp__<server>__<tool> để phân biệt với tool có
+                           sẵn. Kết quả trả về có thể bị người dùng từ chối —
+                           lúc đó KHÔNG gọi lại y hệt. */
+                        mcpTools.keys.size > 0
+                          ? '[MCP] Bạn có thêm các công cụ tên bắt đầu bằng "mcp__" do người dùng ' +
+                            'kết nối từ server MCP bên ngoài. Chúng hoạt động như mọi công cụ khác — ' +
+                            'gọi khi cần, đọc kết quả rồi tiếp tục. Nếu kết quả báo "denied" ' +
+                            '(người dùng từ chối) thì KHÔNG gọi lại công cụ đó nữa, hãy nói rõ với ' +
+                            'người dùng và đề cách khác.'
+                          : '',
                         /* Sub-task planning: khi nhận task phức tạp, phân rã thành
                            subtask để theo dõi tiến độ. Port từ Plandex + Cline. */
                         workspaceState?.connected
@@ -1785,7 +1869,11 @@ export async function POST(req: Request) {
                     })),
                     system: composedSystem,
                     tools: serverTools as ReturnType<typeof buildAgentTools>,
-                    clientTools: CLIENT_TOOL_NAMES,
+                    clientTools: clientToolNames,
+                    /* Schema của tool MCP đi vào protocol text: đường emulated
+                       không có kênh tool-call native nên mô tả + chữ ký args
+                       phải nằm ngay trong prompt. */
+                    extraToolDocs: mcpTools.defs,
                     onClientToolCall: (call) => {
                       /* Forward part 'tool_call' — useChat populates
                          toolInvocations + onToolCall chạy trên máy user. */
@@ -1809,6 +1897,32 @@ export async function POST(req: Request) {
                       };
                     },
                     onMemoryProposal: (text) => writeAnnotation({ memoryProposal: { text } }),
+                    onDelegateCall: async ({ instructions, max_turns, timeout_secs }) => {
+                      /* Run subagent inline with isolated context. Subagent gets
+                         fresh messages, same model/tools, but NO delegate tool
+                         (prevents recursion). Result returned as tool result string. */
+                      const subResult = await runSubagent({
+                        instructions,
+                        maxTurns: max_turns,
+                        timeoutSecs: timeout_secs,
+                        model: openaiNonStreaming(targetModel),
+                        systemBase: composedSystem,
+                        serverTools: serverTools as ReturnType<typeof buildAgentTools>,
+                        clientToolNames: CLIENT_TOOL_NAMES,
+                        abortSignal: link.signal,
+                        ...(modelConfig.supportsTemperature === false
+                          ? {}
+                          : { temperature: temperature ?? 0.7 }),
+                        ...(modelConfig.maxOutputTokens ? { maxTokens: modelConfig.maxOutputTokens } : {}),
+                        onProgress: (phase, detail) => {
+                          writeAnnotation({ subagent: { phase, ...detail } });
+                        },
+                      });
+                      console.info(
+                        `[req:${requestId}] subagent done (${subResult.status}, ${subResult.turnsUsed} turns, ${subResult.toolCalls} calls)`,
+                      );
+                      return JSON.stringify(subResult);
+                    },
                   });
                   clearIdle();
                   clearTimeout(budgetTimer);
@@ -1845,7 +1959,8 @@ export async function POST(req: Request) {
                    model biết tên tool qua [Tools]/[Workspace] nhưng không thể gọi). */
                 console.info(
                   `[req:${requestId}] native path: allowAgentTools=${allowAgentTools}, ` +
-                    `serverTools=${Object.keys(serverTools).length}, clientTools=${CLIENT_TOOL_NAMES.size}, ` +
+                    `serverTools=${Object.keys(serverTools).length}, clientTools=${clientToolNames.size}, ` +
+                    `mcpTools=${mcpTools.keys.size}${mcpTools.skipped ? ` (bỏ ${mcpTools.skipped})` : ''}, ` +
                     `model=${targetModel}`,
                 );
 
@@ -1856,16 +1971,24 @@ export async function POST(req: Request) {
                     ? {
                         tools: {
                           ...serverTools,
-                          /* Plan mode: loại write tools — agent chỉ được explore.
-                             Client-side onToolCall cũng chặn nhưng đây là lớp
-                             server để model không bao giờ thấy tool bị cấm. */
-                          ...(agentMode === 'plan'
-                            ? Object.fromEntries(
-                                Object.entries(CLIENT_TOOL_DEFS).filter(
-                                  ([name]) => !PLAN_MODE_WRITE_TOOLS.has(name),
-                                ),
-                              )
-                            : CLIENT_TOOL_DEFS),
+                          /* Tool client khai báo cho model. Hai bộ lọc:
+                             1. Plan mode: loại write tools — agent chỉ được
+                                explore. Client-side onToolCall cũng chặn nhưng
+                                đây là lớp server để model không bao giờ thấy
+                                tool bị cấm.
+                             2. Đường native: loại tool cần cơ chế riêng của
+                                emulated (delegate chạy qua onDelegateCall) —
+                                để nguyên thì model gọi mà chỉ nhận lại note. */
+                          ...Object.fromEntries(
+                            Object.entries(CLIENT_TOOL_DEFS).filter(
+                              ([name]) =>
+                                !NATIVE_EXCLUDED_CLIENT_TOOLS.has(name) &&
+                                (agentMode !== 'plan' || !PLAN_MODE_WRITE_TOOLS.has(name)),
+                            ),
+                          ),
+                          /* Tool MCP: khai báo để model gọi được. Không có
+                             execute — thực thi ở renderer qua IPC. */
+                          ...mcpTools.defs,
                         },
                         maxSteps: SERVER_MAX_STEPS,
                       }
@@ -1930,7 +2053,10 @@ export async function POST(req: Request) {
                            qua data-stream để useChat populates toolInvocations
                            + onToolCall chạy trên File System Access API của
                            user. Tool native KHÔNG forward — tránh resubmit kép. */
-                        if (CLIENT_TOOL_NAMES.has(part.toolName)) {
+                        /* Forward tool client (fs_*, shell/git, MCP) sang
+                           renderer: server không có execute cho chúng. delegate
+                           bị loại ở native nên không bao giờ lọt tới đây. */
+                        if (nativeClientToolNames.has(part.toolName)) {
                           hasPendingClientCalls = true;
                           dataStream.write(
                             formatDataStreamPart('tool_call', {

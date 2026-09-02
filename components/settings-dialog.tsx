@@ -2,13 +2,14 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { db, addMemory, deleteMemory, MAX_MEMORIES, MAX_MEMORY_CHARS, type PromptTemplate } from '@/lib/db';
-import { useAppStore, SERVER_PROVIDER_ID } from '@/lib/store';
+import { useAppStore, SERVER_PROVIDER_ID, ALL_TOOL_CATEGORIES, TOOL_CATEGORY_LABELS, isPermissionOverride, type PermissionOverride } from '@/lib/store';
 import { exportJson, exportMarkdown, importBackup, type ImportMode } from '@/lib/backup';
 import { X, Download, Upload, Loader2, ShieldAlert, Pencil, Trash2 } from 'lucide-react';
 import { useInstallPrompt } from '@/lib/use-install-prompt';
 import { KodaMark } from '@/components/koda-logo';
 import { ProviderManager } from '@/components/provider-manager';
 import { UsageStats } from '@/components/usage-stats';
+import { McpSettingsPanel } from '@/components/mcp/mcp-settings-panel';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { savePrompt, deletePrompt } from '@/lib/prompt-library';
 import {
@@ -795,7 +796,94 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                     />
                   </label>
                 )}
+
+                {/* Auto-pilot Mode */}
+                {(settings.agentTools ?? true) && (
+                  <>
+                    <label htmlFor="auto-pilot-toggle" className="flex items-start justify-between gap-3 border-l-2 border-zinc-200 pl-3">
+                      <span className="min-w-0">
+                        <span className="block text-sm font-medium text-zinc-700">
+                          Auto-pilot Mode
+                        </span>
+                        <span className="mt-0.5 block text-[11px] leading-relaxed text-zinc-600">
+                          Agent chạy nhiều bước liên tiếp không cần duyệt từng bước.
+                          Kết hợp với Staging Sandbox để an toàn hơn.
+                        </span>
+                      </span>
+                      <input
+                        id="auto-pilot-toggle"
+                        type="checkbox"
+                        checked={settings.autoPilot ?? false}
+                        onChange={(e) => updateSettings({ autoPilot: e.target.checked })}
+                        className="mt-0.5 h-4 w-4 flex-shrink-0 rounded accent-brand"
+                      />
+                    </label>
+
+                    {(settings.autoPilot ?? false) && (
+                      <div className="border-l-2 border-zinc-200 pl-3">
+                        <label htmlFor="approval-policy" className="block text-sm font-medium text-zinc-700 mb-1">
+                          Approval Policy
+                        </label>
+                        <select
+                          id="approval-policy"
+                          value={settings.approvalPolicy ?? 'smart'}
+                          onChange={(e) => updateSettings({ approvalPolicy: e.target.value as 'always' | 'smart' | 'never' })}
+                          className="field w-full max-w-xs"
+                        >
+                          <option value="smart">Smart — tự duyệt read + safe commands, hỏi khi ghi/destructive</option>
+                          <option value="never">Never ask (YOLO) — tự duyệt tất cả trừ lệnh nguy hiểm</option>
+                          <option value="always">Always ask — luôn hỏi (như tắt auto-pilot)</option>
+                        </select>
+                        <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">
+                          {(settings.approvalPolicy ?? 'smart') === 'smart' && '✅ Read-only tools và safe commands (npm test, git status...) tự động duyệt. Write/destructive vẫn hỏi.'}
+                          {(settings.approvalPolicy ?? 'smart') === 'never' && '⚡ Tất cả tool calls tự động duyệt TRỪ lệnh luôn-chặn (rm -rf /, mkfs, shutdown...). Dùng với Staging Sandbox.'}
+                          {(settings.approvalPolicy ?? 'smart') === 'always' && '🔒 Luôn hỏi trước khi chạy bất kỳ tool nào. Tương đương tắt auto-pilot.'}
+                        </p>
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
+
+              {/* Per-Tool Permission Overrides */}
+              {(settings.agentTools ?? true) && (settings.autoPilot ?? false) && (
+                <div className="space-y-3 border-l-2 border-zinc-200 pl-3">
+                  <h3 className="text-sm font-semibold text-zinc-700">Per-Tool Permissions</h3>
+                  <p className="text-[11px] leading-relaxed text-zinc-500">
+                    Override auto-approve behavior per tool category. &quot;Default&quot; follows the approval policy above.
+                  </p>
+                  <div className="space-y-1.5">
+                    {ALL_TOOL_CATEGORIES.map((cat) => {
+                      const info = TOOL_CATEGORY_LABELS[cat];
+                      const current = settings.toolPermissions?.[cat] ?? 'default';
+                      return (
+                        <div key={cat} className="flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
+                          <span className="min-w-0 flex-1 text-xs text-zinc-700">
+                            <span className="mr-1.5">{info.icon}</span>
+                            <span className="font-medium">{info.label}</span>
+                            <span className="ml-1 text-[10px] text-zinc-400">({info.tools})</span>
+                          </span>
+                          <select
+                            value={current}
+                            onChange={(e) => {
+                              const val = e.target.value as PermissionOverride;
+                              updateSettings({ toolPermissions: { ...settings.toolPermissions, [cat]: val } });
+                            }}
+                            className="field-sm w-28 text-[11px]"
+                          >
+                            <option value="default">Default</option>
+                            <option value="auto">Auto-approve</option>
+                            <option value="ask">Always ask</option>
+                            <option value="deny">Block</option>
+                          </select>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              <McpSettingsPanel />
 
               <div className="space-y-3">
                 <h3 className="text-sm font-semibold text-zinc-800">Nhập &amp; hiệu năng</h3>

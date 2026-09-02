@@ -10,6 +10,8 @@
  * lib/fs-access.ts + tool shell_run/git_* trong agent-tools.
  */
 
+import type { McpToolInfo } from '@/lib/mcp/tool-mapper';
+
 /* ------------------------------------------------------------------ */
 /* Kiểu dữ liệu — mirror payload của electron/ipc.cjs                  */
 /* ------------------------------------------------------------------ */
@@ -35,6 +37,12 @@ export interface KodaRunResult {
   stderr: string;
   durationMs: number;
   timedOut: boolean;
+  /** True khi output bị cắt bởi smart truncation (Goose-style). */
+  truncated?: boolean;
+  /** Đường dẫn temp file chứa full output (khi truncated). */
+  savedTo?: string;
+  /** Hướng dẫn LLM đọc full output từ temp file. */
+  previewHint?: string;
 }
 
 export interface KodaSearchMatch {
@@ -59,6 +67,87 @@ export interface KodaGitStatusEntry {
 export interface KodaGitStatus {
   branch: string | null;
   entries: KodaGitStatusEntry[];
+}
+
+/* ------------------------------------------------------------------ */
+/* MCP — mirror payload của electron/mcp/ipc-handlers.cjs              */
+/* ------------------------------------------------------------------ */
+
+/** Trạng thái vòng đời của một MCP server. */
+export type KodaMcpServerState = 'connected' | 'connecting' | 'disconnected' | 'error';
+
+/**
+ * Cấu hình MCP server do người dùng khai báo.
+ * `id` bị khoá vào tập ký tự an toàn vì nó nằm trong tên tool mà model gọi.
+ */
+export type KodaMcpServerConfig =
+  | {
+      id: string;
+      name: string;
+      transport: 'stdio';
+      command: string;
+      args?: string[];
+      env?: Record<string, string>;
+      cwd?: string;
+      autoApprove?: string[];
+      timeoutSecs?: number;
+    }
+  | {
+      id: string;
+      name: string;
+      transport: 'sse' | 'streamable-http';
+      url: string;
+      headers?: Record<string, string>;
+      autoApprove?: string[];
+      timeoutSecs?: number;
+    };
+
+export interface KodaMcpServerStatus {
+  id: string;
+  name: string;
+  status: KodaMcpServerState;
+  error?: string;
+  toolCount: number;
+  serverVersion?: string;
+}
+
+/**
+ * Tool do MCP server công bố.
+ * Alias của `McpToolInfo` (lib/mcp/tool-mapper) để một định dạng tool chỉ tồn
+ * tại ở một nơi — `import type` nên không kéo runtime của tool-mapper vào
+ * bundle của bridge.
+ */
+export type KodaMcpToolInfo = McpToolInfo;
+
+/** Một khối nội dung trong CallToolResult của MCP. */
+export interface KodaMcpContent {
+  type: string;
+  text?: string;
+  [key: string]: unknown;
+}
+
+export interface KodaMcpCallResult {
+  /** Mảng content nguyên vẹn từ MCP server. */
+  content: KodaMcpContent[];
+  /** true = tool CHẠY RỒI NHƯNG BÁO LỖI NGHIỆP VỤ (khác với lỗi giao thức). */
+  isError: boolean;
+  /** true = bị chặn bởi policy "luôn từ chối" hoặc người dùng bấm từ chối. */
+  denied?: boolean;
+}
+
+export type KodaMcpPermissionDecision =
+  | 'allow_once'
+  | 'always_allow'
+  | 'deny_once'
+  | 'always_deny';
+
+export interface KodaMcpApprovalRequest {
+  id: string;
+  serverId: string;
+  toolName: string;
+  arguments: Record<string, unknown>;
+  createdAt: number;
+  expiresAt: number;
 }
 
 export interface KodaBridge {
@@ -91,6 +180,31 @@ export interface KodaBridge {
     log(opts?: { limit?: number }): Promise<string>;
     add(relPaths: string[]): Promise<{ ok: true }>;
     commit(message: string): Promise<{ ok: true; output: string }>;
+  };
+  /**
+   * Có thể thiếu hoàn toàn khi app chạy trên web hoặc khi shell Electron cũ
+   * hơn bản renderer — mọi caller PHẢI check trước khi dùng.
+   */
+  mcp?: {
+    listServers(): Promise<KodaMcpServerStatus[]>;
+    addServer(config: KodaMcpServerConfig): Promise<KodaMcpServerStatus>;
+    removeServer(id: string): Promise<{ ok: true }>;
+    reconnect(id: string): Promise<KodaMcpServerStatus>;
+    updateConfig(servers: KodaMcpServerConfig[]): Promise<{ ok: true }>;
+    listTools(): Promise<KodaMcpToolInfo[]>;
+    callTool(
+      serverId: string,
+      toolName: string,
+      args: Record<string, unknown>,
+    ): Promise<KodaMcpCallResult>;
+    resolveApproval(approvalId: string, decision: KodaMcpPermissionDecision): Promise<{ ok: true }>;
+    getPendingApprovals(): Promise<KodaMcpApprovalRequest[]>;
+    getStatus(): Promise<{ servers: KodaMcpServerStatus[]; tools: number }>;
+    onApprovalRequested(cb: (req: KodaMcpApprovalRequest) => void): () => void;
+    onApprovalResolved(
+      cb: (res: { id: string; decision: KodaMcpPermissionDecision; timedOut?: boolean }) => void,
+    ): () => void;
+    onServerStatus(cb: (status: KodaMcpServerStatus) => void): () => void;
   };
 }
 

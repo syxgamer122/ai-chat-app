@@ -63,6 +63,16 @@ import {
   type CompactionMarker,
 } from '@/lib/context-compaction';
 import {
+  buildGoalKickoff,
+  describeGoalStop,
+  evaluateGoalTurn,
+  getGoalLoop,
+  startGoalLoop,
+  stopGoalLoop,
+  stripGoalCompleteTag,
+  type GoalLoopState,
+} from '@/lib/goal-loop';
+import {
   CONTINUE_PROMPT,
   sanitizeContent,
   getFinishInfo,
@@ -115,6 +125,19 @@ import {
   type TurnCapture,
 } from '@/lib/workspace-checkpoints';
 import { CLIENT_TOOL_NAMES } from '@/lib/agent-tools';
+import { shouldAutoApprove } from '@/lib/auto-pilot';
+import {
+  callMcpTool,
+  isMcpAvailable,
+  listMcpTools,
+  onMcpServerStatus,
+} from '@/lib/mcp/bridge';
+import {
+  formatMcpResultForModel,
+  isMcpToolKey,
+  mapMcpTools,
+  type McpToolInfo,
+} from '@/lib/mcp/tool-mapper';
 import {
   stageFile,
   unstageFile,
@@ -156,6 +179,7 @@ import { DiffConfirm, type DiffConfirmState } from '@/components/diff-confirm';
 import { ShellConfirm } from '@/components/shell-confirm';
 import { StagingPanel, type StagingPanelState } from '@/components/staging-panel';
 import { OrchestratorPanel } from '@/components/orchestrator/orchestrator-panel';
+import { McpToolApprovalDialog } from '@/components/mcp/tool-approval-dialog';
 import { useOrchestrator } from '@/lib/use-orchestrator';
 import { toSkills } from '@/lib/prompt-library';
 import { matchActiveSkills } from '@/lib/skills';
@@ -201,6 +225,9 @@ export default function ChatInterface() {
   const forceEmulatedTools = useAppStore((s) => s.settings.forceEmulatedTools ?? false);
   /** Chế độ agent: 'plan' = chỉ explore, 'act' = đọc + ghi. */
   const agentMode = useAppStore((s) => s.settings.agentMode ?? 'act');
+  const autoPilot = useAppStore((s) => s.settings.autoPilot ?? false);
+  const approvalPolicy = useAppStore((s) => s.settings.approvalPolicy ?? 'smart');
+  const toolPermissions = useAppStore((s) => s.settings.toolPermissions);
   /** Staging sandbox: fs_edit/fs_write ghi vào bộ đệm thay vì đĩa. */
   const stagingEnabled = useAppStore((s) => s.settings.stagingSandbox ?? true);
   /** Capability suy luận của model đang chọn (metadata kiểu OpenRouter). */
@@ -710,6 +737,82 @@ export default function ChatInterface() {
     setShellState(null);
     resumeRef.current();
   }, []);
+
+  /* ------------------------------------------------------------------ */
+  /* MCP tools — danh sách tool từ các server người dùng đã kết nối       */
+  /* ------------------------------------------------------------------ */
+
+  /**
+   * Danh sách tool gửi kèm mỗi request (route chỉ khai báo, không thực thi
+   * được). Index nằm trong REF: `handleClientToolCall` cần tra cứu mà không
+   * bị phụ thuộc vào closure — thêm vào deps của callback sẽ làm nó đổi
+   * danh tính mỗi lần danh sách MCP đổi.
+   */
+  const mcpIndexRef = useRef<Map<string, { serverId: string; toolName: string }>>(new Map());
+  const [mcpTools, setMcpTools] = useState<McpToolInfo[]>([]);
+
+  const refreshMcpTools = useCallback(async () => {
+    if (!isMcpAvailable()) return;
+    try {
+      const tools = await listMcpTools();
+      mcpIndexRef.current = mapMcpTools(tools).index;
+      setMcpTools(tools);
+    } catch {
+      // Lỗi đọc danh sách (shell Electron bận) — giữ nguyên danh sách cũ,
+      // lần refresh sau (khi server đổi trạng thái) sẽ thử lại.
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isMcpAvailable()) return;
+    void refreshMcpTools();
+    /* Server đổi trạng thái (vừa thêm, vừa kết nối lại, vừa mất kết nối) là
+       lúc danh sách tool thay đổi — nạp lại thay vì đoán. */
+    return onMcpServerStatus(() => {
+      void refreshMcpTools();
+    });
+  }, [refreshMcpTools]);
+
+  /* ------------------------------------------------------------------ */
+  /* Auto-pilot wrappers: skip modal when policy allows auto-approval    */
+  /* ------------------------------------------------------------------ */
+
+  const autoApproveShell = useCallback(
+    async (s: { command: string; cwd?: string }): Promise<boolean> => {
+      if (
+        shouldAutoApprove({
+          toolName: 'shell_run',
+          args: { command: s.command, cwd: s.cwd },
+          policy: approvalPolicy,
+          autoPilotEnabled: autoPilot,
+          toolPermissions,
+        })
+      ) {
+        return true;
+      }
+      return showShellModal(s);
+    },
+    [autoPilot, approvalPolicy, toolPermissions, showShellModal],
+  );
+
+  const autoApproveDiff = useCallback(
+    async (s: { path: string; oldText: string; newText: string }): Promise<boolean> => {
+      if (
+        shouldAutoApprove({
+          toolName: 'fs_edit',
+          args: { path: s.path },
+          policy: approvalPolicy,
+          autoPilotEnabled: autoPilot,
+          toolPermissions,
+        })
+      ) {
+        return true;
+      }
+      return showDiffModal(s);
+    },
+    [autoPilot, approvalPolicy, toolPermissions, showDiffModal],
+  );
+
   useEffect(() => {
     /* Khôi phục handle phiên trước. PHẢI đồng bộ lại state sau khi xong:
        restoreWorkspaceRoot() chỉ nạp handle vào biến module của fs-access,
@@ -780,6 +883,35 @@ export default function ChatInterface() {
    */
   const handleClientToolCall = useCallback(
     async ({ toolCall }: { toolCall: { toolName: string; args?: unknown } }) => {
+      /* Tool MCP đi TRƯỚC mọi kiểm tra khác: chúng không cần workspace
+         (không đụng file của người dùng qua fs_*), và tên không nằm trong
+         CLIENT_TOOL_NAMES nên sẽ bị chặn ở ngay dòng dưới nếu để lọt xuống. */
+      if (isMcpToolKey(toolCall.toolName)) {
+        const target = mcpIndexRef.current.get(toolCall.toolName);
+        if (!target) {
+          return JSON.stringify({
+            error:
+              `Tool MCP "${toolCall.toolName}" không còn tồn tại — server có thể đã bị gỡ ` +
+              'hoặc mất kết nối. Kiểm tra lại trong Cài đặt → MCP.',
+          });
+        }
+        try {
+          const result = await callMcpTool(
+            target.serverId,
+            target.toolName,
+            (toolCall.args ?? {}) as Record<string, unknown>,
+          );
+          return formatMcpResultForModel(result, toolCall.toolName);
+        } catch (err) {
+          /* Lỗi GIAO THỨC (mất kết nối, timeout, người dùng từ chối ở tầng
+             IPC) — khác với lỗi nghiệp vụ đã được format ở trên. */
+          return JSON.stringify({
+            error: `Gọi công cụ MCP "${toolCall.toolName}" thất bại: ${String(
+              err instanceof Error ? err.message : err,
+            )}`,
+          });
+        }
+      }
       if (!CLIENT_TOOL_NAMES.has(toolCall.toolName)) return undefined;
       const isDesktop = isKodaDesktop();
       const desktopOnly = new Set(['shell_run', 'git_status', 'git_diff', 'git_log', 'git_add', 'git_commit']);
@@ -923,7 +1055,7 @@ export default function ChatInterface() {
               return JSON.stringify({ applied: true, staged: true, blocks: applied.length, strategies: applied });
             }
             /* Legacy path: diff modal + ghi đĩa ngay + checkpoint. */
-            const approved = await showDiffModal({ path, oldText: beforeText, newText: current });
+            const approved = await autoApproveDiff({ path, oldText: beforeText, newText: current });
             if (!approved) {
               return JSON.stringify({
                 applied: false,
@@ -1013,7 +1145,7 @@ export default function ChatInterface() {
               return JSON.stringify({ written: true, staged: true, size: content.length });
             }
             /* Legacy path: diff modal + ghi đĩa ngay + checkpoint. */
-            const approved = await showDiffModal({ path, oldText, newText: content });
+            const approved = await autoApproveDiff({ path, oldText, newText: content });
             if (!approved) {
               return JSON.stringify({
                 written: false,
@@ -1035,12 +1167,14 @@ export default function ChatInterface() {
           case 'shell_run': {
             const command = String(args.command ?? '');
             const cwd = args.cwd ? String(args.cwd) : undefined;
-            const approved = await showShellModal({ command, cwd });
+            const timeoutSecs = typeof args.timeout_secs === 'number' ? Math.min(Math.max(args.timeout_secs, 1), 600) : undefined;
+            const timeoutMs = timeoutSecs ? timeoutSecs * 1000 : undefined;
+            const approved = await autoApproveShell({ command, cwd });
             if (!approved) {
               return JSON.stringify({ approved: false, note: 'Người dùng TỪ CHỐI chạy lệnh này.' });
             }
             const bridge = (await import('@/lib/desktop-bridge')).kodaDesktop()!;
-            const result = await bridge.shell.run({ command, cwd });
+            const result = await bridge.shell.run({ command, cwd, timeoutMs });
 
             /* Auto-debug loop: khi lệnh fail + safe command → track attempts và
                chèn retry guidance vào result để model tự sửa và retry. Port từ
@@ -1110,7 +1244,7 @@ export default function ChatInterface() {
           }
           case 'git_commit': {
             const message = String(args.message ?? '');
-            const approved = await showShellModal({ command: `git commit -m "${message.slice(0, 80)}"`, cwd: undefined });
+            const approved = await autoApproveShell({ command: `git commit -m "${message.slice(0, 80)}"`, cwd: undefined });
             if (!approved) {
               return JSON.stringify({ approved: false, note: 'Người dùng TỪ CHỐI commit này.' });
             }
@@ -1122,6 +1256,11 @@ export default function ChatInterface() {
           /* ------------------------------------------------------------------ */
           /* Sub-task Plan                                                       */
           /* ------------------------------------------------------------------ */
+
+          /* Không có case 'delegate': route KHÔNG khai báo tool này ở đường
+             native (NATIVE_EXCLUDED_CLIENT_TOOLS) vì runSubagent chỉ chạy
+             inline trong runEmulatedLoop. Đường emulated xử lý delegate phía
+             server qua onDelegateCall, nên renderer không bao giờ nhận nó. */
 
           case 'plan_create': {
             const title = String(args.title ?? 'Untitled plan');
@@ -1198,7 +1337,24 @@ export default function ChatInterface() {
         return JSON.stringify({ error: msg });
       }
     },
-    [showNotice, showDiffModal, showShellModal, readCaptureForPath],
+    [
+      showNotice,
+      /* showDiffModal/showShellModal KHÔNG có ở đây: thân callback chỉ còn gọi
+         autoApproveShell/autoApproveDiff (chúng tự phụ thuộc hai hàm đó). Khai
+         báo thừa làm callback đổi danh tính vô cớ. */
+      autoApproveShell,
+      autoApproveDiff,
+      readCaptureForPath,
+      /* Bốn giá trị này ĐỌC TRỰC TIẾP trong thân callback (guard plan-mode
+         của fs_edit/fs_write, nhánh staging, chat hiện tại). Thiếu chúng thì
+         callback giữ nguyên giá trị CŨ mãi mãi: người dùng bật PLAN mode giữa
+         phiên mà lớp chặn phía client vẫn dùng 'act' — server có lọc tool rồi,
+         nhưng đây là lớp bảo vệ thứ hai nên không được phép đóng băng. */
+      agentMode,
+      stagingEnabled,
+      updateStaging,
+      currentChatId,
+    ],
   );
 
   /** Build API headers cho fetch calls — gộp logic trùng lặp từ useChat + performCompaction. */
@@ -1317,6 +1473,10 @@ export default function ChatInterface() {
             compactBoundaryId: requestCompaction.upToId,
           }
         : {}),
+      /* Tool MCP hiện có (chỉ trong Electron desktop): route khai báo cho
+         model, renderer thực thi rồi resubmit kết quả. Không gửi khi rỗng để
+         không phình payload của mọi request web. */
+      ...(mcpTools.length > 0 ? { mcpTools } : {}),
     },
     experimental_throttle: throttleMs,
     /* Client-executed tools (fs_*): onToolCall chạy trên máy user, trả kết quả
@@ -1337,7 +1497,7 @@ export default function ChatInterface() {
       closeTurnCapture();
       // Guard markup tool-call model tự nhả vào kênh text — strip TRƯỚC khi
       // sanitize/lưu để nội dung trong DB cũng sạch (tokens + search index).
-      const clean = sanitizeContent(stripEmulatedToolMarkup(message.content).text);
+      const clean = sanitizeContent(stripGoalCompleteTag(stripEmulatedToolMarkup(message.content).text));
 
       /**
        * Gateway nhận request có `tools` nhưng BỎ QUA IM LẶNG: model không bao
@@ -1442,11 +1602,46 @@ export default function ChatInterface() {
        */
       if (finishReason !== 'tool-calls' && finishRef.current !== 'error') {
         succeedRun();
+
+        /* Goal Loop gate — lượt assistant vừa THẬT SỰ kết thúc (không phải
+           resubmit tool-calls, không phải error). Verdict đọc/ghi trực tiếp
+           lib store (conversation-scoped) qua evaluateGoalTurn; decision
+           'continue' → append steering để useChat resubmit tự động, còn lại
+           → dừng vòng lặp + báo UI. Marker <goal-complete> đã bị strip khỏi
+           `clean` nên không dính DB/UI. */
+        if (getGoalLoop(useAppStore.getState().currentChatId)?.status === 'active') {
+          const verdict = evaluateGoalTurn(useAppStore.getState().currentChatId, message.content);
+          setGoalLoop(verdict.state);
+          if (verdict.decision === 'continue' && verdict.steering) {
+            void append({ role: 'user', content: verdict.steering });
+          } else {
+            showNotice(describeGoalStop(verdict.state), 6000);
+          }
+        }
       }
     },
     onError: (err) => {
       console.error('[useChat]', err);
       failRun();
+
+      // UX: Parse error code de hien thi toast phu hop thay vi im lang.
+      const errMsg = err instanceof Error ? err.message : String(err);
+      const codeMatch = /\[([A-Z_]+)#/.exec(errMsg);
+      const code = codeMatch?.[1] ?? '';
+      if (code === 'UPSTREAM_PAYMENT_402') {
+        showNotice('Tai khoan upstream het credit. Vui long nap them hoac doi provider.', 8000);
+      } else if (code === 'UPSTREAM_AUTH_401') {
+        showNotice('API Key khong hop le hoac da bi thu hoi. Kiem tra lai trong Cai dat.', 8000);
+      } else if (code === 'UPSTREAM_CONTEXT_OVERFLOW') {
+        showNotice('Hoi thoai qua dai. Hay nen bot hoac bat dau cuoc tro chuyen moi.', 6000);
+      } else if (code === 'RATE_LIMITED') {
+        showNotice('Dang gui tin nhan qua nhanh. Vui long doi vai giay.', 4000);
+      } else if (code === 'INJECTION_BLOCKED') {
+        showNotice('Tin nhan bi tu choi vi co dau hieu vuot qua huong dan he thong.', 5000);
+      } else if (code && !code.startsWith('UPSTREAM_SERVER_')) {
+        const cleanMsg = errMsg.replace(/\s*\[[\w#]+\]$/, '').slice(0, 200);
+        showNotice(cleanMsg, 6000);
+      }
     },
   });
 
@@ -1744,7 +1939,10 @@ export default function ChatInterface() {
     },
     [
       currentChatId, isLoading, activeCompaction, autoCompactEnabled, messages,
-      buildApiHeaders, showNotice, model,
+      /* Cửa sổ ngữ cảnh phụ thuộc vào danh sách model của provider đang active
+         (resolveContextWindow). Thiếu thì đổi provider mà compaction vẫn tính
+         theo cửa sổ của provider trước. */
+      buildApiHeaders, showNotice, model, activeProvider?.models,
     ],
   );
 
@@ -1778,7 +1976,11 @@ export default function ChatInterface() {
       systemPrompt,
     ]);
     return { tokens, max: resolveContextWindow(model, activeProvider?.models) };
-  }, [messagesForUsage, activeCompaction, model, activeProvider, systemPrompt]);
+    /* Liệt kê ĐÚNG thứ được đọc (activeProvider?.models) thay vì cả object
+       activeProvider: khai báo rộng hơn mức cần khiến memo tính lại khi bất kỳ
+       trường nào của provider đổi (kể cả trường không ảnh hưởng cửa sổ ngữ
+       cảnh). Đổi provider thì chính mảng models cũng đổi nên không bỏ sót. */
+  }, [messagesForUsage, activeCompaction, model, activeProvider?.models, systemPrompt]);
 
   useEffect(() => {
     if (isLoading || !currentChatId || !contextUsage) return;
@@ -1838,6 +2040,45 @@ export default function ChatInterface() {
       if (ok) void reload();
     })();
   }, [error, isLoading, performCompaction, reload]);
+
+  /* Goal Loop — vòng lặp hướng mục tiêu (Loop Engineering). State machine thuần
+     ở lib/goal-loop.ts (conversation-scoped, TTL tự dọn); state React dưới đây
+     chỉ là PHẢN CHIẾU cho UI. onFinish đọc trực tiếp lib store qua getGoalLoop()
+     nên vòng lặp không phụ thuộc thứ tự khai báo của state này. */
+  const [goalLoop, setGoalLoop] = useState<GoalLoopState | null>(() => getGoalLoop(currentChatId));
+  useEffect(() => {
+    setGoalLoop(getGoalLoop(currentChatId));
+  }, [currentChatId]);
+
+  const handleGoalLoopClick = useCallback(
+    (goalText: string) => {
+      const chatId = useAppStore.getState().currentChatId;
+      if (!chatId) {
+        showNotice('Cần một hội thoại trước khi đặt mục tiêu.', 4000);
+        return;
+      }
+      /* Goal đang chạy → click = dừng (nút có hai nghĩa, nhãn gọi rõ). */
+      if (goalLoop?.status === 'active') {
+        const stopped = stopGoalLoop(chatId);
+        setGoalLoop(stopped);
+        showNotice('🎯 Đã dừng goal loop.', 4000);
+        return;
+      }
+      const goal = (goalText ?? '').trim();
+      if (!goal) {
+        showNotice(
+          '🎯 Gõ mục tiêu vào ô nhập rồi bấm Goal loop — agent sẽ tự lặp đến khi hoàn thành (tối đa 5 lượt).',
+          6000,
+        );
+        return;
+      }
+      const started = startGoalLoop(chatId, { instruction: goal });
+      setGoalLoop(started);
+      setInput('');
+      void append({ role: 'user', content: buildGoalKickoff(started) });
+    },
+    [goalLoop, append, setInput, showNotice],
+  );
 
   const continueGenerating = useCallback(() => {
     void append({ role: 'user', content: CONTINUE_PROMPT });
@@ -1988,6 +2229,7 @@ export default function ChatInterface() {
     currentChatId,
     isLoading,
     stop,
+    stopRun,
     closeTurnCapture,
   ]);
 
@@ -2031,7 +2273,7 @@ export default function ChatInterface() {
     ) {
       pendingAssistantForkRef.current = null;
     }
-  }, [stop, closeTurnCapture]);
+  }, [stop, stopRun, closeTurnCapture]);
 
   useEffect(() => {
     if (isLoading) {
@@ -2596,12 +2838,14 @@ export default function ChatInterface() {
     });
 
     return unsubscribe;
-    /* Cả ba đều ỔN ĐỊNH nên thêm vào không làm effect chạy lại:
+    /* Tất cả đều ỔN ĐỊNH nên thêm vào không làm effect chạy lại:
        - setCurrentChatId: selector Zustand
        - showNotice: useCallback([])
        - stop: useCallback của useChat (chỉ đọc abortControllerRef)
+       - stopRun: stop() của useRunLifecycle — useCallback([publish]), mà
+         publish là useCallback([]) nên không bao giờ đổi danh tính
        Khai báo đầy đủ để lint kiểm tra được thật, thay vì tắt cảnh báo. */
-  }, [setMessages, setCurrentChatId, showNotice, stop]);
+  }, [setMessages, setCurrentChatId, showNotice, stop, stopRun]);
 
   useEffect(() => {
     if (!currentChatId) return;
@@ -2755,6 +2999,7 @@ export default function ChatInterface() {
       setMessages,
       showNotice,
       stop,
+      stopRun,
     ],
   );
 
@@ -2787,12 +3032,26 @@ export default function ChatInterface() {
 
   const [swipeDirection, setSwipeDirection] = useState<'left' | 'right' | null>(null);
 
+  const swipeFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const showSwipeFeedback = useCallback((direction: 'left' | 'right') => {
     setSwipeDirection(direction);
-    window.setTimeout(() => {
+    if (swipeFeedbackTimerRef.current) clearTimeout(swipeFeedbackTimerRef.current);
+    swipeFeedbackTimerRef.current = setTimeout(() => {
       setSwipeDirection(null);
+      swipeFeedbackTimerRef.current = null;
     }, 400);
   }, []);
+
+  /* Dọn timer phản hồi vuốt khi unmount. Effect này PHẢI đứng sau
+     showSwipeFeedback: ref được GHI trong callback đó, mà React Compiler cấm
+     ghi một giá trị đã được đọc ở effect đứng trước nó. Gom vào effect dọn
+     chung ở trên (đứng trước) sẽ vỡ quy tắc bất biến. */
+  useEffect(
+    () => () => {
+      if (swipeFeedbackTimerRef.current) clearTimeout(swipeFeedbackTimerRef.current);
+    },
+    [],
+  );
 
   const swipeHandlers = useSwipeBranch({
     onSwipeLeft: () => {
@@ -3326,6 +3585,15 @@ export default function ChatInterface() {
        * không phải Edit hoặc Regenerate.
        */
       pendingAssistantForkRef.current = null;
+
+      /* Goal loop: tin nhắn THỦ CÔNG của người dùng = đổi hướng → dừng loop.
+         Steering do goal gate append() trực tiếp (không qua submitTurn) nên
+         không thể tự dừng nhầm vòng lặp của chính nó. */
+      if (getGoalLoop(currentChatId)?.status === 'active') {
+        const stopped = stopGoalLoop(currentChatId);
+        setGoalLoop(stopped);
+        showNotice('🎯 Goal loop dừng vì bạn gửi tin nhắn mới.', 4000);
+      }
 
       let chatId = currentChatId;
       if (!chatId) {
@@ -3890,6 +4158,14 @@ export default function ChatInterface() {
         onToggleWebSearch={() => updateSettings({ webSearch: !webSearchEnabled })}
         agentMode={agentMode}
         onToggleAgentMode={() => updateSettings({ agentMode: agentMode === 'plan' ? 'act' : 'plan' })}
+        autoPilot={autoPilot}
+        approvalPolicy={approvalPolicy}
+        onCycleAutoPilot={() => {
+          if (!autoPilot) updateSettings({ autoPilot: true, approvalPolicy: 'smart' });
+          else if (approvalPolicy === 'smart') updateSettings({ approvalPolicy: 'never' });
+          else if (approvalPolicy === 'never') updateSettings({ autoPilot: false, approvalPolicy: 'smart' });
+          else updateSettings({ autoPilot: true, approvalPolicy: 'smart' });
+        }}
         stagedFileCount={stagingVersion >= 0 ? stagingCount(stagingRef.current) : 0}
         onOpenStaging={() => setStagingPanelOpen(true)}
         orchestratorOpen={orchestratorOpen}
@@ -3899,6 +4175,11 @@ export default function ChatInterface() {
         onPickWorkspace={pickFolder}
         onDisconnectWorkspace={disconnectFolder}
         canContinue={canContinue}
+        goalLoopActive={goalLoop?.status === 'active'}
+        goalLoopInfo={
+          goalLoop?.status === 'active' ? `${goalLoop.iterations + 1}/${goalLoop.maxIterations}` : undefined
+        }
+        onGoalLoopClick={handleGoalLoopClick}
         onContinue={continueGenerating}
         thinkingLevel={
           (activeProvider ? supportsThinkingLevel(activeProvider.baseUrl) : serverCaps.thinkingLevel) ||
@@ -3917,6 +4198,10 @@ export default function ChatInterface() {
       {/* Thông báo lỗi/cảnh báo từ showNotice() — trước đây không hề được render. */}
       <DiffConfirm state={diffState} onClose={closeDiffModal} />
       <ShellConfirm state={shellState} onClose={closeShellModal} />
+      {/* Phê duyệt tool MCP: event đến từ Electron main bất kể đang ở đâu trong
+          app, nên mount ở gốc chat thay vì trong một panel cụ thể. Component tự
+          ẩn khi không có yêu cầu nào đang chờ. */}
+      <McpToolApprovalDialog />
       {stagingPanelOpen && (
         <StagingPanel
           store={stagingRef.current}

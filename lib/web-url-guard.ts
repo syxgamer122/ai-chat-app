@@ -72,6 +72,23 @@ function isPrivateIPv6(host: string): boolean {
  * Kiểm tra URL trước khi fetch phía server. Trả `{ ok: false, error }` thay vì
  * throw để route map thẳng thành response lỗi cho client.
  */
+/**
+ * Kiểm tra IP đã resolve có nằm trong dải private/internal không.
+ * Dùng sau DNS lookup để chặn DNS rebinding: hostname public nhưng DNS
+ * trả về IP nội bộ (127.0.0.1, 169.254.x.x, 10.x.x.x, etc.).
+ *
+ * PERF: Không trả URL object vì caller chỉ cần ok/error. Tránh tạo URL
+ * object thừa khi IP hợp lệ (hot path cho mỗi fetch).
+ */
+export function assertFetchableIp(ip: string): UrlCheckResult {
+  if (!ip) return { ok: false, error: 'Không resolve được IP.' };
+  if (isPrivateIPv4(ip)) return { ok: false, error: 'DNS resolve về địa chỉ IPv4 riêng.' };
+  if (isPrivateIPv6(ip)) return { ok: false, error: 'DNS resolve về địa chỉ IPv6 riêng.' };
+  // FIX: Trả URL rỗng thay vì null-as-any để tránh NPE nếu caller truy cập .url
+  // khi ok===true. Caller hiện tại chỉ check !ok nên an toàn, nhưng phòng ngừa.
+  return { ok: true, url: '' as unknown as URL };
+}
+
 export function assertFetchableUrl(raw: string): UrlCheckResult {
   const trimmed = (raw ?? '').trim();
   let url: URL;

@@ -7,6 +7,17 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 const invoke = (channel, payload) => ipcRenderer.invoke(channel, payload ?? {});
 
+/**
+ * Subscribe một event một chiều từ main process.
+ * Gỡ đăng ký bằng removeListener trên CHÍNH listener đã tạo — removeAllListeners
+ * sẽ gỡ nhầm listener của component khác đang nghe cùng channel.
+ */
+const onEvent = (channel, callback) => {
+  const listener = (_event, data) => callback(data);
+  ipcRenderer.on(channel, listener);
+  return () => ipcRenderer.removeListener(channel, listener);
+};
+
 contextBridge.exposeInMainWorld('koda', {
   desktop: true,
   platform: process.platform,
@@ -39,5 +50,28 @@ contextBridge.exposeInMainWorld('koda', {
     log: (opts) => invoke('koda:git-log', opts),
     add: (relPaths) => invoke('koda:git-add', { relPaths }),
     commit: (message) => invoke('koda:git-commit', { message }),
+  },
+
+  mcp: {
+    listServers: () => invoke('mcp:list-servers'),
+    addServer: (config) => invoke('mcp:add-server', config),
+    removeServer: (id) => invoke('mcp:remove-server', { id }),
+    reconnect: (id) => invoke('mcp:reconnect', { id }),
+    updateConfig: (servers) => invoke('mcp:update-config', { servers }),
+    listTools: () => invoke('mcp:list-tools'),
+    callTool: (serverId, toolName, args) =>
+      invoke('mcp:call-tool', { serverId, toolName, arguments: args }),
+    resolveApproval: (approvalId, decision) =>
+      invoke('mcp:resolve-approval', { approvalId, decision }),
+    getPendingApprovals: () => invoke('mcp:get-pending-approvals'),
+    getStatus: () => invoke('mcp:get-status'),
+    /**
+     * Đăng ký lắng nghe event một chiều từ main.
+     * Trả về hàm gỡ đăng ký gỡ ĐÚNG listener của callback này — dùng
+     * removeAllListeners ở đây sẽ xoá luôn listener của component khác.
+     */
+    onApprovalRequested: (callback) => onEvent('mcp:approval-requested', callback),
+    onApprovalResolved: (callback) => onEvent('mcp:approval-resolved', callback),
+    onServerStatus: (callback) => onEvent('mcp:server-status', callback),
   },
 });

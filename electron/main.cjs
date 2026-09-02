@@ -16,6 +16,7 @@ const path = require('node:path');
 const fs = require('node:fs');
 const http = require('node:http');
 const ipcBridge = require('./ipc.cjs');
+const mcpIpc = require('./mcp/ipc-handlers.cjs');
 
 const APP_ROOT = path.join(__dirname, '..');
 const IS_DEV = process.argv.includes('--dev') || process.env.KODA_ELECTRON_DEV === '1';
@@ -293,6 +294,11 @@ if (!gotLock) {
       audit: klog,
       workspaceOverride: process.env.KODA_WORKSPACE_ROOT || null,
     });
+    // Init MCP manager (async, non-blocking)
+    mcpIpc.register(ipcMain, {
+      userDataDir: app.getPath('userData'),
+      audit: klog,
+    }).catch((e) => klog('MCP init failed:', String(e?.message ?? e)));
     klog('boot: dev=', IS_DEV, 'port=', PORT);
     createWindow();
     try {
@@ -310,6 +316,7 @@ if (!gotLock) {
   app.on('before-quit', () => {
     app.isQuitting = true;
     ipcBridge.killAllRunning();
+    mcpIpc.shutdown().catch(() => {});
     killServerTree();
   });
 }

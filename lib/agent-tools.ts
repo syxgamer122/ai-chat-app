@@ -27,6 +27,7 @@ import { WEB_LIMITS } from '@/lib/web-context';
 import { judgeInjection } from '@/lib/injection-guard';
 import { getToolCallBudget, checkDoomLoop } from '@/lib/tool-call-budget';
 import { MAX_TOOL_CALLS_PER_TURN, TOOL_RESULT_MAX_CHARS } from '@/lib/tool-limits';
+import { isMcpToolKey } from '@/lib/mcp/tool-mapper';
 
 export type AgentToolSet = ReturnType<typeof buildAgentTools>;
 
@@ -91,6 +92,17 @@ export function searchMemories(
 /** Args ngắn gọn hiển thị trên chip — KHÔNG đưa nội dung dài vào annotation. */
 export function summarizeToolArgs(name: string, args: unknown): string {
   const a = (args ?? {}) as Record<string, unknown>;
+  /* Tool MCP: tên đã encode server + tool, arg thì tuỳ server ngoài kia nên
+     không có case riêng — gom key/value ngắn để chip có nội dung thay vì trống. */
+  if (isMcpToolKey(name)) {
+    return Object.entries(a)
+      .slice(0, 3)
+      .map(([k, v]) => {
+        const raw = typeof v === 'string' ? v : JSON.stringify(v);
+        return `${k}=${String(raw ?? '').slice(0, 40)}`;
+      })
+      .join(' ');
+  }
   switch (name) {
     case 'web_search':
       return String(a.query ?? '').slice(0, 80);
@@ -580,7 +592,7 @@ function formatArgsSignature(parameters: unknown): string {
   return `{${parts.join(', ')}}`;
 }
 
-interface ToolLikeForDocs {
+export interface ToolLikeForDocs {
   description?: string;
   parameters?: unknown;
 }
@@ -637,8 +649,18 @@ export const ALL_TOOL_PROTOCOL_NAMES: readonly string[] = Object.freeze([
  * trường `tools` của API, chèn thêm manual là trả tiền token hai lần (~960
  * token mỗi request). Đường đó dùng formatToolNameList().
  */
-export function formatToolProtocolManual(toolNames: Iterable<string>): string {
-  const registry = getDocRegistry();
+export function formatToolProtocolManual(
+  toolNames: Iterable<string>,
+  /**
+   * Tool không nằm trong registry tĩnh (MCP từ Electron main chẳng hạn) —
+   * chúng chỉ tồn tại trong request hiện tại nên không thể cache vào
+   * `docRegistryCache`.
+   */
+  extraRegistry?: Record<string, ToolLikeForDocs>,
+): string {
+  const registry = extraRegistry
+    ? { ...getDocRegistry(), ...extraRegistry }
+    : getDocRegistry();
   const lines: string[] = [];
   for (const name of toolNames) {
     const def = registry[name];
@@ -759,12 +781,16 @@ export const CLIENT_TOOL_DEFS = {
   shell_run: tool({
     description:
       'Chạy LỆNH SHELL trong workspace của người dùng (CHỈ trong Koda desktop). Dùng để build/test/lint/chạy script. ' +
-      'Người dùng LUÔN xem lệnh và PHẢI phê duyệt trước khi chạy. Lệnh chạy qua cmd.exe / sh, timeout 120s, output cap 400k. ' +
-      'AUTO-DEBUG: khi lệnh test/build/lint thất bại, kết quả sẽ kèm retryGuidance hướng dẫn bạn sửa và chạy lại. ' +
-      'KHÔNG dùng để đọc/ghi file — dùng fs_* cho việc đó. Trên web thuần tool này sẽ báo lỗi.',
+      'Người dùng LUÔN xem lệnh và PHẢI phê duyệt trước khi chạy. Lệnh chạy qua cmd.exe / sh, timeout mặc định 120s. ' +
+      'OUTPUT TRUNCATION (Goose-style): output vượt 2000 dòng hoặc 50KB sẽ bị cắt, giữ phần CUỐI (chứa lỗi/thông báo quan trọng). ' +
+      'Full output được lưu vào temp file, kết quả có savedTo (đường dẫn) và previewHint (hướng dẫn đọc tiếp). ' +
+      'Khi thấy truncated: true, dùng fs_read với savedTo để đọc full output nếu cần. ' +
+      'AUTO-DEBUG: khi lệnh test/build/lint thất bại, kết quả kèm retryGuidance hướng dẫn sửa và chạy lại. ' +
+      'KHÔNG dùng để đọc/ghi file → dùng fs_* cho việc đó. Trên web thuần tool này sẽ báo lỗi.',
     parameters: z.object({
       command: z.string().min(1).max(4000).describe('Lệnh shell, vd "npm test" hoặc "npm run build"'),
       cwd: z.string().max(500).optional().describe('Thư mục làm việc tương đối trong workspace, mặc định gốc'),
+      timeout_secs: z.number().int().min(1).max(600).optional().describe('Timeout giây (mặc định 120, tối đa 600)'),
     }),
   }),
   git_status: tool({
@@ -850,12 +876,43 @@ export const CLIENT_TOOL_DEFS = {
       text: z.string().min(5).max(400).describe('Nội dung bài học, vd "Luôn chạy tsc --noEmit trước khi commit TypeScript"'),
     }),
   }),
+  /* ------------------------------------------------------------------ */
+  /* Subagent Delegation — Goose-style task delegation to isolated worker     */
+  /* ------------------------------------------------------------------ */
+
+  delegate: tool({
+    description:
+      'GIAO TASK cho SUBAGENT độc lập (Goose-style). Subagent chạy với context RIÊNG (không thấy lịch sử chat), ' +
+      'có tools giống bạn nhưng KHÔNG thể gọ delegate (không đế quy). Dùng khi: task độc lập cần ' +
+      'nhiều bước tool (refactor file, research codebase, chạy test suite...). Max turns mặc định 10, tối đa 25. ' +
+      'Subagent trả kết quả tóm tắt khi xong.',
+    parameters: z.object({
+      instructions: z.string().min(10).max(5000).describe('Mô tả task chi tiết cho subagent'),
+      max_turns: z.number().int().min(1).max(25).optional().describe('Số turns tối đa (mặc định 10, max 25)'),
+      timeout_secs: z.number().int().min(30).max(600).optional().describe('Timeout giây (mặc định 300, max 600)'),
+    }),
+  }),
 } as const;
 
 export type ClientToolSet = typeof CLIENT_TOOL_DEFS;
 
 /** Tên các tool chạy phía client — route dùng để quyết forward part. */
 export const CLIENT_TOOL_NAMES: ReadonlySet<string> = new Set(Object.keys(CLIENT_TOOL_DEFS));
+
+/**
+ * Tool client KHÔNG được khai báo ở đường NATIVE (function calling gốc).
+ *
+ * `delegate` chỉ chạy được nhờ route tự chạy subagent inline qua
+ * `onDelegateCall` (runSubagent) — cơ chế đó tồn tại trong runEmulatedLoop,
+ * không tồn tại trong đường native. Khai báo nó ở native thì model gọi được
+ * nhưng renderer chỉ trả lại một dòng note: một tool GIẢ, vừa tốn lượt gọi
+ * vừa làm model tin rằng task đã được giao.
+ *
+ * Muốn delegate chạy được ở native thì cần một endpoint server riêng
+ * (vd /api/subagent) nhận instructions và chạy runSubagent — renderer không
+ * có model + khoá để tự chạy. Chừng nào chưa có, đừng quảng cáo tool này.
+ */
+export const NATIVE_EXCLUDED_CLIENT_TOOLS: ReadonlySet<string> = new Set(['delegate']);
 
 /* ------------------------------------------------------------------ */
 /* Validate đề xuất ghi nhớ — thuần, test được                         */

@@ -59,8 +59,12 @@ export const EMU_MAX_RESULT_CHARS = TOOL_RESULT_MAX_CHARS;
  * emulated luôn đọc full file). Không còn fallback: caller bắt buộc truyền
  * danh sách tool thực tế của request.
  */
-export function buildProtocolHeader(toolNames: Iterable<string>): string {
-  const manual = formatToolProtocolManual(toolNames);
+export function buildProtocolHeader(
+  toolNames: Iterable<string>,
+  /** Tool động (MCP) không có trong registry tĩnh của agent-tools. */
+  extraToolDocs?: Record<string, { description?: string; parameters?: unknown }>,
+): string {
+  const manual = formatToolProtocolManual(toolNames, extraToolDocs);
   return [
     '# Tool calling protocol',
     '',
@@ -222,12 +226,23 @@ export interface EmulatedLoopOptions {
    */
   clientTools?: ReadonlySet<string>;
   onClientToolCall?: (call: { toolCallId: string; toolName: string; args: Record<string, unknown> }) => void;
+  /**
+   * Tài liệu tool ĐỘNG (MCP) kèm theo `clientTools` để đưa vào protocol text.
+   * Không truyền thì tool vẫn được phép gọi nhưng model không biết schema.
+   */
+  extraToolDocs?: Record<string, { description?: string; parameters?: unknown }>;
   /* Callbacks xuống route (ghi stream/annotation) */
   onTextDelta: (delta: string) => void;
   onReasoningLine: (line: string) => void;
   onAnnotation: (payload: Record<string, unknown>) => void;
   onUsage?: (usage: { promptTokens?: number; completionTokens?: number }) => void;
   onMemoryProposal?: (text: string) => void;
+  /**
+   * Delegate handler: when model calls 'delegate', this callback runs the
+   * subagent inline (server-side) and returns the result string.
+   * If not provided, delegate calls are treated as unknown tools.
+   */
+  onDelegateCall?: (args: { instructions: string; max_turns?: number; timeout_secs?: number }) => Promise<string>;
 }
 
 export interface EmulatedLoopResult {
@@ -252,7 +267,7 @@ export async function runEmulatedLoop(opts: EmulatedLoopOptions): Promise<Emulat
     ...Object.keys(opts.tools),
     ...(opts.clientTools ?? []),
   ]);
-  const protocol = buildProtocolHeader(knownTools);
+  const protocol = buildProtocolHeader(knownTools, opts.extraToolDocs);
   const messages: Array<{ role: 'user' | 'assistant'; content: string }> = opts.messages.filter(
     (m): m is { role: 'user' | 'assistant'; content: string } => m.role !== 'system',
   );
@@ -304,7 +319,31 @@ export async function runEmulatedLoop(opts: EmulatedLoopOptions): Promise<Emulat
     for (const call of calls) {
       /* Tool CLIENT (fs_*): yield turn — route forward part, client thực thi
          trên máy user, resubmit mang kết quả trở lại và loop chạy tiếp. */
-      if (opts.clientTools?.has(call.name)) {
+            /* Delegate: run subagent inline (server-side) via callback. */
+      if (call.name === 'delegate' && opts.onDelegateCall) {
+        const id = `emu-${round}-${totalCalls}`;
+        opts.onAnnotation({
+          tool: { id, name: 'delegate', phase: 'start', args: summarizeToolArgs('delegate', call.args) },
+        });
+        let delegateResult: string;
+        try {
+          delegateResult = await opts.onDelegateCall({
+            instructions: String(call.args.instructions ?? ''),
+            max_turns: typeof call.args.max_turns === 'number' ? call.args.max_turns : undefined,
+            timeout_secs: typeof call.args.timeout_secs === 'number' ? call.args.timeout_secs : undefined,
+          });
+        } catch (err) {
+          delegateResult = JSON.stringify({ error: err instanceof Error ? err.message : String(err) });
+        }
+        totalCalls += 1;
+        opts.onAnnotation({
+          tool: { id, name: 'delegate', phase: 'done', summary: delegateResult.slice(0, 200) },
+        });
+        resultBlocks.push(`[TOOL_RESULT name=delegate]\n${delegateResult}\n[/TOOL_RESULT]`);
+        continue;
+      }
+
+if (opts.clientTools?.has(call.name)) {
         totalCalls += 1;
         opts.onClientToolCall?.({
           toolCallId: `emu-${round}-${totalCalls}`,

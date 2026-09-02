@@ -54,6 +54,12 @@ const LIMITS = Object.freeze({
   SHELL_TIMEOUT_DEFAULT_MS: 120_000,
   SHELL_TIMEOUT_MAX_MS: 600_000,
   SHELL_OUTPUT_MAX_CHARS: 400_000,
+  /* Goose-style smart truncation: giữ output trong ngân sách token của LLM.
+     Khi vượt → lưu full vào temp file, trả preview (đuôi) + đường dẫn đọc tiếp. */
+  SHELL_OUTPUT_LIMIT_LINES: 2_000,
+  SHELL_OUTPUT_LIMIT_BYTES: 50_000,
+  SHELL_OUTPUT_PREVIEW_LINES: 50,
+  SHELL_OUTPUT_PREVIEW_BYTES: 10_000,
   GIT_TIMEOUT_MS: 60_000,
   COMMIT_MESSAGE_MAX_CHARS: 4_000,
 });
@@ -327,6 +333,80 @@ function killAllRunning() {
   runningChildren.clear();
 }
 
+/* ------------------------------------------------------------------ */
+/* Smart output truncation (Goose-style)                                */
+/* Khi stdout/stderr vượt ngưỡng → lưu full vào temp file, trả preview  */
+/* (đuôi = phần cuối chứa lỗi/thông báo quan trọng) + hint đọc tiếp.    */
+/* ------------------------------------------------------------------ */
+
+const os = require('node:os');
+const crypto = require('node:crypto');
+
+/**
+ * @param {string} fullOutput
+ * @param {'stdout'|'stderr'|'output'} label
+ * @returns {{ text: string; truncated: boolean; savedTo?: string; previewHint?: string }}
+ */
+function truncateShellOutput(fullOutput, label) {
+  if (!fullOutput) return { text: '', truncated: false };
+
+  const lines = fullOutput.split('\n');
+  const totalLines = lines.length;
+  const totalBytes = Buffer.byteLength(fullOutput, 'utf8');
+
+  const exceededLines = totalLines > LIMITS.SHELL_OUTPUT_LIMIT_LINES;
+  const exceededBytes = totalBytes > LIMITS.SHELL_OUTPUT_LIMIT_BYTES;
+
+  if (!exceededLines && !exceededBytes) {
+    return { text: fullOutput, truncated: false };
+  }
+
+  // Lưu full output vào temp file
+  const tmpDir = os.tmpdir();
+  const id = crypto.randomBytes(4).toString('hex');
+  const fileName = `koda-shell-${label}-${id}.txt`;
+  const savePath = path.join(tmpDir, fileName);
+  try {
+    fs.writeFileSync(savePath, fullOutput, 'utf8');
+  } catch {
+    // Nếu không ghi được → fallback về cap cũ
+    return {
+      text: fullOutput.slice(0, LIMITS.SHELL_OUTPUT_MAX_CHARS),
+      truncated: true,
+    };
+  }
+
+  // Preview = đuôi (last N lines) vì lỗi thường nằm ở cuối
+  const previewStart = Math.max(0, totalLines - LIMITS.SHELL_OUTPUT_PREVIEW_LINES);
+  let preview = lines.slice(previewStart).join('\n');
+
+  // Cap preview bytes để tránh line dài bất thường (progress bar, base64...)
+  if (Buffer.byteLength(preview, 'utf8') > LIMITS.SHELL_OUTPUT_PREVIEW_BYTES) {
+    let cutAt = preview.length - LIMITS.SHELL_OUTPUT_PREVIEW_BYTES;
+    // Snip to char boundary (avoid cutting surrogate pairs)
+    while (cutAt < preview.length && !Number.isFinite(parseInt(preview[cutAt], 10)) === false) {
+      cutAt += 1;
+    }
+    preview = preview.slice(Math.max(0, cutAt));
+  }
+
+  const reason = exceededLines
+    ? `Output exceeded ${LIMITS.SHELL_OUTPUT_LIMIT_LINES} line limit (${totalLines} lines total).`
+    : `Output exceeded ${LIMITS.SHELL_OUTPUT_LIMIT_BYTES} byte limit (${totalBytes} bytes total).`;
+
+  const isWin = process.platform === 'win32';
+  const readCmd = isWin
+    ? `Get-Content "${savePath}" -TotalCount 200 or Select-String`
+    : `head -200 "${savePath}" or tail -200 "${savePath}"`;
+
+  return {
+    text: preview,
+    truncated: true,
+    savedTo: savePath,
+    previewHint: `[${reason} Full output saved to ${savePath}. Read with ${readCmd}, up to ${LIMITS.SHELL_OUTPUT_LIMIT_LINES} lines at a time.]`,
+  };
+}
+
 function shellRun(payload) {
   const root = requireRoot();
   const cwd = resolveWithin(root, payload.cwd ?? '');
@@ -356,6 +436,7 @@ function shellRun(payload) {
       killTree(child);
     }, timeoutMs);
 
+    /* Cap thô khi thu thập để tránh OOM; truncate thông minh ở resolve. */
     const cap = (s, add) => (s.length >= LIMITS.SHELL_OUTPUT_MAX_CHARS ? s : (s + add).slice(0, LIMITS.SHELL_OUTPUT_MAX_CHARS));
 
     child.stdout.on('data', (d) => {
@@ -369,14 +450,33 @@ function shellRun(payload) {
       settled = true;
       clearTimeout(timer);
       runningChildren.delete(child);
-      resolve({ code: null, signal: null, stdout, stderr: `${stderr}\n${String(err)}`.trim(), durationMs: Date.now() - started, timedOut });
+      const errStderr = `${stderr}\n${String(err)}`.trim();
+      const outTrunc = truncateShellOutput(stdout, 'stdout');
+      const errTrunc = truncateShellOutput(errStderr, 'stderr');
+      resolve({
+        code: null, signal: null,
+        stdout: outTrunc.text, stderr: errTrunc.text,
+        durationMs: Date.now() - started, timedOut,
+        truncated: outTrunc.truncated || errTrunc.truncated,
+        savedTo: outTrunc.savedTo || errTrunc.savedTo,
+        previewHint: [outTrunc.previewHint, errTrunc.previewHint].filter(Boolean).join('\n') || undefined,
+      });
     });
     child.on('exit', (code, signal) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       runningChildren.delete(child);
-      resolve({ code, signal, stdout, stderr, durationMs: Date.now() - started, timedOut });
+      const outTrunc = truncateShellOutput(stdout, 'stdout');
+      const errTrunc = truncateShellOutput(stderr, 'stderr');
+      resolve({
+        code, signal,
+        stdout: outTrunc.text, stderr: errTrunc.text,
+        durationMs: Date.now() - started, timedOut,
+        truncated: outTrunc.truncated || errTrunc.truncated,
+        savedTo: outTrunc.savedTo || errTrunc.savedTo,
+        previewHint: [outTrunc.previewHint, errTrunc.previewHint].filter(Boolean).join('\n') || undefined,
+      });
     });
   });
 }
@@ -554,4 +654,5 @@ module.exports = {
   LIMITS,
   BINARY_EXT_RE,
   IGNORE_DIRS,
+  truncateShellOutput,
 };

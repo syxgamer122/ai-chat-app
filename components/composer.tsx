@@ -19,7 +19,9 @@ import {
   Paperclip,
   Pencil,
   Square,
+  Target,
   X,
+  Zap,
 } from 'lucide-react';
 import { ModelSelector, type ModelOption } from '@/components/model-selector';
 import { ThinkingSlider } from '@/components/thinking-slider';
@@ -78,6 +80,12 @@ interface ComposerProps {
   onToggleWebSearch?: () => void;
   agentMode?: 'plan' | 'act';
   onToggleAgentMode?: () => void;
+  autoPilot?: boolean;
+  approvalPolicy?: "always" | "smart" | "never";
+  onCycleAutoPilot?: () => void;
+  goalLoopActive?: boolean;
+  goalLoopInfo?: string;
+  onGoalLoopClick?: (goalText: string) => void;
   stagedFileCount?: number;
   onOpenStaging?: () => void;
   /** Orchestrator: panel quét tham số đang mở? */
@@ -299,6 +307,12 @@ export function Composer({
   onToggleWebSearch,
   agentMode,
   onToggleAgentMode,
+  autoPilot,
+  approvalPolicy,
+  onCycleAutoPilot,
+  goalLoopActive,
+  goalLoopInfo,
+  onGoalLoopClick,
   stagedFileCount,
   onOpenStaging,
   /**
@@ -494,6 +508,37 @@ export function Composer({
       label: agentMode === 'plan' ? 'Chuyển sang ACT mode' : 'Chuyển sang PLAN mode',
       shortLabel: 'PLAN mode',
       onClick: onToggleAgentMode,
+    });
+  }
+
+  if (onCycleAutoPilot) {
+    const policyLabel = approvalPolicy === 'never' ? 'YOLO'
+      : approvalPolicy === 'always' ? 'Always ask'
+      : 'Smart';
+    tools.push({
+      key: 'auto-pilot',
+      icon: Zap,
+      active: autoPilot ?? false,
+      disabled: isStreaming,
+      label: autoPilot
+        ? `Auto-pilot: ${policyLabel} — click to cycle`
+        : 'Bật Auto-pilot',
+      shortLabel: autoPilot ? `AP: ${policyLabel}` : 'Auto-pilot',
+      onClick: onCycleAutoPilot,
+    });
+  }
+
+  if (onGoalLoopClick) {
+    tools.push({
+      key: 'goal-loop',
+      icon: Target,
+      active: goalLoopActive ?? false,
+      disabled: isStreaming && !(goalLoopActive ?? false),
+      label: goalLoopActive
+        ? `Goal loop đang chạy${goalLoopInfo ? ` — lượt ${goalLoopInfo}` : ''} — bấm để dừng`
+        : 'Goal loop — gõ mục tiêu vào ô nhập rồi bấm để agent tự lặp đến khi hoàn thành',
+      shortLabel: goalLoopActive ? `Goal ${goalLoopInfo ?? ''}`.trim() : 'Goal loop',
+      onClick: () => onGoalLoopClick(input),
     });
   }
 

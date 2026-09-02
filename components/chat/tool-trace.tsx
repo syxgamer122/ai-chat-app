@@ -12,6 +12,7 @@ import {
   Wrench,
 } from 'lucide-react';
 import { ShimmerLine } from '@/components/effects';
+import { SubagentCard, getSubagentAnnotations } from '@/components/subagent-card';
 
 /**
  * Tool trace — timeline các lần model gọi công cụ trong bubble assistant.
@@ -97,9 +98,14 @@ export const ToolTrace = memo(function ToolTrace({
   toolInvocations?: ToolInvocationLike[];
 }) {
   const events = collectToolEvents(annotations, toolInvocations);
-  if (events.length === 0) return null;
+  const subagentAnns = getSubagentAnnotations(annotations);
+  if (events.length === 0 && subagentAnns.length === 0) return null;
 
   return (
+    <>
+      {subagentAnns.map((ann, i) => (
+        <SubagentCard key={i} annotation={ann} />
+      ))}
     <div className="mb-3 flex flex-wrap gap-1.5" role="list" aria-label="Các công cụ AI đã dùng">
       {events.map((ev) => {
         const meta = LABELS[ev.name] ?? { label: ev.name, Icon: Wrench };
@@ -124,5 +130,6 @@ export const ToolTrace = memo(function ToolTrace({
         );
       })}
     </div>
+    </>
   );
 });

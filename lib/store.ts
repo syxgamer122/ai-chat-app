@@ -47,6 +47,74 @@ export interface PerfSettings {
   animations: boolean;
 }
 
+/**
+ * Per-tool permission override for a category.
+ * - 'default': tuân theo approvalPolicy hiện tại (smart/never/always)
+ * - 'auto': luôn auto-approve (bỏ qua approvalPolicy)
+ * - 'ask': luôn hỏi (kể cả khi policy = never/YOLO)
+ * - 'deny': chặn hoàn toàn (tool không được gọi)
+ */
+export type PermissionOverride = 'default' | 'auto' | 'ask' | 'deny';
+
+/**
+ * Category groups for per-tool permission overrides.
+ * Each category maps to one or more tool names.
+ */
+export type ToolCategory =
+  | 'fs_read'
+  | 'fs_write'
+  | 'shell'
+  | 'git'
+  | 'web'
+  | 'memory'
+  | 'plan'
+  | 'delegate';
+
+/** Map from tool name → category for quick lookup. */
+export const TOOL_CATEGORY_MAP: Record<string, ToolCategory> = {
+  fs_read: 'fs_read',
+  fs_list: 'fs_read',
+  fs_search: 'fs_read',
+  fs_edit: 'fs_write',
+  fs_write: 'fs_write',
+  shell_run: 'shell',
+  git_status: 'git',
+  git_diff: 'git',
+  git_log: 'git',
+  git_add: 'git',
+  git_commit: 'git',
+  web_search: 'web',
+  web_fetch: 'web',
+  memory_search: 'memory',
+  memory_save: 'memory',
+  plan_create: 'plan',
+  plan_update: 'plan',
+  delegate: 'delegate',
+};
+
+/** Human-readable labels for each category (UI). */
+export const TOOL_CATEGORY_LABELS: Record<ToolCategory, { label: string; icon: string; tools: string }> = {
+  fs_read: { label: 'File Reading', icon: '📂', tools: 'fs_read, fs_list, fs_search' },
+  fs_write: { label: 'File Editing', icon: '✏️', tools: 'fs_edit, fs_write' },
+  shell: { label: 'Shell Commands', icon: '💻', tools: 'shell_run' },
+  git: { label: 'Git Operations', icon: '🔀', tools: 'git_status, git_diff, git_log, git_add, git_commit' },
+  web: { label: 'Web Tools', icon: '🌐', tools: 'web_search, web_fetch' },
+  memory: { label: 'Memory', icon: '🧠', tools: 'memory_search, memory_save' },
+  plan: { label: 'Plans', icon: '📋', tools: 'plan_create, plan_update' },
+  delegate: { label: 'Subagent', icon: '🤖', tools: 'delegate' },
+};
+
+export const ALL_TOOL_CATEGORIES: ToolCategory[] = [
+  'fs_read', 'fs_write', 'shell', 'git', 'web', 'memory', 'plan', 'delegate',
+];
+
+/** Per-category permission overrides. All default to 'default'. */
+export type ToolPermissions = Record<ToolCategory, PermissionOverride>;
+
+export function isPermissionOverride(v: unknown): v is PermissionOverride {
+  return v === 'default' || v === 'auto' || v === 'ask' || v === 'deny';
+}
+
 export interface Settings {
   model: string;
   temperature: number;
@@ -80,6 +148,20 @@ export interface Settings {
    * Tắt → hành vi cũ: diff modal phê duyệt từng edit, ghi đĩa ngay.
    */
   stagingSandbox: boolean;
+  /**
+   * Auto-pilot mode: skip confirmation modals for tool calls based on
+   * approvalPolicy. Port from Goose GooseMode + Codex approval modes.
+   */
+  autoPilot: boolean;
+  /**
+   * Approval policy when autoPilot is ON:
+   * - 'always': ask for everything (same as autoPilot OFF)
+   * - 'smart': auto-approve reads + safe commands, ask for writes/destructive
+   * - 'never': auto-approve everything except always-blocked commands (YOLO)
+   */
+  approvalPolicy: 'always' | 'smart' | 'never';
+  /** Per-tool permission overrides by category. */
+  toolPermissions: ToolPermissions;
   apiKey?: string;
   accessCode?: string;
 }
@@ -123,9 +205,26 @@ const DEFAULT_SETTINGS: Settings = {
   forceEmulatedTools: false,
   agentMode: 'act',
   stagingSandbox: true,
+  autoPilot: false,
+  approvalPolicy: 'smart',
+  toolPermissions: { fs_read: 'default', fs_write: 'default', shell: 'default', git: 'default', web: 'default', memory: 'default', plan: 'default', delegate: 'default' },
   apiKey: '',
   accessCode: '',
 };
+
+/** Validate persisted toolPermissions, falling back to current for invalid entries. */
+function validateToolPermissions(
+  persisted: unknown,
+  fallback: ToolPermissions,
+): ToolPermissions {
+  if (!persisted || typeof persisted !== 'object') return { ...fallback };
+  const p = persisted as Record<string, unknown>;
+  const result = { ...fallback };
+  for (const cat of ALL_TOOL_CATEGORIES) {
+    if (isPermissionOverride(p[cat])) result[cat] = p[cat];
+  }
+  return result;
+}
 
 export const useAppStore = create<AppState>()(
   persist(
@@ -168,6 +267,9 @@ export const useAppStore = create<AppState>()(
           webSearch: s.settings.webSearch,
           agentMode: s.settings.agentMode,
           stagingSandbox: s.settings.stagingSandbox,
+          autoPilot: s.settings.autoPilot,
+          approvalPolicy: s.settings.approvalPolicy,
+          toolPermissions: s.settings.toolPermissions,
         },
       }),
       merge: (persisted, current) => {
@@ -200,6 +302,15 @@ export const useAppStore = create<AppState>()(
               typeof p.settings?.stagingSandbox === 'boolean'
                 ? p.settings.stagingSandbox
                 : current.settings.stagingSandbox,
+            autoPilot:
+              typeof p.settings?.autoPilot === 'boolean'
+                ? p.settings.autoPilot
+                : current.settings.autoPilot,
+            approvalPolicy:
+              p.settings?.approvalPolicy === 'always' || p.settings?.approvalPolicy === 'smart' || p.settings?.approvalPolicy === 'never'
+                ? p.settings.approvalPolicy
+                : current.settings.approvalPolicy,
+            toolPermissions: validateToolPermissions(p.settings?.toolPermissions, current.settings.toolPermissions),
             apiKey: '',
             accessCode: '',
           },
