@@ -1,3 +1,4 @@
+/* global process, console, fetch */
 import fs from 'node:fs';
 
 const webhook = process.env.DISCORD_WEBHOOK;
