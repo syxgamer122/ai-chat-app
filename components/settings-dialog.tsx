@@ -6,7 +6,7 @@ import { useAppStore, SERVER_PROVIDER_ID, ALL_TOOL_CATEGORIES, TOOL_CATEGORY_LAB
 import { exportJson, exportMarkdown, importBackup, type ImportMode } from '@/lib/backup';
 import { X, Download, Upload, Loader2, ShieldAlert, Pencil, Trash2 } from 'lucide-react';
 import { useInstallPrompt } from '@/lib/use-install-prompt';
-import { KodaMark } from '@/components/koda-logo';
+import { VyenMark } from '@/components/vyen-logo';
 import { ProviderManager } from '@/components/provider-manager';
 import { UsageStats } from '@/components/usage-stats';
 import { McpSettingsPanel } from '@/components/mcp/mcp-settings-panel';
@@ -124,10 +124,10 @@ function InstallSection() {  const { canInstall, installed, isIOS, install } = u
       {installed ? (
         <div className="flex items-center gap-3 rounded-xl border border-zinc-200 bg-surface-raised p-3">
           <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-surface-muted ring-1 ring-zinc-900/5">
-            <KodaMark size={20} />
+            <VyenMark size={20} />
           </div>
           <p className="text-xs text-zinc-600">
-            <strong className="font-semibold">KODA</strong> đang chạy bản đã cài lên thiết bị —
+            <strong className="font-semibold">Vyen</strong> đang chạy bản đã cài lên thiết bị —
             hoạt động offline và mở như app thật.
           </p>
         </div>
@@ -139,7 +139,7 @@ function InstallSection() {  const { canInstall, installed, isIOS, install } = u
           className="btn-primary w-full bg-gradient-to-r from-brand to-brand-accent hover:from-brand-hover hover:to-brand-accent"
         >
           {installing ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-          Cài KODA lên thiết bị
+          Cài Vyen lên thiết bị
         </button>
       ) : isIOS ? (
         <p className="text-xs leading-relaxed text-zinc-600">

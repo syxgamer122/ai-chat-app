@@ -11,7 +11,7 @@ import { stripEmulatedToolMarkup } from '@/lib/text-tool-guard';
 import { stripMarkdownForSpeech } from '@/lib/speech-text';
 import { useTts } from '@/lib/use-tts';
 import { ToolTrace } from '@/components/chat/tool-trace';
-import { KodaMark } from '@/components/koda-logo';
+import { VyenMark } from '@/components/vyen-logo';
 
 export function AssistantAvatar() {
   return (
@@ -19,7 +19,7 @@ export function AssistantAvatar() {
       aria-hidden="true"
       className="mt-0.5 flex h-7 w-7 flex-shrink-0 select-none items-center justify-center rounded-full bg-zinc-900 dark:bg-gradient-to-br dark:from-aurora-from/20 dark:via-aurora-via/15 dark:to-aurora-to/20 dark:shadow-[0_0_12px_rgb(var(--aurora-from)/0.2)]"
     >
-      <KodaMark size={14} className="text-white dark:text-aurora-from" />
+      <VyenMark size={14} className="text-white dark:text-aurora-from" />
     </div>
   );
 }

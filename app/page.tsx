@@ -32,7 +32,7 @@ export default function Home() {
   const theme = useAppStore((s) => s.theme);
 
   /*
-   * KODA đã commit dark-only (xem app/layout.tsx). Effect này giữ cứng
+   * Vyen đã commit dark-only (xem app/layout.tsx). Effect này giữ cứng
    * class `dark` lên <html> cho mọi lần re-render, phòng extension hoặc
    * mã khác gỡ nhầm. Có thể xoá khi nào `theme` bị gỡ khỏi store.
    */

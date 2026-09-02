@@ -379,7 +379,7 @@ class McpManager extends EventEmitter {
     try {
       transport = this._createTransport(entry);
 
-      client = new sdkClient({ name: 'koda-desktop', version: '1.0.0' });
+      client = new sdkClient({ name: 'vyen-desktop', version: '1.0.0' });
 
       // Transport mất kết nối (process con chết, mạng đứt) → hạ trạng thái
       // ngay thay vì giữ 'connected' giả tạo tới lần gọi tool kế tiếp.
@@ -399,7 +399,7 @@ class McpManager extends EventEmitter {
       await client.connect(transport);
 
       /* tools/list_changed: server báo danh sách tool đổi (vd server sinh tool
-         theo cấu hình). Không subscribe thì Koda giữ danh sách cũ tới khi
+         theo cấu hình). Không subscribe thì Vyen giữ danh sách cũ tới khi
          người dùng bấm "Làm mới" — model gọi tool đã bị gỡ và nhận lỗi mơ hồ. */
       if (sdkToolListChangedSchema) {
         try {
@@ -471,7 +471,7 @@ class McpManager extends EventEmitter {
           : undefined,
         cwd: config.cwd,
         // 'inherit' (mặc định SDK) đẩy thẳng stderr của server ra console app;
-        // pipe để gắn prefix, vừa đọc được vừa không lẫn với log của Koda.
+        // pipe để gắn prefix, vừa đọc được vừa không lẫn với log của Vyen.
         stderr: 'pipe',
       });
     }

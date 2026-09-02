@@ -1,7 +1,7 @@
 /**
  * Auto-debug loop state tracker — bounded retry với no-progress detection.
  *
- * Port mô hình Plandex `plandex debug` (MIT) về mô hình client-side của KODA:
+ * Port mô hình Plandex `plandex debug` (MIT) về mô hình client-side của Vyen:
  * KHÔNG xây outer loop riêng (rủi ro infinite loop). Thay vào đó track state
  * để enhanced shell_run result hướng dẫn model tự retry an toàn.
  *

@@ -1,10 +1,10 @@
 /**
- * Adapter filesystem cho Koda desktop (Electron).
- * Mọi op đi qua window.koda IPC bridge (electron/ipc.cjs),
+ * Adapter filesystem cho Vyen desktop (Electron).
+ * Mọi op đi qua window.vyen IPC bridge (electron/ipc.cjs),
  * giữ nguyên contract với lib/fs-access.ts để chat-interface
  * không phải fork logic diff/search.
  */
-import { isKodaDesktop, kodaDesktop } from '@/lib/desktop-bridge';
+import { isVyenDesktop, vyenDesktop } from '@/lib/desktop-bridge';
 
 // Mirror trần của lib/fs-access.ts — giữ đồng bộ để desktop không
 // đọc được nhiều hơn web rồi làm phình context ở nơi khác.
@@ -37,13 +37,13 @@ export interface SearchMatch {
 }
 
 function requireBridge() {
-  const b = kodaDesktop();
-  if (!b) throw new Error('Koda desktop bridge chưa sẵn sàng.');
+  const b = vyenDesktop();
+  if (!b) throw new Error('Vyen desktop bridge chưa sẵn sàng.');
   return b;
 }
 
 export function isDesktopAvailable(): boolean {
-  return isKodaDesktop();
+  return isVyenDesktop();
 }
 
 export async function desktopGetWorkspaceInfo(): Promise<{ connected: boolean; name: string | null }> {
@@ -57,8 +57,8 @@ export async function desktopGetWorkspaceInfo(): Promise<{ connected: boolean; n
 
 export async function desktopPickWorkspaceRoot(): Promise<{ ok: true; name: string } | { ok: false; error: string }> {
   const b = requireBridge();
-  // Ưu tiên dialog native (koda:workspace-select) nếu preload expose;
-  // fallback về set() khi test/smoke dùng KODA_WORKSPACE_ROOT.
+  // Ưu tiên dialog native (vyen:workspace-select) nếu preload expose;
+  // fallback về set() khi test/smoke dùng VYEN_WORKSPACE_ROOT.
   const k = b as unknown as { workspace: { select?: () => Promise<{ path?: string; cancelled?: boolean }> } };
   if (k.workspace.select) {
     const r = await k.workspace.select();
@@ -78,7 +78,7 @@ export async function desktopPickWorkspaceRoot(): Promise<{ ok: true; name: stri
 export async function desktopDisconnectWorkspace(): Promise<{ connected: boolean; name: string | null }> {
   const b = requireBridge();
   if (typeof b.workspace.clear !== 'function') {
-    throw new Error('Koda desktop cần khởi động lại để hỗ trợ ngắt kết nối (main process cũ).');
+    throw new Error('Vyen desktop cần khởi động lại để hỗ trợ ngắt kết nối (main process cũ).');
   }
   await b.workspace.clear();
   return { connected: false, name: null };
@@ -87,7 +87,7 @@ export async function desktopDisconnectWorkspace(): Promise<{ connected: boolean
 export async function desktopRequireWorkspace(): Promise<{ ok: true } | { ok: false; error: string }> {
   const info = await desktopGetWorkspaceInfo();
   if (!info.connected) {
-    return { ok: false, error: 'Chưa kết nối thư mục làm việc trong Koda desktop. Bấm 📁 trên composer để chọn thư mục.' };
+    return { ok: false, error: 'Chưa kết nối thư mục làm việc trong Vyen desktop. Bấm 📁 trên composer để chọn thư mục.' };
   }
   return { ok: true };
 }
@@ -139,7 +139,7 @@ export interface DesktopImageReadResult {
 export async function desktopFsReadImage(rawPath: string): Promise<DesktopImageReadResult> {
   const b = requireBridge();
   if (typeof b.fs.readImage !== 'function') {
-    throw new Error('Koda desktop cần khởi động lại để hỗ trợ đọc ảnh (main process cũ).');
+    throw new Error('Vyen desktop cần khởi động lại để hỗ trợ đọc ảnh (main process cũ).');
   }
   const r = await b.fs.readImage(rawPath);
   return {

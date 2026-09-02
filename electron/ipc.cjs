@@ -1,7 +1,7 @@
 'use strict';
 
 /*
- * Koda desktop IPC bridge — fs / shell / git / workspace.
+ * Vyen desktop IPC bridge — fs / shell / git / workspace.
  *
  * Trust model (quyết định thiết kế, có chủ ý):
  * - Renderer là code của app (contextIsolation + sandbox), nhưng nếu renderer
@@ -11,7 +11,7 @@
  *   2. Chặn shell injection cấu trúc: command chạy qua cmd /c nhưng args
  *      là MỘT chuỗi đã qua schema (max 4000), cwd luôn nằm trong root,
  *      timeout + tree-kill + output cap — không bao giờ treo máy user.
- *   3. Audit log mọi shell/git call ra koda-shell.log.
+ *   3. Audit log mọi shell/git call ra vyen-shell.log.
  * - Approval UI (user bấm đồng ý lệnh) thuộc tầng renderer/tool — giai đoạn 3.
  */
 
@@ -89,7 +89,17 @@ let workspaceFile = null;
 let auditLog = () => {};
 
 function loadWorkspace(userDataDir) {
-  workspaceFile = path.join(userDataDir, 'koda-workspace.json');
+  workspaceFile = path.join(userDataDir, 'vyen-workspace.json');
+  // Migration từ thời KODA: lần đầu sau rebrand file mới chưa có — chép từ
+  // file cũ sang; các lần persist sau sẽ ghi ra tên mới.
+  if (!fs.existsSync(workspaceFile)) {
+    const legacy = path.join(userDataDir, 'koda-workspace.json');
+    if (fs.existsSync(legacy)) {
+      try {
+        fs.copyFileSync(legacy, workspaceFile);
+      } catch {}
+    }
+  }
   try {
     const raw = JSON.parse(fs.readFileSync(workspaceFile, 'utf8'));
     if (typeof raw.root === 'string' && fs.existsSync(raw.root)) {
@@ -110,7 +120,7 @@ function persistWorkspace(root) {
 
 function requireRoot() {
   if (!workspaceRoot) {
-    throw new Error('Chưa chọn workspace trong Koda desktop (Settings → Workspace).');
+    throw new Error('Chưa chọn workspace trong Vyen desktop (Settings → Workspace).');
   }
   return workspaceRoot;
 }
@@ -364,7 +374,7 @@ function truncateShellOutput(fullOutput, label) {
   // Lưu full output vào temp file
   const tmpDir = os.tmpdir();
   const id = crypto.randomBytes(4).toString('hex');
-  const fileName = `koda-shell-${label}-${id}.txt`;
+  const fileName = `vyen-shell-${label}-${id}.txt`;
   const savePath = path.join(tmpDir, fileName);
   try {
     fs.writeFileSync(savePath, fullOutput, 'utf8');
@@ -573,15 +583,15 @@ function handler(fn) {
 function register(ipcMain, opts) {
   auditLog = opts.audit;
   loadWorkspace(opts.userDataDir);
-  // KODA_WORKSPACE_ROOT: override cho e2e/smoke — không persist (chỉ runtime).
+  // VYEN_WORKSPACE_ROOT: override cho e2e/smoke — không persist (chỉ runtime).
   if (opts.workspaceOverride && fs.existsSync(opts.workspaceOverride)) {
     workspaceRoot = path.resolve(opts.workspaceOverride);
   }
 
   const on = (channel, fn) => ipcMain.handle(channel, handler(fn));
 
-  on('koda:workspace-get', () => ({ path: workspaceRoot }));
-  on('koda:workspace-select', async () => {
+  on('vyen:workspace-get', () => ({ path: workspaceRoot }));
+  on('vyen:workspace-select', async () => {
     const dialog = getDialog();
     if (!dialog) throw new Error('Dialog không khả dụng.');
     const win = getFocusedWindow();
@@ -593,7 +603,7 @@ function register(ipcMain, opts) {
     auditLog(`workspace = ${resolved}`);
     return { path: workspaceRoot };
   });
-  on('koda:workspace-set', (payload) => {
+  on('vyen:workspace-set', (payload) => {
     const schema = z.object({ path: z.string().min(1).max(500) });
     const p = schema.parse(payload);
     const resolved = path.resolve(p.path);
@@ -605,25 +615,25 @@ function register(ipcMain, opts) {
   });
   // Ngắt kết nối: xoá root runtime + persist null (loadWorkspace bỏ qua root
   // không phải string, nên phiên sau không âm thầm nối lại).
-  on('koda:workspace-clear', () => {
+  on('vyen:workspace-clear', () => {
     workspaceRoot = null;
     persistWorkspace(null);
     auditLog('workspace = (đã ngắt kết nối)');
     return { ok: true };
   });
-  on('koda:fs-list', (p) => fsList(FsListPayload.parse(p)));
-  on('koda:fs-read', (p) => fsRead(FsReadPayload.parse(p)));
-  on('koda:fs-read-image', (p) => fsReadImage(FsReadPayload.parse(p)));
-  on('koda:fs-write', (p) => fsWrite(FsWritePayload.parse(p)));
-  on('koda:fs-delete', (p) => fsDelete(FsDeletePayload.parse(p)));
-  on('koda:fs-stat', (p) => fsStat(FsStatPayload.parse(p)));
-  on('koda:fs-search', (p) => fsSearch(FsSearchPayload.parse(p)));
-  on('koda:shell-run', (p) => shellRun(ShellPayload.parse(p)));
-  on('koda:git-status', (p) => {
+  on('vyen:fs-list', (p) => fsList(FsListPayload.parse(p)));
+  on('vyen:fs-read', (p) => fsRead(FsReadPayload.parse(p)));
+  on('vyen:fs-read-image', (p) => fsReadImage(FsReadPayload.parse(p)));
+  on('vyen:fs-write', (p) => fsWrite(FsWritePayload.parse(p)));
+  on('vyen:fs-delete', (p) => fsDelete(FsDeletePayload.parse(p)));
+  on('vyen:fs-stat', (p) => fsStat(FsStatPayload.parse(p)));
+  on('vyen:fs-search', (p) => fsSearch(FsSearchPayload.parse(p)));
+  on('vyen:shell-run', (p) => shellRun(ShellPayload.parse(p)));
+  on('vyen:git-status', (p) => {
     GitStatusPayload.parse(p ?? {});
     return gitRun(requireRoot(), ['status', '--porcelain=v1', '-b']).then(parsePorcelain);
   });
-  on('koda:git-diff', (p) => {
+  on('vyen:git-diff', (p) => {
     const d = GitDiffPayload.parse(p ?? {});
     const args = ['diff'];
     if (d.staged) args.push('--cached');
@@ -631,18 +641,18 @@ function register(ipcMain, opts) {
     if (d.relPath) args.push(d.relPath);
     return gitRun(requireRoot(), args);
   });
-  on('koda:git-log', (p) => {
+  on('vyen:git-log', (p) => {
     const d = GitLogPayload.parse(p ?? {});
     return gitRun(requireRoot(), ['log', '--oneline', `-${d.limit ?? 30}`]);
   });
-  on('koda:git-add', (p) => {
+  on('vyen:git-add', (p) => {
     const d = GitAddPayload.parse(p);
     const root = requireRoot();
     // Path từ renderer phải nằm trong root trước khi đưa cho git.
     for (const rel of d.relPaths) resolveWithin(root, rel);
     return gitRun(root, ['add', '--', ...d.relPaths]).then(() => ({ ok: true }));
   });
-  on('koda:git-commit', (p) => {
+  on('vyen:git-commit', (p) => {
     const d = GitCommitPayload.parse(p);
     return gitRun(requireRoot(), ['commit', '-m', d.message]).then((out) => ({ ok: true, output: out.trim().slice(0, 2000) }));
   });

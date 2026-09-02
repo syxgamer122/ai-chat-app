@@ -7,7 +7,7 @@
  * Đó là lý do AO tồn tại — "autonomously handles CI fixes, merge conflicts,
  * and code reviews".
  *
- * Bản port trước đó của KODA đã có plan/spawn/review nhưng THIẾU MẮT XÍCH
+ * Bản port trước đó của Vyen đã có plan/spawn/review nhưng THIẾU MẮT XÍCH
  * NÀY: một cell hỏng là hỏng luôn, một cú 429 hay 503 làm mất hẳn một ô trong
  * lưới, và lưới mất ô thì heatmap mất hình. Module này lấy lại đúng 3 điều:
  *

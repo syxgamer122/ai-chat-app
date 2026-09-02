@@ -6,7 +6,7 @@ import type { Message } from 'ai/react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { ArrowDown, ArrowUp } from 'lucide-react';
 import { ChatErrorBoundary } from '@/components/chat-error-boundary';
-import { KodaLogo } from '@/components/koda-logo';
+import { VyenLogo } from '@/components/vyen-logo';
 import { TextShimmer } from '@/components/effects';
 import { MessageItem, AssistantAvatar, type BranchInfo } from './message-item';
 import { motion } from 'framer-motion';
@@ -180,7 +180,7 @@ export const MessageList = memo(function MessageList({
   /**
    * Đang chờ token đầu tiên mà tin nhắn assistant cuối vẫn rỗng: hàng rỗng
    * (avatar + caret nháy trên bong bóng trống) bị ẩn, ThinkingIndicator đại
-   * diện — nếu không sẽ có 2 avatar KODA cùng lúc cho 1 câu trả lời. Ký tự
+   * diện — nếu không sẽ có 2 avatar Vyen cùng lúc cho 1 câu trả lời. Ký tự
    * đầu tiên tới → hàng hiện lại và indicator tự ẩn (caret tiếp quản).
    */
   const pendingEmptyAssistant =
@@ -337,7 +337,7 @@ export const MessageList = memo(function MessageList({
       >
         {!hasMessages ? (
           <div className="mx-auto flex h-full max-w-thread flex-col items-center justify-center px-4 pb-16 pt-10">
-            <KodaLogo size="lg" className="mb-5" />
+            <VyenLogo size="lg" className="mb-5" />
             <h1 className="w-full min-w-0 max-w-[16rem] text-balance text-center text-[20px] font-semibold leading-tight tracking-tight text-zinc-800 sm:max-w-none md:text-[26px]">
               Hôm nay mình giúp gì cho bạn?
             </h1>

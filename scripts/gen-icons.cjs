@@ -1,5 +1,5 @@
 // Sinh icon PWA (192/512/maskable-512/180) — vẽ lại thiết kế app/icon.svg.
-// Logo KODA: chữ K bằng 3 nét bo tròn gradient teal→green + 2 node tròn ở đầu nét.
+// Logo Vyen: chữ V bằng 2 nét bo tròn gradient teal→green + 2 node tròn ở đỉnh.
 // Tự encode PNG bằng zlib + CRC32 (không cần thư viện ngoài). Chạy 1 lần rồi xoá.
 const fs = require('fs');
 const path = require('path');
@@ -54,13 +54,12 @@ const TEAL = [0x0a, 0x7e, 0x8c];
 const GREEN = [0x4e, 0xcb, 0x71];
 const STROKE_HALF = 1.6; // stroke-width 3.2
 const STROKES = [
-  [10.5, 8, 10.5, 24], // sổ dọc của K (thân trái)
-  [10.5, 16, 22.5, 8], // tay chéo: từ giữa thân kéo lên phải
-  [10.5, 16, 22.5, 24], // tay chéo: từ giữa thân kéo xuống phải
+  [10, 7.5, 16, 24.5], // nét trái của V
+  [22, 7.5, 16, 24.5], // nét phải của V
 ];
 const NODES = [
-  [22.5, 8, 2.4, TEAL],
-  [22.5, 24, 2.4, GREEN],
+  [10, 7.5, 2.4, TEAL],
+  [22, 7.5, 2.4, GREEN],
 ];
 // Trục gradient chéo từ góc trên-trái sang dưới-phải của vùng nét.
 const G0 = [8, 7];

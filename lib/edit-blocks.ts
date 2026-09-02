@@ -1,6 +1,6 @@
 /**
  * SEARCH/REPLACE edit blocks — port từ aider `coders/editblock_coder.py`
- * (Apache-2.0), thu gọn về TS thuần cho agent coding của KODA.
+ * (Apache-2.0), thu gọn về TS thuần cho agent coding của Vyen.
  *
  * Vì sao: model free viết khối edit rất hay lệch — thiếu/thừa indent, bọc
  * thêm fence, quên tên file, dùng "..." để lược code. Chuỗi fallback của

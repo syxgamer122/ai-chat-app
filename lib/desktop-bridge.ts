@@ -1,7 +1,7 @@
 /**
- * Typed client cho Koda desktop bridge (`window.koda`).
+ * Typed client cho Vyen desktop bridge (`window.vyen`).
  *
- * Renderer KHÔNG bao giờ gọi window.koda trực tiếp — đi qua module này để:
+ * Renderer KHÔNG bao giờ gọi window.vyen trực tiếp — đi qua module này để:
  * - feature-detect an toàn (SSR/web: trả null, caller rẽ nhánh về FSA API)
  * - có type một chỗ, preload và main tự do refactor nội bộ
  * - normalize lỗi Electron (string) thành Error chuẩn cho catch phía app
@@ -16,21 +16,21 @@ import type { McpToolInfo } from '@/lib/mcp/tool-mapper';
 /* Kiểu dữ liệu — mirror payload của electron/ipc.cjs                  */
 /* ------------------------------------------------------------------ */
 
-export interface KodaFsEntry {
+export interface VyenFsEntry {
   name: string;
   kind: 'file' | 'directory';
   size: number;
   mtimeMs: number;
 }
 
-export interface KodaFsStat {
+export interface VyenFsStat {
   exists: boolean;
   kind?: 'file' | 'directory';
   size?: number;
   mtimeMs?: number;
 }
 
-export interface KodaRunResult {
+export interface VyenRunResult {
   code: number | null;
   signal: string | null;
   stdout: string;
@@ -45,28 +45,28 @@ export interface KodaRunResult {
   previewHint?: string;
 }
 
-export interface KodaSearchMatch {
+export interface VyenSearchMatch {
   path: string;
   line: number;
   text: string;
 }
 
-export interface KodaSearchOptions {
+export interface VyenSearchOptions {
   isRegex?: boolean;
   caseSensitive?: boolean;
   maxResults?: number;
 }
 
-export interface KodaGitStatusEntry {
+export interface VyenGitStatusEntry {
   x: string;
   y: string;
   path: string;
   origPath?: string;
 }
 
-export interface KodaGitStatus {
+export interface VyenGitStatus {
   branch: string | null;
-  entries: KodaGitStatusEntry[];
+  entries: VyenGitStatusEntry[];
 }
 
 /* ------------------------------------------------------------------ */
@@ -74,13 +74,13 @@ export interface KodaGitStatus {
 /* ------------------------------------------------------------------ */
 
 /** Trạng thái vòng đời của một MCP server. */
-export type KodaMcpServerState = 'connected' | 'connecting' | 'disconnected' | 'error';
+export type VyenMcpServerState = 'connected' | 'connecting' | 'disconnected' | 'error';
 
 /**
  * Cấu hình MCP server do người dùng khai báo.
  * `id` bị khoá vào tập ký tự an toàn vì nó nằm trong tên tool mà model gọi.
  */
-export type KodaMcpServerConfig =
+export type VyenMcpServerConfig =
   | {
       id: string;
       name: string;
@@ -102,10 +102,10 @@ export type KodaMcpServerConfig =
       timeoutSecs?: number;
     };
 
-export interface KodaMcpServerStatus {
+export interface VyenMcpServerStatus {
   id: string;
   name: string;
-  status: KodaMcpServerState;
+  status: VyenMcpServerState;
   error?: string;
   toolCount: number;
   serverVersion?: string;
@@ -117,31 +117,31 @@ export interface KodaMcpServerStatus {
  * tại ở một nơi — `import type` nên không kéo runtime của tool-mapper vào
  * bundle của bridge.
  */
-export type KodaMcpToolInfo = McpToolInfo;
+export type VyenMcpToolInfo = McpToolInfo;
 
 /** Một khối nội dung trong CallToolResult của MCP. */
-export interface KodaMcpContent {
+export interface VyenMcpContent {
   type: string;
   text?: string;
   [key: string]: unknown;
 }
 
-export interface KodaMcpCallResult {
+export interface VyenMcpCallResult {
   /** Mảng content nguyên vẹn từ MCP server. */
-  content: KodaMcpContent[];
+  content: VyenMcpContent[];
   /** true = tool CHẠY RỒI NHƯNG BÁO LỖI NGHIỆP VỤ (khác với lỗi giao thức). */
   isError: boolean;
   /** true = bị chặn bởi policy "luôn từ chối" hoặc người dùng bấm từ chối. */
   denied?: boolean;
 }
 
-export type KodaMcpPermissionDecision =
+export type VyenMcpPermissionDecision =
   | 'allow_once'
   | 'always_allow'
   | 'deny_once'
   | 'always_deny';
 
-export interface KodaMcpApprovalRequest {
+export interface VyenMcpApprovalRequest {
   id: string;
   serverId: string;
   toolName: string;
@@ -150,7 +150,7 @@ export interface KodaMcpApprovalRequest {
   expiresAt: number;
 }
 
-export interface KodaBridge {
+export interface VyenBridge {
   desktop: true;
   platform: string;
   electron: string;
@@ -162,20 +162,20 @@ export interface KodaBridge {
     clear?(): Promise<{ ok: true }>;
   };
   fs: {
-    list(relPath?: string): Promise<KodaFsEntry[]>;
+    list(relPath?: string): Promise<VyenFsEntry[]>;
     read(relPath: string): Promise<{ content: string; size: number }>;
     /** Có thể thiếu nếu renderer mới hơn main (app chưa restart) — caller phải check. */
     readImage?(relPath: string): Promise<{ mimeType: string; base64: string; size: number }>;
     write(relPath: string, content: string): Promise<{ size: number }>;
     delete(relPath: string): Promise<void>;
-    stat(relPath: string): Promise<KodaFsStat>;
-    search(opts: { query: string } & KodaSearchOptions): Promise<KodaSearchMatch[]>;
+    stat(relPath: string): Promise<VyenFsStat>;
+    search(opts: { query: string } & VyenSearchOptions): Promise<VyenSearchMatch[]>;
   };
   shell: {
-    run(opts: { command: string; cwd?: string; timeoutMs?: number }): Promise<KodaRunResult>;
+    run(opts: { command: string; cwd?: string; timeoutMs?: number }): Promise<VyenRunResult>;
   };
   git: {
-    status(): Promise<KodaGitStatus>;
+    status(): Promise<VyenGitStatus>;
     diff(opts?: { relPath?: string; staged?: boolean }): Promise<string>;
     log(opts?: { limit?: number }): Promise<string>;
     add(relPaths: string[]): Promise<{ ok: true }>;
@@ -186,25 +186,25 @@ export interface KodaBridge {
    * hơn bản renderer — mọi caller PHẢI check trước khi dùng.
    */
   mcp?: {
-    listServers(): Promise<KodaMcpServerStatus[]>;
-    addServer(config: KodaMcpServerConfig): Promise<KodaMcpServerStatus>;
+    listServers(): Promise<VyenMcpServerStatus[]>;
+    addServer(config: VyenMcpServerConfig): Promise<VyenMcpServerStatus>;
     removeServer(id: string): Promise<{ ok: true }>;
-    reconnect(id: string): Promise<KodaMcpServerStatus>;
-    updateConfig(servers: KodaMcpServerConfig[]): Promise<{ ok: true }>;
-    listTools(): Promise<KodaMcpToolInfo[]>;
+    reconnect(id: string): Promise<VyenMcpServerStatus>;
+    updateConfig(servers: VyenMcpServerConfig[]): Promise<{ ok: true }>;
+    listTools(): Promise<VyenMcpToolInfo[]>;
     callTool(
       serverId: string,
       toolName: string,
       args: Record<string, unknown>,
-    ): Promise<KodaMcpCallResult>;
-    resolveApproval(approvalId: string, decision: KodaMcpPermissionDecision): Promise<{ ok: true }>;
-    getPendingApprovals(): Promise<KodaMcpApprovalRequest[]>;
-    getStatus(): Promise<{ servers: KodaMcpServerStatus[]; tools: number }>;
-    onApprovalRequested(cb: (req: KodaMcpApprovalRequest) => void): () => void;
+    ): Promise<VyenMcpCallResult>;
+    resolveApproval(approvalId: string, decision: VyenMcpPermissionDecision): Promise<{ ok: true }>;
+    getPendingApprovals(): Promise<VyenMcpApprovalRequest[]>;
+    getStatus(): Promise<{ servers: VyenMcpServerStatus[]; tools: number }>;
+    onApprovalRequested(cb: (req: VyenMcpApprovalRequest) => void): () => void;
     onApprovalResolved(
-      cb: (res: { id: string; decision: KodaMcpPermissionDecision; timedOut?: boolean }) => void,
+      cb: (res: { id: string; decision: VyenMcpPermissionDecision; timedOut?: boolean }) => void,
     ): () => void;
-    onServerStatus(cb: (status: KodaMcpServerStatus) => void): () => void;
+    onServerStatus(cb: (status: VyenMcpServerStatus) => void): () => void;
   };
 }
 
@@ -214,26 +214,26 @@ export interface KodaBridge {
 
 declare global {
   interface Window {
-    koda?: KodaBridge;
+    vyen?: VyenBridge;
   }
 }
 
-/** true khi app đang chạy trong Koda desktop shell (Electron). */
-export function isKodaDesktop(): boolean {
-  return typeof window !== 'undefined' && window.koda?.desktop === true;
+/** true khi app đang chạy trong Vyen desktop shell (Electron). */
+export function isVyenDesktop(): boolean {
+  return typeof window !== 'undefined' && window.vyen?.desktop === true;
 }
 
 /** Bridge hoặc null — caller web không cần check typeof window nữa. */
-export function kodaDesktop(): KodaBridge | null {
+export function vyenDesktop(): VyenBridge | null {
   if (typeof window === 'undefined') return null;
-  return window.koda?.desktop === true ? window.koda : null;
+  return window.vyen?.desktop === true ? window.vyen : null;
 }
 
 /** Bắt buộc desktop — ném lỗi rõ ràng thay vì undefined đi tiếp. */
-export function requireKodaDesktop(): KodaBridge {
-  const bridge = kodaDesktop();
+export function requireVyenDesktop(): VyenBridge {
+  const bridge = vyenDesktop();
   if (!bridge) {
-    throw new Error('Tính năng này chỉ khả dụng trong Koda desktop (Electron).');
+    throw new Error('Tính năng này chỉ khả dụng trong Vyen desktop (Electron).');
   }
   return bridge;
 }

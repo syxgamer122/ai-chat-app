@@ -96,7 +96,7 @@ export function buildSubagentSystemPrompt(
     '',
     '# Subagent Role',
     '',
-    'You are a SPECIALIZED SUBAGENT running within Koda. Your purpose is to complete',
+    'You are a SPECIALIZED SUBAGENT running within Vyen. Your purpose is to complete',
     'a specific, bounded task independently.',
     '',
     '## Rules',

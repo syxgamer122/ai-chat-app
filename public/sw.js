@@ -1,5 +1,5 @@
 /*
- * Service worker cho KODA — AI Innovations.
+ * Service worker cho Vyen — AI Innovations.
  * Chiến lược bảo toàn:
  *  - /api/*            → không can thiệp (stream phải đi thẳng mạng)
  *  - /_next/static/*   → cache-first (asset có hash, bất biến)

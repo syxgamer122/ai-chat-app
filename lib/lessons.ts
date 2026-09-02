@@ -3,7 +3,7 @@
  * lưu persistent và inject vào system prompt cho các phiên sau.
  *
  * Port mô hình Claude Code /reflect + AGENTS.md (Addy Osmani) + Qwen-mem về
- * mô hình KODA: dùng bảng memories sẵn có trong Dexie, thêm category prefix
+ * mô hình Vyen: dùng bảng memories sẵn có trong Dexie, thêm category prefix
  * để phân biệt lesson với fact thông thường.
  *
  * Thuần function, không Dexie/React — test được trong node.

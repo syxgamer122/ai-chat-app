@@ -1,6 +1,6 @@
 /*
  * Preload — cầu nối duy nhất giữa renderer (app) và main process.
- * Mọi op đều là ipcRenderer.invoke tới channel 'koda:*' đã đăng ký trong
+ * Mọi op đều là ipcRenderer.invoke tới channel 'vyen:*' đã đăng ký trong
  * ipc.cjs (path-guard + zod ở phía main). Không expose require/node globals.
  */
 const { contextBridge, ipcRenderer } = require('electron');
@@ -18,38 +18,38 @@ const onEvent = (channel, callback) => {
   return () => ipcRenderer.removeListener(channel, listener);
 };
 
-contextBridge.exposeInMainWorld('koda', {
+contextBridge.exposeInMainWorld('vyen', {
   desktop: true,
   platform: process.platform,
   electron: process.versions.electron,
 
   workspace: {
-    get: () => invoke('koda:workspace-get'),
-    select: () => invoke('koda:workspace-select'),
-    set: (path) => invoke('koda:workspace-set', { path }),
-    clear: () => invoke('koda:workspace-clear'),
+    get: () => invoke('vyen:workspace-get'),
+    select: () => invoke('vyen:workspace-select'),
+    set: (path) => invoke('vyen:workspace-set', { path }),
+    clear: () => invoke('vyen:workspace-clear'),
   },
 
   fs: {
-    list: (relPath = '') => invoke('koda:fs-list', { relPath }),
-    read: (relPath) => invoke('koda:fs-read', { relPath }),
-    readImage: (relPath) => invoke('koda:fs-read-image', { relPath }),
-    write: (relPath, content) => invoke('koda:fs-write', { relPath, content }),
-    delete: (relPath) => invoke('koda:fs-delete', { relPath }),
-    stat: (relPath) => invoke('koda:fs-stat', { relPath }),
-    search: (opts) => invoke('koda:fs-search', opts),
+    list: (relPath = '') => invoke('vyen:fs-list', { relPath }),
+    read: (relPath) => invoke('vyen:fs-read', { relPath }),
+    readImage: (relPath) => invoke('vyen:fs-read-image', { relPath }),
+    write: (relPath, content) => invoke('vyen:fs-write', { relPath, content }),
+    delete: (relPath) => invoke('vyen:fs-delete', { relPath }),
+    stat: (relPath) => invoke('vyen:fs-stat', { relPath }),
+    search: (opts) => invoke('vyen:fs-search', opts),
   },
 
   shell: {
-    run: (opts) => invoke('koda:shell-run', opts),
+    run: (opts) => invoke('vyen:shell-run', opts),
   },
 
   git: {
-    status: () => invoke('koda:git-status'),
-    diff: (opts) => invoke('koda:git-diff', opts),
-    log: (opts) => invoke('koda:git-log', opts),
-    add: (relPaths) => invoke('koda:git-add', { relPaths }),
-    commit: (message) => invoke('koda:git-commit', { message }),
+    status: () => invoke('vyen:git-status'),
+    diff: (opts) => invoke('vyen:git-diff', opts),
+    log: (opts) => invoke('vyen:git-log', opts),
+    add: (relPaths) => invoke('vyen:git-add', { relPaths }),
+    commit: (message) => invoke('vyen:git-commit', { message }),
   },
 
   mcp: {

@@ -218,7 +218,7 @@ export type UsageTriggerDecision =
  *
  *  1. **Threshold**: promptTokens vượt `window − reserve` → nén.
  *  2. **Silent overflow**: gateway nuốt im lặng, trả `stop_reason=stop` nhưng
- *     `promptTokens > window`. Trước đây KODA KHÔNG phát hiện ca này (comment
+ *     `promptTokens > window`. Trước đây Vyen KHÔNG phát hiện ca này (comment
  *     ở isContextOverflowError ghi rõ "chưa phủ tràn ngầm").
  *  3. **Length-stop zero-output**: `finish_reason=length` + `completionTokens=0`
  *     + `promptTokens ≥ 99% window` → gateway cắt input im lặng, model không
@@ -250,7 +250,7 @@ export function evaluateUsageTrigger(input: UsageTriggerInput): UsageTriggerDeci
      không phải threshold thông thường, dù cả hai đều đúng về mặt toán học. */
 
   /* Ca 1: Silent overflow — gateway trả stop bình thường nhưng input đã vượt
-     window. Đây là ca KODA từng bỏ sót hoàn toàn. */
+     window. Đây là ca Vyen từng bỏ sót hoàn toàn. */
   if (finishReason === 'stop' && promptTokens > window) {
     return { kind: 'silent_overflow', promptTokens };
   }
@@ -367,7 +367,7 @@ export function splitForCompaction(
 /**
  * Regex nhận diện lỗi tràn context theo provider — port trực tiếp từ
  * prime-agent `packages/ai/src/utils/overflow.ts` (MIT), lược bớt các mẫu
- * đặc thù SDK server-side mà KODA không gặp qua gateway OpenAI-compatible.
+ * đặc thù SDK server-side mà Vyen không gặp qua gateway OpenAI-compatible.
  *
  * Mẫu tiêu biểu:
  * - Anthropic: "prompt is too long: 213462 tokens > 200000 maximum"

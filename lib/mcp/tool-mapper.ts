@@ -21,7 +21,7 @@ import { truncateToolResult } from '@/lib/tool-limits';
 /* Types                                                               */
 /* ------------------------------------------------------------------ */
 
-/** Canonical shape — desktop-bridge.ts alias lại thành KodaMcpToolInfo. */
+/** Canonical shape — desktop-bridge.ts alias lại thành VyenMcpToolInfo. */
 export interface McpToolInfo {
   name: string;
   description: string;
@@ -348,7 +348,7 @@ export function mcpContentToText(content: McpContentBlock[]): string {
 
     if (item.type === 'image') {
       const mime = typeof item.mimeType === 'string' ? item.mimeType : 'image';
-      parts.push(`[ảnh ${mime} — Koda chưa đưa ảnh từ MCP vào ngữ cảnh]`);
+      parts.push(`[ảnh ${mime} — Vyen chưa đưa ảnh từ MCP vào ngữ cảnh]`);
       continue;
     }
 
@@ -364,7 +364,7 @@ export function mcpContentToText(content: McpContentBlock[]): string {
 
 /**
  * Chuỗi kết quả đưa cho model.
- * - Thành công: text thuần (đã cắt trần chung của Koda).
+ * - Thành công: text thuần (đã cắt trần chung của Vyen).
  * - Tool tự báo lỗi: JSON có `error` — cùng shape với cách fs_* và shell_run báo
  *   lỗi, để model học một quy ước duy nhất.
  * - Bị từ chối: kèm `denied: true` + chỉ thị không gọi lại (nếu không, model

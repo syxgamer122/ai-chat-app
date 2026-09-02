@@ -26,11 +26,11 @@ import {
   resolveMcpApproval,
 } from '@/lib/mcp/bridge';
 import type {
-  KodaMcpApprovalRequest,
-  KodaMcpPermissionDecision,
+  VyenMcpApprovalRequest,
+  VyenMcpPermissionDecision,
 } from '@/lib/desktop-bridge';
 
-const DECISIONS: Array<{ value: KodaMcpPermissionDecision; label: string; primary?: boolean }> = [
+const DECISIONS: Array<{ value: VyenMcpPermissionDecision; label: string; primary?: boolean }> = [
   { value: 'allow_once', label: 'Cho phép lần này', primary: true },
   { value: 'always_allow', label: 'Luôn cho phép' },
   { value: 'deny_once', label: 'Từ chối lần này' },
@@ -46,7 +46,7 @@ function formatArgs(args: Record<string, unknown>): string {
 }
 
 export function McpToolApprovalDialog() {
-  const [queue, setQueue] = useState<KodaMcpApprovalRequest[]>([]);
+  const [queue, setQueue] = useState<VyenMcpApprovalRequest[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -67,7 +67,7 @@ export function McpToolApprovalDialog() {
   const current = queue[0];
   if (!current) return null;
 
-  const decide = async (decision: KodaMcpPermissionDecision) => {
+  const decide = async (decision: VyenMcpPermissionDecision) => {
     setError(null);
     // Lạc quan: bỏ khỏi hàng đợi ngay để modal trống không kẹt lại giữa
     // lượt quyết định nối tiếp nhau.

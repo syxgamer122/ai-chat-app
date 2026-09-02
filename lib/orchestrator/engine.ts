@@ -2,7 +2,7 @@
  * Engine điều phối — nơi hai nguồn gặp nhau.
  *
  * Từ **agent-orchestrator** (Untrivial-ai/agent-orchestrator), lấy đúng 3 bước
- * của vòng đời orchestrator mà KODA chưa có:
+ * của vòng đời orchestrator mà Vyen chưa có:
  *   1. `plan`   — orchestrator tự phân rã mục tiêu.
  *   2. `spawn`  — tạo N agent, mỗi agent context RIÊNG (không thấy transcript
  *                 của nhau), chạy song song, có huỷ.

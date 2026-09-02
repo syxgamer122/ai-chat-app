@@ -102,7 +102,7 @@ import {
   restoreWorkspaceRoot,
   type FsDeps,
 } from '@/lib/fs-access';
-import { isKodaDesktop } from '@/lib/desktop-bridge';
+import { isVyenDesktop } from '@/lib/desktop-bridge';
 import {
   desktopFsList,
   desktopFsRead,
@@ -524,7 +524,7 @@ export default function ChatInterface() {
       24k ký tự để đớn context; restore bản truncated là hỏng file user). */
   const readCaptureForPath = useCallback(
     async (deps: FsDeps | null, rawPath: string): Promise<CaptureInput> => {
-      const r = isKodaDesktop() ? await desktopFsReadFull(rawPath) : await fsReadFull(deps!, rawPath);
+      const r = isVyenDesktop() ? await desktopFsReadFull(rawPath) : await fsReadFull(deps!, rawPath);
       switch (r.status) {
         case 'ok':
           return { status: 'ok', path: r.path, content: r.content };
@@ -548,7 +548,7 @@ export default function ChatInterface() {
     const files = Object.values(store);
     if (!files.length) return;
 
-    const isDesktop = typeof window !== 'undefined' && (window as any).koda?.desktop === true;
+    const isDesktop = typeof window !== 'undefined' && (window as any).vyen?.desktop === true;
     const wsForFs = !isDesktop ? await requireWorkspace().then((r) => (r.ok ? r.deps : null)) : null;
     const capChatId = useAppStore.getState().currentChatId;
 
@@ -821,7 +821,7 @@ export default function ChatInterface() {
        nút 📁 mãi hiện "chưa kết nối" dù thư mục đã sẵn sàng, và người dùng
        tưởng tính năng hỏng. */
     let alive = true;
-    if (isKodaDesktop()) {
+    if (isVyenDesktop()) {
       void desktopGetWorkspaceInfo().then((info) => {
         if (alive) setWorkspace(info);
       });
@@ -835,7 +835,7 @@ export default function ChatInterface() {
     };
   }, []);
   const pickFolder = useCallback(async () => {
-    if (isKodaDesktop()) {
+    if (isVyenDesktop()) {
       const r = await desktopPickWorkspaceRoot();
       if (!r.ok) {
         showNotice(r.error);
@@ -860,7 +860,7 @@ export default function ChatInterface() {
    * đúng trạng thái — thiếu bước này UI vẫn tưởng còn kết nối.
    */
   const disconnectFolder = useCallback(async () => {
-    if (isKodaDesktop()) {
+    if (isVyenDesktop()) {
       try {
         await desktopDisconnectWorkspace();
       } catch (e) {
@@ -913,10 +913,10 @@ export default function ChatInterface() {
         }
       }
       if (!CLIENT_TOOL_NAMES.has(toolCall.toolName)) return undefined;
-      const isDesktop = isKodaDesktop();
+      const isDesktop = isVyenDesktop();
       const desktopOnly = new Set(['shell_run', 'git_status', 'git_diff', 'git_log', 'git_add', 'git_commit']);
       if (desktopOnly.has(toolCall.toolName) && !isDesktop) {
-        return JSON.stringify({ error: 'Tool này chỉ khả dụng trong Koda desktop (Electron). Hãy chạy app bằng npm run app:dev / app:prod.' });
+        return JSON.stringify({ error: 'Tool này chỉ khả dụng trong Vyen desktop (Electron). Hãy chạy app bằng npm run app:dev / app:prod.' });
       }
       // Workspace check — rẽ nhánh desktop/web
       if (isDesktop) {
@@ -1173,7 +1173,7 @@ export default function ChatInterface() {
             if (!approved) {
               return JSON.stringify({ approved: false, note: 'Người dùng TỪ CHỐI chạy lệnh này.' });
             }
-            const bridge = (await import('@/lib/desktop-bridge')).kodaDesktop()!;
+            const bridge = (await import('@/lib/desktop-bridge')).vyenDesktop()!;
             const result = await bridge.shell.run({ command, cwd, timeoutMs });
 
             /* Auto-debug loop: khi lệnh fail + safe command → track attempts và
@@ -1221,23 +1221,23 @@ export default function ChatInterface() {
             return JSON.stringify(result);
           }
           case 'git_status': {
-            const bridge = (await import('@/lib/desktop-bridge')).kodaDesktop()!;
+            const bridge = (await import('@/lib/desktop-bridge')).vyenDesktop()!;
             const result = await bridge.git.status();
             return JSON.stringify(result);
           }
           case 'git_diff': {
-            const bridge = (await import('@/lib/desktop-bridge')).kodaDesktop()!;
+            const bridge = (await import('@/lib/desktop-bridge')).vyenDesktop()!;
             const result = await bridge.git.diff({ relPath: args.path ? String(args.path) : undefined, staged: args.staged === true });
             return JSON.stringify({ diff: result });
           }
           case 'git_log': {
-            const bridge = (await import('@/lib/desktop-bridge')).kodaDesktop()!;
+            const bridge = (await import('@/lib/desktop-bridge')).vyenDesktop()!;
             const limit = typeof args.limit === 'number' ? args.limit : 20;
             const result = await bridge.git.log({ limit });
             return JSON.stringify({ log: result });
           }
           case 'git_add': {
-            const bridge = (await import('@/lib/desktop-bridge')).kodaDesktop()!;
+            const bridge = (await import('@/lib/desktop-bridge')).vyenDesktop()!;
             const paths = Array.isArray(args.paths) ? (args.paths as string[]) : [];
             const result = await bridge.git.add(paths);
             return JSON.stringify(result);
@@ -1248,7 +1248,7 @@ export default function ChatInterface() {
             if (!approved) {
               return JSON.stringify({ approved: false, note: 'Người dùng TỪ CHỐI commit này.' });
             }
-            const bridge = (await import('@/lib/desktop-bridge')).kodaDesktop()!;
+            const bridge = (await import('@/lib/desktop-bridge')).vyenDesktop()!;
             const result = await bridge.git.commit(message);
             return JSON.stringify(result);
           }
@@ -3698,7 +3698,7 @@ export default function ChatInterface() {
          (lỗi thật "đã kết nối folder nhưng agent coding không nhận diện"). */
       if (userText) {
         try {
-          const wsInfo = isKodaDesktop()
+          const wsInfo = isVyenDesktop()
             ? await desktopGetWorkspaceInfo()
             : getWorkspaceInfo();
           options.body = { ...options.body, workspace: wsInfo };

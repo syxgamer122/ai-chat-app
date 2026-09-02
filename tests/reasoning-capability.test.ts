@@ -10,7 +10,7 @@ describe('parseModelReasoning — metadata kiểu OpenRouter', () => {
     expect(parseModelReasoning(null)).toBeNull();
   });
 
-  it('reasoning object + supported_efforts mảng -> lọc về 4 mức KODA', () => {
+  it('reasoning object + supported_efforts mảng -> lọc về 4 mức Vyen', () => {
     const cap = parseModelReasoning({
       id: 'a',
       supported_parameters: ['tools', 'reasoning'],
@@ -19,7 +19,7 @@ describe('parseModelReasoning — metadata kiểu OpenRouter', () => {
     expect(cap).toEqual({ efforts: ['medium'], mandatory: false });
   });
 
-  it('supported_efforts null -> đủ 4 mức KODA', () => {
+  it('supported_efforts null -> đủ 4 mức Vyen', () => {
     const cap = parseModelReasoning({
       supported_parameters: ['reasoning'],
       reasoning: { mandatory: true, supported_efforts: null },

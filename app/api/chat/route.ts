@@ -942,7 +942,7 @@ export async function POST(req: Request) {
     const messages = attachToolResultParts(parsed.data.messages);
 
     /* Chẩn đoán agent coding: xác nhận client có gửi trạng thái workspace.
-       Grep koda-shell.log / dev log theo "workspace connected". */
+       Grep vyen-shell.log / dev log theo "workspace connected". */
     if (workspaceState?.connected) {
       console.info(
         `[req:${requestId}] workspace connected: ${String(workspaceState.name ?? '').slice(0, 120)}`,

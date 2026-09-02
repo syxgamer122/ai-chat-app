@@ -1,7 +1,7 @@
 /**
  * Tích hợp THẬT với một MCP server qua stdio.
  *
- * Đây là test duy nhất chứng minh Koda nói đúng giao thức MCP end-to-end:
+ * Đây là test duy nhất chứng minh Vyen nói đúng giao thức MCP end-to-end:
  * spawn process → initialize → tools/list → tools/call → close. Mọi test khác
  * trong bộ đều giả lập client, nên sẽ không bắt được lỗi lệch protocol.
  */
@@ -58,7 +58,7 @@ describe('MCP end-to-end qua stdio', () => {
 
     await manager.callTool('demo', 'enable_extra', {});
 
-    // Không có timeout riêng: nếu Koda bỏ lỡ thông báo, promise treo tới khi
+    // Không có timeout riêng: nếu Vyen bỏ lỡ thông báo, promise treo tới khi
     // vitest cắt (30s) — đỏ ở đúng chỗ cần đỏ.
     await expect(refreshed).resolves.toBe(4);
     expect(manager.listTools().map((t: { name: string }) => t.name)).toContain('extra_tool');

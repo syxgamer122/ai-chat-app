@@ -3,12 +3,12 @@
 /**
  * Quản lý MCP server trong Cài đặt.
  *
- * MCP chỉ tồn tại trong Koda desktop: client MCP sống trong Electron main
+ * MCP chỉ tồn tại trong Vyen desktop: client MCP sống trong Electron main
  * (nơi spawn được process con và giữ kết nối HTTP), renderer chỉ nói chuyện
  * qua IPC. Trên web component này tự thu mình lại thành một dòng giải thích
  * thay vì giả vờ có tính năng.
  *
- * Cấu hình được lưu ở Electron userData (koda-mcp-configs.json) — MỘT nguồn
+ * Cấu hình được lưu ở Electron userData (vyen-mcp-configs.json) — MỘT nguồn
  * duy nhất, vì renderer (Zustand/localStorage) và main không chia sẻ bộ nhớ.
  */
 
@@ -23,9 +23,9 @@ import {
   removeMcpServer,
 } from '@/lib/mcp/bridge';
 import type {
-  KodaMcpServerConfig,
-  KodaMcpServerState,
-  KodaMcpServerStatus,
+  VyenMcpServerConfig,
+  VyenMcpServerState,
+  VyenMcpServerStatus,
 } from '@/lib/desktop-bridge';
 
 type Transport = 'stdio' | 'streamable-http' | 'sse';
@@ -46,8 +46,8 @@ const SERVER_ID_RE = /^[A-Za-z0-9_-]+$/;
 const inputClass =
   'w-full rounded-lg border border-zinc-300 bg-white px-2.5 py-1.5 text-sm text-zinc-800 outline-none transition-colors placeholder:text-zinc-400 focus:border-brand';
 
-function StatusBadge({ status }: { status: KodaMcpServerState }) {
-  const map: Record<KodaMcpServerState, { label: string; className: string }> = {
+function StatusBadge({ status }: { status: VyenMcpServerState }) {
+  const map: Record<VyenMcpServerState, { label: string; className: string }> = {
     connected: { label: 'Đã kết nối', className: 'bg-emerald-100 text-emerald-700' },
     connecting: { label: 'Đang kết nối', className: 'bg-amber-100 text-amber-700' },
     disconnected: { label: 'Chưa kết nối', className: 'bg-zinc-100 text-zinc-600' },
@@ -63,7 +63,7 @@ function StatusBadge({ status }: { status: KodaMcpServerState }) {
 
 export function McpSettingsPanel() {
   const [available] = useState(() => isMcpAvailable());
-  const [servers, setServers] = useState<KodaMcpServerStatus[]>([]);
+  const [servers, setServers] = useState<VyenMcpServerStatus[]>([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -126,7 +126,7 @@ export function McpSettingsPanel() {
   }
 
   /** Gom form thành config đúng schema của main; trả null khi chưa hợp lệ. */
-  function buildConfig(): KodaMcpServerConfig | null {
+  function buildConfig(): VyenMcpServerConfig | null {
     const trimmedId = id.trim();
     if (!SERVER_ID_RE.test(trimmedId)) {
       setError('Id server chỉ được chứa chữ, số, gạch ngang và gạch dưới (ví dụ: filesystem).');
@@ -267,7 +267,7 @@ export function McpSettingsPanel() {
       <div className="space-y-2 border-l-2 border-zinc-200 pl-3">
         <h3 className="text-sm font-semibold text-zinc-700">MCP server</h3>
         <p className="text-[11px] leading-relaxed text-zinc-500">
-          MCP chỉ chạy trong <span className="font-medium">Koda desktop</span> (Electron) — nơi app
+          MCP chỉ chạy trong <span className="font-medium">Vyen desktop</span> (Electron) — nơi app
           có thể chạy lệnh và giữ kết nối tới server MCP. Trên trình duyệt không có mặt phẳng đó.
         </p>
       </div>
@@ -445,7 +445,7 @@ export function McpSettingsPanel() {
                 className={`${inputClass} resize-y font-mono text-[11px]`}
               />
               <span className="mt-1 block text-[10px] text-zinc-500">
-                Chỉ những gì bạn khai báo ở đây được truyền cho server — Koda không tự động chia
+                Chỉ những gì bạn khai báo ở đây được truyền cho server — Vyen không tự động chia
                 sẻ biến môi trường của máy.
               </span>
             </label>

@@ -120,7 +120,7 @@ describe.skipIf(!truncateShellOutput)('truncateShellOutput', () => {
     if (result.savedTo) {
       tempFiles.push(result.savedTo);
       expect(result.savedTo.startsWith(os.tmpdir())).toBe(true);
-      expect(path.basename(result.savedTo)).toMatch(/^koda-shell-stdout-[a-f0-9]+\.txt$/);
+      expect(path.basename(result.savedTo)).toMatch(/^vyen-shell-stdout-[a-f0-9]+\.txt$/);
     }
   });
 

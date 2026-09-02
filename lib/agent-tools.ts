@@ -775,12 +775,12 @@ export const CLIENT_TOOL_DEFS = {
       content: z.string().max(100_000).describe('Toàn bộ nội dung file sau khi ghi'),
     }),
   }),
-  // ── Desktop-only tools (chỉ chạy khi window.koda.desktop === true) ──
+  // ── Desktop-only tools (chỉ chạy khi window.vyen.desktop === true) ──
   // Trên web thuần các tool này không có mặt — route lọc theo CLIENT_TOOL_NAMES
   // và chat-interface trả lỗi mạch lạc nếu thiếu bridge.
   shell_run: tool({
     description:
-      'Chạy LỆNH SHELL trong workspace của người dùng (CHỈ trong Koda desktop). Dùng để build/test/lint/chạy script. ' +
+      'Chạy LỆNH SHELL trong workspace của người dùng (CHỈ trong Vyen desktop). Dùng để build/test/lint/chạy script. ' +
       'Người dùng LUÔN xem lệnh và PHẢI phê duyệt trước khi chạy. Lệnh chạy qua cmd.exe / sh, timeout mặc định 120s. ' +
       'OUTPUT TRUNCATION (Goose-style): output vượt 2000 dòng hoặc 50KB sẽ bị cắt, giữ phần CUỐI (chứa lỗi/thông báo quan trọng). ' +
       'Full output được lưu vào temp file, kết quả có savedTo (đường dẫn) và previewHint (hướng dẫn đọc tiếp). ' +
@@ -794,32 +794,32 @@ export const CLIENT_TOOL_DEFS = {
     }),
   }),
   git_status: tool({
-    description: 'Xem trạng thái git của workspace (CHỈ trong Koda desktop). Trả branch + danh sách file staged/unstaged.',
+    description: 'Xem trạng thái git của workspace (CHỈ trong Vyen desktop). Trả branch + danh sách file staged/unstaged.',
     parameters: z.object({}),
   }),
   git_diff: tool({
-    description: 'Xem diff git của workspace (CHỈ trong Koda desktop). Mặc định diff unstaged; staged=true để xem staged.',
+    description: 'Xem diff git của workspace (CHỈ trong Vyen desktop). Mặc định diff unstaged; staged=true để xem staged.',
     parameters: z.object({
       path: z.string().max(500).optional().describe('Đường dẫn tương đối cần diff; bỏ trống = toàn workspace'),
       staged: z.boolean().optional().describe('True = diff staged (git diff --cached)'),
     }),
   }),
   git_log: tool({
-    description: 'Xem lịch sử commit git (CHỈ trong Koda desktop).',
+    description: 'Xem lịch sử commit git (CHỈ trong Vyen desktop).',
     parameters: z.object({
       limit: z.number().int().min(1).max(100).optional().describe('Số commit, mặc định 20'),
     }),
   }),
   git_add: tool({
     description:
-      'Stage file vào git index (CHỈ trong Koda desktop). Người dùng KHÔNG cần phê duyệt riêng — git_add an toàn. ' +
+      'Stage file vào git index (CHỈ trong Vyen desktop). Người dùng KHÔNG cần phê duyệt riêng — git_add an toàn. ' +
       'Chỉ stage đường dẫn người dùng đã thấy qua fs_* trước đó.',
     parameters: z.object({
       paths: z.array(z.string().min(1).max(500)).min(1).max(20).describe('Danh sách đường dẫn tương đối cần stage, vd ["src/index.ts"]'),
     }),
   }),
   git_commit: tool({
-    description: 'Tạo commit git (CHỈ trong Koda desktop). Người dùng PHẢI phê duyệt message trước khi commit.',
+    description: 'Tạo commit git (CHỈ trong Vyen desktop). Người dùng PHẢI phê duyệt message trước khi commit.',
     parameters: z.object({
       message: z.string().min(1).max(2000).describe('Commit message'),
     }),

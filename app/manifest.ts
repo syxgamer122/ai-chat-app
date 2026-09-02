@@ -2,8 +2,8 @@ import type { MetadataRoute } from 'next';
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: 'KODA — AI Innovations',
-    short_name: 'KODA',
+    name: 'Vyen — AI Innovations',
+    short_name: 'Vyen',
     description:
       'Trợ lý AI hội thoại phân nhánh — dữ liệu lưu ngay trên thiết bị của bạn.',
     lang: 'vi',

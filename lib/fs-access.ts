@@ -91,7 +91,7 @@ export async function pickWorkspaceRoot(): Promise<{ ok: true; name: string } | 
     return { ok: false, error: 'Trình duyệt không hỗ trợ File System Access API (cần Chrome/Edge).' };
   }
   try {
-    const handle = await picker({ mode: 'readwrite', id: 'koda-workspace' });
+    const handle = await picker({ mode: 'readwrite', id: 'vyen-workspace' });
     cachedRoot = handle;
     cachedName = handle.name;
     await db.kv.put({ key: KV_KEY, value: handle });

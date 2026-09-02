@@ -2,13 +2,13 @@
  * Vòng đời một lượt chạy (run) — desired/observed reconciler.
  *
  * Port lõi reconciler của agent-orchestrator (Untrivial-ai/agent-orchestrator)
- * về mô hình single-agent streaming của KODA.
+ * về mô hình single-agent streaming của Vyen.
  *
  * Ở AO, reconciler là trái tim: nó so sánh `desired` (control plane MUỐN sandbox
  * thế nào) với `observed` (sandbox THỰC SỰ đang thế nào) rồi quyết định hành
  * động, có `TerminalStartupTimeout`, `DeletionDeadline` và backoff 30s→5m.
  *
- * Vấn đề tương đương ở KODA: toàn bộ vòng đời một run hiện tại là MỘT boolean
+ * Vấn đề tương đương ở Vyen: toàn bộ vòng đời một run hiện tại là MỘT boolean
  * `isLoading` từ useChat. Hệ quả:
  *   - Stream đứt giữa chừng (mạng, tab suspend, upstream treo) → spinner xoay
  *     vô hạn vì không ai định nghĩa "run này đã chết".

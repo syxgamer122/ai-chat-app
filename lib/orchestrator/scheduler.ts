@@ -4,7 +4,7 @@
  *
  * Ở vectorbt, "chạy tất cả cùng lúc" nghĩa là MỘT phép toán NumPy trên mọi
  * cột: không có khái niệm concurrency vì CPU làm hết trong một pass. Sang
- * KODA, mỗi cột = MỘT request mạng đến LLM gateway, nên "một pass" dịch thành
+ * Vyen, mỗi cột = MỘT request mạng đến LLM gateway, nên "một pass" dịch thành
  * **một pass có giới hạn đồng thời**:
  *   - Đủ rộng để tận dụng song song (mặc định 3).
  *   - Đủ hẹp để không đánh sập gateway free có ngân sách chung.

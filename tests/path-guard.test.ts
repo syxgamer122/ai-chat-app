@@ -1,5 +1,5 @@
 /**
- * Path guard của Koda desktop (electron/path-guard.cjs) — CJS thuần nên
+ * Path guard của Vyen desktop (electron/path-guard.cjs) — CJS thuần nên
  * test qua createRequire thay vì import ESM.
  */
 import { createRequire } from 'node:module';
@@ -14,7 +14,7 @@ const { resolveWithin, isWithinRoot } = require('../electron/path-guard.cjs') as
 };
 
 const isWin = process.platform === 'win32';
-const root = path.resolve(os.tmpdir(), 'koda-guard-test-root');
+const root = path.resolve(os.tmpdir(), 'vyen-guard-test-root');
 
 function expectWithin(rel: string, expectedSuffix: string): void {
   const got = resolveWithin(root, rel);

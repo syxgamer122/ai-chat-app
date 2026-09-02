@@ -44,7 +44,7 @@ const call = (channel: string, payload?: unknown) => {
 };
 
 beforeAll(async () => {
-  userDataDir = mkdtempSync(path.join(tmpdir(), 'koda-mcp-test-'));
+  userDataDir = mkdtempSync(path.join(tmpdir(), 'vyen-mcp-test-'));
   await mcpIpc.register(fakeIpcMain, { userDataDir, audit: () => {} });
 });
 
@@ -181,7 +181,7 @@ describe('MCP IPC handlers', () => {
       id: 'broken',
       name: 'Broken',
       transport: 'stdio',
-      command: 'koda-command-that-does-not-exist',
+      command: 'vyen-command-that-does-not-exist',
     })) as { id: string; status: string; error?: string };
 
     expect(added.id).toBe('broken');

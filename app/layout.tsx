@@ -10,7 +10,7 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: 'KODA — AI Innovations',
+  title: 'Vyen — AI Innovations',
   description: 'Trợ lý AI cá nhân với hội thoại phân nhánh — dữ liệu lưu ngay trên thiết bị của bạn.',
   /**
    * CDN media của Qwen (cdn.qwenlm.ai) chặn hotlink theo `Referer`: request
@@ -24,7 +24,7 @@ export const metadata: Metadata = {
   appleWebApp: {
     capable: true,
     statusBarStyle: 'default',
-    title: 'KODA',
+    title: 'Vyen',
   },
   icons: {
     apple: '/icons/icon-180.png',
@@ -43,7 +43,7 @@ export const viewport: Viewport = {
 };
 
 /**
- * Chống FOUC: gắn cứng class `dark` lên <html> trước first-paint. KODA đã
+ * Chống FOUC: gắn cứng class `dark` lên <html> trước first-paint. Vyen đã
  * commit dark-only (aurora dark là bản sắc, 18/32 component hardcode màu
  * tối, việc hỗ trợ light mode đòi đập đi viết lại nửa codebase). Phải là
  * script inline đồng bộ đặt đầu <body> — class đã có sẵn trên <html> rồi

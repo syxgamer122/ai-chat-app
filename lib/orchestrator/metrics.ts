@@ -11,7 +11,7 @@
  *                                                    MultiIndex cột
  *   - `series.vbt.heatmap(x_level, y_level)`       → pivot 2 trục thành lưới màu
  *
- * Chuyển ngữ sang KODA: mỗi lần chạy một cell của lưới tham số sinh ra MỘT
+ * Chuyển ngữ sang Vyen: mỗi lần chạy một cell của lưới tham số sinh ra MỘT
  * `RunRecord`. Từ đó:
  *   - `scoreRecords`  ≈ `pf.trades.expectancy()` — điểm kỳ vọng của một record.
  *   - `groupByAxis`   ≈ `groupby(level).mean()`  — "trục nào đang tốt?".

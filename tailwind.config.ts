@@ -42,7 +42,7 @@ const config: Config = {
           code: 'rgb(var(--surface-code) / <alpha-value>)',
           'code-header': 'rgb(var(--surface-code-header) / <alpha-value>)',
         },
-        /** Thương hiệu KODA. */
+        /** Thương hiệu Vyen. */
         brand: {
           DEFAULT: 'rgb(var(--brand) / <alpha-value>)',
           hover: 'rgb(var(--brand-hover) / <alpha-value>)',

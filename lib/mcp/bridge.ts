@@ -1,5 +1,5 @@
 /**
- * MCP bridge phía renderer — cửa ngõ DUY NHẤT xuống `window.koda.mcp`.
+ * MCP bridge phía renderer — cửa ngõ DUY NHẤT xuống `window.vyen.mcp`.
  *
  * Tồn tại để phần còn lại của app không phải biết:
  *  - MCP chỉ sống trong Electron desktop (web thì không có gì cả),
@@ -11,30 +11,30 @@
  */
 
 import {
-  kodaDesktop,
-  type KodaMcpApprovalRequest,
-  type KodaMcpCallResult,
-  type KodaMcpPermissionDecision,
-  type KodaMcpServerConfig,
-  type KodaMcpServerStatus,
-  type KodaMcpToolInfo,
+  vyenDesktop,
+  type VyenMcpApprovalRequest,
+  type VyenMcpCallResult,
+  type VyenMcpPermissionDecision,
+  type VyenMcpServerConfig,
+  type VyenMcpServerStatus,
+  type VyenMcpToolInfo,
 } from '@/lib/desktop-bridge';
 
 /** MCP chỉ khả dụng trong app desktop có shell hỗ trợ. */
 export function isMcpAvailable(): boolean {
-  return typeof kodaDesktop()?.mcp?.listTools === 'function';
+  return typeof vyenDesktop()?.mcp?.listTools === 'function';
 }
 
 /** Bridge thô hoặc null — caller tự quyết định khi vắng mặt. */
 function mcp() {
-  return kodaDesktop()?.mcp ?? null;
+  return vyenDesktop()?.mcp ?? null;
 }
 
 /* ------------------------------------------------------------------ */
 /* Đọc (không bao giờ ném)                                             */
 /* ------------------------------------------------------------------ */
 
-export async function listMcpServers(): Promise<KodaMcpServerStatus[]> {
+export async function listMcpServers(): Promise<VyenMcpServerStatus[]> {
   const bridge = mcp();
   if (!bridge) return [];
   try {
@@ -47,7 +47,7 @@ export async function listMcpServers(): Promise<KodaMcpServerStatus[]> {
   }
 }
 
-export async function listMcpTools(): Promise<KodaMcpToolInfo[]> {
+export async function listMcpTools(): Promise<VyenMcpToolInfo[]> {
   const bridge = mcp();
   if (!bridge) return [];
   try {
@@ -59,7 +59,7 @@ export async function listMcpTools(): Promise<KodaMcpToolInfo[]> {
 }
 
 export async function getMcpStatus(): Promise<{
-  servers: KodaMcpServerStatus[];
+  servers: VyenMcpServerStatus[];
   tools: number;
 }> {
   const bridge = mcp();
@@ -83,15 +83,15 @@ function requireMcp() {
   const bridge = mcp();
   if (!bridge) {
     throw new Error(
-      'MCP chỉ khả dụng trong Koda desktop (Electron). Hãy chạy app bằng npm run app:dev / app:prod.',
+      'MCP chỉ khả dụng trong Vyen desktop (Electron). Hãy chạy app bằng npm run app:dev / app:prod.',
     );
   }
   return bridge;
 }
 
 export async function addMcpServer(
-  config: KodaMcpServerConfig,
-): Promise<KodaMcpServerStatus> {
+  config: VyenMcpServerConfig,
+): Promise<VyenMcpServerStatus> {
   return requireMcp().addServer(config);
 }
 
@@ -99,17 +99,17 @@ export async function removeMcpServer(id: string): Promise<void> {
   await requireMcp().removeServer(id);
 }
 
-export async function reconnectMcpServer(id: string): Promise<KodaMcpServerStatus> {
+export async function reconnectMcpServer(id: string): Promise<VyenMcpServerStatus> {
   return requireMcp().reconnect(id);
 }
 
-export async function updateMcpConfig(servers: KodaMcpServerConfig[]): Promise<void> {
+export async function updateMcpConfig(servers: VyenMcpServerConfig[]): Promise<void> {
   await requireMcp().updateConfig(servers);
 }
 
 export async function resolveMcpApproval(
   approvalId: string,
-  decision: KodaMcpPermissionDecision,
+  decision: VyenMcpPermissionDecision,
 ): Promise<void> {
   await requireMcp().resolveApproval(approvalId, decision);
 }
@@ -123,7 +123,7 @@ export async function callMcpTool(
   serverId: string,
   toolName: string,
   args: Record<string, unknown>,
-): Promise<KodaMcpCallResult> {
+): Promise<VyenMcpCallResult> {
   const result = await requireMcp().callTool(serverId, toolName, args ?? {});
   return {
     content: Array.isArray(result?.content) ? result.content : [],
@@ -140,7 +140,7 @@ export async function callMcpTool(
 const noop = () => () => {};
 
 export function onMcpApprovalRequested(
-  cb: (req: KodaMcpApprovalRequest) => void,
+  cb: (req: VyenMcpApprovalRequest) => void,
 ): () => void {
   const bridge = mcp();
   if (!bridge?.onApprovalRequested) return noop();
@@ -148,14 +148,14 @@ export function onMcpApprovalRequested(
 }
 
 export function onMcpApprovalResolved(
-  cb: (res: { id: string; decision: KodaMcpPermissionDecision; timedOut?: boolean }) => void,
+  cb: (res: { id: string; decision: VyenMcpPermissionDecision; timedOut?: boolean }) => void,
 ): () => void {
   const bridge = mcp();
   if (!bridge?.onApprovalResolved) return noop();
   return bridge.onApprovalResolved(cb);
 }
 
-export function onMcpServerStatus(cb: (status: KodaMcpServerStatus) => void): () => void {
+export function onMcpServerStatus(cb: (status: VyenMcpServerStatus) => void): () => void {
   const bridge = mcp();
   if (!bridge?.onServerStatus) return noop();
   return bridge.onServerStatus(cb);

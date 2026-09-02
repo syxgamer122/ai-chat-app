@@ -44,7 +44,7 @@ describe('subagent constants', () => {
 /* ------------------------------------------------------------------ */
 
 describe('buildSubagentSystemPrompt', () => {
-  const baseSystem = 'You are Koda, an AI coding assistant.';
+  const baseSystem = 'You are Vyen, an AI coding assistant.';
   const instructions = 'Refactor the auth module to use JWT tokens.';
 
   it('includes base system prompt', () => {

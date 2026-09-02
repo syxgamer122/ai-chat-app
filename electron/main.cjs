@@ -1,5 +1,5 @@
 /*
- * Koda desktop shell — Electron main process.
+ * Vyen desktop shell — Electron main process.
  *
  * Trách nhiệm: khởi động (hoặc gắn vào) Next.js server cục bộ, mở cửa sổ
  * load app từ đó, và canh chừng server sống chết. Chưa có IPC tool nào ở
@@ -19,8 +19,12 @@ const ipcBridge = require('./ipc.cjs');
 const mcpIpc = require('./mcp/ipc-handlers.cjs');
 
 const APP_ROOT = path.join(__dirname, '..');
-const IS_DEV = process.argv.includes('--dev') || process.env.KODA_ELECTRON_DEV === '1';
-const PORT = Number(process.env.KODA_PORT || 3457);
+// Giữ thư mục userData cũ ("ai-chat") sau khi đổi package name sang "vyen" —
+// userData của Electron lấy theo app name, đổi tên sẽ mất lịch sử chat
+// (IndexedDB) và cấu hình của bản đã cài trên máy.
+app.setName('ai-chat');
+const IS_DEV = process.argv.includes('--dev') || process.env.VYEN_ELECTRON_DEV === '1';
+const PORT = Number(process.env.VYEN_PORT || 3457);
 const HOST = '127.0.0.1';
 const BASE = `http://${HOST}:${PORT}`;
 /** next dev (Turbopack, FS chậm) đã đo lạnh ~82s — trần phải rộng hơn thế. */
@@ -37,14 +41,14 @@ let serverDied = false;
 /* ------------------------------------------------------------------ */
 
 function klog(...parts) {
-  const line = `[koda] ${parts.join(' ')}`;
+  const line = `[vyen] ${parts.join(' ')}`;
   console.log(line);
   klogLine(line);
 }
 
 function klogLine(line) {
   try {
-    const file = path.join(app.getPath('userData'), 'koda-shell.log');
+    const file = path.join(app.getPath('userData'), 'vyen-shell.log');
     // Tránh phình vô hạn: log cũ quá lớn thì cắt lại từ đầu.
     try {
       const st = fs.statSync(file);
@@ -70,7 +74,7 @@ function pushServerLog(chunk) {
 }
 
 /**
- * Probe đúng endpoint đặc trưng của Koda (/api/server-config) — không dính
+ * Probe đúng endpoint đặc trưng của Vyen (/api/server-config) — không dính
  * nhầm app khác đang tình cờ chiếm port.
  */
 function probeServer(base, timeoutMs = PROBE_TIMEOUT_MS) {
@@ -115,7 +119,7 @@ function spawnNextServer() {
     if (!fs.existsSync(buildId)) {
       showError(
         'Chưa có bản build production',
-        'Koda desktop chạy `next start` nên cần build trước:\n\n    npm run build\n\n' +
+        'Vyen desktop chạy `next start` nên cần build trước:\n\n    npm run build\n\n' +
           'Hoặc chạy bản dev: npm run app:dev',
       );
       return null;
@@ -152,15 +156,15 @@ function spawnNextServer() {
 }
 
 async function ensureServer() {
-  // KODA_URL: ép gắn vào server đang chạy elsewhere (debug/online) — không spawn.
-  const forced = process.env.KODA_URL;
+  // VYEN_URL: ép gắn vào server đang chạy elsewhere (debug/online) — không spawn.
+  const forced = process.env.VYEN_URL;
   if (forced) {
     const ok = await probeServer(forced);
     if (ok) return forced;
-    throw new Error(`KODA_URL=${forced} không phản hồi /api/server-config`);
+    throw new Error(`VYEN_URL=${forced} không phản hồi /api/server-config`);
   }
   if (await probeServer(BASE)) {
-    klog(`đã có Koda server tại ${BASE} — gắn vào thay vì spawn.`);
+    klog(`đã có Vyen server tại ${BASE} — gắn vào thay vì spawn.`);
     return BASE;
   }
   spawnNextServer();
@@ -177,7 +181,7 @@ async function ensureServer() {
 /* Cửa sổ                                                              */
 /* ------------------------------------------------------------------ */
 
-const LOADING_HTML = `<!doctype html><html><head><meta charset="utf-8"><title>Koda</title>
+const LOADING_HTML = `<!doctype html><html><head><meta charset="utf-8"><title>Vyen</title>
 <style>
   body{margin:0;height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;
     background:#0b0f14;color:#9fb3c8;font-family:system-ui,sans-serif;gap:18px}
@@ -187,7 +191,7 @@ const LOADING_HTML = `<!doctype html><html><head><meta charset="utf-8"><title>Ko
   code{color:#4ea1ff;font-size:13px}
 </style></head><body>
 <div class="spin"></div>
-<div>Đang khởi động Koda…</div>
+<div>Đang khởi động Vyen…</div>
 <code>${IS_DEV ? 'next dev' : 'next start'} — ${BASE}</code>
 </body></html>`;
 
@@ -197,7 +201,7 @@ function createWindow() {
     height: 880,
     minWidth: 980,
     minHeight: 640,
-    title: 'Koda',
+    title: 'Vyen',
     backgroundColor: '#0b0f14',
     autoHideMenuBar: true,
     show: false,
@@ -224,7 +228,7 @@ function createWindow() {
   });
   // Không cấp camera/mic/geolocation/notification — app chưa cần cái nào.
   mainWindow.webContents.session.setPermissionRequestHandler((_wc, permission, cb) => {
-    console.warn(`[koda] permission denied: ${permission}`);
+    console.warn(`[vyen] permission denied: ${permission}`);
     cb(false);
   });
   mainWindow.on('closed', () => {
@@ -253,7 +257,7 @@ async function loadApp(base) {
   }
 }
 
-function showError(title, detail) {  console.error(`[koda] ${title}: ${detail}`);
+function showError(title, detail) {  console.error(`[vyen] ${title}: ${detail}`);
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.show();
     // Có thể đua với vòng retry loadApp khi server chết giữa chừng — nuốt
@@ -287,12 +291,12 @@ if (!gotLock) {
   });
 
   app.whenReady().then(async () => {
-    if (process.platform === 'win32') app.setAppUserModelId('app.koda.desktop');
+    if (process.platform === 'win32') app.setAppUserModelId('app.vyen.desktop');
     if (!IS_DEV) Menu.setApplicationMenu(null); // dev giữ menu cho DevTools
     ipcBridge.register(ipcMain, {
       userDataDir: app.getPath('userData'),
       audit: klog,
-      workspaceOverride: process.env.KODA_WORKSPACE_ROOT || null,
+      workspaceOverride: process.env.VYEN_WORKSPACE_ROOT || null,
     });
     // Init MCP manager (async, non-blocking)
     mcpIpc.register(ipcMain, {
@@ -305,10 +309,10 @@ if (!gotLock) {
       const base = await ensureServer();
       if (mainWindow && !mainWindow.isDestroyed()) await loadApp(base);
       klog('sẵn sàng:', base);
-      if (process.env.KODA_IPC_SMOKE === '1') await runIpcSmoke();
+      if (process.env.VYEN_IPC_SMOKE === '1') await runIpcSmoke();
     } catch (e) {
       klog('boot thất bại:', String(e?.message ?? e));
-      showError('Không khởi động được Koda', String(e?.message ?? e));
+      showError('Không khởi động được Vyen', String(e?.message ?? e));
     }
   });
 
@@ -322,7 +326,7 @@ if (!gotLock) {
 }
 
 /* ------------------------------------------------------------------ */
-/* Self-test IPC (chỉ khi KODA_IPC_SMOKE=1) — chạy trong renderer qua  */
+/* Self-test IPC (chỉ khi VYEN_IPC_SMOKE=1) — chạy trong renderer qua  */
 /* preload bridge, ghi kết quả vào log rồi tự thoát. Không bao giờ bật */
 /* trong môi trường thường.                                            */
 /* ------------------------------------------------------------------ */
@@ -331,17 +335,17 @@ async function runIpcSmoke() {
   klog('[smoke] bắt đầu self-test IPC bridge…');
   const script = `(async () => {
     const out = {};
-    const k = window.koda;
+    const k = window.vyen;
     out.fingerprint = { desktop: k.desktop, platform: k.platform };
     out.workspaceGet = await k.workspace.get();
     out.fsList = (await k.fs.list('.')).length;
-    await k.fs.write('koda-smoke.txt', 'smoke ' + Date.now());
-    out.fsRead = (await k.fs.read('koda-smoke.txt')).content.slice(0, 30);
-    out.fsStat = await k.fs.stat('koda-smoke.txt');
+    await k.fs.write('vyen-smoke.txt', 'smoke ' + Date.now());
+    out.fsRead = (await k.fs.read('vyen-smoke.txt')).content.slice(0, 30);
+    out.fsStat = await k.fs.stat('vyen-smoke.txt');
     out.fsSearch = (await k.fs.search({ query: 'smoke', maxResults: 5 })).length;
-    await k.fs.delete('koda-smoke.txt');
+    await k.fs.delete('vyen-smoke.txt');
     // Sandbox renderer khong co process object — dung lenh echo on dinh.
-    out.shellRun = await k.shell.run({ command: 'echo koda-ok' });
+    out.shellRun = await k.shell.run({ command: 'echo vyen-ok' });
     try { out.gitStatus = await k.git.status(); } catch (e) { out.gitStatus = { error: String(e).slice(0, 120) }; }
     try { out.escape = await k.fs.read('../outside.txt'); } catch (e) { out.escape = 'BLOCKED: ' + String(e).slice(0, 80); }
     return out;

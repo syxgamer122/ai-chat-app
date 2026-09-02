@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * MCP Types & Zod Schemas cho Koda.
+ * MCP Types & Zod Schemas cho Vyen.
  *
  * Shared giữa electron/mcp/ modules. Zod v3 compatible.
  *
@@ -62,7 +62,7 @@ const McpStdioConfigSchema = z.object({
 /**
  * HTTP+SSE (transport cũ của MCP). Đã bị Streamable HTTP thay thế từ
  * spec 2025-06-18 nhưng vẫn còn rất nhiều server công cộng chạy nó, nên
- * Koda hỗ trợ để không rơi vào tình trạng "server này không kết nối được".
+ * Vyen hỗ trợ để không rơi vào tình trạng "server này không kết nối được".
  */
 const McpSseConfigSchema = z.object({
   ...commonFields,

@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * Micro-transitions pack cho KODA — port từ Amicro registry (MIT,
+ * Micro-transitions pack cho Vyen — port từ Amicro registry (MIT,
  * github.com/Subhan-code/Amicro--Micro-transitions-), framer-motion.
  *
  * Quy tắc bắt buộc khi dùng:

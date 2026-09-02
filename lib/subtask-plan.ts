@@ -3,7 +3,7 @@
  * thành các subtask có thể theo dõi tiến độ.
  *
  * Port mô hình Plandex plans + Cline sub-agents về mô hình single-agent của
- * KODA: KHÔNG tạo agent con hay chạy song song. Thay vào đó cung cấp tool
+ * Vyen: KHÔNG tạo agent con hay chạy song song. Thay vào đó cung cấp tool
  * để model TỰ phân rã và track tiến độ trong cùng conversation.
  *
  * Thuần function, không Dexie/React — test được trong node.

@@ -7,7 +7,7 @@
  * sinh ra tích Descartes của các trục tham số, rồi mọi indicator/signal/
  * portfolio được tính bằng một phép toán trên TOÀN BỘ mảng.
  *
- * Chuyển ngữ sang orchestrator của KODA:
+ * Chuyển ngữ sang orchestrator của Vyen:
  *   - "thời gian"      → không còn (không phải backtest).
  *   - "cột = cấu hình" → **một cell trong lưới tham số** (vd: góc tiếp cận
  *                        = phản biện × độ chi tiết = chi tiết).

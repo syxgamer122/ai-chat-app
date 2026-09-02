@@ -1,19 +1,19 @@
 /*
- * Logo KODA — nguồn duy nhất cho dấu hiệu thương hiệu.
+ * Logo Vyen — nguồn duy nhất cho dấu hiệu thương hiệu.
  * Trước đây SVG này bị inline lặp ở sidebar, empty state và settings với 3 id
  * gradient khác nhau; gom về một chỗ để đổi nhận diện chỉ cần sửa 1 file.
  */
 import React, { useId } from 'react';
 
-interface KodaMarkProps {
+interface VyenMarkProps {
   size?: number;
   className?: string;
 }
 
-/** Chỉ riêng dấu hiệu (chữ K phân nhánh) — không có chữ. */
-export function KodaMark({ size = 16, className }: KodaMarkProps) {
+/** Chỉ riêng dấu hiệu (chữ V — hai nét hội tụ, hai node ở đỉnh) — không có chữ. */
+export function VyenMark({ size = 16, className }: VyenMarkProps) {
   // useId: mỗi instance một gradient id riêng, tránh trùng khi render nhiều lần.
-  const gradientId = `koda-mark-${useId()}`;
+  const gradientId = `vyen-mark-${useId()}`;
   return (
     <svg
       width={size}
@@ -29,25 +29,24 @@ export function KodaMark({ size = 16, className }: KodaMarkProps) {
           <stop offset="1" stopColor="rgb(var(--brand-accent))" />
         </linearGradient>
       </defs>
-      <path d="M10.5 8V24" stroke={`url(#${gradientId})`} strokeWidth="3.2" strokeLinecap="round" />
-      <path d="M10.5 16L22.5 8" stroke={`url(#${gradientId})`} strokeWidth="3.2" strokeLinecap="round" />
-      <path d="M10.5 16L22.5 24" stroke={`url(#${gradientId})`} strokeWidth="3.2" strokeLinecap="round" />
-      <circle cx="22.5" cy="8" r="2.4" fill="rgb(var(--brand))" />
-      <circle cx="22.5" cy="24" r="2.4" fill="rgb(var(--brand-accent))" />
+      <path d="M10 7.5L16 24.5" stroke={`url(#${gradientId})`} strokeWidth="3.2" strokeLinecap="round" />
+      <path d="M22 7.5L16 24.5" stroke={`url(#${gradientId})`} strokeWidth="3.2" strokeLinecap="round" />
+      <circle cx="10" cy="7.5" r="2.4" fill="rgb(var(--brand))" />
+      <circle cx="22" cy="7.5" r="2.4" fill="rgb(var(--brand-accent))" />
     </svg>
   );
 }
 
-interface KodaLogoProps {
+interface VyenLogoProps {
   /** `sm` cho sidebar, `lg` cho empty state. */
   size?: 'sm' | 'lg';
-  /** Hiển thị chữ "KODA / AI Innovations" bên cạnh (sm) hoặc bên dưới (lg). */
+  /** Hiển thị chữ "Vyen / AI Innovations" bên cạnh (sm) hoặc bên dưới (lg). */
   withWordmark?: boolean;
   className?: string;
 }
 
 /** Dấu hiệu + wordmark, dùng ở sidebar và trạng thái rỗng. */
-export function KodaLogo({ size = 'sm', withWordmark = true, className }: KodaLogoProps) {
+export function VyenLogo({ size = 'sm', withWordmark = true, className }: VyenLogoProps) {
   const isLarge = size === 'lg';
 
   const tile = (
@@ -58,7 +57,7 @@ export function KodaLogo({ size = 'sm', withWordmark = true, className }: KodaLo
           : 'flex h-7 w-7 items-center justify-center rounded-lg bg-surface-muted ring-1 ring-zinc-900/5'
       }
     >
-      <KodaMark size={isLarge ? 34 : 16} />
+      <VyenMark size={isLarge ? 34 : 16} />
     </div>
   );
 
@@ -68,7 +67,7 @@ export function KodaLogo({ size = 'sm', withWordmark = true, className }: KodaLo
     return (
       <div className={`flex flex-col items-center ${className ?? ''}`}>
         {tile}
-        <div className="mt-5 text-[15px] font-extrabold tracking-tight text-zinc-800">KODA</div>
+        <div className="mt-5 text-[15px] font-extrabold tracking-tight text-zinc-800">Vyen</div>
         <div className="text-[10px] font-medium uppercase tracking-[0.28em] text-zinc-500">
           AI Innovations
         </div>
@@ -80,7 +79,7 @@ export function KodaLogo({ size = 'sm', withWordmark = true, className }: KodaLo
     <div className={`flex items-center gap-2.5 ${className ?? ''}`}>
       {tile}
       <div className="leading-tight">
-        <div className="text-[14px] font-extrabold tracking-tight text-zinc-800">KODA</div>
+        <div className="text-[14px] font-extrabold tracking-tight text-zinc-800">Vyen</div>
         <div className="text-[10px] font-medium uppercase tracking-[0.24em] text-zinc-500">
           AI Innovations
         </div>

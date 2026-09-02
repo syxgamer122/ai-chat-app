@@ -1,7 +1,7 @@
 /**
  * MCP server mẫu để test TÍCH HỢP THẬT (không mock).
  *
- * Dựng bằng chính SDK mà Koda dùng làm client, nên nếu hai bên nói khác
+ * Dựng bằng chính SDK mà Vyen dùng làm client, nên nếu hai bên nói khác
  * giao thức thì test vỡ ngay ở khởi tạo. File là .mjs vì MCP SDK chỉ có ESM.
  */
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
@@ -18,8 +18,8 @@ const server = new Server(
 
 /**
  * Tool thứ tư chỉ xuất hiện SAU khi client gọi `enable_extra` — dùng để kiểm
- * chứng Koda cósubscribe `tools/list_changed` hay không (nếu không, danh sách
- * tool của Koda sẽ giữ nguyên cũ cho tới khi người dùng bấm làm mới).
+ * chứng Vyen cósubscribe `tools/list_changed` hay không (nếu không, danh sách
+ * tool của Vyen sẽ giữ nguyên cũ cho tới khi người dùng bấm làm mới).
  */
 let extraEnabled = false;
 

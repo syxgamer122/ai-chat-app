@@ -14,7 +14,7 @@ import type { SnippetSegment } from '@/lib/search-utils';
 import { useDebouncedValue } from '@/lib/hooks/use-debounced-value';
 import { MD_QUERY, useMediaQuery } from '@/lib/hooks/use-media-query';
 import { BackupReminder } from '@/components/backup-reminder';
-import { KodaLogo } from '@/components/koda-logo';
+import { VyenLogo } from '@/components/vyen-logo';
 import {
   Plus, MessageSquare, Pin, Trash2, Search, Settings as SettingsIcon,
   X, MoreHorizontal, FileJson, FileText, Loader2, PanelLeftClose, PanelLeftOpen,
@@ -345,7 +345,7 @@ export function Sidebar() {
           }`}
         >
           <div className="flex items-center justify-between px-3 pb-2 pt-3">
-            <KodaLogo size="sm" />
+            <VyenLogo size="sm" />
             <div className="flex items-center gap-0.5">
               <button
                 type="button"

@@ -1,6 +1,6 @@
 /**
  * Hợp đồng plan của orchestrator — port phần **chưa có** của
- * Untrivial-ai/agent-orchestrator sang KODA.
+ * Untrivial-ai/agent-orchestrator sang Vyen.
  *
  * Ở AO, orchestrator là MỘT session (`kind: orchestrator`) làm 3 việc:
  *   1. **Plan**  — phân rã task thành việc cần làm.
@@ -9,7 +9,7 @@
  *   3. **Review** — gom kết quả (messages + changed files) rồi sửa lỗi CI,
  *                  merge conflict, review code.
  *
- * KODA đã có sẵn phần reconciler (lib/run-lifecycle.ts) và plan tracker
+ * Vyen đã có sẵn phần reconciler (lib/run-lifecycle.ts) và plan tracker
  * (lib/subtask-plan.ts) — module này CHỈ lấy phần còn thiếu: **hợp đồng dữ
  * liệu của bước Plan**, đủ chặt để một LLM sinh ra và đủ lỏng để parse được
  * ngay cả khi model trả JSON rác.

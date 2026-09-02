@@ -120,9 +120,21 @@ function broadcast(channel, payload) {
 /* Persistence                                                         */
 /* ------------------------------------------------------------------ */
 
+/** Migration từ thời KODA: file mới chưa có thì chép từ file tên cũ sang. */
+function migrateLegacyFile(newPath) {
+  const legacy = newPath.replace(/vyen-/, 'koda-');
+  if (!fs.existsSync(newPath) && fs.existsSync(legacy)) {
+    try {
+      fs.copyFileSync(legacy, newPath);
+    } catch {}
+  }
+}
+
 function loadConfigs(userDataDir) {
-  configPath = path.join(userDataDir, 'koda-mcp-configs.json');
-  policyPath = path.join(userDataDir, 'koda-mcp-policies.json');
+  configPath = path.join(userDataDir, 'vyen-mcp-configs.json');
+  policyPath = path.join(userDataDir, 'vyen-mcp-policies.json');
+  migrateLegacyFile(configPath);
+  migrateLegacyFile(policyPath);
   try {
     const raw = JSON.parse(fs.readFileSync(configPath, 'utf8'));
     return Array.isArray(raw) ? raw : [];

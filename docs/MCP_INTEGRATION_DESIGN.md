@@ -1,4 +1,4 @@
-# Koda MCP Integration Architecture Design v2 (Deep Dive)
+# Vyen MCP Integration Architecture Design v2 (Deep Dive)
 
 ## 1. Kiến trúc tham khảo - Deep Findings
 
@@ -44,7 +44,7 @@
 
 **Sandbox fallback chain**: bwrap → bundled bwrap → landlock → none
 
-### 1.3 Koda: Existing Tool Architecture
+### 1.3 Vyen: Existing Tool Architecture
 
 **Tool definition** (`lib/agent-tools.ts`):
 - Vercel AI SDK `tool()` helper với Zod schemas
@@ -64,17 +64,17 @@
 - Stream events: planning → sweeping → ranking → synthesizing → done
 - WorkerContext inject LLM implementation (deps injection pattern)
 
-## 2. Architecture Design cho Koda (Revised)
+## 2. Architecture Design cho Vyen (Revised)
 
 ### 2.1 Decision: KHÔNG theo Goose ACP pattern
 
-Goose dùng Rust backend riêng (goosed) + ACP protocol vì họ cần performance cao và multi-client. Koda là Next.js app, không cần layer phức tạp đó.
+Goose dùng Rust backend riêng (goosed) + ACP protocol vì họ cần performance cao và multi-client. Vyen là Next.js app, không cần layer phức tạp đó.
 
-**Koda approach**: MCP Client chạy TRONG Electron main process, communicate qua IPC (đơn giản hơn, phù hợp scale).
+**Vyen approach**: MCP Client chạy TRONG Electron main process, communicate qua IPC (đơn giản hơn, phù hợp scale).
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│                  Koda Desktop App                    │
+│                  Vyen Desktop App                    │
 │                                                      │
 │  ┌────────────────────┐    IPC     ┌──────────────┐ │
 │  │  Renderer (React)   │◄──────────►│ Main Process │ │
@@ -135,7 +135,7 @@ components/mcp/                  # React components
 └── ToolCallStatus.tsx            # Execution progress indicator
 ```
 
-### 2.4 Integration Points với Existing Koda
+### 2.4 Integration Points với Existing Vyen
 
 **Thay thế emulated tools bằng MCP tools:**
 

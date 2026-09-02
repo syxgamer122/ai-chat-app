@@ -1,16 +1,16 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
   <defs>
-    <linearGradient id="koda" x1="8" y1="7" x2="24" y2="25" gradientUnits="userSpaceOnUse">
+    <linearGradient id="vyen" x1="8" y1="7" x2="24" y2="25" gradientUnits="userSpaceOnUse">
       <stop stop-color="#0A7E8C" />
       <stop offset="1" stop-color="#4ECB71" />
     </linearGradient>
   </defs>
   <rect width="32" height="32" rx="8" fill="#101013" />
   <!-- Thân dọc của K -->
-  <path d="M10.5 8V24" stroke="url(#koda)" stroke-width="3.2" stroke-linecap="round" />
+  <path d="M10.5 8V24" stroke="url(#vyen)" stroke-width="3.2" stroke-linecap="round" />
   <!-- Tay chéo: xuất phát từ giữa thân dọc, kéo sang phải -->
-  <path d="M10.5 16L22.5 8" stroke="url(#koda)" stroke-width="3.2" stroke-linecap="round" />
-  <path d="M10.5 16L22.5 24" stroke="url(#koda)" stroke-width="3.2" stroke-linecap="round" />
+  <path d="M10.5 16L22.5 8" stroke="url(#vyen)" stroke-width="3.2" stroke-linecap="round" />
+  <path d="M10.5 16L22.5 24" stroke="url(#vyen)" stroke-width="3.2" stroke-linecap="round" />
   <!-- Node tròn ở đầu phải 2 tay chéo -->
   <circle cx="22.5" cy="8" r="2.4" fill="#0A7E8C" />
   <circle cx="22.5" cy="24" r="2.4" fill="#4ECB71" />

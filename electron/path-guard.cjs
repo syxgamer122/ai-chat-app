@@ -1,7 +1,7 @@
 'use strict';
 
 /*
- * Path guard dùng chung cho mọi IPC fs/shell của Koda desktop.
+ * Path guard dùng chung cho mọi IPC fs/shell của Vyen desktop.
  * Thuần, không phụ thuộc Electron — unit-test được bằng vitest qua
  * createRequire (xem tests/path-guard.test.ts).
  *

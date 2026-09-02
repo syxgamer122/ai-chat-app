@@ -2,7 +2,7 @@
  * Staging Diff Sandbox — bộ đệm thay đổi của agent TRƯỚC KHI chạm đĩa.
  *
  * Port mô hình "cumulative diff review sandbox" của Plandex (MIT) về mô hình
- * client-side của KODA:
+ * client-side của Vyen:
  *  - fs_edit/fs_write KHÔNG ghi đĩa — ghi vào overlay (bộ đệm trong RAM).
  *  - fs_read ĐỌC OVERLAY TRƯỚC, đĩa sau — agent tự thấy kết quả sửa của mình,
  *    tránh doom-loop "sửa rồi đọc lại vẫn cũ".

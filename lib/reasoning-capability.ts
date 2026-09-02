@@ -1,7 +1,7 @@
 /**
  * Reasoning capability — đọc metadata suy luận của model từ /v1/models theo
  * chuẩn OpenRouter (port từ prime-agent `openrouter-reasoning.ts`, MIT,
- * lược về bộ 4 mức của KODA).
+ * lược về bộ 4 mức của Vyen).
  *
  * Vấn đề: thinking slider trước giờ chỉ có tác dụng trên crax
  * (`supportsThinkingLevel` là regex hostname) — với OrcaRouter/Tokenin tham
@@ -17,7 +17,7 @@ import type { ThinkingLevel } from '@/lib/provider-url';
 
 export interface ReasoningCapability {
   /**
-   * Các mức của KODA (low/medium/high/max) mà model khai báo hỗ trợ.
+   * Các mức của Vyen (low/medium/high/max) mà model khai báo hỗ trợ.
    * Mảng rỗng = model chỉ bật/tắt suy luận (không chọn được mức) — gửi mức
    * nào cũng được, gateway tự dịch.
    */
@@ -30,7 +30,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-const KODA_LEVELS: readonly ThinkingLevel[] = ['low', 'medium', 'high', 'max'];
+const VYEN_LEVELS: readonly ThinkingLevel[] = ['low', 'medium', 'high', 'max'];
 
 /**
  * Phân tích một entry model từ response /v1/models.
@@ -49,17 +49,17 @@ export function parseModelReasoning(item: unknown): ReasoningCapability | null {
   const mandatory = item.reasoning.mandatory === true;
   const rawEfforts = item.reasoning.supported_efforts;
 
-  // supported_efforts === null: hỗ trợ MỌI mức chuẩn → map đủ 4 mức KODA.
+  // supported_efforts === null: hỗ trợ MỌI mức chuẩn → map đủ 4 mức Vyen.
   if (rawEfforts === null) {
-    return { efforts: [...KODA_LEVELS], mandatory };
+    return { efforts: [...VYEN_LEVELS], mandatory };
   }
 
   if (Array.isArray(rawEfforts)) {
     const lowered = new Set(
       rawEfforts.filter((e): e is string => typeof e === 'string').map((e) => e.toLowerCase()),
     );
-    const efforts = KODA_LEVELS.filter((level) => lowered.has(level));
-    // Khai báo có reasoning nhưng không khớp mức nào của KODA (vd chỉ
+    const efforts = VYEN_LEVELS.filter((level) => lowered.has(level));
+    // Khai báo có reasoning nhưng không khớp mức nào của Vyen (vd chỉ
     // "minimal"/"xhigh") → coi như toggle-only: gửi mức nào cũng dịch được.
     return { efforts, mandatory };
   }
@@ -71,7 +71,7 @@ export function parseModelReasoning(item: unknown): ReasoningCapability | null {
 
 /** true nếu `candidate` là mức gần `requested` nhất trong danh sách hỗ trợ. */
 function distance(a: ThinkingLevel, b: ThinkingLevel): number {
-  return Math.abs(KODA_LEVELS.indexOf(a) - KODA_LEVELS.indexOf(b));
+  return Math.abs(VYEN_LEVELS.indexOf(a) - VYEN_LEVELS.indexOf(b));
 }
 
 /**
