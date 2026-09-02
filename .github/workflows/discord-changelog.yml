@@ -1,0 +1,15 @@
+name: Thông báo cập nhật lên Discord
+
+on:
+  push:
+
+jobs:
+  thong-bao:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Gửi bản tin cập nhật vào Discord
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_CHANGELOG_WEBHOOK }}
+        run: node .github/scripts/discord-changelog.mjs
