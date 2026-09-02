@@ -10,7 +10,9 @@
  * 5. Result extraction: last assistant text = subagent's answer
  *
  * Execution model: Fork runEmulatedLoop() with isolated messages + reduced tools.
- * Runs entirely CLIENT-side (like fs_*, shell_run) because it needs LLM access.
+ * Runs SERVER-side inside the chat route (needs LLM access). Client tools
+ * (fs_*, shell, git) reach the user's machine via the annotation relay in
+ * lib/subagent-relay.ts — pass `resolveClientTool` to enable them.
  */
 
 import { generateText } from 'ai';
@@ -55,6 +57,15 @@ export interface SubagentOptions {
     toolName: string;
     args: Record<string, unknown>;
   }) => void;
+  /**
+   * Relay tool client xuống renderer (lib/subagent-relay.ts). Có callback này
+   * subagent mới dùng ĐƯỢC fs, shell, git — không có thì chỉ còn server tools.
+   */
+  resolveClientTool?: (call: {
+    toolCallId: string;
+    toolName: string;
+    args: Record<string, unknown>;
+  }) => Promise<string>;
   /** Abort signal from parent. */
   abortSignal?: AbortSignal;
   /** Temperature override. */
@@ -170,6 +181,7 @@ export async function runSubagent(opts: SubagentOptions): Promise<SubagentResult
       tools: opts.serverTools,
       clientTools: opts.clientToolNames, // Already excludes 'delegate'
       onClientToolCall: opts.onClientToolCall,
+      resolveClientTool: opts.resolveClientTool,
       temperature: opts.temperature,
       maxTokens: opts.maxTokens,
       abortSignal: controller.signal,
@@ -250,4 +262,56 @@ export async function runSubagent(opts: SubagentOptions): Promise<SubagentResult
       error: errorMsg,
     };
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* Shared execute — dùng cho CẢ hai đường (emulated + native)          */
+/* ------------------------------------------------------------------ */
+
+export interface DelegateExecuteDeps {
+  model: LanguageModel;
+  systemBase: string;
+  serverTools: AgentToolSet;
+  clientToolNames: ReadonlySet<string>;
+  abortSignal?: AbortSignal;
+  temperature?: number;
+  maxTokens?: number;
+  resolveClientTool?: SubagentOptions['resolveClientTool'];
+  onProgress?: SubagentOptions['onProgress'];
+}
+
+/**
+ * Thân thực thi của tool delegate — gọi từ onDelegateCall (đường emulated)
+ * lẫn execute của server-tool (đường native). Trả JSON string của
+ * SubagentResult để model đọc status/turns/kết quả.
+ *
+ * Luôn LỌC 'delegate' khỏi clientToolNames dù caller truyền gì — chống đệ
+ * quy ở đúng tầng này (route hay truyền nhầm set đầy đủ).
+ */
+export async function executeDelegate(
+  args: { instructions?: unknown; max_turns?: unknown; timeout_secs?: unknown },
+  deps: DelegateExecuteDeps,
+): Promise<string> {
+  const instructions = String(args.instructions ?? '');
+  if (instructions.trim().length < 10) {
+    return JSON.stringify({
+      status: 'error',
+      error: 'instructions quá ngắn — viết brief đầy đủ (tối thiểu 10 ký tự) cho subagent.',
+    });
+  }
+  const subResult = await runSubagent({
+    instructions,
+    maxTurns: typeof args.max_turns === 'number' ? args.max_turns : undefined,
+    timeoutSecs: typeof args.timeout_secs === 'number' ? args.timeout_secs : undefined,
+    model: deps.model,
+    systemBase: deps.systemBase,
+    serverTools: deps.serverTools,
+    clientToolNames: new Set([...deps.clientToolNames].filter((n) => n !== 'delegate')),
+    resolveClientTool: deps.resolveClientTool,
+    abortSignal: deps.abortSignal,
+    ...(deps.temperature !== undefined ? { temperature: deps.temperature } : {}),
+    ...(deps.maxTokens ? { maxTokens: deps.maxTokens } : {}),
+    onProgress: deps.onProgress,
+  });
+  return JSON.stringify(subResult);
 }

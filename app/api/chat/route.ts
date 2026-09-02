@@ -5,7 +5,9 @@ import {
   createDataStreamResponse,
   formatDataStreamPart,
   APICallError,
+  tool,
   type CoreMessage,
+  type ToolSet,
 } from 'ai';
 import { z } from 'zod';
 import {
@@ -30,7 +32,8 @@ import { parseLooseJson } from '@/lib/json-repair';
 import { isContextOverflowError } from '@/lib/context-budget';
 import { restateUpstreamStatus } from '@/lib/upstream-status-rules';
 import { runEmulatedLoop } from '@/lib/emulated-agent';
-import { runSubagent } from '@/lib/subagent';
+import { executeDelegate } from '@/lib/subagent';
+import { registerSubagentRelay, cancelSubagentRelays } from '@/lib/subagent-relay';
 import { mapMcpTools } from '@/lib/mcp/tool-mapper';
 import { formatSkillsBlock } from '@/lib/skills';
 import { formatWebContextBlock, type WebContextPayload } from '@/lib/web-context';
@@ -53,8 +56,10 @@ import { SERVER_MAX_STEPS, TOOL_RESULT_MAX_CHARS, truncateToolResult } from '@/l
 /**
  * Write tools bị vô hiệu hóa trong Plan mode — agent chỉ được explore (read/list/
  * search) và hỏi clarifying questions. Port từ Cline "Plan and Act" (Apache-2.0).
+ * `delegate` nằm trong set vì subagent CÓ tool ghi file (qua relay renderer) —
+ * cho phép delegate là mở cửa write lậu khỏi plan mode.
  */
-const PLAN_MODE_WRITE_TOOLS = new Set(['fs_write', 'fs_edit']);
+const PLAN_MODE_WRITE_TOOLS = new Set(['fs_write', 'fs_edit', 'delegate']);
 import { mergeSameRole, normalize } from '@/lib/message-normalize';
 import { nonStreamingFetch } from '@/lib/non-streaming-fetch';
 import { looksLikePseudoError, extractPseudoErrorMessage } from '@/lib/pseudo-error-response';
@@ -1339,6 +1344,8 @@ export async function POST(req: Request) {
         const writeFinish = (
           finishReason: 'stop' | 'length' | 'error' | 'other' | 'content-filter' | 'tool-calls',
         ) => {
+          // Stream khép lại — tháo mọi relay subagent còn treo của request này.
+          cancelSubagentRelays(requestId);
           heldSuspect = ''; // artifact ở cuối stream: bỏ.
           dataStream.write(
             formatDataStreamPart('finish_message', {
@@ -1439,6 +1446,21 @@ export async function POST(req: Request) {
               };
 
               const link = linkAbortSignals(req.signal, budgetController.signal);
+
+              /* Subagent relay: subagent chạy server-side nhưng tool client
+                 (fs_*, shell, git, MCP) sống ở renderer. Phát annotation
+                 {subagentCall} — renderer (đang stream) thực thi rồi POST
+                 /api/chat/subagent-relay trả kết quả; promise của
+                 registerSubagentRelay resolve ngay đó và loop subagent nhận
+                 [TOOL_RESULT] chạy tiếp. */
+              const relaySubagentTool = (call: {
+                toolCallId: string;
+                toolName: string;
+                args: Record<string, unknown>;
+              }) => {
+                writeAnnotation({ subagentCall: call });
+                return registerSubagentRelay(requestId, call, { signal: link.signal });
+              };
 
               try {
                 writeAnnotation({
@@ -1653,16 +1675,25 @@ export async function POST(req: Request) {
                    ...mcpTools.keys,
                  ]);
                  /**
-                  * Đường native không quảng cáo được mọi tool client: `delegate`
-                  * cần runSubagent chạy inline, mà cơ chế đó chỉ có ở
-                  * runEmulatedLoop. Bỏ nó khỏi cả khai báo lẫn forwarding để
-                  * model không gọi một tool trả về note vô nghĩa.
+                  * Đường native khai báo tool client KHÔNG kèm execute — trừ
+                  * delegate: route tự chạy subagent server-side qua
+                  * executeDelegate nên ở native nó là SERVER tool thật, không
+                  * forward sang renderer. Bộ lọc này vẫn loại def CLIENT của
+                  * delegate khỏi việc bị spread đè lên bản server.
                   */
                  const nativeClientToolNames = new Set(
                    [...clientToolNames].filter((n) => !NATIVE_EXCLUDED_CLIENT_TOOLS.has(n)),
                  );
+                 /* delegate khả dụng ở CẢ HAI đường: emulated qua onDelegateCall,
+                    native qua server-tool execute. Plan mode đã loại nó khỏi
+                    clientToolNames ngay từ đầu (chống subagent ghi file lậu). */
+                 const delegateAvailable = allowAgentTools && agentMode !== 'plan';
                  const activeToolNames = allowAgentTools
-                   ? [...Object.keys(serverTools), ...nativeClientToolNames]
+                   ? [
+                       ...Object.keys(serverTools),
+                       ...nativeClientToolNames,
+                       ...(delegateAvailable ? ['delegate'] : []),
+                     ]
                    : [];
                 const prefetchedNotes = [
                   webContext
@@ -1791,12 +1822,16 @@ export async function POST(req: Request) {
                             'đọc file → sửa → chạy test → sửa lại nếu lỗi — tất cả trong một luồng liên tục. ' +
                             'Vẫn phải tuân thủ safety: không chạy lệnh destructive, không ghi ngoài workspace.'
                           : '',
-/* Delegation: giao task cho subagent độc lập. */
+                        /* Delegation: giao task cho subagent độc lập. Subagent có
+                           THẬT cả tool client (fs_*, shell_run, git_*) qua relay
+                           renderer — giao được trọn gói cả task code. */
                         workspaceState?.connected
-                          ? '[DELEGATION] Khi có task độc lập phức tạp (refactor file, research codebase, chạy test suite...), ' +
-                            'hãy gọ delegate để giao cho subagent. Subagent chạy với context RIÊNG (không thấy lịch sử chat), ' +
-                            'có đầy đủ tools (fs_*, shell_run, git_*) nhưng KHÔNG thể gọ delegate (không đế quy). ' +
-                            'Viết instructions chi tiết, rõ ràng. Subagent trả kết quả tóm tắt khi xong.'
+                          ? '[DELEGATION] Khi có task độc lập giao trọn gói được (refactor một file, khảo sát codebase, ' +
+                            'chạy và phân tích test...), hãy gọi delegate. Subagent chạy context RIÊNG (không thấy lịch sử ' +
+                            'chat), có đủ tools như bạn (fs_*, shell_run, git_*) nhưng KHÔNG thể gọi delegate (không đệ quy) ' +
+                            'và bị giới hạn số turns (mặc định 10). Viết instructions như brief cho người mới: mục tiêu, ' +
+                            'file/path cụ thể, tiêu chí hoàn thành. Nó trả JSON có status và result — đọc kỹ, nếu ' +
+                            'failed/max-turns thì tự quyết làm lại bằng delegate khác hoặc làm phần còn thiếu trực tiếp.'
                           : '',
                         /* MCP: tool từ server ngoài do người dùng tự cài. Tên có
                            dạng mcp__<server>__<tool> để phân biệt với tool có
@@ -1897,14 +1932,8 @@ export async function POST(req: Request) {
                       };
                     },
                     onMemoryProposal: (text) => writeAnnotation({ memoryProposal: { text } }),
-                    onDelegateCall: async ({ instructions, max_turns, timeout_secs }) => {
-                      /* Run subagent inline with isolated context. Subagent gets
-                         fresh messages, same model/tools, but NO delegate tool
-                         (prevents recursion). Result returned as tool result string. */
-                      const subResult = await runSubagent({
-                        instructions,
-                        maxTurns: max_turns,
-                        timeoutSecs: timeout_secs,
+                    onDelegateCall: (call) =>
+                      executeDelegate(call, {
                         model: openaiNonStreaming(targetModel),
                         systemBase: composedSystem,
                         serverTools: serverTools as ReturnType<typeof buildAgentTools>,
@@ -1914,15 +1943,13 @@ export async function POST(req: Request) {
                           ? {}
                           : { temperature: temperature ?? 0.7 }),
                         ...(modelConfig.maxOutputTokens ? { maxTokens: modelConfig.maxOutputTokens } : {}),
+                        /* Subagent dùng được tool client qua relay renderer —
+                           đây là điểm khác biệt với bản cũ (chỉ server tools). */
+                        resolveClientTool: relaySubagentTool,
                         onProgress: (phase, detail) => {
                           writeAnnotation({ subagent: { phase, ...detail } });
                         },
-                      });
-                      console.info(
-                        `[req:${requestId}] subagent done (${subResult.status}, ${subResult.turnsUsed} turns, ${subResult.toolCalls} calls)`,
-                      );
-                      return JSON.stringify(subResult);
-                    },
+                      }),
                   });
                   clearIdle();
                   clearTimeout(budgetTimer);
@@ -1964,6 +1991,40 @@ export async function POST(req: Request) {
                     `model=${targetModel}`,
                 );
 
+                /* Delegate ở đường NATIVE — tool SERVER-side: execute chạy
+                   subagent ngay trong route (cùng executeDelegate của đường
+                   emulated). Trước đây delegate chỉ tồn tại ở đường emulated,
+                   model native hoàn toàn không có subagent. */
+                const nativeDelegateTool: Record<string, ToolSet[string]> = delegateAvailable
+                  ? {
+                      delegate: tool({
+                        description: CLIENT_TOOL_DEFS.delegate.description,
+                        parameters: CLIENT_TOOL_DEFS.delegate.parameters,
+                        execute: async (args: unknown) =>
+                          executeDelegate(
+                            args as { instructions?: unknown; max_turns?: unknown; timeout_secs?: unknown },
+                            {
+                              model: openaiNonStreaming(targetModel),
+                              systemBase: composedSystem,
+                              serverTools: serverTools as ReturnType<typeof buildAgentTools>,
+                              clientToolNames: CLIENT_TOOL_NAMES,
+                              abortSignal: link.signal,
+                              ...(modelConfig.supportsTemperature === false
+                                ? {}
+                                : { temperature: temperature ?? 0.7 }),
+                              ...(modelConfig.maxOutputTokens
+                                ? { maxTokens: modelConfig.maxOutputTokens }
+                                : {}),
+                              resolveClientTool: relaySubagentTool,
+                              onProgress: (phase, detail) => {
+                                writeAnnotation({ subagent: { phase, ...detail } });
+                              },
+                            },
+                          ),
+                      }),
+                    }
+                  : {};
+
                 const result = streamText({
                   model: openai(targetModel),
                   messages: core,
@@ -1976,9 +2037,9 @@ export async function POST(req: Request) {
                                 explore. Client-side onToolCall cũng chặn nhưng
                                 đây là lớp server để model không bao giờ thấy
                                 tool bị cấm.
-                             2. Đường native: loại tool cần cơ chế riêng của
-                                emulated (delegate chạy qua onDelegateCall) —
-                                để nguyên thì model gọi mà chỉ nhận lại note. */
+                             2. Đường native: def CLIENT của delegate bị loại —
+                                delegate do route cung cấp bản SERVER (có
+                                execute) ở nativeDelegateTool bên dưới. */
                           ...Object.fromEntries(
                             Object.entries(CLIENT_TOOL_DEFS).filter(
                               ([name]) =>
@@ -1986,6 +2047,7 @@ export async function POST(req: Request) {
                                 (agentMode !== 'plan' || !PLAN_MODE_WRITE_TOOLS.has(name)),
                             ),
                           ),
+                          ...nativeDelegateTool,
                           /* Tool MCP: khai báo để model gọi được. Không có
                              execute — thực thi ở renderer qua IPC. */
                           ...mcpTools.defs,
@@ -2055,7 +2117,9 @@ export async function POST(req: Request) {
                            user. Tool native KHÔNG forward — tránh resubmit kép. */
                         /* Forward tool client (fs_*, shell/git, MCP) sang
                            renderer: server không có execute cho chúng. delegate
-                           bị loại ở native nên không bao giờ lọt tới đây. */
+                           là SERVER tool ở đường này (execute chạy subagent
+                           trong route) nên không nằm trong nativeClientToolNames
+                           — AI SDK tự thực thi, không forward. */
                         if (nativeClientToolNames.has(part.toolName)) {
                           hasPendingClientCalls = true;
                           dataStream.write(

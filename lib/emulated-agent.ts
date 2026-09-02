@@ -227,6 +227,14 @@ export interface EmulatedLoopOptions {
   clientTools?: ReadonlySet<string>;
   onClientToolCall?: (call: { toolCallId: string; toolName: string; args: Record<string, unknown> }) => void;
   /**
+   * RELAY MODE (subagent): tool client không yield turn mà chờ kết quả từ
+   * callback này (route phát annotation xuống renderer, renderer thực thi
+   * rồi POST kết quả về — xem lib/subagent-relay.ts). Có mặt thì loop không
+   * bao giờ trả 'pending-client' vì tool client; subagent dùng được fs,
+   * shell, git như tool server trong CÙNG vòng đời loop.
+   */
+  resolveClientTool?: (call: { toolCallId: string; toolName: string; args: Record<string, unknown> }) => Promise<string>;
+  /**
    * Tài liệu tool ĐỘNG (MCP) kèm theo `clientTools` để đưa vào protocol text.
    * Không truyền thì tool vẫn được phép gọi nhưng model không biết schema.
    */
@@ -345,8 +353,28 @@ export async function runEmulatedLoop(opts: EmulatedLoopOptions): Promise<Emulat
 
 if (opts.clientTools?.has(call.name)) {
         totalCalls += 1;
+        const id = `emu-${round}-${totalCalls}`;
+        if (opts.resolveClientTool) {
+          /* Relay mode: chờ renderer thực thi (annotation → POST về) rồi nhận
+             kết quả ngay trong vòng đời loop — nhiều call trong cùng round
+             vẫn chạy tuần tự hết, không phải yield turn. */
+          opts.onAnnotation({
+            tool: { id, name: call.name, phase: 'start', args: summarizeToolArgs(call.name, call.args) },
+          });
+          let resultText: string;
+          try {
+            resultText = await opts.resolveClientTool({ toolCallId: id, toolName: call.name, args: call.args });
+          } catch (err) {
+            resultText = JSON.stringify({ error: err instanceof Error ? err.message : String(err) });
+          }
+          opts.onAnnotation({
+            tool: { id, name: call.name, phase: 'done', summary: resultText.slice(0, 200) },
+          });
+          resultBlocks.push(`[TOOL_RESULT name=${call.name}]\n${resultText}\n[/TOOL_RESULT]`);
+          continue;
+        }
         opts.onClientToolCall?.({
-          toolCallId: `emu-${round}-${totalCalls}`,
+          toolCallId: id,
           toolName: call.name,
           args: call.args,
         });

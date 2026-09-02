@@ -166,6 +166,7 @@ import {
   planProgress,
   formatPlanSummary,
   parsePlan,
+  type Plan,
   type SubtaskStatus,
 } from '@/lib/subtask-plan';
 import {
@@ -191,6 +192,7 @@ import { ChatHeader } from './chat/chat-header';
 import { MessageList } from './chat/message-list';
 import { ContextMeter } from '@/components/context-meter';
 import { WorkspaceCheckpointBar } from '@/components/workspace-checkpoints';
+import { PlanPanel } from '@/components/plan-panel';
 import type { BranchInfo } from './chat/message-item';
 
 /* Trần đính kèm. Đặt ở MODULE scope: trước đây khai báo trong thân component
@@ -481,6 +483,24 @@ export default function ChatInterface() {
 
   /** Auto-debug loop state: track retry attempts per command. */
   const debugLoopRef = useRef<DebugStore>(emptyDebugStore());
+
+  /* Plan checklist (plan_create/plan_update): nạp từ kv theo chat, cập nhật
+     trực tiếp từ handler của tool để UI phản ánh ngay trong lúc stream. */
+  const [plan, setPlan] = useState<Plan | null>(null);
+  const [planHidden, setPlanHidden] = useState(false);
+  useEffect(() => {
+    setPlan(null);
+    setPlanHidden(false);
+    if (!currentChatId) return;
+    void db.kv
+      .get(`plan:${currentChatId}`)
+      .then((row) => {
+        if (!row?.value) return;
+        const parsed = parsePlan(typeof row.value === 'string' ? JSON.parse(row.value) : row.value);
+        if (parsed) setPlan(parsed);
+      })
+      .catch(() => {});
+  }, [currentChatId]);
 
   /** Ghi overlay + persist + bump version. Gọi sau mọi stage/unstage/clear. */
   const updateStaging = useCallback((next: StagingStore) => {
@@ -1275,6 +1295,8 @@ export default function ChatInterface() {
             }
             // Persist plan vào kv
             await db.kv.put({ key: `plan:${currentChatId}`, value: JSON.stringify(plan) }).catch(() => {});
+            setPlan(plan);
+            setPlanHidden(false);
             showNotice(`Đã tạo plan "${title}" với ${plan.subtasks.length} subtask.`);
             return JSON.stringify({ ok: true, plan: formatPlanSummary(plan), subtaskCount: plan.subtasks.length });
           }
@@ -1293,6 +1315,7 @@ export default function ChatInterface() {
               return JSON.stringify({ ok: false, error: `Subtask "${subtaskId}" không tồn tại trong plan.` });
             }
             await db.kv.put({ key: `plan:${currentChatId}`, value: JSON.stringify(updated) }).catch(() => {});
+            setPlan(updated);
             const prog = planProgress(updated);
             return JSON.stringify({
               ok: true,
@@ -1644,6 +1667,77 @@ export default function ChatInterface() {
       }
     },
   });
+
+  /* ------------------------------------------------------------------ */
+  /* Subagent client-tool relay                                          */
+  /* ------------------------------------------------------------------ */
+  /* Annotation {subagentCall} do route phát khi SUBAGENT (chạy server-side)
+     gọi tool client (fs_*, shell, git, MCP). Renderer thực thi bằng ĐÚNG
+     executor của tool thường (handleClientToolCall) rồi POST kết quả về
+     /api/chat/subagent-relay — route resolve promise cho loop subagent đang
+     chờ, subagent nhận kết quả và chạy tiếp.
+     CHỈ xử lý khi stream đang active: annotation cũ persist theo message,
+     nếu xử lý cả khi idle thì mở lại hội thoại sẽ re-execute fs tool. */
+  const subagentRelayDoneRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!isLoading) return;
+    const last = messages[messages.length - 1];
+    if (!last || last.role !== 'assistant') return;
+    const anns = (last.annotations ?? []) as Array<Record<string, unknown>>;
+    for (const ann of anns) {
+      const call = ann?.subagentCall as
+        | { toolCallId?: unknown; toolName?: unknown; args?: unknown }
+        | undefined;
+      const reqId = typeof ann?.requestId === 'string' ? ann.requestId : null;
+      if (
+        !call ||
+        typeof call.toolCallId !== 'string' ||
+        typeof call.toolName !== 'string' ||
+        !reqId
+      ) {
+        continue;
+      }
+      const dedupeKey = `${reqId}:${call.toolCallId}`;
+      if (subagentRelayDoneRef.current.has(dedupeKey)) continue;
+      subagentRelayDoneRef.current.add(dedupeKey);
+      /* Hoist giá trị đã narrow ra khỏi closure async — TS không giữ property
+         narrowing (typeof call.toolName) khi đi vào callback. */
+      const relayToolCallId = call.toolCallId;
+      const relayToolName = call.toolName;
+      const relayArgs = call.args;
+      void (async () => {
+        let resultText: string;
+        try {
+          const executed = await handleClientToolCall({
+            toolCall: { toolName: relayToolName, args: relayArgs },
+          });
+          resultText =
+            typeof executed === 'string'
+              ? executed
+              : JSON.stringify(executed ?? {
+                  error: `Tool "${relayToolName}" không trả kết quả.`,
+                });
+        } catch (err) {
+          resultText = JSON.stringify({
+            error: String(err instanceof Error ? err.message : err),
+          });
+        }
+        try {
+          await fetch('/api/chat/subagent-relay', {
+            method: 'POST',
+            headers: { ...buildApiHeaders(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              requestId: reqId,
+              toolCallId: relayToolCallId,
+              result: resultText,
+            }),
+          });
+        } catch {
+          /* Stream có thể đã đóng (subagent timeout) — relay bên server tự dọn. */
+        }
+      })();
+    }
+  }, [messages, isLoading, handleClientToolCall, buildApiHeaders]);
 
   /* Nối các ref mà reconciler dùng — dùng ref để callback ở trên không bị
      phụ thuộc vào identity của hàm/mảng do useChat cấp. */
@@ -4134,6 +4228,12 @@ export default function ChatInterface() {
         busy={isLoading || mediaBusy}
         onNotice={showNotice}
       />
+
+      {/* Checklist tiến độ của plan hiện tại — promise [PLANNING] trong
+          system prompt giờ có UI thật. */}
+      {plan && !planHidden && (
+        <PlanPanel plan={plan} onHide={() => setPlanHidden(true)} />
+      )}
 
       <Composer
         input={input}

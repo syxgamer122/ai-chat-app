@@ -900,17 +900,15 @@ export type ClientToolSet = typeof CLIENT_TOOL_DEFS;
 export const CLIENT_TOOL_NAMES: ReadonlySet<string> = new Set(Object.keys(CLIENT_TOOL_DEFS));
 
 /**
- * Tool client KHÔNG được khai báo ở đường NATIVE (function calling gốc).
+ * Tool client KHÔNG được khai báo TRỰC TIẾP ở đường NATIVE (function calling
+ * gốc).
  *
- * `delegate` chỉ chạy được nhờ route tự chạy subagent inline qua
- * `onDelegateCall` (runSubagent) — cơ chế đó tồn tại trong runEmulatedLoop,
- * không tồn tại trong đường native. Khai báo nó ở native thì model gọi được
- * nhưng renderer chỉ trả lại một dòng note: một tool GIẢ, vừa tốn lượt gọi
- * vừa làm model tin rằng task đã được giao.
- *
- * Muốn delegate chạy được ở native thì cần một endpoint server riêng
- * (vd /api/subagent) nhận instructions và chạy runSubagent — renderer không
- * có model + khoá để tự chạy. Chừng nào chưa có, đừng quảng cáo tool này.
+ * `delegate` không có execute phía client — renderer không tự chạy được
+ * subagent (thiếu model + khoá). Ở native, ROUTE cung cấp một bản SERVER của
+ * delegate (tool() với execute → executeDelegate, xem app/api/chat/route.ts
+ * + lib/subagent.ts). Set này đảm bảo def CLIENT không bị spread đè lên bản
+ * server đó; đường emulated vẫn dùng def client vì loop emulated xử lý
+ * delegate qua onDelegateCall.
  */
 export const NATIVE_EXCLUDED_CLIENT_TOOLS: ReadonlySet<string> = new Set(['delegate']);
 
