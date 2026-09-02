@@ -784,7 +784,8 @@ export const CLIENT_TOOL_DEFS = {
       'Người dùng LUÔN xem lệnh và PHẢI phê duyệt trước khi chạy. Lệnh chạy qua cmd.exe / sh, timeout mặc định 120s. ' +
       'OUTPUT TRUNCATION (Goose-style): output vượt 2000 dòng hoặc 50KB sẽ bị cắt, giữ phần CUỐI (chứa lỗi/thông báo quan trọng). ' +
       'Full output được lưu vào temp file, kết quả có savedTo (đường dẫn) và previewHint (hướng dẫn đọc tiếp). ' +
-      'Khi thấy truncated: true, dùng fs_read với savedTo để đọc full output nếu cần. ' +
+      'Khi thấy truncated: true, chạy đúng lệnh trong previewHint (Get-Content/head/tail đọc savedTo) để xem full output — ' +
+      'fs_read KHÔNG đọc được temp file này vì nằm ngoài workspace (path-guard chặn). ' +
       'AUTO-DEBUG: khi lệnh test/build/lint thất bại, kết quả kèm retryGuidance hướng dẫn sửa và chạy lại. ' +
       'KHÔNG dùng để đọc/ghi file → dùng fs_* cho việc đó. Trên web thuần tool này sẽ báo lỗi.',
     parameters: z.object({

@@ -1812,7 +1812,8 @@ export async function POST(req: Request) {
                            kết quả chỉ chứa phần CUỐI (preview) + đường dẫn temp file. */
                         workspaceState?.connected
                           ? '[SHELL OUTPUT] Khi shell_run trả truncated: true, output đã bị cắt (giữ phần cuối chứa lỗi). ' +
-                            'Full output nằm ở savedTo (đường dẫn temp file). Dùng fs_read với path=savedTo để đọc đầy đủ nếu cần phân tích chi tiết. ' +
+                            'Full output nằm ở savedTo (đường dẫn temp file, NGOÀI workspace — fs_read không đọc được). ' +
+                            'Chạy đúng lệnh trong previewHint (Get-Content/head/tail) để đọc đầy đủ nếu cần phân tích chi tiết. ' +
                             'Đừng yêu cầu chạy lại lệnh chỉ để xem output — đọc file trước.'
                           : '',
                         /* Auto-pilot: khi bật, agent chạy nhiều bước liên tiếp không cần duyệt từng bước. */

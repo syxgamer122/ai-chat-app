@@ -11,6 +11,7 @@ import { stripEmulatedToolMarkup } from '@/lib/text-tool-guard';
 import { stripMarkdownForSpeech } from '@/lib/speech-text';
 import { useTts } from '@/lib/use-tts';
 import { ToolTrace } from '@/components/chat/tool-trace';
+import { OrchestratorBadge, getOrchestratorAdoptedAnnotation } from '@/components/chat/orchestrator-badge';
 import { VyenMark } from '@/components/vyen-logo';
 
 export function AssistantAvatar() {
@@ -268,6 +269,19 @@ export const MessageItem = memo(
               ))}
             </div>
           )}
+
+          {/* Provenance "adopted từ Orchestrator": message assistant được chép
+              từ panel Orchestrator mang annotation orchestratorAdopted (persist
+              qua Dexie). Badge đứng trên ToolTrace và nội dung để người đọc
+              thấy nguồn gốc trước; message thường không có annotation này →
+              không render gì. Memo comparison dưới đã so annotations bằng
+              reference nên badge cập nhật đúng khi annotations đổi. */}
+          {(() => {
+            const adopted = getOrchestratorAdoptedAnnotation(
+              (m as any).annotations as unknown[] | undefined,
+            );
+            return adopted ? <OrchestratorBadge payload={adopted} /> : null;
+          })()}
 
           <ToolTrace
             annotations={(m as any).annotations as Array<Record<string, unknown>> | undefined}
