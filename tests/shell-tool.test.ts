@@ -20,12 +20,22 @@ let truncateShellOutput: (
   label: 'stdout' | 'stderr' | 'output',
 ) => { text: string; truncated: boolean; savedTo?: string; previewHint?: string };
 
+let isSavedShellOutput: (p: string) => boolean;
+let registerSavedShellOutput: (p: string) => void;
+let SAVED_OUTPUT_REGISTRY_MAX: number;
+
 try {
   const ipc = require('../electron/ipc.cjs') as Record<string, unknown>;
   truncateShellOutput = ipc.truncateShellOutput as typeof truncateShellOutput;
+  isSavedShellOutput = ipc.isSavedShellOutput as typeof isSavedShellOutput;
+  registerSavedShellOutput = ipc.registerSavedShellOutput as typeof registerSavedShellOutput;
+  SAVED_OUTPUT_REGISTRY_MAX = ipc.SAVED_OUTPUT_REGISTRY_MAX as number;
 } catch {
   // Nếu ipc.cjs không export trực tiếp, test sẽ skip
   truncateShellOutput = null as any;
+  isSavedShellOutput = null as any;
+  registerSavedShellOutput = null as any;
+  SAVED_OUTPUT_REGISTRY_MAX = 0;
 }
 
 // Cleanup temp files created during tests
@@ -133,5 +143,45 @@ describe.skipIf(!truncateShellOutput)('truncateShellOutput', () => {
     // 2000 lines is NOT exceeded (limit is >2000), so no truncation
     expect(result.truncated).toBe(false);
     expect(result.text).toBe(full);
+  });
+});
+
+describe.skipIf(!isSavedShellOutput)('saved output registry — fs_read whitelist', () => {
+  it('truncateShellOutput tự đăng ký savedTo — đọc được qua isSavedShellOutput', () => {
+    const lines = Array.from({ length: 2500 }, (_, i) => `reg ${i}`);
+    const r = truncateShellOutput(lines.join('\n'), 'stdout');
+    expect(r.savedTo).toBeTruthy();
+    if (r.savedTo) tempFiles.push(r.savedTo);
+    expect(isSavedShellOutput(r.savedTo!)).toBe(true);
+  });
+
+  it('path trùng pattern tên nhưng CHƯA từng được ghi → không đọc được', () => {
+    const fake = path.join(os.tmpdir(), 'vyen-shell-stdout-deadbeef.txt');
+    expect(isSavedShellOutput(fake)).toBe(false);
+  });
+
+  it('path thường: tương đối / tuyệt đối lạ / rỗng → luôn false', () => {
+    expect(isSavedShellOutput('README.md')).toBe(false);
+    expect(isSavedShellOutput(path.join(os.tmpdir(), 'khac.txt'))).toBe(false);
+    expect(isSavedShellOutput('')).toBe(false);
+  });
+
+  it('win32: path lệch hoa/thường vẫn khớp (model gõ lại không chính xác)', () => {
+    const p = path.join(os.tmpdir(), 'vyen-shell-stdout-case1.txt');
+    registerSavedShellOutput(p); // registry thuần — không chạm đĩa
+    expect(isSavedShellOutput(p.toUpperCase())).toBe(process.platform === 'win32');
+  });
+
+  it('trần registry: vượt SAVED_OUTPUT_REGISTRY_MAX thì entry cũ nhất bị đẩy ra', () => {
+    const first = path.join(os.tmpdir(), 'vyen-shell-stdout-evict-0.txt');
+    registerSavedShellOutput(first);
+    for (let i = 1; i < SAVED_OUTPUT_REGISTRY_MAX; i += 1) {
+      registerSavedShellOutput(path.join(os.tmpdir(), `vyen-shell-stdout-evict-${i}.txt`));
+    }
+    expect(isSavedShellOutput(first)).toBe(true);
+    const newest = path.join(os.tmpdir(), 'vyen-shell-stdout-evict-new.txt');
+    registerSavedShellOutput(newest);
+    expect(isSavedShellOutput(first)).toBe(false);
+    expect(isSavedShellOutput(newest)).toBe(true);
   });
 });

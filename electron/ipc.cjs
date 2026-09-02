@@ -185,8 +185,21 @@ async function fsList(payload) {
   return out;
 }
 
+/**
+ * Đích của fs_read: temp file output shell (ngoại lệ duy nhất được đọc ngoài
+ * workspace — chỉ file do truncateShellOutput ghi + còn trong registry), còn
+ * lại đi qua path-guard như mọi op khác.
+ */
+function readTargetOf(payload) {
+  if (typeof payload?.relPath === 'string' && isSavedShellOutput(payload.relPath)) {
+    // Luôn trả path GỐC đã ghi (value của registry) — canonical với đĩa.
+    return savedShellOutputs.get(savedOutputKey(payload.relPath));
+  }
+  return targetOf(payload);
+}
+
 async function fsRead(payload) {
-  const file = targetOf(payload);
+  const file = readTargetOf(payload);
   if (BINARY_EXT_RE.test(file)) {
     throw new Error(`File binary không đọc qua công cụ text: ${path.basename(file)}`);
   }
@@ -353,6 +366,43 @@ const os = require('node:os');
 const crypto = require('node:crypto');
 
 /**
+ * Registry temp file output shell do CHÍNH app ghi (truncateShellOutput).
+ * fs_read được đọc NHỮNG file này dù nằm ngoài workspace — exact-match theo
+ * đường dẫn đã ghi thật sự, không đoán theo thư mục/tên: model đưa path nào
+ * thì chỉ path từng được ghi trong phiên này mới đọc được. Trần 50 file gần
+ * nhất; file bị đẩy ra khỏi registry sẽ bị XOÁ khỏi đĩa luôn — output cũ
+ * không ai cần nữa và tmpdir không phình vô hạn.
+ */
+const SAVED_OUTPUT_REGISTRY_MAX = 50;
+const savedShellOutputs = new Map(); // key đã normalize -> path gốc
+
+function savedOutputKey(p) {
+  return process.platform === 'win32' ? path.normalize(p).toLowerCase() : path.normalize(p);
+}
+
+function registerSavedShellOutput(savePath) {
+  const key = savedOutputKey(savePath);
+  if (savedShellOutputs.has(key)) return;
+  savedShellOutputs.set(key, savePath);
+  while (savedShellOutputs.size > SAVED_OUTPUT_REGISTRY_MAX) {
+    const oldestKey = savedShellOutputs.keys().next().value;
+    const oldestPath = savedShellOutputs.get(oldestKey);
+    savedShellOutputs.delete(oldestKey);
+    try {
+      fs.unlinkSync(oldestPath);
+    } catch {
+      // File đã bị dọn bởi OS/user — registry chỉ cần quên đường dẫn.
+    }
+  }
+}
+
+/** true khi `absPath` là temp file output shell đã được ghi trong phiên này. */
+function isSavedShellOutput(absPath) {
+  if (typeof absPath !== 'string' || !path.isAbsolute(absPath)) return false;
+  return savedShellOutputs.has(savedOutputKey(absPath));
+}
+
+/**
  * @param {string} fullOutput
  * @param {'stdout'|'stderr'|'output'} label
  * @returns {{ text: string; truncated: boolean; savedTo?: string; previewHint?: string }}
@@ -385,6 +435,8 @@ function truncateShellOutput(fullOutput, label) {
       truncated: true,
     };
   }
+  // Cho phép fs_read đọc lại file này trong phiên hiện tại.
+  registerSavedShellOutput(savePath);
 
   // Preview = đuôi (last N lines) vì lỗi thường nằm ở cuối
   const previewStart = Math.max(0, totalLines - LIMITS.SHELL_OUTPUT_PREVIEW_LINES);
@@ -413,7 +465,7 @@ function truncateShellOutput(fullOutput, label) {
     text: preview,
     truncated: true,
     savedTo: savePath,
-    previewHint: `[${reason} Full output saved to ${savePath}. Read with ${readCmd}, up to ${LIMITS.SHELL_OUTPUT_LIMIT_LINES} lines at a time.]`,
+    previewHint: `[${reason} Full output saved to ${savePath}. Read it with fs_read (path = this file, paginate via start_line/line_count) or ${readCmd}, up to ${LIMITS.SHELL_OUTPUT_LIMIT_LINES} lines at a time.]`,
   };
 }
 
@@ -665,4 +717,7 @@ module.exports = {
   BINARY_EXT_RE,
   IGNORE_DIRS,
   truncateShellOutput,
+  registerSavedShellOutput,
+  isSavedShellOutput,
+  SAVED_OUTPUT_REGISTRY_MAX,
 };

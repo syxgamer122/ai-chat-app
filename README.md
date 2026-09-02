@@ -39,7 +39,7 @@ Vyen đọc tự do nhưng ghi có kỷ luật: mọi thao tác ghi file / chạ
 
 ### Shell & Git (bản desktop)
 
-- **`shell_run`**: chạy lệnh trong workspace (cmd.exe/sh) sau khi bạn duyệt, timeout mặc định 120s (tối đa 600s). Output vượt 2000 dòng hoặc 50KB bị cắt giữ phần cuối (chứa lỗi), bản full lưu vào temp file kèm `savedTo` + `previewHint` gợi ý lệnh shell đọc tiếp (Get-Content/head/tail — temp file nằm ngoài workspace nên `fs_read` không đọc được, kiểu Goose).
+- **`shell_run`**: chạy lệnh trong workspace (cmd.exe/sh) sau khi bạn duyệt, timeout mặc định 120s (tối đa 600s). Output vượt 2000 dòng hoặc 50KB bị cắt giữ phần cuối (chứa lỗi), bản full lưu vào temp file kèm `savedTo` — agent đọc lại được bằng chính `fs_read` (ngoại lệ duy nhất ngoài workspace, chỉ file do app ghi trong phiên hiện tại; kiểu Goose).
 - **Auto-debug**: lệnh test/build/lint thất bại trả kèm `retryGuidance` hướng dẫn agent sửa rồi chạy lại — tối đa 3 lần thử, dừng khi không tiến triển; lệnh destructive không bao giờ tự retry.
 - **Bộ tool git**: `git_status` / `git_diff` / `git_log` đọc tự do, `git_add` xem như an toàn (không cần duyệt riêng), `git_commit` phải duyệt message trước khi tạo commit.
 
