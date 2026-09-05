@@ -21,6 +21,7 @@ import {
   onMcpServerStatus,
   reconnectMcpServer,
   removeMcpServer,
+  setMcpExposeMode,
 } from '@/lib/mcp/bridge';
 import type {
   VyenMcpServerConfig,
@@ -262,6 +263,20 @@ export function McpSettingsPanel() {
     }
   };
 
+  /** Đổi chế độ expose — không reconnect: chỉ cách tool vào ngữ cảnh model. */
+  const toggleExpose = async (serverId: string, next: 'full' | 'proxy') => {
+    setError(null);
+    setBusyId(serverId);
+    try {
+      await setMcpExposeMode(serverId, next);
+      await refresh();
+    } catch (err) {
+      setError(String(err instanceof Error ? err.message : err));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   if (!available) {
     return (
       <div className="space-y-2 border-l-2 border-zinc-200 pl-3">
@@ -331,6 +346,25 @@ export function McpSettingsPanel() {
                 </div>
 
                 <div className="flex flex-shrink-0 items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      void toggleExpose(server.id, server.exposeMode === 'proxy' ? 'full' : 'proxy')
+                    }
+                    disabled={busyId === server.id}
+                    title={
+                      server.exposeMode === 'proxy'
+                        ? 'Chế độ proxy: model tìm tool qua mcp__search thay vì nhận toàn bộ schema. Bấm để trả về chế độ đầy đủ.'
+                        : 'Bật chế độ proxy: schema không nằm trong ngữ cảnh mỗi request — model tìm tool qua mcp__search (thêm một lượt gọi trung gian).'
+                    }
+                    className={`rounded px-1.5 py-0.5 text-[10px] font-medium disabled:opacity-50 ${
+                      server.exposeMode === 'proxy'
+                        ? 'bg-zinc-900 text-white'
+                        : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200'
+                    }`}
+                  >
+                    {server.exposeMode === 'proxy' ? 'proxy' : 'đầy đủ'}
+                  </button>
                   <button
                     type="button"
                     onClick={() => void retry(server.id)}

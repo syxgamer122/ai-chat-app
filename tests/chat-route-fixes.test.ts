@@ -46,7 +46,7 @@ describe('A3/A5 — đường emulated vẫn đủ server tools + MCP tools', ()
       /const serverTools = allowAgentTools \|\| forceEmulatedTools \|\| emulatedToolPath\s*\n\s*\? buildAgentTools\(\{/,
     );
     expect(source).toMatch(
-      /const mcpTools = allowAgentTools \|\| forceEmulatedTools \|\| emulatedToolPath\s*\n\s*\? mapMcpTools\(mcpToolList \?\? \[\]\)/,
+      /const mcpTools = allowAgentTools \|\| forceEmulatedTools \|\| emulatedToolPath\s*\n\s*\? mapMcpTools\(mcpToolList \?\? \[\], undefined, mcpProxyToolList \?\? \[\]\)/,
     );
   });
 

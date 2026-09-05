@@ -107,6 +107,10 @@ export async function updateMcpConfig(servers: VyenMcpServerConfig[]): Promise<v
   await requireMcp().updateConfig(servers);
 }
 
+export async function setMcpExposeMode(id: string, mode: 'full' | 'proxy'): Promise<void> {
+  await requireMcp().setExposeMode(id, mode);
+}
+
 export async function resolveMcpApproval(
   approvalId: string,
   decision: VyenMcpPermissionDecision,

@@ -135,6 +135,7 @@ import { shouldAutoApprove } from '@/lib/auto-pilot';
 import {
   callMcpTool,
   isMcpAvailable,
+  listMcpServers,
   listMcpTools,
   onMcpServerStatus,
 } from '@/lib/mcp/bridge';
@@ -142,6 +143,11 @@ import {
   formatMcpResultForModel,
   isMcpToolKey,
   mapMcpTools,
+  mcpToolKey,
+  MCP_PROXY_TOOL_KEY,
+  normalizeMcpProxyArgs,
+  resolveMcpProxyTool,
+  searchMcpProxyTools,
   type McpToolInfo,
 } from '@/lib/mcp/tool-mapper';
 import {
@@ -810,6 +816,14 @@ export default function ChatInterface() {
    */
   const mcpIndexRef = useRef<Map<string, { serverId: string; toolName: string }>>(new Map());
   const [mcpTools, setMcpTools] = useState<McpToolInfo[]>([]);
+  /**
+   * Server đang ở chế độ proxy — tool của chúng KHÔNG gửi vào payload
+   * mcpTools (tiết kiệm ngữ cảnh), chỉ dùng làm metadata cho mcp__search.
+   * REF như mcpIndexRef: handleClientToolCall tra cứu không qua closure.
+   */
+  const mcpProxyServerIdsRef = useRef<Set<string>>(new Set());
+  /** Metadata tool proxy cho handler mcp__search — ref để closure không stale. */
+  const mcpProxyToolsRef = useRef<McpToolInfo[]>([]);
 
   const refreshMcpTools = useCallback(async () => {
     if (!isMcpAvailable()) return;
@@ -817,6 +831,15 @@ export default function ChatInterface() {
       const tools = await listMcpTools();
       mcpIndexRef.current = mapMcpTools(tools).index;
       setMcpTools(tools);
+      try {
+        const servers = await listMcpServers();
+        mcpProxyServerIdsRef.current = new Set(
+          servers.filter((s) => s.exposeMode === 'proxy').map((s) => s.id),
+        );
+      } catch {
+        // Đọc trạng thái server lỗi: giữ nguyên mode cũ, tool vẫn chạy.
+      }
+      mcpProxyToolsRef.current = tools.filter((t) => mcpProxyServerIdsRef.current.has(t.serverId));
     } catch {
       // Lỗi đọc danh sách (shell Electron bận) — giữ nguyên danh sách cũ,
       // lần refresh sau (khi server đổi trạng thái) sẽ thử lại.
@@ -832,6 +855,18 @@ export default function ChatInterface() {
       void refreshMcpTools();
     });
   }, [refreshMcpTools]);
+
+  /* Tách tool full/proxy cho payload. Ref không kích hoạt re-render, nhưng
+     refreshMcpTools luôn setMcpTools(new array) cùng lúc với khi ref đổi →
+     memo này tính lại đúng lúc danh sách (hoặc mode server) thực sự đổi. */
+  const mcpFullTools = useMemo(
+    () => mcpTools.filter((t) => !mcpProxyServerIdsRef.current.has(t.serverId)),
+    [mcpTools],
+  );
+  const mcpProxyTools = useMemo(
+    () => mcpTools.filter((t) => mcpProxyServerIdsRef.current.has(t.serverId)),
+    [mcpTools],
+  );
 
   /* ------------------------------------------------------------------ */
   /* Auto-pilot wrappers: skip modal when policy allows auto-approval    */
@@ -958,24 +993,17 @@ export default function ChatInterface() {
    */
   const handleClientToolCall = useCallback(
     async ({ toolCall }: { toolCall: { toolName: string; args?: unknown } }) => {
-      /* Tool MCP đi TRƯỚC mọi kiểm tra khác: chúng không cần workspace
-         (không đụng file của người dùng qua fs_*), và tên không nằm trong
-         CLIENT_TOOL_NAMES nên sẽ bị chặn ở ngay dòng dưới nếu để lọt xuống. */
-      if (isMcpToolKey(toolCall.toolName)) {
-        const target = mcpIndexRef.current.get(toolCall.toolName);
-        if (!target) {
-          return JSON.stringify({
-            error:
-              `Tool MCP "${toolCall.toolName}" không còn tồn tại — server có thể đã bị gỡ ` +
-              'hoặc mất kết nối. Kiểm tra lại trong Cài đặt → MCP.',
-          });
-        }
+      /* Thân thực thi MCP dùng chung: tool thường (qua index) lẫn action "call"
+         của tool proxy (resolve từ metadata) phải đi ĐÚNG đường này để không
+         né approval/autoApprove/vision/format. */
+      const runMcpExecution = async (
+        serverId: string,
+        toolName: string,
+        modelFacingKey: string,
+        args: Record<string, unknown>,
+      ): Promise<string> => {
         try {
-          const result = await callMcpTool(
-            target.serverId,
-            target.toolName,
-            (toolCall.args ?? {}) as Record<string, unknown>,
-          );
+          const result = await callMcpTool(serverId, toolName, args);
           /* Ảnh do MCP trả về → mô tả text qua pipeline vision TRƯỚC khi nén
              thành string cho model (đường sync chỉ để placeholder). Bỏ qua
              khi denied/isError — kết quả khi đó bị nén thành JSON lỗi, mô tả
@@ -993,16 +1021,91 @@ export default function ChatInterface() {
               describeMcpImage(url, undefined, { headers: buildApiHeaders(), model: visionModel }),
             );
           }
-          return formatMcpResultForModel({ ...result, content }, toolCall.toolName);
+          return formatMcpResultForModel({ ...result, content }, modelFacingKey);
         } catch (err) {
           /* Lỗi GIAO THỨC (mất kết nối, timeout, người dùng từ chối ở tầng
              IPC) — khác với lỗi nghiệp vụ đã được format ở trên. */
           return JSON.stringify({
-            error: `Gọi công cụ MCP "${toolCall.toolName}" thất bại: ${String(
+            error: `Gọi công cụ MCP "${modelFacingKey}" thất bại: ${String(
               err instanceof Error ? err.message : err,
             )}`,
           });
         }
+      };
+
+      /* Tool MCP đi TRƯỚC mọi kiểm tra khác: chúng không cần workspace
+         (không đụng file của người dùng qua fs_*), và tên không nằm trong
+         CLIENT_TOOL_NAMES nên sẽ bị chặn ở ngay dòng dưới nếu để lọt xuống. */
+      if (isMcpToolKey(toolCall.toolName)) {
+        /* Tool proxy: key mcp__search không có entry trong index — xử lý
+           riêng, resolve key action call từ metadata server proxy. */
+        if (toolCall.toolName === MCP_PROXY_TOOL_KEY) {
+          const rawArgs = (toolCall.args ?? {}) as Record<string, unknown>;
+          const action = typeof rawArgs.action === 'string' ? rawArgs.action : '';
+          const proxyList = mcpProxyToolsRef.current;
+          if (action === 'search') {
+            const matches = searchMcpProxyTools(
+              proxyList,
+              typeof rawArgs.query === 'string' ? rawArgs.query : '',
+            );
+            return JSON.stringify({
+              tools: matches,
+              hint: matches.length
+                ? 'Gọi action "call" với key + args; "describe" để xem schema đầy đủ trước nếu cần.'
+                : 'Không có tool nào khớp — thử từ khoá khác hoặc query rỗng để liệt kê.',
+            });
+          }
+          if (action === 'describe') {
+            const t =
+              typeof rawArgs.key === 'string' ? resolveMcpProxyTool(proxyList, rawArgs.key) : null;
+            if (!t) {
+              return JSON.stringify({
+                error: `Key "${String(rawArgs.key ?? '')}" không thuộc server proxy hiện hành — hãy search lại.`,
+              });
+            }
+            return JSON.stringify({
+              key: rawArgs.key,
+              name: t.name,
+              server: t.serverName || t.serverId,
+              description: t.description,
+              inputSchema: t.inputSchema ?? {},
+            });
+          }
+          if (action === 'call') {
+            const t =
+              typeof rawArgs.key === 'string' ? resolveMcpProxyTool(proxyList, rawArgs.key) : null;
+            if (!t) {
+              return JSON.stringify({
+                error: `Key "${String(rawArgs.key ?? '')}" không thuộc server proxy hiện hành — hãy search lại.`,
+              });
+            }
+            const args = normalizeMcpProxyArgs(rawArgs.args);
+            if (!args) {
+              return JSON.stringify({
+                error:
+                  'args không parse được thành object — gửi lại dạng object JSON hoặc chuỗi JSON của object.',
+              });
+            }
+            return await runMcpExecution(t.serverId, t.name, mcpToolKey(t.serverId, t.name), args);
+          }
+          return JSON.stringify({
+            error: `Action không hợp lệ: ${action || '(thiếu)'} — chỉ dùng search/describe/call.`,
+          });
+        }
+        const target = mcpIndexRef.current.get(toolCall.toolName);
+        if (!target) {
+          return JSON.stringify({
+            error:
+              `Tool MCP "${toolCall.toolName}" không còn tồn tại — server có thể đã bị gỡ ` +
+              'hoặc mất kết nối. Kiểm tra lại trong Cài đặt → MCP.',
+          });
+        }
+        return await runMcpExecution(
+          target.serverId,
+          target.toolName,
+          toolCall.toolName,
+          (toolCall.args ?? {}) as Record<string, unknown>,
+        );
       }
       if (!CLIENT_TOOL_NAMES.has(toolCall.toolName)) {
         /* Tool lạ PHẢI trả result string thay vì undefined: ai@4 giữ invocation
@@ -1665,7 +1768,10 @@ export default function ChatInterface() {
       /* Tool MCP hiện có (chỉ trong Electron desktop): route khai báo cho
          model, renderer thực thi rồi resubmit kết quả. Không gửi khi rỗng để
          không phình payload của mọi request web. */
-      ...(mcpTools.length > 0 ? { mcpTools } : {}),
+      ...(mcpFullTools.length > 0 ? { mcpTools: mcpFullTools } : {}),
+      /* Tool của server proxy: chỉ là metadata cho mcp__search — KHÔNG được
+         khai báo schema lên model, đây là mục đích của cả chế độ. */
+      ...(mcpProxyTools.length > 0 ? { mcpProxyTools } : {}),
     },
     experimental_throttle: throttleMs,
     /* Client-executed tools (fs_*): onToolCall chạy trên máy user, trả kết quả

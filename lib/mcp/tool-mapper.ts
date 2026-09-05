@@ -16,6 +16,7 @@
 import { tool } from 'ai';
 import { z } from 'zod';
 import { truncateToolResult } from '@/lib/tool-limits';
+import { parseLooseJson } from '@/lib/json-repair';
 
 /* ------------------------------------------------------------------ */
 /* Types                                                               */
@@ -420,6 +421,7 @@ export interface McpToolDefs {
 export function mapMcpTools(
   tools: McpToolInfo[],
   maxTools: number = MAX_MCP_TOOLS,
+  proxyTools?: McpToolInfo[],
 ): McpToolDefs {
   const defs: Record<string, ReturnType<typeof tool>> = {};
   const keys = new Set<string>();
@@ -463,5 +465,128 @@ export function mapMcpTools(
     }
   }
 
+  /* Proxy mode: ĐĂNG KÝ ĐÚNG MỘT tool trung gian thay cho N schema — mục đích
+     của cả tính năng là không nhét schema gốc vào ngữ cảnh. Tool không có
+     execute (client thực thi qua cùng đường MCP thường, approval/autoApprove
+     giữ nguyên). Khong có proxy server thì không đăng ký gì — hành vi cũ. */
+  if (proxyTools && proxyTools.length > 0) {
+    defs[MCP_PROXY_TOOL_KEY] = tool({
+      description:
+        '[MCP proxy] Tìm và dùng các tool của server MCP ở chế độ tiết kiệm ngữ cảnh ' +
+        '(schema của chúng KHÔNG được liệt kê sẵn). Ba bước: action "search" với query ' +
+        'để lấy danh sách tool kèm key; action "describe" với key để xem tham số đầy đủ ' +
+        'khi cần; action "call" với key + args để thực thi tool.',
+      parameters: z.object({
+        action: z
+          .enum(['search', 'describe', 'call'])
+          .describe('search = tìm tool theo từ khoá; describe = xem schema đầy đủ; call = thực thi'),
+        query: z
+          .string()
+          .max(200)
+          .optional()
+          .describe('(search) từ khoá khớp tên hoặc mô tả; bỏ trống = liệt kê đầu danh sách'),
+        key: z
+          .string()
+          .max(120)
+          .optional()
+          .describe('(describe/call) tool key nhận từ kết quả search, dạng mcp__<server>__<tool>'),
+        args: z
+          .unknown()
+          .optional()
+          .describe('(call) tham số của tool đích — object JSON, hoặc chuỗi JSON'),
+      }),
+    });
+    keys.add(MCP_PROXY_TOOL_KEY);
+    // Không thêm entry index: renderer tự resolve key từ metadata proxy server.
+  }
+
   return { defs, keys, index, skipped };
+}
+
+/* ------------------------------------------------------------------ */
+/* Proxy mode — search/describe/call (port ý tưởng pi-mcp-adapter)     */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Key của tool proxy duy nhất. Renderer xử lý tool này TRƯỚC nhánh MCP
+ * thường — key không tồn tại trong mcpIndexRef nên không được resolve nhầm.
+ */
+export const MCP_PROXY_TOOL_KEY = 'mcp__search';
+
+export interface McpProxyMatch {
+  key: string;
+  serverId: string;
+  serverName: string;
+  name: string;
+  description: string;
+}
+
+/**
+ * Chấm điểm substring cho action search: khớp tên tool (2) mạnh hơn khớp mô
+ * tả (1); hòa điểm giữ thứ tự đầu vào nên kết quả ổn định giữa các lần gọi.
+ * Query rỗng → trả đầu danh sách (model chưa biết tên gì để tìm).
+ */
+export function searchMcpProxyTools(
+  proxyTools: readonly McpToolInfo[],
+  query: string,
+  limit: number = 8,
+): McpProxyMatch[] {
+  const q = (query ?? '').trim().toLowerCase();
+  const scored: Array<{ rank: number; index: number; match: McpProxyMatch }> = [];
+  const list = proxyTools ?? [];
+
+  for (let i = 0; i < list.length; i++) {
+    const t = list[i];
+    if (!t?.name || !t?.serverId) continue;
+    const nameHit = q && t.name.toLowerCase().includes(q) ? 2 : 0;
+    const serverHit = q && t.serverName?.toLowerCase().includes(q) ? 1 : 0;
+    const descHit = q && (t.description ?? '').toLowerCase().includes(q) ? 1 : 0;
+    const rank = nameHit + serverHit + descHit;
+    if (q && rank === 0) continue;
+    scored.push({
+      rank,
+      index: i,
+      match: {
+        key: mcpToolKey(t.serverId, t.name),
+        serverId: t.serverId,
+        serverName: t.serverName || t.serverId,
+        name: t.name,
+        description: (t.description ?? '').slice(0, MAX_DESCRIPTION_CHARS),
+      },
+    });
+  }
+
+  scored.sort((a, b) => b.rank - a.rank || a.index - b.index);
+  return scored.slice(0, limit).map((s) => s.match);
+}
+
+/**
+ * Resolve key → tool gốc. So khớp qua mcpToolKey trên metadata thật, KHÔNG
+ * tự cắt chuỗi key để suy ra server/tool (key có thể bị cắt + gắn hash).
+ */
+export function resolveMcpProxyTool(
+  proxyTools: readonly McpToolInfo[],
+  key: string,
+): McpToolInfo | null {
+  for (const t of proxyTools ?? []) {
+    if (t?.name && t?.serverId && mcpToolKey(t.serverId, t.name) === key) return t;
+  }
+  return null;
+}
+
+/**
+ * args của action call: object dùng nguyên văn; JSON string được parse khoan
+ * dung (model hay trả string); không hiểu được → null — caller PHẢI báo lỗi
+ * mà KHÔNG gọi IPC.
+ */
+export function normalizeMcpProxyArgs(raw: unknown): Record<string, unknown> | null {
+  if (raw === undefined || raw === null) return {};
+  if (typeof raw === 'string') {
+    const parsed = parseLooseJson(raw);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  }
+  if (typeof raw === 'object' && !Array.isArray(raw)) return raw as Record<string, unknown>;
+  return null;
 }

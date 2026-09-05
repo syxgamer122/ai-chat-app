@@ -80,6 +80,8 @@ export type VyenMcpServerState = 'connected' | 'connecting' | 'disconnected' | '
  * Cấu hình MCP server do người dùng khai báo.
  * `id` bị khoá vào tập ký tự an toàn vì nó nằm trong tên tool mà model gọi.
  */
+export type VyenMcpExposeMode = 'full' | 'proxy';
+
 export type VyenMcpServerConfig =
   | {
       id: string;
@@ -91,6 +93,7 @@ export type VyenMcpServerConfig =
       cwd?: string;
       autoApprove?: string[];
       timeoutSecs?: number;
+      exposeMode?: VyenMcpExposeMode;
     }
   | {
       id: string;
@@ -100,6 +103,7 @@ export type VyenMcpServerConfig =
       headers?: Record<string, string>;
       autoApprove?: string[];
       timeoutSecs?: number;
+      exposeMode?: VyenMcpExposeMode;
     };
 
 export interface VyenMcpServerStatus {
@@ -109,6 +113,8 @@ export interface VyenMcpServerStatus {
   error?: string;
   toolCount: number;
   serverVersion?: string;
+  /** Thiếu field trong config cũ = 'full'. */
+  exposeMode?: VyenMcpExposeMode;
 }
 
 /**
@@ -286,6 +292,8 @@ export interface VyenBridge {
     removeServer(id: string): Promise<{ ok: true }>;
     reconnect(id: string): Promise<VyenMcpServerStatus>;
     updateConfig(servers: VyenMcpServerConfig[]): Promise<{ ok: true }>;
+    /** Đổi exposeMode ('full'|'proxy') không cần reconnect — chỉ ngữ cảnh model. */
+    setExposeMode(id: string, mode: VyenMcpExposeMode): Promise<{ ok: true }>;
     listTools(): Promise<VyenMcpToolInfo[]>;
     callTool(
       serverId: string,
@@ -474,6 +482,8 @@ function createWebBridge(): VyenBridge {
       removeServer: (id: string) => callWebBridge<{ ok: true }>('mcp:remove-server', { id }),
       reconnect: (id: string) => callWebBridge<VyenMcpServerStatus>('mcp:reconnect', { id }),
       updateConfig: (servers) => callWebBridge<{ ok: true }>('mcp:update-config', { servers }),
+      setExposeMode: (id: string, mode: VyenMcpExposeMode) =>
+        callWebBridge<{ ok: true }>('mcp:set-expose-mode', { id, exposeMode: mode }),
       listTools: () => callWebBridge<VyenMcpToolInfo[]>('mcp:list-tools'),
       callTool: (serverId: string, toolName: string, args: Record<string, unknown>) =>
         callWebBridge<VyenMcpCallResult>('mcp:call-tool', { serverId, toolName, arguments: args }),

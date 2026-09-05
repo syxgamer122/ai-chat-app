@@ -11,6 +11,10 @@ import {
   isMcpToolKey,
   formatMcpResultForModel,
   mapMcpTools,
+  normalizeMcpProxyArgs,
+  resolveMcpProxyTool,
+  searchMcpProxyTools,
+  MCP_PROXY_TOOL_KEY,
   MAX_MCP_TOOLS,
   type McpToolInfo,
 } from '../lib/mcp/tool-mapper';
@@ -330,5 +334,103 @@ describe('mapMcpTools', () => {
     expect(keys.size).toBe(0);
     expect(Object.keys(defs).length).toBe(0);
     expect(index.size).toBe(0);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Proxy mode — mcp__search thay N schema (opt-in per server)            */
+/* ------------------------------------------------------------------ */
+
+const proxyTool = (over: Partial<McpToolInfo>): McpToolInfo => ({
+  name: 'tool',
+  description: 'mô tả tool',
+  inputSchema: { type: 'object' },
+  serverId: 'srv',
+  serverName: 'Srv',
+  ...over,
+});
+
+describe('mapMcpTools — proxy mode', () => {
+  it('đăng ký đúng MỘT mcp__search khi có proxy tools, không đăng ký schema gốc', () => {
+    const out = mapMcpTools([], undefined, [
+      proxyTool({ name: 'a', serverId: 'p1' }),
+      proxyTool({ name: 'b', serverId: 'p1' }),
+    ]);
+    expect(out.keys.has(MCP_PROXY_TOOL_KEY)).toBe(true);
+    expect(out.keys.size).toBe(1);
+    expect(out.keys.has(mcpToolKey('p1', 'a'))).toBe(false);
+    expect(out.index.size).toBe(0);
+  });
+
+  it('không có proxy tools thì không có mcp__search (hành vi cũ)', () => {
+    const out = mapMcpTools([proxyTool({ name: 'a', serverId: 's1' })]);
+    expect(out.keys.has(MCP_PROXY_TOOL_KEY)).toBe(false);
+    expect(out.keys.size).toBe(1);
+  });
+
+  it('mixed mode: full tools + đúng một proxy def, không nhân đôi', () => {
+    const out = mapMcpTools(
+      [proxyTool({ name: 'a', serverId: 's1' })],
+      undefined,
+      [proxyTool({ name: 'b', serverId: 'p1' })],
+    );
+    expect(out.keys.size).toBe(2);
+    expect(out.keys.has(mcpToolKey('s1', 'a'))).toBe(true);
+    expect(out.keys.has(MCP_PROXY_TOOL_KEY)).toBe(true);
+  });
+});
+
+describe('searchMcpProxyTools', () => {
+  const fixtures: McpToolInfo[] = [
+    proxyTool({ name: 'take_screenshot', description: 'Chụp màn hình trang', serverId: 'p1' }),
+    proxyTool({ name: 'read_page', description: 'Đọc nội dung trang web', serverId: 'p1' }),
+    proxyTool({ name: 'query_db', description: 'Chạy SQL trên database', serverId: 'p2' }),
+  ];
+
+  it('khớp tên mạnh hơn khớp mô tả', () => {
+    const ranked: McpToolInfo[] = [
+      proxyTool({ name: 'screenshot', description: 'Chụp màn hình trang', serverId: 'p1' }),
+      proxyTool({ name: 'doc_trang_web', description: 'Đọc nội dung web', serverId: 'p1' }),
+    ];
+    const out = searchMcpProxyTools(ranked, 'trang');
+    // "trang" nằm trong TÊN của doc_trang_web (rank 2) và CHỈ mô tả của
+    // screenshot (rank 1) — name-hit phải đứng trước dù index sau.
+    expect(out[0].name).toBe('doc_trang_web');
+    expect(out).toHaveLength(2);
+  });
+
+  it('query rỗng trả đầu danh sách (liệt kê), giới hạn 8', () => {
+    const many: McpToolInfo[] = Array.from({ length: 12 }, (_, i) =>
+      proxyTool({ name: `tool_${i}`, serverId: 'p1' }),
+    );
+    const out = searchMcpProxyTools(many, '');
+    expect(out).toHaveLength(8);
+    expect(out[0].name).toBe('tool_0');
+  });
+
+  it('không khớp gì trả rỗng', () => {
+    expect(searchMcpProxyTools(fixtures, 'không_tồn_tại_xyz')).toEqual([]);
+  });
+});
+
+describe('resolveMcpProxyTool / normalizeMcpProxyArgs', () => {
+  const fixtures: McpToolInfo[] = [
+    proxyTool({ name: 'take_screenshot', serverId: 'chrome_devtools' }),
+  ];
+
+  it('resolve key đúng qua mcpToolKey, key lạ trả null', () => {
+    expect(resolveMcpProxyTool(fixtures, mcpToolKey('chrome_devtools', 'take_screenshot'))?.name).toBe(
+      'take_screenshot',
+    );
+    expect(resolveMcpProxyTool(fixtures, 'mcp__chrome_devtools__take_screenshot')).toBeTruthy();
+    expect(resolveMcpProxyTool(fixtures, 'mcp__khac__tool')).toBeNull();
+  });
+
+  it('args: object giữ nguyên, chuỗi JSON parse được, chuỗi rác → null', () => {
+    expect(normalizeMcpProxyArgs({ a: 1 })).toEqual({ a: 1 });
+    expect(normalizeMcpProxyArgs('{"a": 1}')).toEqual({ a: 1 });
+    expect(normalizeMcpProxyArgs(undefined)).toEqual({});
+    expect(normalizeMcpProxyArgs('không phải json {')).toBeNull();
+    expect(normalizeMcpProxyArgs(42)).toBeNull();
   });
 });

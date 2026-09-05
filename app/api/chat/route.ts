@@ -802,6 +802,24 @@ const BodySchema = z.object({
     .max(100)
     .optional()
     .catch(undefined),
+  /**
+   * Tool của server ở chế độ proxy (exposeMode 'proxy'): metadata để renderer
+   * chạy action search/describe/call, KHÔNG được khai báo schema lên model.
+   * .catch(undefined) với lý do như mcpTools — hỏng thì tắt, không chết chat.
+   */
+  mcpProxyTools: z
+    .array(
+      z.object({
+        name: z.string().min(1).max(200),
+        description: z.string().max(4000).default(''),
+        inputSchema: z.record(z.unknown()).default({}),
+        serverId: z.string().min(1).max(64).regex(/^[A-Za-z0-9_-]+$/),
+        serverName: z.string().max(200).default(''),
+      }),
+    )
+    .max(100)
+    .optional()
+    .catch(undefined),
   /* Ghi nhớ dài hạn client gửi kèm (Dexie) — memory_search tool đọc từ đây. */
   memories: z
     .array(
@@ -961,7 +979,7 @@ export async function POST(req: Request) {
       });
     }
 
-    const { model, temperature, system, thinkingLevel, visionModel, contextSummary, compactBoundaryId, webContext, liveContext, pdfContexts, agentTools, memories, skills, workspace: workspaceState, forceEmulatedTools, agentMode, staging, mcpTools: mcpToolList, id: conversationId } =
+    const { model, temperature, system, thinkingLevel, visionModel, contextSummary, compactBoundaryId, webContext, liveContext, pdfContexts, agentTools, memories, skills, workspace: workspaceState, forceEmulatedTools, agentMode, staging, mcpTools: mcpToolList, mcpProxyTools: mcpProxyToolList, id: conversationId } =
       parsed.data;
     const messages = attachToolResultParts(parsed.data.messages);
 
@@ -1749,8 +1767,8 @@ export async function POST(req: Request) {
                   * biến mất im lặng.
                   */
                  const mcpTools = allowAgentTools || forceEmulatedTools || emulatedToolPath
-                   ? mapMcpTools(mcpToolList ?? [])
-                   : mapMcpTools([]);
+                   ? mapMcpTools(mcpToolList ?? [], undefined, mcpProxyToolList ?? [])
+                   : mapMcpTools([], undefined, []);
                  /**
                   * Tập tool client của request NÀY = tool client có sẵn + tool MCP
                   * đang sống. Dùng chung cho cả đường native (forward tool-call)
@@ -1932,6 +1950,13 @@ export async function POST(req: Request) {
                             'gọi khi cần, đọc kết quả rồi tiếp tục. Nếu kết quả báo "denied" ' +
                             '(người dùng từ chối) thì KHÔNG gọi lại công cụ đó nữa, hãy nói rõ với ' +
                             'người dùng và đề cách khác.'
+                          : '',
+                        /* Server proxy: schema không được liệt kê — model phải
+                           search trước qua tool mcp__search, không đoán tên. */
+                        mcpProxyToolList?.length
+                          ? '[MCP proxy] Một số server của người dùng đang ở chế độ proxy: tool của ' +
+                            'chúng KHÔNG nằm trong danh sách trên. Dùng tool "mcp__search" ' +
+                            '(action search → describe → call) để tìm và thực thi.'
                           : '',
                         /* Sub-task planning: khi nhận task phức tạp, phân rã thành
                            subtask để theo dõi tiến độ. Port từ Plandex + Cline. */
