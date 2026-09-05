@@ -3,6 +3,7 @@ import {
   validateProviderBaseUrl,
   normalizeProviderModels,
   providerNeedsApiKey,
+  pickRemovedDefaultProviders,
 } from '@/lib/providers';
 
 describe('providers — provider presets', () => {
@@ -91,5 +92,43 @@ describe('providerNeedsApiKey — gateway free không dùng key', () => {
     expect(providerNeedsApiKey(null)).toBe(true);
     expect(providerNeedsApiKey(undefined)).toBe(true);
     expect(providerNeedsApiKey('không-phải-url')).toBe(true);
+  });
+});
+
+/**
+ * Cleanup v7: provider mặc định đã bỏ khỏi seed bị xóa khỏi DB CHỈ KHI chưa
+ * từng có key — provider user đã dán key là đang dùng, không được đụng.
+ */
+describe('pickRemovedDefaultProviders', () => {
+  const REMOVED = [
+    'https://kilgoreai.xyz/v1',
+    'https://openrouter.ai/api/v1',
+    'https://api.airforce/v1',
+    'https://api.orcarouter.ai/v1',
+    'https://tokenin.my.id/v1',
+  ];
+
+  it('xóa: baseUrl thuộc tập bị bỏ VÀ apiKey rỗng', () => {
+    const out = pickRemovedDefaultProviders([
+      { id: 'a', baseUrl: 'https://kilgoreai.xyz/v1', apiKey: '' },
+      { id: 'b', baseUrl: 'https://tokenin.my.id/v1', apiKey: '' },
+    ]);
+    expect(out).toEqual(['a', 'b']);
+  });
+
+  it('GIỮ: provider có key (kể cả secure pointer @secure:)', () => {
+    const out = pickRemovedDefaultProviders([
+      { id: 'used', baseUrl: 'https://api.orcarouter.ai/v1', apiKey: '@secure:provider:used' },
+      { id: 'manual', baseUrl: 'https://api.airforce/v1', apiKey: 'af-live-123' },
+    ]);
+    expect(out).toEqual([]);
+  });
+
+  it('GIỮ: crax và mọi provider ngoài tập bị bỏ', () => {
+    const out = pickRemovedDefaultProviders([
+      { id: 'crax', baseUrl: 'https://gpt.crax.lol/v1', apiKey: '' },
+      { id: 'other', baseUrl: 'https://my-proxy.example.com/v1', apiKey: '' },
+    ]);
+    expect(out).toEqual([]);
   });
 });

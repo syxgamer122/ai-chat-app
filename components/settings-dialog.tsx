@@ -5,7 +5,6 @@ import { db, addMemory, deleteMemory, MAX_MEMORIES, MAX_MEMORY_CHARS, type Promp
 import { useAppStore, SERVER_PROVIDER_ID, ALL_TOOL_CATEGORIES, TOOL_CATEGORY_LABELS, isApiModelId, isPermissionOverride, type PermissionOverride } from '@/lib/store';
 import { exportJson, exportMarkdown, importBackup, type ImportMode } from '@/lib/backup';
 import { X, Download, Upload, Loader2, ShieldAlert, Pencil, Trash2 } from 'lucide-react';
-import { useInstallPrompt } from '@/lib/use-install-prompt';
 import { VyenMark } from '@/components/vyen-logo';
 import { ProviderManager } from '@/components/provider-manager';
 import { UsageStats } from '@/components/usage-stats';
@@ -106,56 +105,6 @@ function MemoriesSection() {
   );
 }
 
-function InstallSection() {  const { canInstall, installed, isIOS, install } = useInstallPrompt();
-
-  const [installing, setInstalling] = useState(false);
-  const handleInstall = async () => {
-    setInstalling(true);
-    try {
-      await install();
-    } finally {
-      setInstalling(false);
-    }
-  };
-
-  return (
-    <div className="space-y-2">
-      <h3 className="text-sm font-semibold text-zinc-800">Ứng dụng</h3>
-      {installed ? (
-        <div className="flex items-center gap-3 rounded-xl border border-zinc-200 bg-surface-raised p-3">
-          <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-surface-muted ring-1 ring-zinc-900/5">
-            <VyenMark size={20} />
-          </div>
-          <p className="text-xs text-zinc-600">
-            <strong className="font-semibold">Vyen</strong> đang chạy bản đã cài lên thiết bị —
-            hoạt động offline và mở như app thật.
-          </p>
-        </div>
-      ) : canInstall ? (
-        <button
-          type="button"
-          onClick={handleInstall}
-          disabled={installing}
-          className="btn-primary w-full bg-gradient-to-r from-brand to-brand-accent hover:from-brand-hover/85 hover:to-brand-accent/85"
-        >
-          {installing ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-          Cài Vyen lên thiết bị
-        </button>
-      ) : isIOS ? (
-        <p className="text-xs leading-relaxed text-zinc-600">
-          Trên iPhone/iPad: bấm nút <strong>Chia sẻ</strong> trong Safari →
-          &ldquo;Thêm vào Màn hình chính&rdquo; để dùng như ứng dụng.
-        </p>
-      ) : (
-        <p className="text-xs leading-relaxed text-zinc-600">
-          Cài app: trên Android/Chrome mở menu ⋮ → &ldquo;Cài đặt ứng dụng&rdquo;;
-          trên máy tính mở biểu tượng install trên thanh địa chỉ.
-        </p>
-      )}
-    </div>
-  );
-}
-
 /* ------------------ Model đọc ảnh (vision) ------------------ */
 
 /**
@@ -237,7 +186,7 @@ function VisionModelSection() {
   );
 }
 
-type SettingsTab = 'chung' | 'provider' | 'stats' | 'prompts' | 'memory' | 'data' | 'app';
+type SettingsTab = 'chung' | 'provider' | 'stats' | 'prompts' | 'memory' | 'data';
 
 const SETTINGS_TABS: Array<{ id: SettingsTab; label: string }> = [
   { id: 'chung', label: 'Chung' },
@@ -246,7 +195,6 @@ const SETTINGS_TABS: Array<{ id: SettingsTab; label: string }> = [
   { id: 'prompts', label: 'Prompt' },
   { id: 'memory', label: 'Ghi nhớ' },
   { id: 'data', label: 'Dữ liệu' },
-  { id: 'app', label: 'Ứng dụng' },
 ];
 
 const FOCUSABLE_SELECTOR =
@@ -1080,29 +1028,16 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                 </p>
                 <ul className="mb-2.5 list-disc space-y-1 pl-4 text-[11px] leading-relaxed text-zinc-600">
                   <li>
-                    <strong className="font-medium text-zinc-800">OpenRouter:</strong> key free tại{' '}
+                    <strong className="font-medium text-zinc-800">crax-gpt:</strong> key tại{' '}
                     <a
-                      href="https://openrouter.ai/keys"
+                      href="https://gpt.crax.lol"
                       target="_blank"
                       rel="noreferrer noopener nofollow"
                       className="text-brand underline-offset-2 hover:underline"
                     >
-                      openrouter.ai/keys
+                      gpt.crax.lol
                     </a>{' '}
-                    — chọn model đuôi <code className="claude-inline-code">:free</code> (50 lượt/ngày;
-                    nạp $10 một lần duy nhất → 1.000 lượt/ngày free vĩnh viễn).
-                  </li>
-                  <li>
-                    <strong className="font-medium text-zinc-800">airforce:</strong> key free tại{' '}
-                    <a
-                      href="https://api.airforce/signup"
-                      target="_blank"
-                      rel="noreferrer noopener nofollow"
-                      className="text-brand underline-offset-2 hover:underline"
-                    >
-                      api.airforce/signup
-                    </a>{' '}
-                    — 1.000 lượt/ngày, 1 lượt/phút, model cơ bản.
+                    — vào Settings → API keys lấy key <code className="claude-inline-code">crk_live_…</code>.
                   </li>
                 </ul>
                 <ProviderManager />
@@ -1137,7 +1072,6 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
 
           {show('memory') && <MemoriesSection />}
 
-          {show('app') && <InstallSection />}
 
           {show('data') && (
             <>

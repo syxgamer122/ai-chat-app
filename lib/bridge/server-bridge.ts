@@ -219,7 +219,11 @@ export function initServerBridge(): BridgeDispatcher {
  */
 export function promptNativeFolderPicker(): string | null {
   if (process.platform === 'win32') {
-    const script = `Add-Type -AssemblyName System.Windows.Forms; $d = New-Object System.Windows.Forms.FolderBrowserDialog; $d.Description = 'Chọn thư mục làm việc (Workspace) cho Vyen'; if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $d.SelectedPath }`;
+    /* ShowDialog() không owner → WinForms dialog không thuộc z-order của cửa
+       sổ nào nên chui XUỐNG DƯỚI cửa sổ app-frame (user phải ẩn Vyen mới
+       thấy). Fix: owner form ẩn TopMost — dialog sở hữu bởi nó luôn nằm
+       TRÊN mọi cửa sổ. Owner Opacity 0 + ngoài màn hình nên không nhấp nháy. */
+    const script = `Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing; $owner = New-Object System.Windows.Forms.Form; $owner.TopMost = $true; $owner.ShowInTaskbar = $false; $owner.Opacity = 0; $owner.Size = New-Object System.Drawing.Size(1, 1); $owner.StartPosition = 'Manual'; $owner.Location = New-Object System.Drawing.Point(-3000, -3000); $d = New-Object System.Windows.Forms.FolderBrowserDialog; $d.Description = 'Chọn thư mục làm việc (Workspace) cho Vyen'; if ($d.ShowDialog($owner) -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $d.SelectedPath }`;
     const b64 = Buffer.from(script, 'utf16le').toString('base64');
     try {
       const { spawnSync } = require('node:child_process');

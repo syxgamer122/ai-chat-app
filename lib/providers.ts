@@ -121,50 +121,51 @@ const DEFAULT_PROVIDER_SEEDS: Array<Pick<ProviderConfig, 'name' | 'baseUrl' | 'a
     baseUrl: 'https://gpt.crax.lol/v1',
     apiKey: '',
   },
-  {
-    /* Kilgore đã chuyển sang tên miền mới (kilgoreai.xyz) và hỗ trợ cả cookie
-       lẫn Bearer API key (`sk-kilg-…`). Server proxy của app không giữ được
-       cookie giữa các request nên mỗi lượt sẽ là phiên mới — mất lịch sử hội
-       thoại phía gateway và có thể bị giới hạn theo IP chung. Khuyến nghị
-       người dùng tạo key qua POST /v1/auth/api-keys rồi dán vào đây để có
-       danh tính ổn định; ô nhập key vẫn cho phép bỏ trống nếu muốn dùng tạm. */
-    name: 'KilgoreAI',
-    baseUrl: 'https://kilgoreai.xyz/v1',
-    apiKey: '',
-  },
-  {
-    // Key free tại https://openrouter.ai/keys — model free có đuôi ":free".
-    name: 'OpenRouter (dự phòng)',
-    baseUrl: 'https://openrouter.ai/api/v1',
-    apiKey: '',
-  },
-  {
-    // Key free tại https://api.airforce/signup — 1.000 lượt/ngày, model cơ bản.
-    name: 'airforce (dự phòng)',
-    baseUrl: 'https://api.airforce/v1',
-    apiKey: '',
-  },
-  {
-    // Key cá nhân tại https://orcarouter.ai — 191 model mọi hãng, có model
-    // `orcarouter/free` chạy miễn phí; model trả phí cần nạp credit.
-    name: 'OrcaRouter (key cá nhân)',
-    baseUrl: 'https://api.orcarouter.ai/v1',
-    apiKey: '',
-  },
-  {
-    // Key cá nhân tại dashboard tokenin.my.id — 82 model `myt/*`, nhiều model
-    // free (-free) + API tạo video (Kling/Seedance/Grok Imagine).
-    name: 'Tokenin (key cá nhân)',
-    baseUrl: 'https://tokenin.my.id/v1',
-    apiKey: '',
-  },
 ];
+
+/**
+ * Provider mặc định ĐÃ BỎ khỏi seed (v7, theo yêu cầu dọn danh sách):
+ * Kilgore chết (domain chuyển + chat timeout), OpenRouter/airforce là dự
+ * phòng chưa dùng, OrcaRouter/Tokenin là key cá nhân tự thêm dễ dàng.
+ * Cleanup v7 xóa khỏi DB những preset này CHỈ KHI apiKey rỗng — provider
+ * user đã dán key là đang dùng, không đụng.
+ */
+const REMOVED_DEFAULT_BASE_URLS = [
+  'https://kilgoreai.xyz/v1',
+  'https://openrouter.ai/api/v1',
+  'https://api.airforce/v1',
+  'https://api.orcarouter.ai/v1',
+  'https://tokenin.my.id/v1',
+];
+
+const PROVIDER_CLEANUP_FLAG = 'providers-cleanup-v7';
+
+/**
+ * Thuần: chọn id của provider thuộc tập mặc định bị bỏ VÀ chưa từng có key.
+ * Client tự thêm cùng baseUrl nhưng ĐÃ có key → không bao giờ bị chọn.
+ */
+export function pickRemovedDefaultProviders(
+  all: ReadonlyArray<Pick<ProviderConfig, 'id' | 'baseUrl' | 'apiKey'>>,
+): string[] {
+  return all
+    .filter((p) => REMOVED_DEFAULT_BASE_URLS.includes(p.baseUrl) && !p.apiKey)
+    .map((p) => p.id);
+}
+
+async function cleanupRemovedDefaultProviders(): Promise<void> {
+  const done = await db.kv.get(PROVIDER_CLEANUP_FLAG);
+  if (done) return;
+  const ids = pickRemovedDefaultProviders(await db.providers.toArray());
+  for (const id of ids) await db.providers.delete(id);
+  await db.kv.put({ key: PROVIDER_CLEANUP_FLAG, value: true });
+}
 
 /** Thêm sẵn các nhà cung cấp user định dùng + dọn trùng lặp — chỉ chạy lần đầu. */
 export async function ensureProviderSeed(): Promise<void> {
   if (!seedPromise) {
     seedPromise = seedOnce()
       .then(() => migrateKiloreDomain())
+      .then(() => cleanupRemovedDefaultProviders())
       .catch((err) => {
         seedPromise = null; // lỗi (vd 2 tab write-conflict) → cho phép thử lại lần sau
         throw err;
