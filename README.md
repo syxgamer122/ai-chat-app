@@ -177,8 +177,8 @@ components/mcp/                 — settings MCP + hộp thoại phê duyệt 4 
 
 Message gốc mang `parentId = '__ROOT__'` (IndexedDB không index được `null`). `branchOrder` là số thứ tự sibling, `branchTieBreaker` (= id) đảm bảo thứ tự ổn định. Mọi lệnh chèn message mới đi qua `db.appendMessage` — cấp `seq`/`branchOrder` nguyên tử trong transaction nên hai tab không đè nhau.
 
-## Ghi chú triển khai (Vercel)
+## Ghi chú triển khai
 
 - Routes API khai báo tường minh `export const runtime = 'nodejs'` — đã rời Edge trước khi Next 16 deprecate.
 - Rate limit in-memory per-isolate: chỉ là lớp chống spam nhẹ, cần Upstash Redis nếu muốn chính xác toàn cục.
-- Origin cho phép: `localhost`, `127.0.0.1`, `[::1]` + các host Vercel tự động; thêm domain riêng qua `ALLOWED_ORIGIN_HOSTS`.
+- Origin cho phép: `localhost`, `127.0.0.1`, `[::1]`; thêm domain riêng qua `ALLOWED_ORIGIN_HOSTS`.

@@ -3,22 +3,18 @@ import type { NextRequest } from 'next/server';
 const IS_PROD = process.env.NODE_ENV === 'production';
 
 /**
- * Số proxy hop tin cậy ở trước app. Trên Vercel = 1 (edge network).
- * Client IP thật = phần tử TRÁI NHẤT của x-forwarded-for.
+ * Số proxy hop tin cậy ở trước app. Client IP thật = phần tử TRÁI NHẤT của
+ * x-forwarded-for; chạy thẳng không qua proxy thì đặt TRUSTED_PROXY_HOPS=0.
  */
 const TRUSTED_PROXY_HOPS = Number(process.env.TRUSTED_PROXY_HOPS ?? '1');
 
 function allowedHosts(): Set<string> {
-  const hosts = new Set<string>(['localhost', '127.0.0.1', '[::1]', 'quyettamvmo.vercel.app']);
+  const hosts = new Set<string>(['localhost', '127.0.0.1', '[::1]']);
   const fromEnv = (process.env.ALLOWED_ORIGIN_HOSTS ?? '')
     .split(',')
     .map((h) => h.trim().toLowerCase())
     .filter(Boolean);
   for (const h of fromEnv) hosts.add(h);
-  for (const key of ['VERCEL_PROJECT_PRODUCTION_URL', 'VERCEL_URL', 'VERCEL_BRANCH_URL']) {
-    const v = process.env[key];
-    if (v) hosts.add(v.replace(/^https?:\/\//, '').toLowerCase());
-  }
   return hosts;
 }
 
@@ -29,7 +25,7 @@ function isValidIp(v: string): boolean {
 }
 
 /**
- * FIX BUG 1b: trước đây trả về hops[hops.length - 1] (IP của proxy Vercel)
+ * FIX BUG 1b: trước đây trả về hops[hops.length - 1] (IP của proxy)
  * => mọi user dùng chung 1 bucket rate-limit => 429 tập thể.
  */
 export function getClientIp(req: NextRequest | Request): string {
@@ -38,14 +34,12 @@ export function getClientIp(req: NextRequest | Request): string {
   /* Hardening: cf-connecting-ip / x-real-ip là header CLIENT GỬI ĐƯỢC nếu
      không đứng sau proxy tương ứng — kẻ tấn công xoay header mỗi request để
      đổi bucket rate-limit, brute-force ACCESS_CODE miễn phí. Mặc định chỉ
-     tin x-vercel-forwarded-for (platform ghi đè) + x-forwarded-for (đã trừ
-     hop tin cậy). Self-host sau Cloudflare: đặt TRUST_PROXY_IP_HEADERS=1. */
+     tin x-forwarded-for (đã trừ hop tin cậy). Self-host sau Cloudflare:
+     đặt TRUST_PROXY_IP_HEADERS=1. */
   const trustExtraIpHeaders = process.env.TRUST_PROXY_IP_HEADERS === '1';
-  const direct =
-    headers.get('x-vercel-forwarded-for') ??
-    (trustExtraIpHeaders
-      ? headers.get('cf-connecting-ip') ?? headers.get('x-real-ip')
-      : null);
+  const direct = trustExtraIpHeaders
+    ? headers.get('cf-connecting-ip') ?? headers.get('x-real-ip')
+    : null;
   if (direct?.trim()) {
     const candidate = direct.split(',')[0].trim();
     if (isValidIp(candidate)) return candidate;

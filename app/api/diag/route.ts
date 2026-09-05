@@ -62,8 +62,6 @@ export async function GET(req: Request) {
     pool: getKeyPoolSnapshot(),
     probes,
     env: {
-      VERCEL_URL: process.env.VERCEL_URL ?? null,
-      VERCEL_PROJECT_PRODUCTION_URL: process.env.VERCEL_PROJECT_PRODUCTION_URL ?? null,
       hasAccessPassword: Boolean(process.env.APP_ACCESS_PASSWORD),
     },
   });
