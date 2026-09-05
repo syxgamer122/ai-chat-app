@@ -2,9 +2,10 @@
  * fsReadImage — đọc ảnh workspace thành data URL cho luồng vision.
  *
  * Bổ sung cho guard fs_readbinary: thay vì CHỈ từ chối file nhị phân, agent
- * giờ xem được ảnh qua Gemini (mô tả text). Test chặn các đường sai trước khi
- * bytes ảnh kịp rời khỏi client: sai đuôi, quá trần, và tính đúng đắn của
- * data URL (mime + base64 giải mã ngược ra đúng bytes gốc).
+ * giờ xem được ảnh qua provider active (mô tả text qua /api/vision). Test
+ * chặn các đường sai trước khi bytes ảnh kịp rời khỏi client: sai đuôi, quá
+ * trần, và tính đúng đắn của data URL (mime + base64 giải mã ngược ra đúng
+ * bytes gốc).
  */
 
 import { describe, expect, it } from 'vitest';

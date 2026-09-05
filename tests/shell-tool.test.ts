@@ -1,5 +1,5 @@
 /**
- * Shell tool tests — smart output truncation (Goose-style) trong electron/ipc.cjs.
+ * Shell tool tests — smart output truncation (Goose-style) trong lib/ipc.cjs.
  *
  * truncateShellOutput là hàm thuần (không phụ thuộc Electron/spawn) nên test
  * trực tiếp qua createRequire. shellRun integration test cần Electron env
@@ -25,7 +25,7 @@ let registerSavedShellOutput: (p: string) => void;
 let SAVED_OUTPUT_REGISTRY_MAX: number;
 
 try {
-  const ipc = require('../electron/ipc.cjs') as Record<string, unknown>;
+  const ipc = require('../lib/ipc.cjs') as Record<string, unknown>;
   truncateShellOutput = ipc.truncateShellOutput as typeof truncateShellOutput;
   isSavedShellOutput = ipc.isSavedShellOutput as typeof isSavedShellOutput;
   registerSavedShellOutput = ipc.registerSavedShellOutput as typeof registerSavedShellOutput;

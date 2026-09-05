@@ -19,23 +19,40 @@
  */
 
 /**
- * Bọc `fetch` để thêm `stream: false` vào body JSON của request POST.
+ * Bọc MỘT `fetch` bất kỳ để thêm `stream: false` vào body JSON của request POST.
  * Body không phải JSON hợp lệ thì để nguyên — không được làm hỏng request lạ.
+ *
+ * Là factory (không cứng global fetch) vì caller đôi khi phải chèn fetch riêng
+ * của mình vào trước: vision-bridge ghép `req.signal` của route để user bấm
+ * Stop thì lượt gọi provider dừng theo, test thì nhét mock để hermetic. Trước
+ * đây vision-bridge tự copy lại nguyên khối logic này — hai bản dễ lệch nhau
+ * khi quirk gateway đổi.
  */
-export const nonStreamingFetch: typeof fetch = async (input, init) => {
-  if (!init?.body || typeof init.body !== 'string') {
-    return fetch(input, init);
-  }
-  let patched = init.body;
-  try {
-    const parsed = JSON.parse(init.body) as Record<string, unknown>;
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      parsed.stream = false;
-      patched = JSON.stringify(parsed);
+export function createNonStreamingFetch(underlying: typeof fetch): typeof fetch {
+  return async (input, init) => {
+    if (!init?.body || typeof init.body !== 'string') {
+      return underlying(input, init);
     }
-  } catch {
-    // Body không phải JSON — gửi nguyên trạng.
-    return fetch(input, init);
-  }
-  return fetch(input, { ...init, body: patched });
-};
+    let patched = init.body;
+    try {
+      const parsed = JSON.parse(init.body) as Record<string, unknown>;
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        parsed.stream = false;
+        patched = JSON.stringify(parsed);
+      }
+    } catch {
+      // Body không phải JSON — gửi nguyên trạng.
+      return underlying(input, init);
+    }
+    return underlying(input, { ...init, body: patched });
+  };
+}
+
+/**
+ * Bản dùng global fetch — call site cũ (title/compact/orchestrate/chat) giữ
+ * nguyên. Bọc bằng lambda thay vì truyền `fetch` trực tiếp: một số runtime
+ * (undici) ném `Illegal invocation` khi global fetch bị tách khỏi ngữ cảnh.
+ */
+export const nonStreamingFetch: typeof fetch = createNonStreamingFetch((input, init) =>
+  fetch(input, init),
+);

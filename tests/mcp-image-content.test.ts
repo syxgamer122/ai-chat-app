@@ -72,12 +72,12 @@ describe('describeMcpImageBlocks', () => {
   it('describe throw → khối text ghi lỗi, không ném ra ngoài', async () => {
     const content: McpContentBlock[] = [png('QQ==')];
     const describe = async () => {
-      throw new Error('Gemini 502');
+      throw new Error('provider 502');
     };
     const out = await describeMcpImageBlocks(content, describe);
     expect(out[0]).toEqual({
       type: 'text',
-      text: '[ảnh MCP image/png: mô tả thất bại — Gemini 502]',
+      text: '[ảnh MCP image/png: mô tả thất bại — provider 502]',
     });
   });
 

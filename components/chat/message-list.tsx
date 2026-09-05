@@ -4,12 +4,9 @@
 import React, { memo, useEffect, useMemo, useState } from 'react';
 import type { Message } from 'ai/react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { ArrowDown, ArrowUp } from 'lucide-react';
+import { ArrowDown } from 'lucide-react';
 import { ChatErrorBoundary } from '@/components/chat-error-boundary';
-import { VyenLogo } from '@/components/vyen-logo';
-import { TextShimmer } from '@/components/effects';
 import { MessageItem, AssistantAvatar, type BranchInfo } from './message-item';
-import { motion } from 'framer-motion';
 
 /* ------------------------------------------------------------------ */
 /* Subcomponent 2: Memoized MessageList with Virtualization           */
@@ -68,27 +65,12 @@ function ThinkingIndicator() {
   return (
     <div className="mx-auto flex max-w-thread items-start gap-3 px-4 py-3 md:px-4">
       <AssistantAvatar />
-      <div className="flex items-center gap-3" role="status" aria-live="polite">
-        <div className="grid grid-cols-3 gap-[3px]" aria-hidden="true">
-          {[0, 1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
-            <motion.div
-              key={i}
-              className="h-1.5 w-1.5 rounded-[1px] bg-brand dark:bg-aurora-from"
-              animate={{ opacity: [0.2, 1, 0.2] }}
-              transition={{
-                duration: 1.2,
-                repeat: Infinity,
-                delay: i * 0.08,
-                ease: 'easeInOut',
-              }}
-            />
-          ))}
-        </div>
-        <span className="text-[13px] tabular-nums text-zinc-500 dark:text-zinc-400">
-          <TextShimmer text={`Đang suy nghĩ${elapsedSec >= 2 ? ` · ${elapsedSec}s` : '…'}`} className="" />
-        </span>
-        <span className="sr-only">AI đang xử lý câu trả lời của bạn</span>
-      </div>
+      <p className="flex min-w-0 items-baseline gap-2 py-1 font-mono text-xs">
+        <span className="text-[#9fa4ab]">$</span>
+        <span className="text-[#ebe7e4]">đang soạn câu trả lời</span>
+        <span className="text-[#9fa4ab]">{elapsedSec >= 1 ? `${elapsedSec}s` : ''}</span>
+        <span className="terminal-cursor" aria-hidden="true" />
+      </p>
     </div>
   );
 }
@@ -317,8 +299,6 @@ export const MessageList = memo(function MessageList({
     () => [
       'Giải thích máy tính lượng tử một cách dễ hiểu',
       'Viết script Python để thu thập dữ liệu web',
-      'Lên thực đơn ăn uống lành mạnh cho một tuần',
-      'Tóm tắt bài viết tôi sắp dán vào đây',
     ],
     [],
   );
@@ -336,30 +316,23 @@ export const MessageList = memo(function MessageList({
         className="chat-scroll h-full overflow-hidden overflow-y-auto px-4 md:px-8"
       >
         {!hasMessages ? (
-          <div className="mx-auto flex h-full max-w-thread flex-col items-center justify-center px-4 pb-16 pt-10">
-            <VyenLogo size="lg" className="mb-5" />
-            <h1 className="w-full min-w-0 max-w-[16rem] text-balance text-center text-[20px] font-semibold leading-tight tracking-tight text-zinc-800 sm:max-w-none md:text-[26px]">
-              Hôm nay mình giúp gì cho bạn?
+          <div className="mx-auto flex h-full max-w-thread flex-col justify-center px-4 pb-16 pt-8">
+            <h1 className="font-pixel text-[24px] tracking-[0.05em] text-[#ebe7e4] [image-rendering:pixelated]">
+              VYEN<span className="text-[#6a9fcc]">_</span>
             </h1>
-            <p className="mt-2 w-full min-w-0 text-pretty text-center text-[13px] text-zinc-500">
-              Hỏi bất cứ điều gì — nói bằng giọng nói, hoặc gõ / để chèn prompt mẫu.
+            <p className="mt-2 font-mono text-xs text-[#9fa4ab] leading-relaxed">
+              Agent harness tối giản: session tree, core tools, tự mở rộng theo workflow của bạn.
             </p>
-            <div className="mt-8 grid w-full grid-cols-1 gap-2.5 sm:grid-cols-2">
+
+            <div className="mt-6 flex w-full max-w-lg flex-col gap-2">
               {suggestions.map((prompt) => (
                 <button
                   key={prompt}
                   type="button"
                   onClick={() => onSelectSuggestion(prompt)}
-                  className="group flex items-center justify-between gap-3 rounded-xl border border-zinc-200/80 bg-surface-raised/70 p-4 text-left transition-all duration-150 hover:-translate-y-0.5 hover:border-brand/40 hover:bg-surface-muted hover:shadow-card"
+                  className="rounded-none border border-[#495059] bg-[#212730] px-3 py-2 text-left font-mono text-xs text-[#ebe7e4] transition-colors duration-150 hover:border-[#757d89] hover:bg-[#252f3d]"
                 >
-                  <span className="text-sm text-zinc-600 transition-colors group-hover:text-zinc-900">
-                    {prompt}
-                  </span>
-                  <ArrowUp
-                    size={13}
-                    aria-hidden="true"
-                    className="flex-shrink-0 text-zinc-400 transition-colors group-hover:text-brand"
-                  />
+                  {prompt}
                 </button>
               ))}
             </div>
@@ -397,18 +370,17 @@ export const MessageList = memo(function MessageList({
                     {compaction && compactionBannerBeforeId === m.id && (
                       <div className="mb-2">
                         {compaction.summary ? (
-                          <details className="surface-panel rounded-lg px-3 py-1.5 text-[11px] text-zinc-500">
-                            <summary className="cursor-pointer select-none font-medium text-zinc-600">
-                              ✂ Đã nén {compaction.compactedCount} tin nhắn trước đó — bấm để xem
-                              tóm tắt
+                          <details className="rounded-none border border-[#4b607c] bg-[#161d27] px-3 py-1.5 font-mono text-xs text-[#e8993a]">
+                            <summary className="cursor-pointer select-none font-medium text-[#6a9fcc]">
+                              Đã nén {compaction.compactedCount} tin nhắn trước đó. Bấm để xem tóm tắt
                             </summary>
-                            <div className="mt-1.5 max-h-48 overflow-y-auto whitespace-pre-wrap leading-relaxed text-zinc-600">
+                            <div className="mt-1.5 max-h-48 overflow-y-auto whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-[#e8993a]">
                               {compaction.summary}
                             </div>
                           </details>
                         ) : (
-                          <div className="surface-panel rounded-lg px-3 py-1.5 text-[11px] text-zinc-500">
-                            ✂ Đã lược bỏ {compaction.compactedCount} tin nhắn cũ
+                          <div className="rounded-none border border-[#4b607c] bg-[#161d27] px-3 py-1.5 font-mono text-xs text-[#e8993a]">
+                            Đã lược bỏ {compaction.compactedCount} tin nhắn cũ
                           </div>
                         )}
                       </div>
@@ -457,7 +429,7 @@ export const MessageList = memo(function MessageList({
             <button
               type="button"
               onClick={onReload}
-              className="flex-shrink-0 rounded-lg bg-red-600 px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-red-700"
+              className="flex-shrink-0 rounded-none bg-[#e8704f] px-3 py-1 font-mono text-xs font-medium text-[#0d1116] transition-colors hover:bg-[#e8704f]/85"
             >
               Thử lại
             </button>
@@ -470,9 +442,9 @@ export const MessageList = memo(function MessageList({
           type="button"
           onClick={onScrollToBottom}
           aria-label="Xuống tin nhắn mới nhất"
-          className="absolute bottom-6 left-1/2 -translate-x-1/2 rounded-full border border-zinc-200 bg-surface-raised p-2 text-zinc-600 shadow-card transition-colors hover:bg-zinc-100 hover:text-zinc-900"
+          className="absolute bottom-6 left-1/2 -translate-x-1/2 rounded-full border border-[#495059] bg-[#212730] p-2 text-[#6a9fcc] transition-colors hover:border-[#757d89] hover:bg-[#252f3d] hover:text-[#ebe7e4]"
         >
-          <ArrowDown size={18} />
+          <ArrowDown size={16} />
         </button>
       )}
     </>

@@ -41,6 +41,26 @@ export async function pumpSseLines(
         }
       }
     }
+    /* Flush đuôi: một số gateway đóng stream NGAY sau payload cuối mà không
+       gửi '\n'. Im lặng bỏ phần đuôi là mất hẳn chunk cuối — nơi thường chứa
+       finish_reason / mảnh text cuối cùng. Chỉ flush khi đuôi là JSON hoàn
+       chỉnh: đó là dấu hiệu payload đã gửi xong và chỉ thiếu delimiter, còn
+       đuôi không parse được JSON là chunk thật sự đứt giữa chừng (case đã có
+       test "payload chưa hoàn chỉnh") — và mọi consumer hiện tại đều
+       JSON.parse payload rồi bỏ dòng rác, nên đuôi rác ném về cũng bị bỏ. */
+    buf += decoder.decode(); // xả nốt byte multibyte dở dang của decoder
+    const tail = buf.replace(/\r$/, '');
+    if (tail.startsWith('data:')) {
+      const raw = tail.slice(5).trim();
+      if (raw) {
+        try {
+          JSON.parse(raw);
+          onData(raw);
+        } catch {
+          /* không phải JSON hoàn chỉnh — coi là payload đứt, bỏ như trước */
+        }
+      }
+    }
   } finally {
     reader.releaseLock();
   }

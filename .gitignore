@@ -16,3 +16,12 @@ opencode.json
 
 # Thư mục làm việc của agent (ghi chú, memory) — không phải mã nguồn
 .workbuddy-ai/
+.opencode/
+.agents/
+
+# State runtime của teamwork engine (worktree cách ly, audit)
+.teamwork/
+teamwork/
+
+# Profile trình duyệt sinh ra khi test launcher desktop
+temp-test-profile/

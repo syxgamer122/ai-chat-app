@@ -97,6 +97,66 @@ const DEFAULT_WEATHER_DEPS: WeatherDeps = {
     '&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=auto&forecast_days=2',
 };
 
+/* ------------------------------------------------------------------ */
+/* Cache in-memory TTL — chống chuỗi fetch chặn submit lặp lại         */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Mỗi lần khớp intent "thời tiết/tỷ giá", gatherLiveContext chạy chuỗi
+ * geocoding → forecast → rates TRƯỚC KHI submit đi — người dùng hỏi lại
+ * chỗ cũ trong vài phút vẫn phải chờ thêm 0.5–3s. Cache 10 phút theo từng
+ * URL (key đã chuẩn hoá sẵn vì URL chứa tham số encode) loại hoàn toàn
+ * chuỗi fetch đó. Thời tiết/tỷ giá không cần tươi hơn 10 phút.
+ */
+const CACHE_TTL_MS = 10 * 60 * 1000;
+const CACHE_MAX_ENTRIES = 50;
+
+interface CacheEntry {
+  at: number;
+  value: unknown;
+}
+
+/** Map module-scope: sống theo vòng đời tab, đóng khi reload. */
+const liveCache = new Map<string, CacheEntry>();
+
+function cacheGet<T>(key: string): T | undefined {
+  const entry = liveCache.get(key);
+  if (!entry) return undefined;
+  const age = Date.now() - entry.at;
+  // Age âm (đồng hồ hệ thống nhảy lùi) cũng coi là hết hạn: ưu tiên dữ liệu
+  // tươi hơn là giữ entry không bao giờ đáo hạn.
+  if (age < 0 || age > CACHE_TTL_MS) {
+    liveCache.delete(key);
+    return undefined;
+  }
+  return entry.value as T;
+}
+
+function cacheSet(key: string, value: unknown): void {
+  // Tràn ngưỡng thì xả SẠCH thay vì LRU: mỗi entry chỉ là JSON thời tiết/tỷ
+  // giá rẻ công fetch lại, Map không bao giờ phình vô hạn trong phiên dài.
+  if (liveCache.size >= CACHE_MAX_ENTRIES) liveCache.clear();
+  liveCache.set(key, { at: Date.now(), value });
+}
+
+interface GeoPlace {
+  name: string;
+  country?: string;
+  admin1?: string;
+  latitude: number;
+  longitude: number;
+}
+
+interface ForecastJson {
+  current?: Record<string, number>;
+  daily?: {
+    time: string[];
+    temperature_2m_max: number[];
+    temperature_2m_min: number[];
+    precipitation_probability_max: number[];
+  };
+}
+
 /**
  * Tra thời tiết theo tên nơi. Trả chuỗi đã format sẵn để nhét thẳng vào
  * system prompt, hoặc null khi không tra được (địa điểm lạ/mạng lỗi) —
@@ -108,31 +168,36 @@ export async function fetchWeather(
 ): Promise<string | null> {
   const d = { ...DEFAULT_WEATHER_DEPS, ...deps };
   try {
-    const geoRes = await fetch(d.geocodingUrl(location), {
-      signal: AbortSignal.timeout(8000),
-      cache: 'no-store',
-    });
-    if (!geoRes.ok) return null;
-    const geo = (await geoRes.json()) as {
-      results?: Array<{ name: string; country?: string; admin1?: string; latitude: number; longitude: number }>;
-    };
-    const place = geo.results?.[0];
+    // Geocoding: chỉ fetch khi chưa có trong cache (URL là key chuẩn hoá).
+    const geoKey = d.geocodingUrl(location);
+    let place = cacheGet<GeoPlace | null>(geoKey);
+    if (place === undefined) {
+      const geoRes = await fetch(geoKey, {
+        signal: AbortSignal.timeout(8000),
+        cache: 'no-store',
+      });
+      // HTTP lỗi/mạng chết thì KHÔNG cache null — lần submit sau được thử lại.
+      if (!geoRes.ok) return null;
+      const geo = (await geoRes.json()) as { results?: GeoPlace[] };
+      place = geo.results?.[0] ?? null;
+      cacheSet(geoKey, place);
+    }
     if (!place) return null;
 
-    const fcRes = await fetch(d.forecastUrl(place.latitude, place.longitude), {
-      signal: AbortSignal.timeout(8000),
-      cache: 'no-store',
-    });
-    if (!fcRes.ok) return null;
-    const fc = (await fcRes.json()) as {
-      current?: Record<string, number>;
-      daily?: {
-        time: string[];
-        temperature_2m_max: number[];
-        temperature_2m_min: number[];
-        precipitation_probability_max: number[];
-      };
-    };
+    // Forecast phụ thuộc toạ độ nên buộc tuần tự sau geocoding — song song
+    // hoá được ở tầng gatherLiveContext (thời tiết ∥ tỷ giá).
+    const fcKey = d.forecastUrl(place.latitude, place.longitude);
+    let fc = cacheGet<ForecastJson>(fcKey);
+    if (!fc) {
+      const fcRes = await fetch(fcKey, {
+        signal: AbortSignal.timeout(8000),
+        cache: 'no-store',
+      });
+      if (!fcRes.ok) return null;
+      fc = (await fcRes.json()) as ForecastJson;
+      if (!fc.current || !fc.daily?.time?.length) return null;
+      cacheSet(fcKey, fc);
+    }
 
     const c = fc.current;
     const day = fc.daily;
@@ -220,14 +285,22 @@ export function formatRatesBlock(result: RatesResult): string | null {
   return lines.join('\n');
 }
 
+const RATES_URL = 'https://open.er-api.com/v6/latest/USD';
+
 export async function fetchRates(): Promise<string | null> {
   try {
-    const res = await fetch('https://open.er-api.com/v6/latest/USD', {
+    // Tỷ giá API chỉ đổi một lần mỗi ngày — cache 10 phút không ảnh hưởng
+    // chất lượng số liệu nhưng loại fetch chặn submit khi hỏi liên tiếp.
+    const cached = cacheGet<string | null>(RATES_URL);
+    if (cached !== undefined) return cached;
+    const res = await fetch(RATES_URL, {
       signal: AbortSignal.timeout(8000),
       cache: 'no-store',
     });
     if (!res.ok) return null;
-    return formatRatesBlock(parseRates(await res.json()));
+    const block = formatRatesBlock(parseRates(await res.json()));
+    cacheSet(RATES_URL, block);
+    return block;
   } catch {
     return null;
   }

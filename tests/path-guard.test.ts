@@ -1,5 +1,5 @@
 /**
- * Path guard của Vyen desktop (electron/path-guard.cjs) — CJS thuần nên
+ * Path guard của Vyen desktop (lib/path-guard.cjs) — CJS thuần nên
  * test qua createRequire thay vì import ESM.
  */
 import { createRequire } from 'node:module';
@@ -8,7 +8,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const require = createRequire(import.meta.url);
-const { resolveWithin, isWithinRoot } = require('../electron/path-guard.cjs') as {
+const { resolveWithin, isWithinRoot } = require('../lib/path-guard.cjs') as {
   resolveWithin: (root: string, rel: string) => string;
   isWithinRoot: (root: string, target: string) => boolean;
 };

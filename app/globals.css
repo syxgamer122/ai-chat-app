@@ -1,105 +1,140 @@
-@import 'katex/dist/katex.min.css';
-
+/*
+ * KHÔNG đặt @import ở đầu file này nữa — mỗi @import tạo một chuỗi request
+ * render-blocking nối đuôi sau CSS chính:
+ *  - Font Pixelify Sans: nguồn tải duy nhất là <link> + preconnect trong
+ *    app/layout.tsx (trước đây tải KÉP qua cả @import lẫn <link>).
+ *  - KaTeX CSS (~23.8KB): đã chuyển vào dynamic import trong loadKatex()
+ *    của components/markdown-renderer.tsx — chỉ tải khi tin nhắn có công
+ *    thức toán, người dùng không dùng math không phải trả khoản này.
+ */
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
   /*
-   * Token màu dạng channel RGB để dùng được cả trong Tailwind
-   * (`bg-brand/20`) và CSS thuần (`rgb(var(--brand))`).
+   * DESIGN.md — Pi Harness × Pixel/Minecraft Identity
+   * Palette Tokens, Typography, and Hardware-accelerated Flat Surface Structure
    */
   :root {
-    --surface: 250 250 251; /* #FAFAFB — canvas */
-    --surface-raised: 255 255 255; /* #FFFFFF — sidebar, composer, panel */
-    --surface-bubble: 235 245 243; /* #EBF5F3 — bong bóng người dùng */
-    --surface-muted: 244 247 250; /* #F4F7FA — hover nhẹ */
-    --surface-code: 15 15 18; /* #0F0F12 — khối code */
-    --surface-code-header: 25 25 30; /* #19191E — thanh công cụ khối code */
-    --brand: 14 116 144; /* #0E7490 — teal-700, professional */
-    --brand-hover: 12 100 126; /* #0C647E */
-    --brand-accent: 56 189 148; /* #38BD94 — mint accent */
-    --brand-border: 165 210 205; /* #A5D2CD */
-    --foreground: 35 35 40; /* zinc-800 softened */
-    --foreground-strong: 20 20 24; /* tiêu đề trong prose */
-    --muted-foreground: 110 125 145; /* slate-500 refined */
-    --line: 230 235 242; /* #E6EBF2 — kẻ bảng, hr */
-    --line-strong: 218 226 236; /* #DAE2EC — vạch blockquote */
-    --scrollbar: 200 210 222; /* #C8D2DE */
-    --scrollbar-hover: 178 190 206; /* #B2BECE */
-    --code-inline-bg: 237 247 249; /* #EDF7F9 */
-    --code-inline-border: 212 232 236; /* #D4E8EC */
+    --bg-deep: 13 17 22; /* #0d1116 — Nền khung ngoài cùng, sidebar, vùng tĩnh */
+    --bg-canvas: 22 29 39; /* #161d27 — Nền vùng làm việc/chat stream trung tâm */
+    --panel-bg: 33 39 48; /* #212730 — Hộp lệnh, khối chat bubble, panel phụ */
+    --panel-soft: 37 47 61; /* #252f3d — Khối tương tác hover, code block */
+    --border-hairline: 73 80 89; /* #495059 — Viền chia phân vùng 1px */
+    --border-hover: 117 125 137; /* #757d89 — Viền khi hover hoặc active */
+    --text-primary: 235 231 228; /* #ebe7e4 — Moonstone (trắng ngà ấm) */
+    --text-muted: 159 164 171; /* #9fa4ab — Metadata, timestamp, nhãn phụ */
+    --accent-steel: 106 159 204; /* #6a9fcc — Màu nhấn chủ đạo: con trỏ, link, viền focus */
+    --accent-thread: 75 96 124; /* #4b607c — Dùng kết hợp trong sọc trạng thái active */
 
-    /* Ramp zinc gốc (đúng hex Tailwind) — theme sáng. */
-    --zinc-50: 250 250 250;
-    --zinc-100: 244 244 245;
-    --zinc-200: 228 228 231;
-    --zinc-300: 212 212 216;
-    --zinc-400: 161 161 170;
-    --zinc-500: 113 113 122;
-    --zinc-600: 82 82 91;
-    --zinc-700: 63 63 70;
-    --zinc-800: 39 39 42;
-    --zinc-900: 24 24 27;
-    --zinc-950: 9 9 11;
+    --status-success: 93 184 122; /* #5db87a */
+    --status-warning: 232 153 58; /* #e8993a */
+    --status-error: 232 112 79; /* #e8704f */
 
-    color-scheme: light;
-  }
+    --font-pixel: 'Pixelify Sans', 'Minecraft', monospace;
 
-  /*
-   * Theme tối — bật bằng class `dark` trên <html> (darkMode:'class').
-   * Token mặt phẳng/foreground đổi hẳn; brand làm sáng nhẹ hơn để giữ
-   * tương phản trên nền tối.
-   *
-   * QUAN TRỌNG về ramp --zinc-*: giá trị bị LẬT bậc đối xứng
-   * (50↔950, 100↔900...) so với theme sáng. Class như `text-zinc-800`
-   * hay `hover:bg-zinc-100` được sinh ra theo vai trò "chữ đậm" /
-   * "nền nhạt" — lật bậc giữ nguyên vai trò đó trên nền tối, nên toàn bộ
-   * UI viết bằng zinc tự thích ứng mà không cần sửa từng component.
-   */
-  .dark {
-    --surface: 8 8 12; /* #08080C — deep aurora canvas */
-    --surface-raised: 16 16 22; /* #101016 — sidebar, composer, panel */
-    --surface-bubble: 18 35 45; /* aurora teal bubble */
-    --surface-muted: 24 24 32; /* #181820 — hover nhẹ */
-    --surface-code: 10 10 14;
-    --surface-code-header: 18 18 24;
-    --brand: 34 211 167; /* #22D3A7 — aurora green-cyan */
-    --brand-hover: 6 182 212; /* #06B6D4 — aurora cyan */
-    --brand-accent: 139 92 246; /* #8B5CF6 — aurora violet */
-    --brand-border: 34 80 70;
-    --foreground: 225 228 235;
-    --foreground-strong: 245 247 252;
-    --muted-foreground: 140 150 170;
-    --line: 30 30 40;
-    --line-strong: 50 50 65;
-    --scrollbar: 45 45 58;
-    --scrollbar-hover: 70 70 88;
-    --code-inline-bg: 16 28 35;
-    --code-inline-border: 30 55 60;
+    --surface: 13 17 22;
+    --surface-raised: 22 29 39;
+    --surface-bubble: 33 39 48;
+    --surface-muted: 37 47 61;
+    --surface-code: 28 33 40;
+    --surface-code-header: 22 29 39;
+    --brand: 106 159 204;
+    --brand-hover: 106 159 204;
+    --brand-accent: 232 112 79;
+    --brand-border: 73 80 89;
+    --foreground: 235 231 228;
+    --foreground-strong: 235 231 228;
+    --muted-foreground: 159 164 171;
+    --line: 73 80 89;
+    --line-strong: 117 125 137;
+    --scrollbar: 73 80 89;
+    --scrollbar-hover: 117 125 137;
+    --code-inline-bg: 33 39 48;
+    --code-inline-border: 73 80 89;
 
-    /* Aurora gradient tokens */
-    --aurora-from: 34 211 167; /* green */
-    --aurora-via: 6 182 212; /* cyan */
-    --aurora-to: 139 92 246; /* violet */
-    --aurora-accent: 217 70 239; /* magenta */
-
-    --zinc-50: 9 9 11; /* ↔ zinc-950 */
-    --zinc-100: 24 24 27; /* ↔ zinc-900 */
-    --zinc-200: 39 39 42; /* ↔ zinc-800 */
-    --zinc-300: 63 63 70; /* ↔ zinc-700 */
-    --zinc-400: 113 113 122; /* ↔ zinc-500 */
-    --zinc-500: 161 161 170; /* ↔ zinc-400 */
-    --zinc-600: 212 212 216; /* ↔ zinc-300 */
-    --zinc-700: 228 228 231; /* ↔ zinc-200 */
-    --zinc-800: 244 244 245; /* ↔ zinc-100 */
-    --zinc-900: 250 250 250; /* ↔ zinc-50 */
-    --zinc-950: 255 255 255;
+    --zinc-50: 13 17 22;
+    --zinc-100: 22 29 39;
+    --zinc-200: 33 39 48;
+    --zinc-300: 73 80 89;
+    --zinc-400: 117 125 137;
+    --zinc-500: 159 164 171;
+    --zinc-600: 159 164 171;
+    --zinc-700: 235 231 228;
+    --zinc-800: 235 231 228;
+    --zinc-900: 235 231 228;
+    --zinc-950: 235 231 228;
 
     color-scheme: dark;
   }
 
-  html,
+  .dark {
+    /* Vyen Dark Core: Deep Slate (#0d1116) + Steel Cyan (#6a9fcc) + Moonstone (#ebe7e4) */
+    --bg-deep: 13 17 22; /* #0d1116 */
+    --bg-canvas: 22 29 39; /* #161d27 */
+    --panel-bg: 33 39 48; /* #212730 */
+    --panel-soft: 37 47 61; /* #252f3d */
+    --border-hairline: 73 80 89; /* #495059 */
+    --border-hover: 117 125 137; /* #757d89 */
+    --text-primary: 235 231 228; /* #ebe7e4 */
+    --text-muted: 159 164 171; /* #9fa4ab */
+    --accent-steel: 106 159 204; /* #6a9fcc */
+    --accent-thread: 75 96 124; /* #4b607c */
+
+    --status-success: 93 184 122; /* #5db87a */
+    --status-warning: 232 153 58; /* #e8993a */
+    --status-error: 232 112 79; /* #e8704f */
+
+    --surface: 13 17 22; /* #0d1116 — Vyen bg-deep */
+    --surface-raised: 22 29 39; /* #161d27 — Vyen bg-canvas */
+    --surface-bubble: 33 39 48; /* #212730 — Vyen panel-bg */
+    --surface-muted: 37 47 61; /* #252f3d — Vyen panel-soft */
+    --surface-code: 28 33 40; /* #1c2128 — One Dark */
+    --surface-code-header: 22 29 39; /* #161d27 */
+    --brand: 106 159 204; /* #6a9fcc — Vyen steel blue */
+    --brand-hover: 106 159 204; /* #6a9fcc — DESIGN.md không có accent sáng hơn để hover */
+    --brand-accent: 232 112 79; /* #e8704f */
+    --brand-border: 73 80 89; /* #495059 — hairline */
+    --foreground: 235 231 228; /* #ebe7e4 — Moonstone */
+    --foreground-strong: 235 231 228; /* #ebe7e4 */
+    --muted-foreground: 159 164 171; /* #9fa4ab — text-muted */
+    --line: 73 80 89; /* #495059 — hairline */
+    --line-strong: 117 125 137; /* #757d89 — border-hover */
+    --scrollbar: 73 80 89;
+    --scrollbar-hover: 117 125 137;
+    --code-inline-bg: 33 39 48;
+    --code-inline-border: 73 80 89;
+
+    --aurora-from: 106 159 204; /* #6a9fcc */
+    --aurora-via: 75 96 124; /* #4b607c */
+    --aurora-to: 232 153 58; /* #e8993a */
+    --aurora-accent: 93 184 122; /* #5db87a */
+
+    --zinc-50: 13 17 22;
+    --zinc-100: 22 29 39;
+    --zinc-200: 33 39 48;
+    --zinc-300: 73 80 89;
+    --zinc-400: 117 125 137;
+    --zinc-500: 159 164 171;
+    --zinc-600: 159 164 171;
+    --zinc-700: 235 231 228;
+    --zinc-800: 235 231 228;
+    --zinc-900: 235 231 228;
+    --zinc-950: 235 231 228;
+
+    color-scheme: dark;
+  }
+
+  html {
+    font-size: 18px;
+    background-color: rgb(var(--surface));
+    color: rgb(var(--foreground));
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    -webkit-text-size-adjust: 100%;
+  }
+
   body {
     background-color: rgb(var(--surface));
     color: rgb(var(--foreground));
@@ -108,33 +143,25 @@
     -webkit-text-size-adjust: 100%;
   }
 
-  /* Ánh sáng ambient rất nhẹ phía trên — không khí thương hiệu Vyen. */
-  body {
-    background-image: radial-gradient(
-      800px 350px at 50% -150px,
-      rgb(var(--brand) / 0.04),
-      transparent 70%
-    );
-    background-repeat: no-repeat;
-  }
-  .dark body {
+  /* Hardware-accelerated faint cyan graph-paper grid texture (alpha 2.5%) */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: -1;
     background-image:
-      radial-gradient(600px 300px at 20% -100px, rgb(var(--aurora-from) / 0.08), transparent 70%),
-      radial-gradient(500px 250px at 80% -80px, rgb(var(--aurora-to) / 0.06), transparent 70%),
-      radial-gradient(400px 200px at 50% -60px, rgb(var(--aurora-via) / 0.05), transparent 70%);
-  }
-
-  button,
-  a,
-  input,
-  textarea {
-    transition: background-color 120ms linear, color 120ms linear,
-      border-color 120ms linear, opacity 120ms linear;
+      repeating-linear-gradient(0deg, rgba(106, 159, 204, 0.025) 0px, rgba(106, 159, 204, 0.025) 1px, transparent 1px, transparent 24px),
+      repeating-linear-gradient(90deg, rgba(106, 159, 204, 0.025) 0px, rgba(106, 159, 204, 0.025) 1px, transparent 1px, transparent 24px);
+    background-size: 24px 24px;
+    background-position: 0 0;
+    will-change: transform;
+    transform: translateZ(0);
   }
 
   :focus-visible {
-    outline: 2px solid rgb(var(--brand) / 0.55);
-    outline-offset: 2px;
+    outline: 2px solid rgba(106, 159, 204, 0.72);
+    outline-offset: 1px;
   }
 }
 
@@ -148,11 +175,6 @@
   }
 }
 
-/*
- * Toggle "Hiệu ứng chuyển động" trong Cài đặt gắn `data-animations="off"` lên
- * <html>. Trước đây cờ này chỉ được truyền xuống props rồi bỏ không dùng, nên
- * tắt đi không có tác dụng gì.
- */
 html[data-animations='off'] *,
 html[data-animations='off'] *::before,
 html[data-animations='off'] *::after {
@@ -162,9 +184,33 @@ html[data-animations='off'] *::after {
   scroll-behavior: auto !important;
 }
 
+/* ------------------------------------------------------------------ */
+/* Absolute Square Corners & Zero Soft-Shadows (DESIGN.md)             */
+/* ------------------------------------------------------------------ */
+
+*,
+*::before,
+*::after {
+  border-radius: 0;
+  box-shadow: none !important;
+  text-shadow: none !important;
+}
+
+.rounded-full,
+[class*="rounded-full"],
+.pill-badge {
+  border-radius: 9999px !important;
+}
+
+/* Zero soft-shadows & disable heavy backdrop-filters for maximum FPS */
+[class*="backdrop-blur"] {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
 * {
   scrollbar-width: thin;
-  scrollbar-color: rgb(50 60 75) transparent;
+  scrollbar-color: #495059 transparent;
 }
 ::-webkit-scrollbar {
   width: 6px;
@@ -174,132 +220,197 @@ html[data-animations='off'] *::after {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgb(50 60 75);
-  border-radius: 10px;
+  background: #495059;
+  border-radius: 0;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgb(70 85 100);
-}
-
-@layer utilities {
-  .pt-safe {
-    padding-top: env(safe-area-inset-top);
-  }
-  .pb-safe {
-    padding-bottom: env(safe-area-inset-bottom);
-  }
-  /*
-   * Biến thể "cộng thêm": `pt-safe` ghi đè hẳn padding-top của các lớp như
-   * `py-2`, làm nội dung dính mép. Hai lớp dưới giữ đúng 0.5rem đệm rồi mới
-   * cộng vùng an toàn của thiết bị.
-   */
-  .pt-safe-2 {
-    padding-top: calc(0.5rem + env(safe-area-inset-top));
-  }
-  .pb-safe-2 {
-    padding-bottom: calc(0.5rem + env(safe-area-inset-bottom));
-  }
-  /* Composer: 1rem đệm cộng thêm vùng an toàn của thiết bị. */
-  .pb-composer {
-    padding-bottom: calc(1rem + env(safe-area-inset-bottom));
-  }
-  .no-scrollbar::-webkit-scrollbar {
-    display: none;
-  }
-  .no-scrollbar {
-    -ms-overflow-style: none;
-    scrollbar-width: none;
-  }
+  background: #757d89;
 }
 
 /* ------------------------------------------------------------------ */
-/* Component recipes — giữ các "công thức" lặp lại ở một chỗ           */
+/* Pi Active Split Indicator Stripe (DESIGN.md)                        */
+/* ------------------------------------------------------------------ */
+
+.pi-active-indicator,
+.vyen-active-indicator {
+  position: relative;
+}
+.pi-active-indicator::before,
+.vyen-active-indicator::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 3px;
+  background: linear-gradient(90deg, #6a9fcc 0 62%, #4b607c 62% 100%);
+  pointer-events: none;
+  z-index: 10;
+}
+
+/* ------------------------------------------------------------------ */
+/* Minecraft Pixel Identity Typography (DESIGN.md)                    */
+/* ------------------------------------------------------------------ */
+
+.font-pixel {
+  font-family: var(--font-pixel), 'Pixelify Sans', 'Minecraft', monospace;
+  image-rendering: pixelated;
+  letter-spacing: 0.05em;
+}
+
+.pixel-header-32 {
+  font-family: var(--font-pixel), 'Pixelify Sans', 'Minecraft', monospace;
+  font-size: 32px;
+  line-height: 1.25;
+  letter-spacing: 0.05em;
+  font-style: normal;
+  image-rendering: pixelated;
+}
+
+.pixel-header-24 {
+  font-family: var(--font-pixel), 'Pixelify Sans', 'Minecraft', monospace;
+  font-size: 24px;
+  line-height: 1.3;
+  letter-spacing: 0.05em;
+  font-style: normal;
+  image-rendering: pixelated;
+}
+
+.pixel-header-16 {
+  font-family: var(--font-pixel), 'Pixelify Sans', 'Minecraft', monospace;
+  font-size: 16px;
+  line-height: 1.4;
+  letter-spacing: 0.05em;
+  font-style: normal;
+  image-rendering: pixelated;
+}
+
+.pixel-label,
+.pixel-meta {
+  font-family: var(--font-pixel), 'Pixelify Sans', 'Minecraft', monospace;
+  font-size: 0.84rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  image-rendering: pixelated;
+}
+
+/* ------------------------------------------------------------------ */
+/* Vyen Technical Framing & Corners                                    */
+/* ------------------------------------------------------------------ */
+
+.vyen-frame,
+.pi-frame {
+  position: relative;
+}
+.vyen-corner-tl, .pi-corner-tl,
+.vyen-corner-tr, .pi-corner-tr,
+.vyen-corner-bl, .pi-corner-bl,
+.vyen-corner-br, .pi-corner-br {
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  pointer-events: none;
+}
+.vyen-corner-tl,
+.pi-corner-tl {
+  top: -1px;
+  left: -1px;
+  border-top: 1.5px solid #6a9fcc;
+  border-left: 1.5px solid #6a9fcc;
+}
+.vyen-corner-tr,
+.pi-corner-tr {
+  top: -1px;
+  right: -1px;
+  border-top: 1.5px solid #6a9fcc;
+  border-right: 1.5px solid #6a9fcc;
+}
+.vyen-corner-bl,
+.pi-corner-bl {
+  bottom: -1px;
+  left: -1px;
+  border-bottom: 1.5px solid #6a9fcc;
+  border-left: 1.5px solid #6a9fcc;
+}
+.vyen-corner-br,
+.pi-corner-br {
+  bottom: -1px;
+  right: -1px;
+  border-bottom: 1.5px solid #6a9fcc;
+  border-right: 1.5px solid #6a9fcc;
+}
+
+/* ------------------------------------------------------------------ */
+/* Component recipes — Vyen minimalist style (DESIGN.md)              */
 /* ------------------------------------------------------------------ */
 
 @layer components {
-  /** Nút chỉ có icon trong header/composer/menu. */
   .icon-btn {
-    @apply flex flex-shrink-0 items-center justify-center rounded-lg text-slate-400
-      transition-all hover:bg-white/10 hover:text-emerald-400
-      disabled:pointer-events-none disabled:opacity-50;
+    @apply flex flex-shrink-0 items-center justify-center rounded-none text-[#9fa4ab]
+      transition-colors duration-100 hover:bg-white/[0.08] hover:text-[#6a9fcc]
+      disabled:pointer-events-none disabled:opacity-40;
   }
   .icon-btn-sm {
-    @apply icon-btn h-8 w-8;
+    @apply icon-btn h-7 w-7;
   }
   .icon-btn-md {
-    @apply icon-btn h-9 w-9;
+    @apply icon-btn h-8 w-8;
   }
   .icon-btn-danger {
-    @apply hover:bg-red-50 hover:text-red-600;
+    @apply hover:bg-[#e8704f]/10 hover:text-[#e8704f];
   }
 
-  /** Mặt phẳng nổi cho dropdown/menu/popover. */
   .surface-panel {
-    @apply rounded-xl border border-white/10 bg-slate-900/80 shadow-[0_8px_32px_-12px_rgb(0_0_0/0.4)] backdrop-blur-xl;
+    @apply rounded-none border border-[#495059] bg-[#161d27];
   }
 
-  /** Dòng lệnh trong menu. */
   .menu-item {
-    @apply flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[12px]
-      text-slate-400 transition-all hover:bg-white/10 hover:text-slate-200;
+    @apply flex w-full items-center gap-2 rounded-none px-2.5 py-1.5 text-[12px] font-mono
+      text-[#ebe7e4] transition-colors duration-100 hover:bg-[#252f3d] hover:text-[#ebe7e4];
   }
   .menu-item-danger {
-    @apply text-red-400 hover:bg-red-500/10 hover:text-red-300;
+    @apply text-[#e8704f] hover:bg-[#e8704f]/10 hover:text-[#e8704f];
   }
 
-  /** Input/select/textarea trong form cài đặt. */
   .field {
-    @apply w-full rounded-xl border border-white/10 bg-white/5 p-2.5 text-sm
-      text-slate-200 outline-none transition-all placeholder:text-slate-500
-      focus:border-emerald-500/30 focus:bg-white/10 focus:shadow-[0_0_8px_rgba(16,185,129,0.1)];
+    @apply w-full rounded-none border border-[#495059] bg-[#0d1116] p-2.5 text-sm font-mono
+      text-[#ebe7e4] outline-none transition-colors duration-100 placeholder:text-[#9fa4ab]
+      focus:border-[#6a9fcc] focus:bg-[#161d27] focus:ring-1 focus:ring-[#6a9fcc]/40;
   }
   .field-sm {
-    @apply w-full rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5
-      text-sm text-slate-200 outline-none transition-all placeholder:text-slate-500
-      focus:border-emerald-500/30 focus:bg-white/10 focus:shadow-[0_0_8px_rgba(16,185,129,0.1)];
+    @apply w-full rounded-none border border-[#495059] bg-[#0d1116] px-2.5 py-1.5
+      text-xs font-mono text-[#ebe7e4] outline-none transition-colors duration-100 placeholder:text-[#9fa4ab]
+      focus:border-[#6a9fcc] focus:bg-[#161d27] focus:ring-1 focus:ring-[#6a9fcc]/40;
   }
 
-  /** Nút hành động chính. */
   .btn-primary {
-    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4
-      py-2.5 text-sm font-medium text-white shadow-[0_0_15px_rgba(16,185,129,0.25)] transition-all
-      hover:bg-emerald-500 hover:shadow-[0_0_25px_rgba(16,185,129,0.35)] active:scale-[0.98] disabled:pointer-events-none
-      disabled:opacity-50;
+    @apply inline-flex items-center justify-center gap-2 rounded-none bg-[#6a9fcc] px-3.5
+      py-2 text-xs font-mono font-semibold text-[#0d1116] transition-all duration-100
+      hover:bg-[#6a9fcc]/85 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50;
   }
   .btn-secondary {
-    @apply inline-flex items-center justify-center gap-2 rounded-xl border
-      border-white/10 bg-white/5 px-3 py-2.5 text-sm font-medium
-      text-slate-300 transition-all hover:bg-white/10 hover:text-white disabled:pointer-events-none
+    @apply inline-flex items-center justify-center gap-2 rounded-none border
+      border-[#495059] bg-[#161d27] px-3 py-2 text-xs font-mono font-medium
+      text-[#ebe7e4] transition-all duration-100 hover:border-[#757d89] hover:bg-[#212730] hover:text-[#ebe7e4] disabled:pointer-events-none
       disabled:opacity-50;
   }
 
-  /** Banner thông báo — nền sáng, chữ đậm, đạt tương phản AA. */
   .notice {
-    @apply rounded-xl border px-3 py-2 text-xs leading-relaxed;
+    @apply rounded-none border px-3 py-2 text-xs font-mono leading-relaxed;
   }
   .notice-warn {
-    @apply notice border-amber-500/20 bg-amber-500/10 text-amber-300 backdrop-blur-sm;
+    @apply notice border-[#e8993a]/40 bg-[#161d27] text-[#e8993a];
   }
   .notice-error {
-    @apply notice border-red-500/20 bg-red-500/10 text-red-300 backdrop-blur-sm;
+    @apply notice border-[#e8704f]/40 bg-[#161d27] text-[#e8704f];
   }
 
-  /**
-   * Thân hộp thoại cài đặt: vạch phân cách nằm GIỮA các nhóm, không phải
-   * `border-t` cứng trong từng nhóm — nhóm đứng đầu tab sẽ không còn vạch
-   * mồ côi ngay dưới thanh tab.
-   */
   .settings-panel > * + * {
-    @apply mt-5 border-t border-zinc-200 pt-5;
+    @apply mt-5 border-t border-[#495059] pt-5;
   }
 
-  /*
-   * Dark mode cho các recipe mang màu accent: nền -50/-100 lật thành
-   * phiên bản trong suốt đậm (amber/red-500/10 trên nền tối) thay vì hex
-   * sáng chói, chữ nâng lên bậc -300/-400 cho đủ tương phản.
-   */
   .dark .icon-btn-danger {
-    @apply hover:bg-red-500/10 hover:text-red-400;
+    @apply hover:bg-[#e8704f]/10 hover:text-[#e8704f];
   }
 }
 
@@ -323,10 +434,6 @@ html[data-animations='off'] *::after {
 /* Hành động trên tin nhắn                                             */
 /* ------------------------------------------------------------------ */
 
-/*
- * Ẩn thanh hành động cho tới khi hover/focus. Trên thiết bị cảm ứng
- * (không có hover) thì hiện thường trực, vì không có cách nào hover.
- */
 .msg-actions {
   opacity: 0;
   transition: opacity 120ms linear;
@@ -342,23 +449,19 @@ html[data-animations='off'] *::after {
 }
 
 /* ------------------------------------------------------------------ */
-/* Typography                                                          */
+/* Typography — Vyen design language (DESIGN.md)                      */
 /* ------------------------------------------------------------------ */
 
 .claude-prose {
-  font-size: 15px;
-  line-height: 1.75;
-  color: rgb(203 213 225);
+  font-size: 17px;
+  line-height: 1.7;
+  color: #ebe7e4;
   word-break: break-word;
   overflow-wrap: anywhere;
 }
-/*
- * `MarkdownRenderer` bọc nội dung trong một div (`.claude-md-root`), nên các
- * quy tắc khoảng cách phải nhắm vào con của div đó — nhắm `.claude-prose > *`
- * chỉ chạm đúng cái wrapper và không có tác dụng gì.
- */
+
 .claude-md-root > * + * {
-  margin-top: 1rem;
+  margin-top: 0.9rem;
 }
 .claude-md-root > :first-child {
   margin-top: 0;
@@ -366,18 +469,22 @@ html[data-animations='off'] *::after {
 .claude-md-root > :last-child {
   margin-bottom: 0;
 }
+
 .claude-prose h1,
 .claude-prose h2,
 .claude-prose h3 {
-  font-weight: 600;
-  line-height: 1.35;
-  color: rgb(241 245 249);
-  margin-top: 1.75rem;
+  font-family: var(--font-pixel), 'Pixelify Sans', 'Minecraft', monospace;
+  image-rendering: pixelated;
+  letter-spacing: 0.05em;
+  font-style: normal;
+  font-weight: 700;
+  line-height: 1.3;
+  color: #ebe7e4;
 }
-.claude-prose h1 { font-size: 1.4rem; }
-.claude-prose h2 { font-size: 1.2rem; }
-.claude-prose h3 { font-size: 1.05rem; }
-/* Tiêu đề mở đầu tin nhắn không cần khoảng trên — tránh lệch mép bong bóng. */
+.claude-prose h1 { font-size: 32px; margin-top: 1.5rem; }
+.claude-prose h2 { font-size: 24px; margin-top: 1.25rem; }
+.claude-prose h3 { font-size: 16px; margin-top: 1rem; }
+
 .claude-md-root > :first-child:is(h1, h2, h3) {
   margin-top: 0;
 }
@@ -389,78 +496,75 @@ html[data-animations='off'] *::after {
 .claude-prose ol { list-style: decimal; }
 .claude-prose li + li { margin-top: 0.35rem; }
 .claude-prose a {
-  color: rgb(34 211 238);
+  color: #6a9fcc;
   text-decoration: underline;
   text-underline-offset: 2px;
-  filter: drop-shadow(0 0 5px rgba(34, 211, 238, 0.5));
-  transition: all 150ms ease;
+  transition: color 100ms ease;
 }
 .claude-prose a:hover {
-  color: rgb(103 232 249);
-  filter: drop-shadow(0 0 8px rgba(34, 211, 238, 0.7));
+  color: #ebe7e4;
 }
 .claude-prose blockquote {
-  border-left: 2px solid rgb(16 185 129 / 0.4);
-  padding-left: 0.9rem;
-  color: rgb(148 163 184);
+  border-left: 2px solid #6a9fcc;
+  padding-left: 0.85rem;
+  color: #9fa4ab;
+  font-style: italic;
 }
 .claude-prose hr {
-  border-color: rgb(255 255 255 / 0.08);
-  margin: 1.5rem 0;
+  border-color: #495059;
+  margin: 1.4rem 0;
 }
 
 .claude-prose table,
 .claude-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 14px;
+  font-size: 13.5px;
 }
 .claude-prose th,
 .claude-prose td,
 .claude-table th,
 .claude-table td {
-  border: 1px solid rgb(255 255 255 / 0.08);
+  border: 1px solid #495059;
   padding: 0.5rem 0.75rem;
   text-align: left;
   vertical-align: top;
 }
 .claude-prose th,
 .claude-table th {
-  background: rgb(255 255 255 / 0.05);
+  background: #212730;
+  color: #ebe7e4;
   font-weight: 600;
   white-space: nowrap;
 }
 
-/*
- * Biến thể trong bong bóng người dùng: cùng công thức typography nhưng chữ
- * theo cỡ bong bóng và khoảng cách gọn hơn.
- */
 .claude-prose-bubble {
   font-size: inherit;
   line-height: inherit;
 }
 .claude-prose-bubble .claude-md-root > * + * {
-  margin-top: 0.65rem;
+  margin-top: 0.6rem;
 }
 .claude-prose-bubble h1,
 .claude-prose-bubble h2,
 .claude-prose-bubble h3 {
-  margin-top: 0.9rem;
+  margin-top: 0.8rem;
   font-size: 1.05em;
 }
 
 /* ------------------------------------------------------------------ */
-/* Code                                                                */
+/* Code — One Dark fine-tuned terminal styling (DESIGN.md)             */
 /* ------------------------------------------------------------------ */
 
 .claude-inline-code,
 .claude-prose :not(pre) > code {
-  background: rgb(16 185 129 / 0.1);
-  border: 1px solid rgb(16 185 129 / 0.2);
-  border-radius: 5px;
+  background: #252f3d;
+  border: 1px solid #495059;
+  border-radius: 0;
   padding: 0.12em 0.38em;
-  font-size: 0.875em;
-  color: rgb(52 211 153);
+  font-size: 0.88em;
+  color: #ebe7e4;
+  font-family: var(--font-mono), ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, Monaco, Consolas, monospace;
   white-space: pre-wrap;
 }
 
@@ -477,48 +581,73 @@ html[data-animations='off'] *::after {
 }
 
 .claude-code-block {
-  background: rgb(10 10 16);
-  border: 1px solid rgb(255 255 255 / 0.08);
-  border-radius: 10px;
+  background: #1c2128;
+  border: 1px solid #495059;
+  border-radius: 0;
   overflow: hidden;
 }
 .claude-code-block pre {
   margin: 0 !important;
-  padding: 0.9rem 1rem !important;
+  padding: 0.85rem 1rem !important;
   overflow-x: auto;
   font-size: 13px !important;
   line-height: 1.6 !important;
-  background: rgb(10 10 16) !important;
+  background: #1c2128 !important;
+  font-family: var(--font-mono), ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, Monaco, Consolas, monospace !important;
 }
 
 /* ------------------------------------------------------------------ */
-/* Caret khi stream                                                    */
+/* Con trỏ gõ Terminal (Cursor Block █) — DESIGN.md                   */
 /* ------------------------------------------------------------------ */
 
-.streaming-caret > div > :last-child::after,
-.streaming-caret::after {
-  content: '';
-  display: inline-block;
-  width: 7px;
-  height: 1em;
-  margin-left: 2px;
-  vertical-align: text-bottom;
-  background: rgb(16 185 129);
-  animation: caret-blink 1s steps(2, start) infinite;
-}
-.streaming-caret > div > :last-child::after {
-  content: none;
-}
-@keyframes caret-blink {
-  to {
-    visibility: hidden;
+@keyframes blink {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
   }
 }
 
+@keyframes terminal-blink {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+
+.terminal-cursor {
+  display: inline-block;
+  color: #6a9fcc;
+  font-family: var(--font-mono), monospace;
+  animation: blink 1s step-end infinite;
+  user-select: none;
+}
+.terminal-cursor:empty::after {
+  content: '█';
+}
+
+.streaming-caret::after {
+  content: ' █';
+  display: inline-block;
+  color: #6a9fcc;
+  font-family: var(--font-mono), monospace;
+  animation: blink 1s step-end infinite;
+}
+
+.claude-prose.streaming-caret .claude-md-root {
+  display: inline;
+}
+
+.claude-prose.streaming-caret .claude-md-root > :last-child:is(p, h1, h2, h3, li) {
+  display: inline;
+}
+
+
 /* ------------------------------------------------------------------ */
-/* FX shimmer text — vệt sáng quét qua chữ đang chờ (TextShimmer).      */
-/* CSS thuần thay framer-mask (type-safe + GPU rẻ); tôn trọng           */
-/* prefers-reduced-motion qua media query.                              */
+/* FX shimmer text                                                     */
 /* ------------------------------------------------------------------ */
 @keyframes fx-shimmer-sweep {
   0% {
@@ -531,9 +660,9 @@ html[data-animations='off'] *::after {
 .fx-shimmer-text {
   background: linear-gradient(
     90deg,
-    rgb(148 163 184 / 0.6) 42%,
-    rgb(16 185 129) 50%,
-    rgb(148 163 184 / 0.6) 58%
+    rgba(159, 164, 171, 0.6) 40%,
+    rgb(106, 159, 204) 50%,
+    rgba(159, 164, 171, 0.6) 60%
   );
   background-size: 200% 100%;
   -webkit-background-clip: text;
@@ -547,7 +676,7 @@ html[data-animations='off'] *::after {
     animation: none;
     background: none;
     -webkit-text-fill-color: currentColor;
-    color: rgb(148 163 184 / 0.85);
+    color: rgba(159, 164, 171, 0.85);
   }
 }
 
@@ -572,46 +701,16 @@ html[data-animations='off'] *::after {
 }
 
 /* ------------------------------------------------------------------ */
-/* Aurora utilities — dark mode only                                    */
+/* Vyen Diff Styling                                                   */
 /* ------------------------------------------------------------------ */
-
-.dark .aurora-text {
-  background: linear-gradient(135deg, rgb(var(--aurora-from)), rgb(var(--aurora-via)), rgb(var(--aurora-to)));
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  color: transparent;
+.diff-line-added {
+  color: #5db87a;
+  background-color: rgba(93, 184, 122, 0.08);
 }
-
-.dark .aurora-border {
-  border-image: linear-gradient(135deg, rgb(var(--aurora-from) / 0.4), rgb(var(--aurora-via) / 0.3), rgb(var(--aurora-to) / 0.4)) 1;
+.diff-line-removed {
+  color: #e8704f;
+  background-color: rgba(232, 112, 79, 0.08);
 }
-
-.dark .aurora-glow {
-  box-shadow:
-    0 0 20px rgb(var(--aurora-from) / 0.15),
-    0 0 40px rgb(var(--aurora-via) / 0.08),
-    0 0 60px rgb(var(--aurora-to) / 0.05);
-}
-
-.dark .aurora-shimmer {
-  background: linear-gradient(
-    90deg,
-    rgb(var(--aurora-from) / 0.08) 0%,
-    rgb(var(--aurora-via) / 0.12) 50%,
-    rgb(var(--aurora-to) / 0.08) 100%
-  );
-  background-size: 200% 100%;
-  animation: aurora-shimmer 3s ease-in-out infinite;
-}
-
-@keyframes aurora-shimmer {
-  0%, 100% { background-position: 0% 50%; }
-  50% { background-position: 100% 50%; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .dark .aurora-shimmer {
-    animation: none;
-  }
+.diff-line-context {
+  color: #9fa4ab;
 }

@@ -1,18 +1,19 @@
 /**
- * Tests cho layer MCP trong Electron main.
+ * Tests cho layer MCP của host process (HTTP bridge / desktop shell).
  *
- * Chạy được trên Node thuần vì manager.cjs / ipc-handlers.cjs chỉ đụng tới
- * `electron` bên trong hàm phát event (đã bọc try/catch). `ipcMain` được giả
- * lập — mỗi channel thu thành một hàm gọi trực tiếp, đủ để test toàn bộ luồng
- * duyệt mà không cần dựng cửa sổ thật.
+ * Chạy được trên Node thuần vì manager.cjs / ipc-handlers.cjs không còn đụng
+ * tới Electron: sự kiện đi ra qua sink `opts.onEvent` (test đăng ký spy thu
+ * vào mảng `sinkEvents`), còn `ipcMain` được giả lập — mỗi channel thu thành
+ * một hàm gọi trực tiếp, đủ để test toàn bộ luồng duyệt mà không cần dựng UI
+ * thật.
  */
-import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 
-// File test là ESM nhưng electron/mcp/*.cjs là CommonJS — cần require thật.
+// File test là ESM nhưng lib/mcp/*.cjs là CommonJS — cần require thật.
 const require = createRequire(import.meta.url);
 
 type Handler = (_event: unknown, payload?: unknown) => Promise<unknown> | unknown;
@@ -24,17 +25,43 @@ const fakeIpcMain = {
   },
 };
 
-const mcpIpc = require('../electron/mcp/ipc-handlers.cjs') as {
-  register: (ipcMain: unknown, opts: { userDataDir: string; audit: (l: string) => void }) => Promise<void>;
+const mcpIpc = require('../lib/mcp/ipc-handlers.cjs') as {
+  register: (
+    ipcMain: unknown,
+    opts: {
+      userDataDir: string;
+      audit?: (l: string) => void;
+      onEvent?: (channel: string, payload: unknown) => void;
+    },
+  ) => Promise<void>;
   shutdown: () => Promise<void>;
   APPROVAL_TIMEOUT_MS: number;
 };
-const { McpManager, matchesAutoApprove } = require('../electron/mcp/manager.cjs') as {
+const { McpManager, matchesAutoApprove } = require('../lib/mcp/manager.cjs') as {
   McpManager: new () => any;
   matchesAutoApprove: (patterns: string[] | undefined, toolName: string) => boolean;
 };
 
 let userDataDir: string;
+
+/** Event thu được từ sink onEvent — reset mỗi test để không nhiễm chéo. */
+const sinkEvents: Array<{ channel: string; payload: Record<string, unknown> }> = [];
+/** Số lần sink được gọi, tính cả các lần nó ném lỗi. */
+let sinkCalls = 0;
+/** Bật để sink ném lỗi — mô phỏng host có bug, luồng duyệt vẫn phải sống. */
+let sinkThrows = false;
+
+const onEvent = (channel: string, payload: unknown) => {
+  sinkCalls += 1;
+  if (sinkThrows) throw new Error('onEvent sink bug (mô phỏng host lỗi)');
+  sinkEvents.push({ channel, payload: payload as Record<string, unknown> });
+};
+
+beforeEach(() => {
+  sinkEvents.length = 0;
+  sinkCalls = 0;
+  sinkThrows = false;
+});
 
 /** Gọi thẳng handler đã đăng ký (bỏ qua lớp ipcRenderer). */
 const call = (channel: string, payload?: unknown) => {
@@ -45,7 +72,7 @@ const call = (channel: string, payload?: unknown) => {
 
 beforeAll(async () => {
   userDataDir = mkdtempSync(path.join(tmpdir(), 'vyen-mcp-test-'));
-  await mcpIpc.register(fakeIpcMain, { userDataDir, audit: () => {} });
+  await mcpIpc.register(fakeIpcMain, { userDataDir, audit: () => {}, onEvent });
 });
 
 afterAll(async () => {
@@ -222,8 +249,27 @@ describe('MCP IPC handlers', () => {
     expect(pending[0].serverId).toBe('broken');
     expect(pending[0].toolName).toBe('do_thing');
 
+    // Sink nhận 'mcp:approval-requested' với id khớp bản poll và đủ payload.
+    const requested = sinkEvents.find((e) => e.channel === 'mcp:approval-requested');
+    expect(requested).toBeDefined();
+    expect(requested?.payload).toMatchObject({
+      id: pending[0].id,
+      serverId: 'broken',
+      toolName: 'do_thing',
+    });
+    expect(requested?.payload.arguments).toEqual({ a: 1 });
+    expect(typeof requested?.payload.createdAt).toBe('number');
+    expect(requested?.payload.expiresAt).toBe(
+      (requested?.payload.createdAt as number) + mcpIpc.APPROVAL_TIMEOUT_MS,
+    );
+
     await expect(call('mcp:resolve-approval', { approvalId: pending[0].id, decision: 'deny_once' }))
       .resolves.toEqual({ ok: true });
+
+    // Sau khi resolve, sink nhận 'mcp:approval-resolved' cho đúng id đó.
+    const resolved = sinkEvents.find((e) => e.channel === 'mcp:approval-resolved');
+    expect(resolved).toBeDefined();
+    expect(resolved?.payload).toEqual({ id: pending[0].id, decision: 'deny_once' });
 
     const result = (await inFlight) as { isError: boolean; denied?: boolean; content: Array<{ text: string }> };
     expect(result.isError).toBe(true);
@@ -251,9 +297,51 @@ describe('MCP IPC handlers', () => {
       await vi.advanceTimersByTimeAsync(mcpIpc.APPROVAL_TIMEOUT_MS);
       const result = (await inFlight) as { denied?: boolean };
       expect(result.denied).toBe(true);
+
+      // Timeout cũng phát 'mcp:approval-resolved' — đủ payload để UI tắt dialog.
+      const requested = sinkEvents.find((e) => e.channel === 'mcp:approval-requested');
+      const resolved = sinkEvents.find((e) => e.channel === 'mcp:approval-resolved');
+      expect(requested).toBeDefined();
+      expect(resolved).toBeDefined();
+      expect(resolved?.payload).toEqual({
+        id: requested?.payload.id,
+        decision: 'deny_once',
+        timedOut: true,
+      });
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('swallows a throwing onEvent sink without breaking the approval flow', async () => {
+    sinkThrows = true;
+
+    const inFlight = call('mcp:call-tool', {
+      serverId: 'broken',
+      toolName: 'boom',
+      arguments: {},
+    });
+
+    // Sink ném ngay tại 'mcp:approval-requested' — pending vẫn phải được tạo.
+    let pending = (await call('mcp:get-pending-approvals')) as Array<{ id: string }>;
+    for (let i = 0; i < 20 && pending.length === 0; i += 1) {
+      await new Promise((r) => setTimeout(r, 5));
+      pending = (await call('mcp:get-pending-approvals')) as typeof pending;
+    }
+    expect(pending).toHaveLength(1);
+    // Sink ĐÃ được gọi và ĐÃ ném — không phải "chắc là vậy".
+    expect(sinkCalls).toBeGreaterThanOrEqual(1);
+
+    await expect(
+      call('mcp:resolve-approval', { approvalId: pending[0].id, decision: 'deny_once' }),
+    ).resolves.toEqual({ ok: true });
+
+    const result = (await inFlight) as { isError: boolean; denied?: boolean };
+    expect(result.isError).toBe(true);
+    expect(result.denied).toBe(true);
+    // 'mcp:approval-resolved' cũng ném — luồng vẫn settle và dọn pending.
+    expect(sinkCalls).toBeGreaterThanOrEqual(2);
+    await expect(call('mcp:get-pending-approvals')).resolves.toEqual([]);
   });
 
   it('removes a server', async () => {

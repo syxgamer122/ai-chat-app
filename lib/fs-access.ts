@@ -223,7 +223,14 @@ export interface FsEntry {
 
 /** Liệt kê MỘT cấp thư mục — agent đi từng bước thay vì quét cả cây. */
 export async function fsList(deps: FsDeps, relPath: string): Promise<FsEntry[]> {
-  const dir = await resolveDir(deps, relPath, false);
+  /* fsList là op fs duy nhất từng nhận path THÔ. Model khám phá workspace
+     rất hay truyền '.' hoặc './src'; đẩy segment đó thẳng vào
+     getDirectoryHandle('.') là tên file không hợp lệ theo spec File System
+     Access → TypeError mù mờ. Chuẩn hoá như mọi op fs khác (fsRead, fsWrite,
+     fsDelete...) để '.'/'./src' chạy đúng và '..' bị chặn có thông báo. */
+  const rel = normalizeRelPath(relPath);
+  if (rel === null) throw new Error(`Đường dẫn không hợp lệ: "${relPath}"`);
+  const dir = await resolveDir(deps, rel, false);
   const out: FsEntry[] = [];
   for await (const entry of dir.values()) {
     if (entry.kind === 'file') {
@@ -330,9 +337,9 @@ export async function fsRead(
 /* ------------------------------------------------------------------ */
 
 /**
- * Chỉ các đuôi ảnh Gemini API nhận inline (image/png, image/jpeg, image/webp,
- * image/heic, image/heif). GIF/AVIF/bmp… không nằm trong danh sách mime chính
- * thức nên cố ý loại — rơi về thông báo từ chối của fs_read thường.
+ * Chỉ các đuôi ảnh pipeline vision hỗ trợ (image/png, image/jpeg, image/webp,
+ * image/heic, image/heif). GIF/AVIF/bmp… chưa được hỗ trợ nên cố ý loại — rơi
+ * về thông báo từ chối của fs_read thường.
  */
 export const IMAGE_VISION_EXT_RE = /\.(png|jpe?g|webp|heic|heif)$/i;
 
@@ -367,8 +374,9 @@ function bytesToBase64(bytes: Uint8Array): string {
 /**
  * Đọc file ảnh trong workspace thành data URL để gửi /api/vision mô tả giúp
  * agent. KHÔNG trả nội dung nhị phân về cho model — model chỉ nhận bản mô tả
- * text do Gemini tạo (ngăn chặn chính xác lỗi "binary garbage → model bịa
- * ERROR: this model does not support image input" người dùng từng gặp).
+ * text do model vision của Nhà cung cấp đang bật tạo (ngăn chặn chính xác lỗi
+ * "binary garbage → model bịa ERROR: this model does not support image input"
+ * người dùng từng gặp).
  */
 export async function fsReadImage(
   deps: FsDeps,
@@ -529,6 +537,107 @@ export interface SearchOptions {
   timeBudgetMs?: number;
 }
 
+/** Dòng dài hơn ngưỡng này bị bỏ qua khi search bằng regex (xem fsSearch). */
+export const MAX_SEARCH_LINE_CHARS = 5000;
+
+/** Thông tin một quantifier trong pattern: độ dài ký tự + có chặn trên không. */
+interface QuantInfo {
+  length: number;
+  unbounded: boolean;
+}
+
+/** Đọc quantifier bắt đầu tại `i` ('+', '*', '?', '{n,m}') — không phải thì null. */
+function readQuantifier(pattern: string, i: number): QuantInfo | null {
+  const c = pattern[i];
+  if (c === '+' || c === '*') return { length: 1, unbounded: true };
+  if (c === '?') return { length: 1, unbounded: false };
+  if (c === '{') {
+    const m = /^\{(\d+)(,(\d*)?)?\}/.exec(pattern.slice(i));
+    if (!m) return null; // '{' thuần chữ (regex JS không nhất thiết phải escape)
+    // {n,} không chặn trên — lặp bao nhiêu lần tùy thích, còn {n} / {n,m} có giới hạn.
+    return { length: m[0].length, unbounded: m[2] === ',' && !m[3] };
+  }
+  return null;
+}
+
+/**
+ * Heuristic PHÁT HIỆN regex "lượng hóa lồng nhau" — dạng kinh điển gây
+ * backtracking thảm hoạ: một NHÓM bị lặp bởi quantifier không chặn trên
+ * trong khi bên trong nhóm đã có quantifier, vd `(a+)+`, `(\w+\s*)*`,
+ * `((a+))+`. Với dòng dài vài nghìn ký tự, một lần `re.test()` như thế treo
+ * main thread vĩnh viễn — deadline của fsSearch chỉ kiểm GIỮA các file/dòng
+ * nên không cứu được.
+ *
+ * Cách quét (rẻ, một lượt): stack đánh dấu "nhóm mở hiện tại có chứa
+ * quantifier chưa". Khi đóng nhóm mà ngay sau ')' là quantifier không chặn
+ * trên → nested. Nhóm con đóng sẽ "nhỏ giọt" cờ quantifier lên nhóm cha để
+ * `((a+))+` cũng bị bắt. Bỏ qua escape (`\+`, `\(`), character class
+ * (`[a+*]` — '+'/'*' ở đó là literal) và tiền tố nhóm (`(?:`, `(?=`, `(?!`,
+ * `(?<=`, `(?<!`, `(?<name>`) để '?' của tiền tố không bị đếm nhầm.
+ *
+ * GIỚI HẠN (chấp nhận, sai lệch hướng "từ chối nhiều hơn" và "thừa nhận
+ * ít nguy hiểm hơn"): (a) quantifier có chặn trên như `(a+)?` hay `(a{2})+`
+ * bị bỏ qua vì không bùng nổ hàm mũ; (b) chồng lấn alternation `(a|aa)+`
+ * KHÔNG bị bắt (cần so vế từng cặp — đắt hơn nhiều) — lớp phòng thủ thứ hai
+ * cho trường hợp đó là trần 5000 ký tự/dòng của fsSearch; (c) `[a-z]+` ở
+ * top level (không nhóm) thì vô hại nên không cần chặn.
+ */
+export function hasNestedQuantifier(pattern: string): boolean {
+  const stack: boolean[] = [];
+  let i = 0;
+  while (i < pattern.length) {
+    const c = pattern[i];
+    if (c === '\\') {
+      i += 2; // bỏ qua ký tự ngay sau escape
+      continue;
+    }
+    if (c === '[') {
+      i++;
+      while (i < pattern.length && pattern[i] !== ']') {
+        if (pattern[i] === '\\') i++;
+        i++;
+      }
+      i++; // qua ']'
+      continue;
+    }
+    if (c === '(') {
+      stack.push(false);
+      const rest = pattern.slice(i + 1);
+      if (rest.startsWith('?:')) i += 2;
+      else if (rest.startsWith('?=') || rest.startsWith('?!')) i += 2;
+      else if (rest.startsWith('?<=') || rest.startsWith('?<!')) i += 3;
+      else {
+        const named = /^\?<[A-Za-z_$][A-Za-z0-9_$]*>/.exec(rest);
+        if (named) i += named[0].length;
+      }
+      i++; // qua '(' (và tiền tố đã nhảy ở trên)
+      continue;
+    }
+    if (c === ')') {
+      const innerHasQuant = stack.pop() ?? false;
+      const q = readQuantifier(pattern, i + 1);
+      if (q) {
+        if (innerHasQuant && q.unbounded) return true;
+        // Nhóm (kể cả phiên bản có quantifier) là biểu thức con của nhóm cha.
+        if (stack.length > 0) stack[stack.length - 1] = true;
+        i += 1 + q.length;
+      } else {
+        if (innerHasQuant && stack.length > 0) stack[stack.length - 1] = true;
+        i++;
+      }
+      continue;
+    }
+    const q = readQuantifier(pattern, i);
+    if (q) {
+      if (stack.length > 0) stack[stack.length - 1] = true;
+      i += q.length;
+      continue;
+    }
+    i++;
+  }
+  return false;
+}
+
 /**
  * Tìm chuỗi/regex trong toàn bộ file text của workspace (đệ quy có ignore).
  * Không có ripgrep-WASM trong spike — scanner JS thẳng với trần thời gian.
@@ -542,6 +651,17 @@ export async function fsSearch(
   const { isRegex = false, caseSensitive = false, maxResults = 30, timeBudgetMs = 4000 } = opts;
   let matcher: (line: string) => boolean;
   if (isRegex) {
+    /* Chặn regex lượng hóa lồng nhau TRƯỚC khi dựng RegExp: một lần test()
+       trên pattern kiểu `(a+)+` với dòng dài chạy hàm mũ và treo main thread
+       ngay lập tức — deadline chỉ kiểm giữa các file/dòng nên vô dụng ở đây.
+       Từ chối sớm để model nhận lỗi rõ ràng và đổi cách tìm. */
+    if (hasNestedQuantifier(query)) {
+      throw new Error(
+        'Regex có dạng lượng hóa lồng nhau (vd "(a+)+") dễ gây backtracking ' +
+          'thảm hoạ và đóng băng giao diện, nên bị từ chối. Hãy đơn giản hóa ' +
+          'mẫu (vd bỏ nhóm lặp không cần thiết) hoặc tắt is_regex để tìm theo chuỗi thường.',
+      );
+    }
     const re = new RegExp(query, caseSensitive ? '' : 'i');
     matcher = (line) => re.test(line);
   } else {
@@ -552,6 +672,7 @@ export async function fsSearch(
   const deadline = Date.now() + timeBudgetMs;
   const results: SearchMatch[] = [];
   let scannedFiles = 0;
+  let skippedLongLines = 0;
   const MAX_FILES = 600;
 
   const walk = async (dir: FsDirHandleLike, prefix: string): Promise<void> => {
@@ -573,11 +694,20 @@ export async function fsSearch(
         const text = await file.text();
         const lines = text.split('\n');
         for (let i = 0; i < lines.length; i++) {
-          if (matcher(lines[i])) {
+          const line = lines[i];
+          /* Lớp phòng thủ thứ hai của guard regex: dòng khổng lồ (file build/
+             minified) nhân chi phí backtracking của bất kỳ pattern nào. Chỉ
+             skip ở chế độ regex — tìm chuỗi thường là phép includes() tuyến
+             tính, bỏ dòng minified làm mất match thật. */
+          if (isRegex && line.length > MAX_SEARCH_LINE_CHARS) {
+            skippedLongLines += 1;
+            continue;
+          }
+          if (matcher(line)) {
             results.push({
               path: rel,
               line: i + 1,
-              text: lines[i].trim().slice(0, 200),
+              text: line.trim().slice(0, 200),
             });
             if (results.length >= maxResults) return;
           }
@@ -589,5 +719,11 @@ export async function fsSearch(
   };
 
   await walk(deps.root, '');
+  if (skippedLongLines > 0) {
+    console.warn(
+      `[fs_search] Đã bỏ qua ${skippedLongLines} dòng dài quá ${MAX_SEARCH_LINE_CHARS} ký tự ` +
+        'để tránh regex treo giao diện.',
+    );
+  }
   return results;
 }

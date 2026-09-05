@@ -7,7 +7,7 @@
  * xanh trên CI (không key) và đỏ trên máy local (có key). Test như vậy vô
  * giá trị.
  *
- * File này chạy trước mỗi test file (`setupFiles` trong vitest.config.ts)
+ * File này chạy trước mỗi test file (`setupFiles` trong vitest.config.mts)
  * nên cũng chặn được rò rỉ chéo: `tinyfish-engine.test.ts` gán
  * `TINYFISH_API_KEY` trong beforeEach của nó, và vitest mặc định dùng pool
  * threads — process.env được chia sẻ giữa các file chạy trong cùng worker.

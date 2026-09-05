@@ -53,14 +53,14 @@ export function BackupReminder({ chatCount }: { chatCount: number }) {
         <HardDriveDownload size={14} aria-hidden="true" className="mt-0.5 flex-shrink-0" />
         <div className="min-w-0 flex-1">
           <p className="leading-relaxed">
-            Đã lâu chưa sao lưu dữ liệu — chat đang lưu trên thiết bị này thôi.
+            Đã lâu chưa sao lưu dữ liệu. Chat đang lưu trên thiết bị này thôi.
           </p>
           <div className="mt-2 flex items-center gap-2">
             <button
               type="button"
               onClick={handleBackup}
               disabled={busy}
-              className="rounded-lg bg-amber-600 px-2.5 py-1 font-medium text-white transition hover:bg-amber-700 disabled:opacity-50"
+              className="rounded-none bg-[#e8993a] px-2.5 py-1 font-medium text-[#0d1116] transition hover:bg-[#e8993a]/85 disabled:opacity-50"
             >
               {busy ? 'Đang sao lưu…' : 'Sao lưu ngay'}
             </button>
@@ -70,7 +70,7 @@ export function BackupReminder({ chatCount }: { chatCount: number }) {
                 snoozeBackupReminder();
                 setVisible(false);
               }}
-              className="rounded-lg px-2 py-1 text-amber-800 transition hover:bg-amber-100 dark:text-amber-300 dark:hover:bg-amber-500/10"
+              className="rounded-none px-2 py-1 text-[#e8993a] transition hover:bg-[#e8993a]/10"
             >
               Để sau
             </button>
@@ -83,7 +83,7 @@ export function BackupReminder({ chatCount }: { chatCount: number }) {
             snoozeBackupReminder();
             setVisible(false);
           }}
-          className="-mr-1 -mt-0.5 flex-shrink-0 rounded p-0.5 text-amber-700/70 transition hover:bg-amber-100 hover:text-amber-900 dark:text-amber-400/70 dark:hover:bg-amber-500/10 dark:hover:text-amber-300"
+          className="-mr-1 -mt-0.5 flex-shrink-0 rounded-none p-0.5 text-[#9fa4ab] transition hover:bg-[#e8993a]/10 hover:text-[#e8993a]"
         >
           <X size={13} />
         </button>

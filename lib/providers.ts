@@ -6,6 +6,7 @@ import {
   providerNeedsApiKey,
   type ProviderModel,
 } from '@/lib/provider-url';
+import { resolveProviderApiKey } from '@/lib/provider-secure-key';
 
 /**
  * Provider Presets — nhiều nhà cung cấp API chuẩn OpenAI-compatible.
@@ -17,6 +18,7 @@ export { SERVER_PROVIDER_ID };
 export type { ActiveProviderSnapshot };
 export { validateProviderBaseUrl, normalizeProviderModels, providerNeedsApiKey };
 export type { ProviderModel, BaseUrlCheck } from '@/lib/provider-url';
+export { SECURE_KEY_MARKER, secureKeyOf, isSecureKeyPointer, resolveProviderApiKey } from '@/lib/provider-secure-key';
 
 export interface ProviderConfig {
   id: string;
@@ -86,7 +88,9 @@ export async function syncActiveProviderSnapshot(providerId: string): Promise<vo
       id: p.id,
       name: p.name,
       baseUrl: p.baseUrl,
-      apiKey: p.apiKey,
+      /* Key có thể là CON TRỎ "@secure:" tới kho mã hoá desktop — snapshot
+         (nơi mọi request lấy header x-api-key) phải mang key THẬT. */
+      apiKey: await resolveProviderApiKey(p.apiKey, p.id),
       models: p.models ?? [],
     });
   } catch (err) {

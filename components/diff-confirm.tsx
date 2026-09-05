@@ -64,38 +64,66 @@ export function DiffConfirm({
       role="dialog"
       aria-modal="true"
       aria-label={`Phê duyệt ghi file ${state.path}`}
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4"
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4"
       onClick={() => decide(false)}
     >
       <div
-        className="flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-zinc-300 bg-surface-raised shadow-panel dark:border-zinc-700"
+        className="pi-frame relative flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-none border border-[#495059] bg-[#212730] font-mono"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between gap-2 border-b border-zinc-200 px-4 py-3">
-          <div className="min-w-0">
-            <div className="text-sm font-semibold text-zinc-900">Agent muốn ghi file</div>
-            <div className="truncate font-mono text-[11px] text-zinc-600">{state.path}</div>
+        <span className="pi-corner-tl" />
+        <span className="pi-corner-tr" />
+        <span className="pi-corner-bl" />
+        <span className="pi-corner-br" />
+
+        <div className="flex items-center justify-between gap-2 border-b border-[#495059] bg-[#161d27] px-4 py-3">
+          <div className="flex items-center gap-2 min-w-0 font-pixel text-[16px] [image-rendering:pixelated]">
+            <span className="font-bold text-[#6a9fcc]">$</span>
+            <span className="font-semibold text-[#6a9fcc]">write</span>
+            <span className="truncate text-xs font-mono text-[#ebe7e4]">{state.path}</span>
           </div>
-          <div className="flex flex-shrink-0 gap-1.5 text-[11px] font-medium">
-            <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-emerald-700">
+          <div className="flex flex-shrink-0 items-center gap-1.5 text-[11px] font-mono">
+            <span className="rounded-none border border-[#5db87a]/30 bg-[#5db87a]/10 px-1.5 py-0.5 text-[#5db87a]">
               +{diff.adds}
             </span>
-            <span className="rounded bg-red-100 px-1.5 py-0.5 text-red-700">-{diff.dels}</span>
+            <span className="rounded-none border border-[#e8704f]/30 bg-[#e8704f]/10 px-1.5 py-0.5 text-[#e8704f]">
+              -{diff.dels}
+            </span>
           </div>
         </div>
 
-        <pre className="flex-1 overflow-auto bg-surface-muted p-3 font-mono text-[11px] leading-relaxed text-zinc-800">
-          {diff.text}
-        </pre>
+        <div className="flex-1 overflow-auto bg-[#0d1116] p-3.5 font-mono text-[11.5px] leading-relaxed">
+          {diff.text.split('\n').map((line, idx) => {
+            const isAdd = line.startsWith('+');
+            const isDel = line.startsWith('-');
+            const isHunk = line.startsWith('@');
+            return (
+              <div
+                key={idx}
+                className={
+                  isAdd
+                    ? 'diff-line-added px-1 text-[#5db87a] bg-[#5db87a]/10'
+                    : isDel
+                      ? 'diff-line-removed px-1 text-[#e8704f] bg-[#e8704f]/10'
+                      : isHunk
+                        ? 'text-[#6a9fcc] font-semibold'
+                        : 'text-[#9fa4ab]'
+                }
+              >
+                {line || ' '}
+              </div>
+            );
+          })}
+        </div>
 
-        <div className="flex items-center justify-between gap-2 border-t border-zinc-200 px-4 py-3">
-          <span className="text-[11px] text-zinc-600">Escape để từ chối</span>
+        <div className="flex items-center justify-between gap-2 border-t border-[#495059] bg-[#161d27] px-4 py-2.5">
+          <span className="text-[11px] text-[#9fa4ab]">$ Esc to reject</span>
           <div className="flex gap-2">
             <button
               ref={discardRef}
               type="button"
               onClick={() => decide(false)}
-              className="flex items-center gap-1.5 rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 transition-colors hover:bg-zinc-100"
+              className="flex items-center gap-1.5 rounded-none border border-[#495059] bg-[#252f3d] px-3 py-1.5 text-xs text-[#ebe7e4] transition-colors hover:border-[#757d89]"
             >
               <X size={13} />
               Từ chối
@@ -103,10 +131,10 @@ export function DiffConfirm({
             <button
               type="button"
               onClick={() => decide(true)}
-              className="flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-brand-hover"
+              className="flex items-center gap-1.5 rounded-none bg-[#6a9fcc] px-3.5 py-1.5 text-xs font-semibold text-[#0d1116] transition-colors hover:bg-[#6a9fcc]/85"
             >
               <Check size={13} />
-              Duyệt &amp; ghi
+              Duyệt & ghi
             </button>
           </div>
         </div>

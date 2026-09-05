@@ -1,7 +1,5 @@
 /*
- * Logo Vyen — nguồn duy nhất cho dấu hiệu thương hiệu.
- * Trước đây SVG này bị inline lặp ở sidebar, empty state và settings với 3 id
- * gradient khác nhau; gom về một chỗ để đổi nhận diện chỉ cần sửa 1 file.
+ * Logo Vyen — nguồn duy nhất cho dấu hiệu thương hiệu Vyen.
  */
 import React, { useId } from 'react';
 
@@ -10,9 +8,8 @@ interface VyenMarkProps {
   className?: string;
 }
 
-/** Chỉ riêng dấu hiệu (chữ V — hai nét hội tụ, hai node ở đỉnh) — không có chữ. */
+/** Dấu hiệu thương hiệu Vyen (chữ V — hai nét hội tụ, hai node ở đỉnh). */
 export function VyenMark({ size = 16, className }: VyenMarkProps) {
-  // useId: mỗi instance một gradient id riêng, tránh trùng khi render nhiều lần.
   const gradientId = `vyen-mark-${useId()}`;
   return (
     <svg
@@ -37,10 +34,13 @@ export function VyenMark({ size = 16, className }: VyenMarkProps) {
   );
 }
 
+// Alias for backwards compatibility across existing components
+export const PiMark = VyenMark;
+
 interface VyenLogoProps {
   /** `sm` cho sidebar, `lg` cho empty state. */
   size?: 'sm' | 'lg';
-  /** Hiển thị chữ "Vyen / AI Innovations" bên cạnh (sm) hoặc bên dưới (lg). */
+  /** Hiển thị chữ "Vyen" bên cạnh (sm) hoặc bên dưới (lg). */
   withWordmark?: boolean;
   className?: string;
 }
@@ -53,8 +53,8 @@ export function VyenLogo({ size = 'sm', withWordmark = true, className }: VyenLo
     <div
       className={
         isLarge
-          ? 'flex h-16 w-16 items-center justify-center rounded-2xl bg-surface-raised shadow-brand-lg ring-1 ring-zinc-900/5'
-          : 'flex h-7 w-7 items-center justify-center rounded-lg bg-surface-muted ring-1 ring-zinc-900/5'
+          ? 'relative flex h-16 w-16 items-center justify-center rounded-none bg-[#161d27] border border-[#495059]'
+          : 'relative flex h-7 w-7 items-center justify-center rounded-none bg-[#161d27] border border-[#495059]'
       }
     >
       <VyenMark size={isLarge ? 34 : 16} />
@@ -67,8 +67,13 @@ export function VyenLogo({ size = 'sm', withWordmark = true, className }: VyenLo
     return (
       <div className={`flex flex-col items-center ${className ?? ''}`}>
         {tile}
-        <div className="mt-5 text-[15px] font-extrabold tracking-tight text-zinc-800">Vyen</div>
-        <div className="text-[10px] font-medium uppercase tracking-[0.28em] text-zinc-500">
+        <div className="mt-4 flex items-center gap-2">
+          <span className="font-pixel text-[32px] font-bold tracking-[0.05em] text-[#ebe7e4] [image-rendering:pixelated]">Vyen</span>
+          <span className="rounded-none border border-[#495059] bg-[#1a2330] px-1.5 py-0.5 font-pixel text-[11px] uppercase tracking-[0.08em] text-[#6a9fcc]">
+            agent
+          </span>
+        </div>
+        <div className="mt-1 font-pixel text-[11px] uppercase tracking-[0.08em] text-[#9fa4ab]">
           AI Innovations
         </div>
       </div>
@@ -79,11 +84,18 @@ export function VyenLogo({ size = 'sm', withWordmark = true, className }: VyenLo
     <div className={`flex items-center gap-2.5 ${className ?? ''}`}>
       {tile}
       <div className="leading-tight">
-        <div className="text-[14px] font-extrabold tracking-tight text-zinc-800">Vyen</div>
-        <div className="text-[10px] font-medium uppercase tracking-[0.24em] text-zinc-500">
+        <div className="flex items-center gap-1.5">
+          <span className="font-pixel text-[16px] font-bold tracking-[0.05em] text-[#ebe7e4] [image-rendering:pixelated]">Vyen</span>
+          <span className="rounded-none border border-[#495059] bg-[#1a2330] px-1 py-0.5 font-pixel text-[9px] uppercase tracking-[0.08em] text-[#6a9fcc]">
+            v0.1
+          </span>
+        </div>
+        <div className="font-pixel text-[9.5px] uppercase tracking-[0.08em] text-[#9fa4ab]">
           AI Innovations
         </div>
       </div>
     </div>
   );
 }
+
+export const PiLogo = VyenLogo;

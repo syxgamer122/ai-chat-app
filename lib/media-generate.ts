@@ -15,11 +15,16 @@
  * Giữ lại module vì `originBlocked` là cơ chế fallback tự động: gateway nào
  * cho phép CORS + có key client thì hưởng lợi (không đụng giới hạn thời gian
  * của serverless), gateway nào chặn thì tự quay về đường server.
+ *
+ * GIAI ĐOẠN 2 (desktop tự chủ): trên Vyen desktop, tạo ẢNH đi qua main-process
+ * proxy `vyen:llm-fetch` (Node fetch — KHÔNG gắn header Origin) nên gateway có
+ * allowlist origin kiểu crax không chặn được; đường web giữ nguyên như cũ.
  */
 
 import { validateProviderBaseUrl } from '@/lib/provider-url';
 import { parseLooseJson } from '@/lib/json-repair';
 import { pumpSseLines } from '@/lib/sse';
+import { vyenDesktop, type VyenLlmFetchResult } from '@/lib/desktop-bridge';
 
 export type MediaKind = 'image' | 'video';
 
@@ -79,12 +84,12 @@ function mediaMarkdown(kind: MediaKind, model: string, url: string): string {
   return kind === 'image' ? `![${model}](${url})` : `[${model}](${url})`;
 }
 
-async function errorFromResponse(res: Response): Promise<MediaGenerationError> {
-  const raw = await res.text().catch(() => '');
+/** Lõi tạo lỗi từ status + body thô — dùng chung cho Response thật và kết quả main-proxy. */
+function mediaError(status: number, raw: string): MediaGenerationError {
   if (/^\s*(<!doctype|<html)/i.test(raw)) {
     return new MediaGenerationError(
-      `Gateway trả về trang lỗi (${res.status}) — có thể đang quá tải, thử lại sau.`,
-      res.status,
+      `Gateway trả về trang lỗi (${status}) — có thể đang quá tải, thử lại sau.`,
+      status,
     );
   }
   let detail = raw.slice(0, 200);
@@ -104,24 +109,29 @@ async function errorFromResponse(res: Response): Promise<MediaGenerationError> {
    * "Origin not allowed" dù key hợp lệ. Đánh dấu để caller fallback qua server
    * (server không gửi Origin nên không bị chặn).
    */
-  if (res.status === 403 && /origin/i.test(detail)) {
+  if (status === 403 && /origin/i.test(detail)) {
     return new MediaGenerationError(
       'Gateway không cho phép gọi trực tiếp từ tên miền này.',
-      res.status,
+      status,
       true,
     );
   }
 
   const hint =
-    res.status === 401 || res.status === 403
+    status === 401 || status === 403
       ? ' Kiểm tra lại API key của nhà cung cấp.'
-      : res.status === 404
+      : status === 404
         ? ' Model này không có trên gateway.'
         : '';
   return new MediaGenerationError(
-    `Tạo media thất bại (${res.status})${detail ? `: ${detail}` : ''}.${hint}`,
-    res.status,
+    `Tạo media thất bại (${status})${detail ? `: ${detail}` : ''}.${hint}`,
+    status,
   );
+}
+
+async function errorFromResponse(res: Response): Promise<MediaGenerationError> {
+  const raw = await res.text().catch(() => '');
+  return mediaError(res.status, raw);
 }
 
 /**
@@ -146,33 +156,71 @@ async function mediaFetch(url: string, init: RequestInit): Promise<Response> {
 /* Ảnh: POST /images/generations (đồng bộ, trả URL hoặc base64)         */
 /* ------------------------------------------------------------------ */
 
+/** Đọc payload JSON ảnh từ chuỗi thô — dùng chung cho cả 2 đường (browser/main). */
+function parseImagePayload(raw: string): { data?: Array<{ url?: unknown; b64_json?: unknown }> } | null {
+  try {
+    return JSON.parse(raw) as { data?: Array<{ url?: unknown; b64_json?: unknown }> };
+  } catch {
+    return null;
+  }
+}
+
+function imageUrlOf(json: { data?: Array<{ url?: unknown; b64_json?: unknown }> } | null): string | null {
+  const item = json?.data?.[0];
+  return typeof item?.url === 'string'
+    ? item.url
+    : typeof item?.b64_json === 'string'
+      ? `data:image/png;base64,${item.b64_json}`
+      : null;
+}
+
 async function generateImage(req: MediaRequest, base: string): Promise<MediaResult> {
   req.onProgress?.('Đang tạo ảnh…');
-  const res = await mediaFetch(`${base}/images/generations`, {
+  const url = `${base}/images/generations`;
+  const headers = {
+    'Content-Type': 'application/json',
+    Authorization: `Bearer ${req.apiKey}`,
+  };
+  const body = JSON.stringify({ model: req.model, prompt: req.prompt.slice(0, 4000), n: 1 });
+
+  /* Desktop (giai đoạn 2): gọi qua main process — Node fetch không gắn Origin
+     nên gateway allowlist-origin (crax "Origin not allowed") không chặn, khỏi
+     phải fallback /api/chat. Trade-off: IPC không chuyển AbortSignal được —
+     bấm Dừng chỉ bỏ qua kết quả khi về; request phía main tự hết timeout 300s. */
+  const bridge = vyenDesktop();
+  if (bridge?.llm) {
+    let r: VyenLlmFetchResult | null = null;
+    try {
+      r = await bridge.llm.fetch({ url, method: 'POST', headers, body, timeoutMs: 300_000 });
+    } catch (err) {
+      // Fallback xuống đường browser CHỈ khi chính bridge chưa có kênh
+      // (shell cũ / server bridge chưa đăng ký): message "Kênh ... không
+      // được hỗ trợ", "Lỗi bridge (...)" hay TypeError khi gọi /api/bridge.
+      // Lỗi SAU khi bridge đã gọi gateway — timeout, mất mạng, response
+      // lỗi — phải rethrow để giữ ngữ nghĩa desktop, không thử lại im lặng.
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!/không được hỗ trợ|bridge/i.test(msg) && !(err instanceof TypeError)) throw err;
+    }
+    if (r) {
+      if (!r.ok) throw mediaError(r.status, r.bodyText);
+      const found = imageUrlOf(parseImagePayload(r.bodyText));
+      if (!found) throw new MediaGenerationError('Gateway không trả về ảnh nào.');
+      return { kind: 'image', url: found, markdown: mediaMarkdown('image', req.model, found) };
+    }
+  }
+
+  const res = await mediaFetch(url, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${req.apiKey}`,
-    },
-    body: JSON.stringify({ model: req.model, prompt: req.prompt.slice(0, 4000), n: 1 }),
+    headers,
+    body,
     signal: req.signal,
   });
 
   if (!res.ok) throw await errorFromResponse(res);
 
-  const json = (await res.json().catch(() => null)) as {
-    data?: Array<{ url?: unknown; b64_json?: unknown }>;
-  } | null;
-  const item = json?.data?.[0];
-  const url =
-    typeof item?.url === 'string'
-      ? item.url
-      : typeof item?.b64_json === 'string'
-        ? `data:image/png;base64,${item.b64_json}`
-        : null;
-
-  if (!url) throw new MediaGenerationError('Gateway không trả về ảnh nào.');
-  return { kind: 'image', url, markdown: mediaMarkdown('image', req.model, url) };
+  const found = imageUrlOf(parseImagePayload(await res.text().catch(() => '')));
+  if (!found) throw new MediaGenerationError('Gateway không trả về ảnh nào.');
+  return { kind: 'image', url: found, markdown: mediaMarkdown('image', req.model, found) };
 }
 
 /* ------------------------------------------------------------------ */

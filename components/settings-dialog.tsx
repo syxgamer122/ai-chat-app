@@ -2,7 +2,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { db, addMemory, deleteMemory, MAX_MEMORIES, MAX_MEMORY_CHARS, type PromptTemplate } from '@/lib/db';
-import { useAppStore, SERVER_PROVIDER_ID, ALL_TOOL_CATEGORIES, TOOL_CATEGORY_LABELS, isPermissionOverride, type PermissionOverride } from '@/lib/store';
+import { useAppStore, SERVER_PROVIDER_ID, ALL_TOOL_CATEGORIES, TOOL_CATEGORY_LABELS, isApiModelId, isPermissionOverride, type PermissionOverride } from '@/lib/store';
 import { exportJson, exportMarkdown, importBackup, type ImportMode } from '@/lib/backup';
 import { X, Download, Upload, Loader2, ShieldAlert, Pencil, Trash2 } from 'lucide-react';
 import { useInstallPrompt } from '@/lib/use-install-prompt';
@@ -136,7 +136,7 @@ function InstallSection() {  const { canInstall, installed, isIOS, install } = u
           type="button"
           onClick={handleInstall}
           disabled={installing}
-          className="btn-primary w-full bg-gradient-to-r from-brand to-brand-accent hover:from-brand-hover hover:to-brand-accent"
+          className="btn-primary w-full bg-gradient-to-r from-brand to-brand-accent hover:from-brand-hover/85 hover:to-brand-accent/85"
         >
           {installing ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
           Cài Vyen lên thiết bị
@@ -150,6 +150,87 @@ function InstallSection() {  const { canInstall, installed, isIOS, install } = u
         <p className="text-xs leading-relaxed text-zinc-600">
           Cài app: trên Android/Chrome mở menu ⋮ → &ldquo;Cài đặt ứng dụng&rdquo;;
           trên máy tính mở biểu tượng install trên thanh địa chỉ.
+        </p>
+      )}
+    </div>
+  );
+}
+
+/* ------------------ Model đọc ảnh (vision) ------------------ */
+
+/**
+ * Chọn model MÔ TẢ ẢNH của provider đang bật. Tách thành component riêng để
+ * chỉ phần này re-render khi snapshot provider đổi (danh sách model được nạp
+ * lại sau mỗi lần "Kiểm tra kết nối"), thay vì cả dialog cài đặt.
+ *
+ * Vyen KHÔNG tự đoán model nào nhìn được ảnh: gateway BYOK chỉ trả id/tên qua
+ * /v1/models, không có metadata capability. Đoán sai thì mọi lượt fs_read ảnh
+ * đều thất bại kèm lỗi mơ hồ của gateway — nên để người dùng tự chọn.
+ */
+function VisionModelSection() {
+  const visionModel = useAppStore((s) => s.settings.visionModel ?? '');
+  const updateSettings = useAppStore((s) => s.updateSettings);
+  const activeProviderId = useAppStore((s) => s.activeProviderId);
+  const activeProvider = useAppStore((s) => s.activeProvider);
+
+  const models = activeProvider?.models ?? [];
+  /* Chưa chọn provider riêng (đang dùng Máy chủ mặc định) hoặc provider chưa
+     tải /v1/models → không có gì để chọn. /api/vision đòi provider active nên
+     đường này chắc chắn không dùng được, khoá select cho rõ ràng. */
+  const noModels = activeProviderId === SERVER_PROVIDER_ID || models.length === 0;
+  /* Model đã lưu nhưng không có trong danh sách hiện tại (đổi provider, gateway
+     bỏ model, snapshot chưa nạp): vẫn hiện thành một option để select không
+     "nói dối" là đang tắt — và KHÔNG reset về '' vì đó là âm thầm xoá lựa chọn
+     của người dùng. */
+  const orphanModel = Boolean(visionModel) && !models.some((m) => m.id === visionModel);
+  /* Id gateway chứa ký tự mà mọi route LLM từ chối (khoảng trắng, '@'...) —
+     client không gửi được nên tính năng ảnh coi như tắt. Nói thẳng ở đây, kẻo
+     người dùng thấy đã chọn model mà ảnh vẫn không đọc được. */
+  const unusableModel = Boolean(visionModel) && !isApiModelId(visionModel);
+
+  return (
+    <div>
+      <label htmlFor="vision-model" className="mb-1.5 block text-sm font-medium text-zinc-700">
+        Model đọc ảnh (vision)
+      </label>
+      <select
+        id="vision-model"
+        value={visionModel}
+        disabled={noModels}
+        onChange={(e) => updateSettings({ visionModel: e.target.value })}
+        className="field disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        <option value="">— Không dùng —</option>
+        {orphanModel && <option value={visionModel}>{visionModel} (không còn trong danh sách)</option>}
+        {models.map((m) => (
+          <option key={m.id} value={m.id}>
+            {m.name || m.id}
+          </option>
+        ))}
+      </select>
+      {noModels ? (
+        <p className="mt-1 text-[11px] leading-relaxed text-zinc-600">
+          Hãy chọn một Nhà cung cấp ở trên và bấm kiểm tra kết nối để tải danh sách model, rồi
+          quay lại đây chọn model đọc ảnh.
+          {visionModel ? ` Lựa chọn cũ (${visionModel}) vẫn được giữ.` : ''}
+        </p>
+      ) : (
+        <p className="mt-1 text-[11px] leading-relaxed text-zinc-600">
+          Dùng để mô tả ảnh thành chữ: ảnh trong thư mục làm việc khi agent gọi{' '}
+          <code className="claude-inline-code">fs_read</code>, ảnh do công cụ MCP trả về, và ảnh
+          bạn đính kèm cho model không xem được ảnh. Phải chọn model <em>nhìn được ảnh</em> (tên
+          thường có <code className="claude-inline-code">vision</code>,{' '}
+          <code className="claude-inline-code">vl</code>,{' '}
+          <code className="claude-inline-code">gpt-4o</code>,{' '}
+          <code className="claude-inline-code">gemini</code>…) — Vyen không tự biết model nào có
+          khả năng này. Để trống thì ảnh chỉ được thay bằng ghi chú dạng chữ.
+        </p>
+      )}
+      {unusableModel && (
+        <p className="notice-warn mt-1.5 text-[11px] leading-relaxed" role="status">
+          Tên model &ldquo;{visionModel}&rdquo; chứa ký tự mà máy chủ không nhận (chỉ cho phép chữ,
+          số và <code className="claude-inline-code">. - : ~ /</code>) nên Vyen chưa dùng được để
+          đọc ảnh. Hãy chọn model khác.
         </p>
       )}
     </div>
@@ -254,8 +335,8 @@ function PromptLibrarySection() {
             onClick={() => setMode(opt.v)}
             className={`rounded-lg px-2.5 py-1 text-[11px] font-medium transition-colors ${
               mode === opt.v
-                ? 'bg-brand text-white'
-                : 'border border-zinc-300 text-zinc-600 hover:text-zinc-900'
+                ? 'bg-brand text-[#0d1116]'
+                : 'border border-[#495059] text-[#9fa4ab] hover:text-[#ebe7e4]'
             }`}
           >
             {opt.label}
@@ -305,7 +386,7 @@ function PromptLibrarySection() {
               <button
                 type="button"
                 onClick={saveEdit}
-                className="rounded-lg bg-brand px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-brand-hover"
+                className="rounded-lg bg-brand px-3 py-1 text-xs font-medium text-[#0d1116] transition-colors hover:bg-brand-hover/85"
               >
                 Lưu
               </button>
@@ -630,7 +711,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   return (
     <div
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
-      className="fixed inset-0 z-50 flex animate-fade-in items-center justify-center bg-zinc-900/50 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex animate-fade-in items-center justify-center bg-black/60 p-4"
     >
       {/*
         role="dialog" phải nằm trên chính hộp thoại, không phải lớp phủ: nếu đặt
@@ -642,11 +723,17 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
         aria-modal="true"
         aria-labelledby="settings-dialog-title"
         tabIndex={-1}
-        className="flex max-h-[90dvh] w-full max-w-lg animate-pop-in flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-surface shadow-2xl focus:outline-none"
+        className="pi-frame relative flex max-h-[90dvh] w-full max-w-lg animate-pop-in flex-col overflow-hidden rounded-none border border-[#495059] bg-[#212730] focus:outline-none font-mono"
       >
-        <div className="flex flex-shrink-0 items-center justify-between gap-3 border-b border-zinc-200 px-5 py-3.5 sm:px-6">
-          <h2 id="settings-dialog-title" className="text-base font-semibold text-zinc-900">
-            Cài đặt ứng dụng
+        <span className="pi-corner-tl" />
+        <span className="pi-corner-tr" />
+        <span className="pi-corner-bl" />
+        <span className="pi-corner-br" />
+
+        <div className="flex flex-shrink-0 items-center justify-between gap-3 border-b border-[#495059] bg-[#161d27] px-5 py-3">
+          <h2 id="settings-dialog-title" className="flex items-center gap-1.5 font-pixel text-[16px] font-semibold tracking-[0.05em] text-[#ebe7e4] [image-rendering:pixelated]">
+            <span className="font-bold text-[#6a9fcc]">$</span>
+            <span>settings</span>
           </h2>
           <button
             type="button"
@@ -654,13 +741,13 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
             aria-label="Đóng cài đặt"
             className="icon-btn-sm"
           >
-            <X size={18} />
+            <X size={16} />
           </button>
         </div>
 
-        <div className="flex-shrink-0 px-5 pt-4 sm:px-6">
+        <div className="flex-shrink-0 px-5 pt-3">
           <div
-            className="no-scrollbar flex gap-1 overflow-x-auto rounded-xl bg-surface-raised p-1 ring-1 ring-zinc-200"
+            className="no-scrollbar flex gap-1 overflow-x-auto rounded-none bg-[#0d1116] p-1 border border-[#495059]"
             role="tablist"
             aria-label="Nhóm cài đặt"
           >
@@ -675,10 +762,10 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                 tabIndex={tab === t.id ? 0 : -1}
                 onClick={() => setTab(t.id)}
                 onKeyDown={onTabKeyDown}
-                className={`flex-shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium transition ${
+                className={`flex-shrink-0 rounded-none px-2.5 py-1 text-xs font-mono transition-colors duration-100 ${
                   tab === t.id
-                    ? 'bg-brand text-white shadow-sm'
-                    : 'text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900'
+                    ? 'bg-[#6a9fcc] text-[#0d1116] font-semibold'
+                    : 'text-[#9fa4ab] hover:bg-[#161d27] hover:text-[#ebe7e4]'
                 }`}
               >
                 {t.label}
@@ -1020,6 +1107,8 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                 </ul>
                 <ProviderManager />
               </div>
+
+              <VisionModelSection />
 
               <div>
                 <label htmlFor="access-code" className="mb-1.5 block text-sm font-medium text-zinc-700">

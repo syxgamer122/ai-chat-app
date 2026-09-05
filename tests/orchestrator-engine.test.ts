@@ -54,8 +54,8 @@ describe('orchestrate — đường vui', () => {
     const result = await orchestrate('Mục tiêu', undefined, {
       ...baseDeps({
         run: async (ctx) => {
-          // Ô đầu chậm nhất — xong CUỐI cùng.
-          await delay(ctx.cell.index === 0 ? 30 : 0);
+          // Ô đầu chậm nhất — xong CUỐI cùng (120ms để ổn định dưới tải CPU cao).
+          await delay(ctx.cell.index === 0 ? 120 : 0);
           return { output: `kết quả ${ctx.cell.index}` };
         },
       }),

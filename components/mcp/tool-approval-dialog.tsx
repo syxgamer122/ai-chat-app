@@ -86,50 +86,55 @@ export function McpToolApprovalDialog() {
         role="dialog"
         aria-modal="true"
         aria-labelledby="mcp-approval-title"
-        className="relative w-full max-w-lg overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-2xl"
+        className="pi-frame relative w-full max-w-lg overflow-hidden rounded-none border border-[#495059] bg-[#212730] font-mono text-[#ebe7e4]"
       >
-        <div className="flex items-start gap-3 border-b border-zinc-200 bg-amber-50 px-4 py-3">
-          <ShieldAlert className="mt-0.5 h-5 w-5 flex-shrink-0 text-amber-600" />
+        <span className="pi-corner-tl" />
+        <span className="pi-corner-tr" />
+        <span className="pi-corner-bl" />
+        <span className="pi-corner-br" />
+
+        <div className="flex items-start gap-3 border-b border-[#495059] bg-[#161d27] px-4 py-3">
+          <ShieldAlert className="mt-0.5 h-5 w-5 flex-shrink-0 text-[#e8993a]" />
           <div className="min-w-0">
-            <h2 id="mcp-approval-title" className="text-sm font-semibold text-zinc-800">
-              MCP server muốn chạy một công cụ
+            <h2 id="mcp-approval-title" className="font-pixel text-[16px] font-semibold text-[#ebe7e4] [image-rendering:pixelated]">
+              <span className="text-[#6a9fcc] font-bold mr-1">$</span>mcp approval
             </h2>
-            <p className="mt-0.5 text-[11px] leading-relaxed text-zinc-600">
+            <p className="mt-0.5 text-[11px] leading-relaxed text-[#9fa4ab]">
               Công cụ này do server bên ngoài cung cấp. Chỉ cho phép nếu bạn tin server này.
             </p>
           </div>
         </div>
 
         <div className="space-y-3 px-4 py-3">
-          <div className="flex items-center gap-2 rounded-lg bg-zinc-50 px-3 py-2">
-            <Terminal className="h-4 w-4 flex-shrink-0 text-zinc-500" />
-            <code className="min-w-0 flex-1 truncate text-xs font-medium text-zinc-800">
+          <div className="flex items-center gap-2 rounded-none border border-[#495059] bg-[#161b22] px-3 py-2">
+            <Terminal className="h-4 w-4 flex-shrink-0 text-[#6a9fcc]" />
+            <code className="min-w-0 flex-1 truncate text-xs font-medium text-[#ebe7e4]">
               {current.toolName}
             </code>
-            <span className="flex-shrink-0 rounded bg-zinc-200 px-1.5 py-0.5 text-[10px] text-zinc-600">
+            <span className="flex-shrink-0 rounded-none border border-[#495059] bg-[#212730] px-1.5 py-0.5 text-[10px] text-[#9fa4ab]">
               {current.serverId}
             </span>
           </div>
 
           <div>
-            <div className="mb-1 text-[11px] font-medium text-zinc-500">Tham số</div>
-            <pre className="max-h-48 overflow-auto rounded-lg bg-zinc-900 px-3 py-2 text-[11px] leading-relaxed text-zinc-100">
+            <div className="mb-1 text-[11px] font-medium text-[#9fa4ab]">Tham số</div>
+            <pre className="max-h-48 overflow-auto rounded-none border border-[#495059] bg-[#1c2128] px-3 py-2 text-[11px] leading-relaxed text-[#7ea3c7]">
               {formatArgs(current.arguments)}
             </pre>
           </div>
 
           {queue.length > 1 && (
-            <p className="text-[11px] text-zinc-500">
+            <p className="text-[11px] text-[#9fa4ab]">
               Còn {queue.length - 1} yêu cầu khác đang chờ sau yêu cầu này.
             </p>
           )}
 
           {error && (
-            <p className="rounded-lg bg-red-50 px-3 py-2 text-[11px] text-red-700">{error}</p>
+            <p className="rounded-none border border-[#e8704f]/40 bg-[#241313] px-3 py-2 text-[11px] text-[#e8704f]">{error}</p>
           )}
         </div>
 
-        <div className="flex flex-wrap gap-2 border-t border-zinc-200 bg-zinc-50 px-4 py-3">
+        <div className="flex flex-wrap gap-2 border-t border-[#495059] bg-[#1c2128] px-4 py-3">
           {DECISIONS.map((d) => (
             <button
               key={d.value}
@@ -137,8 +142,8 @@ export function McpToolApprovalDialog() {
               onClick={() => void decide(d.value)}
               className={
                 d.primary
-                  ? 'rounded-lg bg-brand px-3 py-1.5 text-xs font-medium text-white hover:opacity-90'
-                  : 'rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-100'
+                  ? 'rounded-none bg-[#6a9fcc] px-3.5 py-1.5 text-xs font-semibold text-[#0d1116] transition-colors hover:bg-[#89b8e0]'
+                  : 'rounded-none border border-[#495059] bg-[#212730] px-3 py-1.5 text-xs font-medium text-[#ebe7e4] transition-colors hover:border-[#757d89] hover:bg-[#252f3d]'
               }
             >
               {d.label}

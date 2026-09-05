@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useChat, type Message } from 'ai/react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { useAppStore } from '@/lib/store';
+import { useAppStore, isApiModelId } from '@/lib/store';
 import { syncActiveProviderSnapshot } from '@/lib/providers';
 import {
   db,
@@ -116,7 +116,12 @@ import {
   desktopDisconnectWorkspace,
   desktopRequireWorkspace,
 } from '@/lib/desktop-fs';
-import { describeWorkspaceImage, describeMcpImage, isImagePath } from '@/lib/fs-vision';
+import {
+  describeWorkspaceImage,
+  describeMcpImage,
+  isImagePath,
+  type WorkspaceImageToolResult,
+} from '@/lib/fs-vision';
 import { hasMcpImages, describeMcpImageBlocks } from '@/lib/mcp/image-content';
 import {
   captureFile,
@@ -179,8 +184,7 @@ import {
 import { normalizePathKey } from '@/lib/path-utils';
 import { DiffConfirm, type DiffConfirmState } from '@/components/diff-confirm';
 import { ShellConfirm } from '@/components/shell-confirm';
-import { StagingPanel, type StagingPanelState } from '@/components/staging-panel';
-import { OrchestratorPanel } from '@/components/orchestrator/orchestrator-panel';
+import type { StagingPanelState } from '@/components/staging-panel';
 import { McpToolApprovalDialog } from '@/components/mcp/tool-approval-dialog';
 import { useOrchestrator } from '@/lib/use-orchestrator';
 import { toSkills } from '@/lib/prompt-library';
@@ -193,8 +197,26 @@ import { ChatHeader } from './chat/chat-header';
 import { MessageList } from './chat/message-list';
 import { ContextMeter } from '@/components/context-meter';
 import { WorkspaceCheckpointBar } from '@/components/workspace-checkpoints';
-import { PlanPanel } from '@/components/plan-panel';
 import type { BranchInfo } from './chat/message-item';
+
+/* Ba panel overlay lớn (staging/orchestrator/plan) chỉ mở theo yêu cầu —
+   import tĩnh kéo cả ba (kèm heatmap, diff view, subtask UI) vào chunk
+   trang chính dù 99% phiên không mở chúng. dynamic() tách chunk riêng,
+   tải lúc lần đầu mở. ssr:false vì đây đã là client tree (hooks). */
+import dynamic from 'next/dynamic';
+
+const StagingPanel = dynamic(
+  () => import('@/components/staging-panel').then((m) => m.StagingPanel),
+  { ssr: false },
+);
+const OrchestratorPanel = dynamic(
+  () => import('@/components/orchestrator/orchestrator-panel').then((m) => m.OrchestratorPanel),
+  { ssr: false },
+);
+const PlanPanel = dynamic(
+  () => import('@/components/plan-panel').then((m) => m.PlanPanel),
+  { ssr: false },
+);
 
 /* Trần đính kèm. Đặt ở MODULE scope: trước đây khai báo trong thân component
    nên tạo lại mỗi render và làm eslint cảnh báo thiếu dependency ở
@@ -212,6 +234,20 @@ export default function ChatInterface() {
   const updateSettings = useAppStore((s) => s.updateSettings);
 
   const model = useAppStore((s) => s.settings.model);
+  /**
+   * Model MÔ TẢ ẢNH (người dùng chọn trong Cài đặt → Nhà cung cấp). Rỗng =
+   * luồng ảnh tắt: /api/vision đòi model bắt buộc nên gọi mà không có chỉ
+   * nhận 400, thà không gọi và nói rõ cho model/người dùng.
+   *
+   * Lọc qua isApiModelId ngay tại đây: field `visionModel` của /api/chat KHÔNG
+   * có `.catch(undefined)` như model của title/compact, nên một id gateway lạ
+   * (ký tự ngoài `\w . - : ~ /`) sẽ làm CẢ lượt chat trả BAD_SCHEMA 400 vì một
+   * field phụ. Id không gửi được coi như chưa chọn.
+   */
+  const visionModel = useAppStore((s) => {
+    const v = s.settings.visionModel ?? '';
+    return isApiModelId(v) ? v : '';
+  });
   const temperature = useAppStore((s) => s.settings.temperature);
   const thinkingLevel = useAppStore((s) => s.settings.thinkingLevel);
   const systemPrompt = useAppStore((s) => s.settings.systemPrompt);
@@ -899,6 +935,21 @@ export default function ChatInterface() {
     showNotice('Đã ngắt kết nối thư mục làm việc.', 3000);
   }, [showNotice]);
 
+  /** Build API headers cho fetch calls — gộp logic trùng lặp từ useChat + performCompaction.
+   *  Khai báo TRƯỚC handleClientToolCall: luồng mô tả ảnh (fs_read ảnh, ảnh MCP)
+   *  gọi /api/vision ngay trong tool handler và cần đúng headers provider này. */
+  const buildApiHeaders = useCallback((): Record<string, string> => ({
+    ...(accessCode ? { 'x-access-code': accessCode } : {}),
+    ...(activeProvider?.baseUrl
+      ? {
+          'x-api-base': activeProvider.baseUrl,
+          ...(activeProvider.apiKey ? { 'x-api-key': activeProvider.apiKey } : {}),
+        }
+      : apiKey
+        ? { 'x-api-key': apiKey }
+        : {}),
+  }), [accessCode, activeProvider, apiKey]);
+
   /**
    * fs_*, shell, git tools chạy NGAY TRÊN MÁY USER — server không thể chạm file.
    * onToolCall trả kết quả (JSON string) → useChat đặt state 'result' → sau stream,
@@ -931,10 +982,16 @@ export default function ChatInterface() {
              ảnh chỉ tốn lệnh vision (~35s + ngân sách rate limit của route).
              Tầng này phục vụ cả tool MCP của subagent (relay đi qua handler
              này). Lambda bọc vì describeMcpImage nhận fetchImpl ở tham số 2,
-             không khớp McpImageDescriber (mimeType). */
+             không khớp McpImageDescriber (mimeType) — nên fetchImpl để
+             undefined (mặc định) và opts đi ở tham số 3.
+             CHƯA chọn model vision → bỏ hẳn bước describe: /api/vision đòi
+             model nên mọi khối ảnh chỉ nhận về "mô tả thất bại", tệ hơn ghi
+             chú placeholder mặc định của mcpContentToText. */
           let content = result.content;
-          if (!result.denied && !result.isError && hasMcpImages(content)) {
-            content = await describeMcpImageBlocks(content, (url) => describeMcpImage(url));
+          if (visionModel && !result.denied && !result.isError && hasMcpImages(content)) {
+            content = await describeMcpImageBlocks(content, (url) =>
+              describeMcpImage(url, undefined, { headers: buildApiHeaders(), model: visionModel }),
+            );
           }
           return formatMcpResultForModel({ ...result, content }, toolCall.toolName);
         } catch (err) {
@@ -947,7 +1004,12 @@ export default function ChatInterface() {
           });
         }
       }
-      if (!CLIENT_TOOL_NAMES.has(toolCall.toolName)) return undefined;
+      if (!CLIENT_TOOL_NAMES.has(toolCall.toolName)) {
+        /* Tool lạ PHẢI trả result string thay vì undefined: ai@4 giữ invocation
+           kẹt ở state `call` mãi mãi khi onToolCall không trả gì → stream treo
+           vĩnh viễn. Nhánh default cuối switch đã làm đúng — đồng bộ hoá. */
+        return JSON.stringify({ error: `Tool không tồn tại: ${toolCall.toolName}` });
+      }
       const isDesktop = isVyenDesktop();
       const desktopOnly = new Set(['shell_run', 'git_status', 'git_diff', 'git_log', 'git_add', 'git_commit']);
       if (desktopOnly.has(toolCall.toolName) && !isDesktop) {
@@ -993,11 +1055,18 @@ export default function ChatInterface() {
               const sliced = lineCount !== undefined
                 ? lines.slice(startLine - 1, startLine - 1 + lineCount)
                 : lines.slice(startLine - 1);
-              const truncated = lineCount !== undefined
-                ? startLine - 1 + lineCount < lines.length
-                : false;
+              /* Trần 24k ký tự MIRROR fsRead trên đĩa: overlay tích luỹ nhiều
+                 fs_edit có thể dài hơn trần — không cắt thì một fs_read nhồi
+                 cả file khổng lồ vào context trong khi đường đĩa vẫn cắt.
+                 truncated phản ánh cả cắt-dòng (có line_count) lẫn cắt-ký tự
+                 để model biết gọi tiếp start_line thay vì tưởng hết file. */
+              const STAGED_READ_MAX_CHARS = 24_000;
+              const joined = sliced.join('\n');
+              const truncated =
+                (lineCount !== undefined ? startLine - 1 + lineCount < lines.length : false) ||
+                joined.length > STAGED_READ_MAX_CHARS;
               return JSON.stringify({
-                content: sliced.join('\n'),
+                content: joined.slice(0, STAGED_READ_MAX_CHARS),
                 size: content.length,
                 truncated,
                 staged: true,
@@ -1007,9 +1076,28 @@ export default function ChatInterface() {
                bản mô tả text thay vì bị từ chối (lỗi "image input" người dùng
                từng gặp khi bytes nhị phân đi thẳng vào context). */
             if (isImagePath(rel)) {
+              /* Chưa chọn model đọc ảnh: KHÔNG gọi /api/vision (route đòi
+                 model, chắc chắn 400) — trả thẳng lý do theo shape
+                 WorkspaceImageToolResult để model đọc được và nói lại cho
+                 người dùng cách bật, thay vì báo "lỗi hệ thống tệp". */
+              if (!visionModel) {
+                const result: WorkspaceImageToolResult = {
+                  path: rel,
+                  kind: 'image',
+                  error:
+                    'Chưa chọn model đọc ảnh (vision) trong Cài đặt → Nhà cung cấp, nên không mô ' +
+                    'tả được ảnh này. Hãy nói người dùng chọn một model xem được ảnh của Nhà cung ' +
+                    'cấp đang bật rồi đọc lại.',
+                };
+                return JSON.stringify(result);
+              }
               const result = await describeWorkspaceImage(
                 rel,
                 isDesktop ? desktopFsReadImage : (p) => fsReadImage(wsForFs!, p),
+                /* fetchImpl mặc định (chỗ tiêm này chỉ dành cho test) — headers
+                   provider + model vision đi ở tham số thứ 4. */
+                undefined,
+                { headers: buildApiHeaders(), model: visionModel },
               );
               return JSON.stringify(result);
             }
@@ -1063,9 +1151,29 @@ export default function ChatInterface() {
             }
             /* Staging path: base content từ overlay nếu có, nếu không thì từ đĩa. */
             const existingStaged = stagingRef.current[normPath];
-            const beforeText = existingStaged
-              ? existingStaged.content
-              : isDesktop ? (await desktopFsRead(path)).content : (await fsRead(wsForFs!, path)).content;
+            let beforeText: string;
+            if (existingStaged) {
+              beforeText = existingStaged.content;
+            } else {
+              /* Đọc NGUYÊN VĂN toàn file qua fsReadFull/desktopFsReadFull —
+                 KHÔNG dùng fsRead thường: bản đó cắt 24k ký tự để đớn context,
+                 mà SEARCH/REPLACE dưới đây áp lên beforeText rồi fsWrite/staging
+                 ghi ĐÈ TOÀN FILE → file >24k mất sạch phần đuôi (mất dữ liệu).
+                 File vượt trần đọc full → trả tool error, bắt model chia nhỏ. */
+              const full = isDesktop ? await desktopFsReadFull(path) : await fsReadFull(wsForFs!, path);
+              if (full.status !== 'ok') {
+                return JSON.stringify({
+                  applied: false,
+                  error:
+                    full.status === 'too-large'
+                      ? `File "${path}" quá lớn để fs_edit (trần đọc toàn bộ 512KB). Hãy đọc từng đoạn bằng fs_read rồi áp nhiều lần fs_edit nhỏ.`
+                      : full.status === 'missing'
+                        ? `File "${path}" không tồn tại. Dùng fs_write để tạo file mới.`
+                        : `Không đọc được "${path}": ${'message' in full ? full.message : 'lỗi không rõ'}`,
+                });
+              }
+              beforeText = full.content;
+            }
             let current = beforeText;
             const applied = [];
             for (const block of parsed.blocks) {
@@ -1148,10 +1256,22 @@ export default function ChatInterface() {
             }
             const content = String(args.content ?? '');
             let oldText = '';
-            try {
-              oldText = isDesktop ? (await desktopFsRead(path)).content : (await fsRead(wsForFs!, path)).content;
-            } catch {
-              /* file mới — diff toàn bộ là add */
+            {
+              /* Đọc full như fs_edit: oldText là cơ sở của diff duyệt + original
+                 của staging + đếm dòng cho trần 200 dòng — bản cắt 24k làm user
+                 duyệt diff KHÔNG thấy phần đuôi bị xoá, và file nhiều ký tự dài
+                 lách qua trần dòng. File >512KB → chặn, buộc dùng fs_edit. */
+              const full = isDesktop ? await desktopFsReadFull(path) : await fsReadFull(wsForFs!, path);
+              if (full.status === 'too-large') {
+                return JSON.stringify({
+                  written: false,
+                  error:
+                    `File "${path}" quá lớn để ghi đè toàn bộ (trần đọc 512KB). ` +
+                    'Dùng fs_edit để sửa cục bộ thay vì ghi lại cả file.',
+                });
+              }
+              if (full.status === 'ok') oldText = full.content;
+              /* missing/error → coi như file mới — diff toàn bộ là add (giữ hành vi cũ). */
             }
             /* Large file protection (port Wove, Apache-2.0): chặn full rewrite
                file >200 dòng. Ghi đè file lớn dễ mất nội dung agent chưa đọc
@@ -1279,7 +1399,16 @@ export default function ChatInterface() {
           }
           case 'git_commit': {
             const message = String(args.message ?? '');
-            const approved = await autoApproveShell({ command: `git commit -m "${message.slice(0, 80)}"`, cwd: undefined });
+            /* Lệnh THẬT chạy bridge.git.commit(message) bằng argv an toàn chứ
+               không qua shell — hiển thị "git commit -m \"...cắt 80...\"" là ghép
+               chuỗi shell GIẢ: message chứa dấu " đọc lệch, phần cắt 80 ký tự
+               thì user duyệt khác những gì chạy. Chỉ giữ tiền tố "git commit"
+               (auto-pilot đối chiếu pattern lệnh trên chuỗi này), phần sau là
+               thông điệp NGUYÊN VĂN dạng dữ liệu. */
+            const approved = await autoApproveShell({
+              command: `git commit — thông điệp commit:\n${message}`,
+              cwd: undefined,
+            });
             if (!approved) {
               return JSON.stringify({ approved: false, note: 'Người dùng TỪ CHỐI commit này.' });
             }
@@ -1308,8 +1437,25 @@ export default function ChatInterface() {
                 files: Array.isArray(st.files) ? st.files.filter((f: unknown): f is string => typeof f === 'string') : undefined,
               });
             }
-            // Persist plan vào kv
-            await db.kv.put({ key: `plan:${currentChatId}`, value: JSON.stringify(plan) }).catch(() => {});
+            /* Plan là tài nguyên CỦA CHAT. currentChatId null (draft) mà ghi
+               `plan:null` thì vừa tạo khoá mồ côi không chat nào đọc được, vừa
+               bắt MỌI draft sau này dùng chung một khoá → plan phiên này đè
+               lên phiên khác. Materialize draft thành chat thật theo đúng
+               pattern submitTurn/handleGenerateMedia rồi mới ghi. */
+            let chatId = useAppStore.getState().currentChatId;
+            if (!chatId) {
+              chatId = draftId;
+              hydratedFor.current = chatId;
+              await db.chats.put({
+                id: chatId,
+                title: 'New Chat',
+                pinned: 0,
+                createdAt: Date.now(),
+                updatedAt: Date.now(),
+              });
+              setCurrentChatId(chatId);
+            }
+            await db.kv.put({ key: `plan:${chatId}`, value: JSON.stringify(plan) }).catch(() => {});
             setPlan(plan);
             setPlanHidden(false);
             showNotice(`Đã tạo plan "${title}" với ${plan.subtasks.length} subtask.`);
@@ -1319,17 +1465,20 @@ export default function ChatInterface() {
           case 'plan_update': {
             const subtaskId = String(args.subtaskId ?? '');
             const status = String(args.status ?? '') as SubtaskStatus;
-            // Load plan từ kv
-            const row = await db.kv.get(`plan:${currentChatId}`).catch(() => null);
+            /* Load plan từ kv. Đọc chatId TƯƠI từ store: plan_create trong
+               cùng stream có thể vừa materialize draft thành chat — biến
+               `currentChatId` bắt trong closure lúc đó vẫn là null. */
+            const chatId = useAppStore.getState().currentChatId;
+            const row = chatId ? await db.kv.get(`plan:${chatId}`).catch(() => null) : null;
             const plan = row?.value ? parsePlan(typeof row.value === 'string' ? JSON.parse(row.value) : row.value) : null;
-            if (!plan) {
+            if (!chatId || !plan) {
               return JSON.stringify({ ok: false, error: 'Không tìm thấy plan hiện tại. Gọi plan_create trước.' });
             }
             const updated = updateSubtaskStatus(plan, subtaskId, status);
             if (!updated) {
               return JSON.stringify({ ok: false, error: `Subtask "${subtaskId}" không tồn tại trong plan.` });
             }
-            await db.kv.put({ key: `plan:${currentChatId}`, value: JSON.stringify(updated) }).catch(() => {});
+            await db.kv.put({ key: `plan:${chatId}`, value: JSON.stringify(updated) }).catch(() => {});
             setPlan(updated);
             const prog = planProgress(updated);
             return JSON.stringify({
@@ -1383,30 +1532,28 @@ export default function ChatInterface() {
       autoApproveShell,
       autoApproveDiff,
       readCaptureForPath,
-      /* Bốn giá trị này ĐỌC TRỰC TIẾP trong thân callback (guard plan-mode
-         của fs_edit/fs_write, nhánh staging, chat hiện tại). Thiếu chúng thì
-         callback giữ nguyên giá trị CŨ mãi mãi: người dùng bật PLAN mode giữa
-         phiên mà lớp chặn phía client vẫn dùng 'act' — server có lọc tool rồi,
+      /* Các giá trị này ĐỌC TRỰC TIẾP trong thân callback (guard plan-mode
+         của fs_edit/fs_write, nhánh staging, materialize draft chat). Thiếu
+         chúng thì callback giữ nguyên giá trị CŨ mãi mãi: người dùng bật PLAN
+         mode giữa phiên mà lớp chặn phía client vẫn dùng 'act' — server có lọc
+         tool rồi,
          nhưng đây là lớp bảo vệ thứ hai nên không được phép đóng băng. */
       agentMode,
       stagingEnabled,
       updateStaging,
-      currentChatId,
+      /* plan_create/plan_update đọc chat MỚI NHẤT qua useAppStore.getState()
+         thay vì closure (plan_create có thể materialize draft chat giữa
+         stream), nên ở đây chỉ cần draftId + setCurrentChatId cho nhánh đó. */
+      draftId,
+      setCurrentChatId,
+      /* Luồng mô tả ảnh (fs_read ảnh workspace + ảnh MCP) đọc hai giá trị này
+         trực tiếp. Thiếu chúng: người dùng chọn model vision hoặc đổi Nhà cung
+         cấp giữa phiên mà tool handler vẫn gửi model/headers cũ → /api/vision
+         trả 400/401 dù Cài đặt đã đúng. */
+      visionModel,
+      buildApiHeaders,
     ],
   );
-
-  /** Build API headers cho fetch calls — gộp logic trùng lặp từ useChat + performCompaction. */
-  const buildApiHeaders = useCallback((): Record<string, string> => ({
-    ...(accessCode ? { 'x-access-code': accessCode } : {}),
-    ...(activeProvider?.baseUrl
-      ? {
-          'x-api-base': activeProvider.baseUrl,
-          ...(activeProvider.apiKey ? { 'x-api-key': activeProvider.apiKey } : {}),
-        }
-      : apiKey
-        ? { 'x-api-key': apiKey }
-        : {}),
-  }), [accessCode, activeProvider, apiKey]);
 
   /* ------------------------------------------------------------------ */
   /* Vòng đời run — desired/observed reconciler                          */
@@ -1488,6 +1635,10 @@ export default function ChatInterface() {
       temperature,
       thinkingLevel,
       system: systemPrompt,
+      /* Vision-bridge: model chat không xem được ảnh thì server mô tả ảnh đính
+         kèm bằng model này (cùng provider active) rồi thay vào tin nhắn. Không
+         gửi khi rỗng — server hiểu là tính năng tắt và dùng placeholder text. */
+      ...(visionModel ? { visionModel } : {}),
       /* Cho phép tắt hẳn tool-calling. Server mặc định `?? true`, nên TRƯỚC
          ĐÂY không gửi trường này đồng nghĩa tool luôn bật và người dùng
          không có cách nào huỷ. */
@@ -1984,6 +2135,11 @@ export default function ChatInterface() {
             },
             body: JSON.stringify({
               messages: payload,
+              /* Provider active là nguồn duy nhất: model đang chat được thử
+                 ĐẦU TIÊN cho bản tóm tắt, chuỗi env chỉ là dự phòng. Thiếu
+                 field này thì nén luôn chạy bằng model env — trên provider
+                 BYOK thường là 404 rồi rơi về tóm tắt tất định. */
+              model,
               ...(compactContext ? { context: compactContext } : {}),
             }),
           });
@@ -2070,7 +2226,15 @@ export default function ChatInterface() {
    * `isLoading` nên không hề bị ảnh hưởng.
    */
   const frozenUsageMessagesRef = useRef(messages);
-  if (!isLoading) frozenUsageMessagesRef.current = messages;
+  /* Cập nhật ref qua useEffect chứ KHÔNG mutate ngay trong thân render:
+     đổi ref giữa render khiến hai consumer đọc ref ở cùng một render thấy
+     giá trị khác nhau tuỳ thời điểm, và render bị vứt (StrictMode) vẫn để
+     lại effect cạnh trong ref. Ngữ nghĩa giữ nguyên: chỉ khoá lại khi
+     KHÔNG stream — effect bỏ qua khi isLoading nên ref giữ snapshot cuối
+     trước khi stream bắt đầu. */
+  useEffect(() => {
+    if (!isLoading) frozenUsageMessagesRef.current = messages;
+  }, [isLoading, messages]);
   const messagesForUsage = isLoading ? frozenUsageMessagesRef.current : messages;
 
   const contextUsage = useMemo(() => {
@@ -2212,6 +2376,10 @@ export default function ChatInterface() {
     apiKey,
     providerBase: activeProvider?.baseUrl,
     providerKey: activeProvider?.apiKey,
+    /* Model đang chat được /api/title thử đầu tiên khi có provider active —
+       không gửi thì tiêu đề chạy bằng model env, thường 404 trên gateway BYOK
+       và tụt về tiêu đề heuristic cắt 5 từ. */
+    model,
   });
 
   const reloadTreeFromDatabase = useCallback(async () => {
@@ -2490,14 +2658,14 @@ export default function ChatInterface() {
     })();
 
     return () => {
+      /* Chỉ hủy async đang treo — KHÔNG revoke blob URL ở đây. Cleanup chạy
+         TRƯỚC thân effect kế tiếp, kể cả khi lần chạy đó early-return vì
+         hydratedFor đã khớp chatId (deps ngoài ý muốn đổi danh tính). Revoke
+         trong cleanup lúc đó giết URL mà DOM đang hiển thị → ảnh vỡ vĩnh viễn.
+         Mọi đường THAY messages đều revoke ở đúng lúc trong thân effect (nhánh
+         !currentChatId, và trước khi tạo URL cho chat mới); unmount có effect
+         dọn riêng bên dưới. */
       cancelled = true;
-      /* CỐ Ý đọc .current tại thời điểm cleanup, không snapshot ở đầu effect:
-         `createdObjectUrls` giữ NGUYÊN một Set suốt vòng đời component (chỉ
-         .add/.clear, không bao giờ gán lại), và ta cần revoke đúng những URL
-         ĐANG tồn tại lúc dọn. Snapshot theo gợi ý của lint sẽ bỏ sót mọi URL
-         tạo sau khi effect chạy → rò rỉ blob thật. */
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-      revokeObjectUrls(createdObjectUrls.current);
     };
     // showNotice là useCallback([]) — ổn định vĩnh viễn, thêm vào không gây
     // chạy lại effect nhưng làm lint kiểm tra được đầy đủ.
@@ -4305,7 +4473,7 @@ export default function ChatInterface() {
         <div
           className={[
             'pointer-events-none fixed top-1/2 z-50 -translate-y-1/2',
-            'rounded-full border border-zinc-200 bg-surface-raised/90 px-3.5 py-1.5 text-xs text-zinc-700 shadow-card backdrop-blur',
+            'rounded-full border border-[#495059] bg-[#212730] px-3.5 py-1.5 font-mono text-xs text-[#ebe7e4]',
             'animate-pop-in',
             swipeDirection === 'left' ? 'right-4' : 'left-4',
           ].join(' ')}

@@ -6,6 +6,7 @@ import { getKeyCandidates, markKeyFailure, markKeySuccess, getKeyLabel } from '@
 import { validateProviderBaseUrl } from '@/lib/provider-url';
 import { sharedFreeBudget, acquireUpstreamSlot } from '@/lib/upstream-queue';
 import { filterSupportedModels, markModelUnsupported } from '@/lib/model-negative-cache';
+import { ACTIVE_MODEL_BODY_FIELD, buildActiveModelChain, isActiveProvider } from '@/lib/aux-llm-chain';
 import {
   checkRateLimit,
   rateLimitIdentity,
@@ -45,8 +46,14 @@ const CompactSchema = z.object({
     )
     .min(2)
     .max(MAX_MESSAGES),
-  /** Gợi ý chủ yếu để log/debug; chain thật nằm ở COMPACT_MODEL_CHAIN. */
-  model: z.string().max(64).optional(),
+  /** Model người dùng đang chọn — lên ĐẦU chuỗi thử khi provider active
+      (xem buildActiveModelChain); demo vẫn chỉ dùng COMPACT_MODEL_CHAIN.
+      Dùng field dùng chung với /api/title: regex chặn tên rác (khoảng trắng,
+      ký tự lạ) khỏi được prepend — tên vi phạm chỉ tốn một round-trip 404 và
+      ghi bẩn negative-cache. `.catch(undefined)` để tên rác chỉ bị BỎ QUA,
+      không kéo cả body sang `bad_schema` (mất luôn bản nén, hội thoại rơi về
+      hard-trim vì một field phụ). */
+  model: ACTIVE_MODEL_BODY_FIELD,
   instructions: z.string().max(500).optional(),
   /**
    * Ngữ cảnh CÓ CẤU TRÚC do client trích từ phần bị nén (FileOps, requests,
@@ -189,9 +196,17 @@ export async function POST(req: Request) {
     const candidateKeys = candidateResult.keys.slice(0, 3);
 
     const compactUpstreamBase = providerBase ?? process.env.OPENAI_BASE_URL ?? null;
-    const compactModelChain = compactUpstreamBase
+    const filteredCompactChain = compactUpstreamBase
       ? filterSupportedModels(compactUpstreamBase, COMPACT_MODEL_CHAIN)
       : [...COMPACT_MODEL_CHAIN];
+    /* Provider active là nguồn duy nhất: model người dùng chọn lên ĐẦU chuỗi,
+       env chain chỉ là dự phòng sau nó — model 404 thì còn tên kế để thử,
+       client nhận summary thay vì rớt hard-trim. Demo giữ nguyên hành vi cũ. */
+    const compactModelChain = buildActiveModelChain({
+      providerActive: isActiveProvider(providerBase, customKey),
+      model: parsed.data.model,
+      fallbackChain: filteredCompactChain,
+    });
 
     /* Nội dung hội thoại ghép thành transcript phẳng — attachment đã bị client
        bỏ qua khi đóng gói; chỉ giữ text để tóm tắt rẻ và ổn định. */

@@ -722,7 +722,7 @@ export const CLIENT_TOOL_DEFS = {
       'Đọc nội dung một FILE trong workspace của người dùng (trên máy họ). ' +
       'File TEXT (mã nguồn, cấu hình, tài liệu...): trả nội dung, tối đa 24.000 ký tự tính TỪ start_line ' +
       'trở đi; vượt trần thì kết quả có `truncated: true` — đọc tiếp bằng cách gọi lại với start_line lớn hơn. ' +
-      'File ẢNH (.png/.jpg/.webp/.heic): trả `description` — bản mô tả chi tiết do Gemini vision tạo, ' +
+      'File ẢNH (.png/.jpg/.webp/.heic): trả `description` — bản mô tả chi tiết do model vision của Nhà cung cấp đang bật tạo (qua /api/vision), ' +
       'kèm transcribe nguyên văn mọi chữ trong ảnh; dùng để xem ảnh, screenshot, diagram trong workspace. ' +
       'Định dạng khác (PDF, font, video, file nén) bị từ chối — với PDF/tài liệu hãy bảo người dùng đính kèm vào khung chat. ' +
       'Với file text lớn, nên dùng fs_search để định vị trước rồi đọc quanh vùng đó bằng ' +

@@ -10,7 +10,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
-const { McpManager } = require('../electron/mcp/manager.cjs') as {
+const { McpManager } = require('../lib/mcp/manager.cjs') as {
   McpManager: new () => any;
 };
 

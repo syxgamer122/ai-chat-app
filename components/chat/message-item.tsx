@@ -18,9 +18,37 @@ export function AssistantAvatar() {
   return (
     <div
       aria-hidden="true"
-      className="mt-0.5 flex h-7 w-7 flex-shrink-0 select-none items-center justify-center rounded-full bg-zinc-900 dark:bg-gradient-to-br dark:from-aurora-from/20 dark:via-aurora-via/15 dark:to-aurora-to/20 dark:shadow-[0_0_12px_rgb(var(--aurora-from)/0.2)]"
+      className="mt-0.5 flex h-7 w-7 flex-shrink-0 select-none items-center justify-center rounded-none border border-[#495059] bg-[#212730] text-[#6a9fcc]"
     >
-      <VyenMark size={14} className="text-white dark:text-aurora-from" />
+      <VyenMark size={14} />
+    </div>
+  );
+}
+
+function ThinkingBlock({ reasoning, isStreaming }: { reasoning: string; isStreaming: boolean }) {
+  const [open, setOpen] = useState(false);
+  const lines = reasoning.trim().split('\n').filter(Boolean);
+  const preview = lines[lines.length - 1] || 'thinking...';
+
+  return (
+    <div className="my-2 rounded-none border border-[#495059] bg-[#161d27] p-2 text-xs font-mono">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="flex w-full items-baseline justify-between gap-2 text-left text-[11px] text-[#6a9fcc] hover:text-[#ebe7e4]"
+      >
+        <span className="flex min-w-0 items-baseline gap-1.5 italic">
+          <span className="font-semibold not-italic">thinking</span>
+          {isStreaming && <span className="terminal-cursor not-italic" aria-hidden="true" />}
+          {!open && <span className="truncate text-[#9fa4ab]">· {preview}</span>}
+        </span>
+        <span className="flex-shrink-0 text-[10px] text-[#9fa4ab]">[{open ? 'hide' : 'expand'}]</span>
+      </button>
+      {open && (
+        <div className="mt-2 max-h-60 overflow-y-auto whitespace-pre-wrap border-l border-[#495059] pl-2.5 font-mono text-[11.5px] italic leading-relaxed text-[#9fa4ab]">
+          {reasoning}
+        </div>
+      )}
     </div>
   );
 }
@@ -68,13 +96,13 @@ function ActionButton({
       onClick={onClick}
       aria-label={label}
       title={label}
-      className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors ${
+      className={`relative flex h-6 w-6 items-center justify-center rounded-none transition-colors after:absolute after:-inset-[10px] after:content-[''] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[#6a9fcc] ${
         active
-          ? 'bg-white/10 text-emerald-400'
-          : 'text-slate-500 hover:bg-white/10 hover:text-slate-300'
+          ? 'bg-[#252f3d] text-[#6a9fcc]'
+          : 'text-[#9fa4ab] hover:bg-[#252f3d] hover:text-[#ebe7e4]'
       }`}
     >
-      <Icon size={14} />
+      <Icon size={13} />
     </button>
   );
 }
@@ -107,12 +135,12 @@ export const MessageItem = memo(
 
     if (m.role === 'user') {
       return (
-        <div className="group flex w-full justify-end px-4 py-1">
-          <div className="flex max-w-[85%] md:max-w-[70%] flex-col items-end gap-1">
+        <div className="group flex w-full justify-end px-4 py-1.5">
+          <div className="flex max-w-[88%] md:max-w-[72%] flex-col items-end gap-1">
             {m.experimental_attachments && m.experimental_attachments.length > 0 && (
               <div className="mb-2 flex flex-wrap gap-2 justify-end">
                 {m.experimental_attachments.map((att, idx) => (
-                  <div key={idx} className="relative overflow-hidden rounded-xl border border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900">
+                  <div key={idx} className="relative overflow-hidden rounded-none border border-[#495059] bg-[#212730]">
                     {att.contentType?.startsWith('image/') ? (
                       <img
                         src={att.url}
@@ -124,8 +152,8 @@ export const MessageItem = memo(
                         onError={onContentResize}
                       />
                     ) : (
-                      <div className="flex items-center gap-2 px-3 py-2 text-xs text-zinc-600 dark:text-zinc-400">
-                        <Paperclip size={12} className="text-zinc-400" />
+                      <div className="flex items-center gap-2 px-3 py-2 text-xs font-mono text-[#ebe7e4]">
+                        <Paperclip size={12} className="text-[#6a9fcc]" />
                         <span className="truncate max-w-[150px]">{att.name}</span>
                       </div>
                     )}
@@ -135,7 +163,7 @@ export const MessageItem = memo(
             )}
 
             {isEditing ? (
-              <div className="flex w-full min-w-[280px] flex-col gap-2 rounded-xl border border-zinc-200 bg-white p-3 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+              <div className="flex w-full min-w-[280px] flex-col gap-2 rounded-none border border-[#495059] bg-[#161d27] p-3">
                 <TextareaAutosize
                   value={draft}
                   onChange={(e) => onDraftChange(e.target.value)}
@@ -147,28 +175,28 @@ export const MessageItem = memo(
                     if (e.key === 'Escape') onCancelEdit();
                   }}
                   aria-label="Sửa nội dung tin nhắn"
-                  className="w-full resize-none bg-transparent text-sm text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-zinc-100"
+                  className="w-full resize-none bg-transparent font-mono text-sm text-[#ebe7e4] outline-none placeholder:text-[#9fa4ab]"
                   autoFocus
                 />
-                <div className="flex justify-end gap-2 border-t border-zinc-100 pt-2 text-xs dark:border-zinc-900">
+                <div className="flex justify-end gap-2 border-t border-[#495059] pt-2 text-xs font-mono">
                   <button
                     type="button"
                     onClick={onCancelEdit}
-                    className="rounded-md px-2.5 py-1 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-900 dark:hover:text-zinc-300"
+                    className="rounded-none px-2.5 py-1 text-[#9fa4ab] transition-colors hover:bg-[#252f3d] hover:text-[#ebe7e4]"
                   >
                     Hủy
                   </button>
                   <button
                     type="button"
                     onClick={() => onSaveEdit(m.id)}
-                    className="rounded-md bg-zinc-900 px-3 py-1 font-medium text-white transition-colors hover:bg-zinc-800 dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-100"
+                    className="rounded-none bg-[#6a9fcc] px-3 py-1 font-medium text-[#0d1116] transition-colors hover:bg-[#6a9fcc]/85"
                   >
                     Lưu & Gửi lại
                   </button>
                 </div>
               </div>
             ) : (
-              <div className="relative rounded-2xl rounded-br-sm bg-gradient-to-br from-emerald-600/60 to-cyan-600/60 px-4 py-2.5 text-[15px] leading-relaxed text-white shadow-lg backdrop-blur-md border border-emerald-400/20">
+              <div className="relative rounded-none border border-[#495059] bg-[#212730] px-4 py-2.5 text-[17px] leading-relaxed text-[#ebe7e4]">
                 <div
                   className={`claude-prose claude-prose-bubble ${
                     isLongUserMsg && !isExpanded ? 'relative max-h-36 overflow-hidden' : ''
@@ -183,7 +211,7 @@ export const MessageItem = memo(
                   </ErrorBoundary>
 
                   {isLongUserMsg && !isExpanded && (
-                    <div className="pointer-events-none absolute bottom-0 left-0 right-0 h-12 bg-gradient-to-t from-emerald-700/60 via-emerald-600/40 to-transparent" />
+                    <div className="pointer-events-none absolute bottom-0 left-0 right-0 h-12 bg-gradient-to-t from-[#212730] via-[#212730]/70 to-transparent" />
                   )}
                 </div>
 
@@ -192,7 +220,7 @@ export const MessageItem = memo(
                     type="button"
                     onClick={() => setIsExpanded((prev) => !prev)}
                     aria-expanded={isExpanded}
-                    className="mt-1 inline-flex items-center gap-1 text-[11px] font-medium text-emerald-200/80 transition-colors hover:text-white"
+                    className="mt-1.5 inline-flex items-center gap-1 font-mono text-[11px] font-medium text-[#6a9fcc] transition-colors hover:text-[#ebe7e4]"
                   >
                     {isExpanded ? (
                       <>
@@ -211,7 +239,7 @@ export const MessageItem = memo(
             )}
 
             {!isEditing && (
-              <div className="msg-actions mt-0.5 flex items-center gap-0.5">
+              <div className="msg-actions mt-0.5 flex items-center gap-1">
                 {branchInfo && (
                   <BranchSwitcher
                     currentIndex={branchInfo.currentIndex}
@@ -248,7 +276,7 @@ export const MessageItem = memo(
           {m.experimental_attachments && m.experimental_attachments.length > 0 && (
             <div className="flex flex-wrap gap-2">
               {m.experimental_attachments.map((att, idx) => (
-                <div key={idx} className="relative overflow-hidden rounded-xl border border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900">
+                <div key={idx} className="relative overflow-hidden rounded-none border border-[#495059] bg-[#212730]">
                   {att.contentType?.startsWith('image/') ? (
                     <img
                       src={att.url}
@@ -260,8 +288,8 @@ export const MessageItem = memo(
                       onError={onContentResize}
                     />
                   ) : (
-                    <div className="flex items-center gap-2 px-3 py-2 text-xs text-zinc-600 dark:text-zinc-400">
-                      <Paperclip size={12} className="text-zinc-400" />
+                    <div className="flex items-center gap-2 px-3 py-2 text-xs font-mono text-[#ebe7e4]">
+                      <Paperclip size={12} className="text-[#6a9fcc]" />
                       <span className="truncate max-w-[150px]">{att.name}</span>
                     </div>
                   )}
@@ -270,12 +298,6 @@ export const MessageItem = memo(
             </div>
           )}
 
-          {/* Provenance "adopted từ Orchestrator": message assistant được chép
-              từ panel Orchestrator mang annotation orchestratorAdopted (persist
-              qua Dexie). Badge đứng trên ToolTrace và nội dung để người đọc
-              thấy nguồn gốc trước; message thường không có annotation này →
-              không render gì. Memo comparison dưới đã so annotations bằng
-              reference nên badge cập nhật đúng khi annotations đổi. */}
           {(() => {
             const adopted = getOrchestratorAdoptedAnnotation(
               (m as any).annotations as unknown[] | undefined,
@@ -291,17 +313,16 @@ export const MessageItem = memo(
             }> | undefined}
           />
 
-          {isStreaming && typeof (m as any).reasoning === 'string' && (m as any).reasoning.trim() && (
-            <p role="status" className="flex items-center gap-2 text-[12px] text-zinc-500">
-              <span className="h-1.5 w-1.5 flex-shrink-0 animate-pulse rounded-full bg-zinc-400" />
-              <span className="truncate">
-                {(m as any).reasoning.trim().split('\n').filter(Boolean).slice(-1)[0]}
-              </span>
-            </p>
-          )}
+          {(() => {
+            const reasoning = (m as any).reasoning;
+            if (typeof reasoning === 'string' && reasoning.trim()) {
+              return <ThinkingBlock reasoning={reasoning} isStreaming={isStreaming} />;
+            }
+            return null;
+          })()}
 
           <div
-            className={`claude-prose text-slate-300 ${isStreaming ? 'streaming-caret' : ''}`}
+            className={`claude-prose text-[#ebe7e4] ${isStreaming ? 'streaming-caret' : ''}`}
             aria-busy={isStreaming}
           >
             <ErrorBoundary resetKey={`${m.id}:${m.content.length}`}>
@@ -317,13 +338,13 @@ export const MessageItem = memo(
             const { truncated, message: note } = getFinishInfo(m);
             if (!truncated || isStreaming) return null;
             return (
-              <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-300 backdrop-blur-sm">
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-none border border-[#e8993a]/30 bg-[#161d27] px-3 py-2 text-xs font-mono text-[#e8993a]">
                 <span className="min-w-0">{note ?? 'Câu trả lời có thể chưa hoàn chỉnh.'}</span>
                 {onContinueGenerating && (
                   <button
                     type="button"
                     onClick={onContinueGenerating}
-                    className="flex-shrink-0 rounded-md bg-amber-600 px-2.5 py-1 font-medium text-white transition-colors hover:bg-amber-700"
+                    className="flex-shrink-0 rounded-none bg-[#e8993a] px-2.5 py-1 font-medium text-[#0d1116] transition-colors hover:bg-[#e8993a]/85"
                   >
                     Viết tiếp
                   </button>
@@ -333,15 +354,15 @@ export const MessageItem = memo(
           })()}
 
           {m.role === 'assistant' && (m as any).status === 'aborted' && (
-            <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-white/10 pt-2">
+            <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-[#495059] pt-2 font-mono">
               <div className="flex items-center gap-1.5">
                 <MessageStatusBadge status="aborted" />
-                <span className="text-[11px] text-zinc-400">· Bạn có thể tạo lại</span>
+                <span className="text-[11px] text-[#9fa4ab]">· Bạn có thể tạo lại</span>
               </div>
               <button
                 type="button"
                 onClick={() => onRegenerate(m.id)}
-                className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-900 dark:hover:text-zinc-100"
+                className="inline-flex items-center gap-1 rounded-none px-2 py-1 text-[11px] text-[#6a9fcc] transition-colors hover:bg-[#252f3d] hover:text-[#ebe7e4]"
               >
                 <RefreshCcw size={12} />
                 <span>Tạo nhánh mới</span>
@@ -350,7 +371,7 @@ export const MessageItem = memo(
           )}
 
           {!isStreaming && (
-            <div className="msg-actions -ml-1 flex items-center gap-0.5 pt-1">
+            <div className="msg-actions -ml-1 flex items-center gap-1 pt-1">
               <ActionButton
                 icon={isCopied ? Check : Copy}
                 onClick={() => onCopy(m)}

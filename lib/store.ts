@@ -115,8 +115,29 @@ export function isPermissionOverride(v: unknown): v is PermissionOverride {
   return v === 'default' || v === 'auto' || v === 'ask' || v === 'deny';
 }
 
+/**
+ * Tên model có gửi được lên route LLM hay không. Mọi route (chat/title/compact/
+ * vision) validate field `model` bằng CÙNG ràng buộc: chữ-số cùng `. - : ~ /`,
+ * tối đa 120 ký tự — vì tên đó được chuyển thẳng lên gateway.
+ *
+ * Client phải tự lọc TRƯỚC khi gửi: `visionModel` trong body /api/chat không có
+ * `.catch(undefined)` như hai route phụ, nên một id lạ của gateway (kiểu
+ * `@cf/...`) sẽ làm cả request chat trả 400 vì một field phụ của tính năng ảnh.
+ */
+export function isApiModelId(v: string): boolean {
+  return /^[\w.\-:~/]{1,120}$/.test(v);
+}
+
 export interface Settings {
   model: string;
+  /**
+   * Model dùng để MÔ TẢ ẢNH thành text (fs_read ảnh trong workspace, ảnh do
+   * tool MCP trả về, ảnh đính kèm khi model chat không xem được ảnh).
+   * Vyen không đoán được model nào của gateway nhìn được ảnh, nên người dùng
+   * tự chọn trong Cài đặt → Nhà cung cấp. Rỗng = tính năng ảnh tắt (client
+   * không gọi /api/vision, ảnh bị thay bằng ghi chú/placeholder text).
+   */
+  visionModel: string;
   temperature: number;
   /** Mức suy luận gửi kèm request — chỉ gateway crax dịch được giá trị này. */
   thinkingLevel: ThinkingLevel;
@@ -192,12 +213,18 @@ interface AppState {
 
 const DEFAULT_SETTINGS: Settings = {
   model: DEFAULT_MODEL_ID,
+  visionModel: '',
   temperature: 0.7,
   thinkingLevel: DEFAULT_THINKING_LEVEL,
   systemPrompt:
     'You are a helpful, brilliant AI assistant. Use Markdown and LaTeX when appropriate. ' +
     'For LaTeX math, always use $$...$$ for block math and \\(...\\) for inline math.',
-  perf: { throttleMs: 150, animations: true },
+  /* throttleMs 50 (trước đây 150): gom render 150ms làm token hiển thị từng
+     lô trễ rõ rệt trong lúc stream. 50ms vẫn gom đủ để máy yếu không vẽ từng
+     ký tự nhưng cảm giác "token chạy ngay". CHỈ là mặc định cho phiên mới —
+     perf được persist, ai đã chỉnh slider (settings-dialog) thì giữ nguyên
+     giá trị của họ qua merge. */
+  perf: { throttleMs: 50, animations: true },
   sendOnEnter: true,
   autoCompact: true,
   webSearch: false,
@@ -258,6 +285,9 @@ export const useAppStore = create<AppState>()(
         theme: s.theme,
         settings: {
           model: s.settings.model,
+          /* Lựa chọn của người dùng (không suy ra được từ đâu khác) → phải
+             sống qua reload, nếu không mỗi lần mở lại app là luồng ảnh tắt. */
+          visionModel: s.settings.visionModel,
           temperature: s.settings.temperature,
           thinkingLevel: s.settings.thinkingLevel,
           systemPrompt: s.settings.systemPrompt,
@@ -265,6 +295,11 @@ export const useAppStore = create<AppState>()(
           sendOnEnter: s.settings.sendOnEnter,
           autoCompact: s.settings.autoCompact,
           webSearch: s.settings.webSearch,
+          /* Hai toggle tool cũng là lựa chọn của người dùng bấm trong composer
+             (gửi kèm mỗi request lên server) — thiếu khoá này là F5 mất cài
+             đặt: agentTools tắt tự bật lại, forceEmulatedTools bật tự tắt. */
+          agentTools: s.settings.agentTools,
+          forceEmulatedTools: s.settings.forceEmulatedTools,
           agentMode: s.settings.agentMode,
           stagingSandbox: s.settings.stagingSandbox,
           autoPilot: s.settings.autoPilot,
@@ -292,6 +327,13 @@ export const useAppStore = create<AppState>()(
             ...current.settings,
             ...(p.settings ?? {}),
             model: validModel,
+            /* Model vision không qua normalizeModelId: nó là id của gateway do
+               người dùng khai, không thuộc catalog built-in. Chỉ chặn giá trị
+               không phải string (storage bị sửa tay/rác) → về mặc định. */
+            visionModel:
+              typeof p.settings?.visionModel === 'string'
+                ? p.settings.visionModel
+                : current.settings.visionModel,
             thinkingLevel: isThinkingLevel(p.settings?.thinkingLevel)
               ? p.settings.thinkingLevel
               : DEFAULT_THINKING_LEVEL,

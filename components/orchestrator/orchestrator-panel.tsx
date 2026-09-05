@@ -129,21 +129,26 @@ export function OrchestratorPanel({
       onClick={busy ? undefined : onClose}
     >
       <div
-        className="flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-zinc-300 bg-surface-raised shadow-panel dark:border-zinc-700"
+        className="pi-frame relative flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-none border border-[#495059] bg-[#212730] font-mono text-[#ebe7e4]"
         onClick={(e) => e.stopPropagation()}
       >
+        <span className="pi-corner-tl" />
+        <span className="pi-corner-tr" />
+        <span className="pi-corner-bl" />
+        <span className="pi-corner-br" />
+
         {/* Header */}
-        <div className="flex items-start justify-between gap-3 border-b border-zinc-200 px-4 py-3">
+        <div className="flex items-start justify-between gap-3 border-b border-[#495059] bg-[#161d27] px-4 py-3">
           <div className="min-w-0">
-            <div className="flex items-center gap-1.5 text-sm font-semibold text-zinc-900">
-              <Network size={15} className="text-[rgb(var(--brand))]" />
-              Orchestrator
-              <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium text-zinc-600">
+            <div className="flex items-center gap-1.5 font-pixel text-[16px] font-semibold text-[#ebe7e4] [image-rendering:pixelated]">
+              <Network size={15} className="text-[#6a9fcc]" />
+              <span>Orchestrator</span>
+              <span className="rounded-none border border-[#495059] bg-[#161b22] px-1.5 py-0.5 font-mono text-[10px] text-[#6a9fcc]">
                 {busy && <Loader2 size={9} className="mr-1 inline animate-spin" />}
                 {PHASE_LABEL[state.phase]}
               </span>
             </div>
-            <div className="mt-0.5 line-clamp-2 text-[11px] text-zinc-600">
+            <div className="mt-0.5 line-clamp-2 font-mono text-[11px] text-[#9fa4ab]">
               {state.plan?.goal || goalDraft || 'Chưa có mục tiêu'}
             </div>
           </div>
@@ -151,7 +156,7 @@ export function OrchestratorPanel({
             type="button"
             onClick={onClose}
             aria-label="Đóng"
-            className="flex-shrink-0 rounded p-1 text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800"
+            className="icon-btn-sm text-[#9fa4ab] hover:text-[#ebe7e4]"
           >
             <X size={16} />
           </button>
@@ -160,10 +165,10 @@ export function OrchestratorPanel({
         <div className="flex-1 space-y-4 overflow-auto p-4">
           {/* Thiết lập — chỉ hiện khi chưa chạy */}
           {state.phase === 'idle' && (
-            <div className="space-y-2 rounded-lg border border-zinc-200 p-3">
+            <div className="space-y-2 rounded-none border border-[#495059] bg-[#161b22] p-3">
               <label
                 htmlFor="orch-goal"
-                className="block text-[11px] font-semibold uppercase tracking-wide text-zinc-500"
+                className="block text-[11px] font-semibold uppercase tracking-wide text-[#6a9fcc]"
               >
                 Mục tiêu
               </label>
@@ -173,15 +178,15 @@ export function OrchestratorPanel({
                 onChange={(e) => setGoalDraft(e.target.value)}
                 rows={3}
                 placeholder="Ví dụ: giải thích vì sao Next.js App Router không còn getServerSideProps"
-                className="w-full resize-y rounded-lg border border-zinc-300 bg-surface-raised px-2.5 py-2 text-[13px] text-zinc-800 outline-none placeholder:text-zinc-400 focus:border-[rgb(var(--brand))]"
+                className="w-full resize-y rounded-none border border-[#495059] bg-[#0d1116] px-2.5 py-2 font-mono text-[13px] text-[#ebe7e4] outline-none placeholder:text-[#9fa4ab]/60 focus:border-[#6a9fcc]"
               />
-              <div className="flex flex-wrap items-center gap-3 text-[11px] text-zinc-600">
+              <div className="flex flex-wrap items-center gap-3 text-[11px] text-[#9fa4ab]">
                 <label className="inline-flex items-center gap-1.5">
                   Số cấu hình
                   <select
                     value={maxRuns}
                     onChange={(e) => setMaxRuns(Number(e.target.value))}
-                    className="rounded border border-zinc-300 bg-surface-raised px-1.5 py-0.5 text-[11px] text-zinc-800"
+                    className="rounded-none border border-[#495059] bg-[#0d1116] px-1.5 py-0.5 font-mono text-[11px] text-[#ebe7e4] outline-none"
                   >
                     {RUN_OPTIONS.map((n) => (
                       <option key={n} value={n}>
@@ -195,7 +200,7 @@ export function OrchestratorPanel({
                     type="checkbox"
                     checked={judge}
                     onChange={(e) => setJudge(e.target.checked)}
-                    className="h-3.5 w-3.5 accent-teal-700"
+                    className="h-3.5 w-3.5 accent-[#6a9fcc]"
                   />
                   Chấm điểm từng kết quả (thêm ~{maxRuns} lượt gọi)
                 </label>
@@ -204,11 +209,11 @@ export function OrchestratorPanel({
                 type="button"
                 disabled={!goalDraft.trim()}
                 onClick={() => onRun({ goal: goalDraft.trim(), maxRuns, judge })}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-[rgb(var(--brand))] px-3 py-1.5 text-[12px] font-semibold text-white hover:bg-[rgb(var(--brand-hover))] disabled:opacity-40"
+                className="inline-flex items-center gap-1.5 rounded-none bg-[#6a9fcc] px-3.5 py-1.5 font-mono text-[12px] font-semibold text-[#0d1116] transition-colors hover:bg-[#89b8e0] disabled:opacity-40"
               >
                 <Play size={13} /> Chạy lưới
               </button>
-              <p className="text-[11px] leading-relaxed text-zinc-500">
+              <p className="text-[11px] leading-relaxed text-[#9fa4ab]">
                 Mỗi ô trong lưới là MỘT agent giải cùng mục tiêu theo một cấu hình KHÁC NHAU. Kết quả
                 được chấm, xếp hạng rồi tổng hợp — bạn nhìn được cả lưới chứ không chỉ câu trả lời
                 cuối cùng.
@@ -219,7 +224,7 @@ export function OrchestratorPanel({
           {/* Tiến độ */}
           {state.total > 0 && (
             <div className="space-y-1">
-              <div className="flex items-center justify-between text-[11px] text-zinc-600">
+              <div className="flex items-center justify-between text-[11px] text-[#9fa4ab]">
                 <span>
                   {state.done}/{state.total} cấu hình
                   {state.stats ? ` · ${state.stats.ok} thành công` : ''}
@@ -233,25 +238,25 @@ export function OrchestratorPanel({
 
           {/* Lưới tham số */}
           {state.plan && (
-            <div className="rounded-lg border border-zinc-200 p-3">
-              <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">
+            <div className="rounded-none border border-[#495059] bg-[#161b22] p-3">
+              <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-[#6a9fcc]">
                 Lưới tham số
               </div>
               <div className="flex flex-wrap gap-1.5">
                 {state.plan.axes.map((a) => (
                   <span
                     key={a.name}
-                    className="rounded border border-zinc-200 bg-surface-muted px-1.5 py-0.5 text-[11px] text-zinc-700"
+                    className="rounded-none border border-[#495059] bg-[#212730] px-1.5 py-0.5 text-[11px] text-[#ebe7e4]"
                   >
                     <span className="font-medium">{a.name}</span>
-                    <span className="text-zinc-500"> ({a.values.length}): </span>
+                    <span className="text-[#9fa4ab]"> ({a.values.length}): </span>
                     {a.values.join(' / ')}
                   </span>
                 ))}
-                {!state.plan.axes.length && <span className="text-[11px] text-zinc-500">Lưới mặc định</span>}
+                {!state.plan.axes.length && <span className="text-[11px] text-[#9fa4ab]">Lưới mặc định</span>}
               </div>
               {state.plan.criteria.length > 0 && (
-                <ul className="mt-2 space-y-0.5 text-[11px] text-zinc-600">
+                <ul className="mt-2 space-y-0.5 text-[11px] text-[#9fa4ab]">
                   {state.plan.criteria.map((c) => (
                     <li key={c}>· {c}</li>
                   ))}
@@ -262,20 +267,20 @@ export function OrchestratorPanel({
 
           {/* Bảng kết quả */}
           {rows.length > 0 && (
-            <div className="overflow-hidden rounded-lg border border-zinc-200">
-              <div className="border-b border-zinc-200 bg-surface-muted px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">
+            <div className="overflow-hidden rounded-none border border-[#495059] bg-[#161b22]">
+              <div className="border-b border-[#495059] bg-[#1c2128] px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-[#6a9fcc]">
                 Bản ghi theo cấu hình
               </div>
-              <ul className="divide-y divide-zinc-200">
+              <ul className="divide-y divide-[#495059]">
                 {rows.map((r, i) => (
                   <li key={`${r.cellIndex}-${r.key}`}>
                     <button
                       type="button"
                       onClick={() => setExpanded(expanded === i ? null : i)}
-                      className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-surface-muted"
+                      className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-[#212730]"
                     >
                       <StatusDot status={r.status} />
-                      <span className="min-w-0 flex-1 truncate text-[12px] text-zinc-800">
+                      <span className="min-w-0 flex-1 truncate text-[12px] text-[#ebe7e4]">
                         {describeCell({ index: r.cellIndex, key: r.key, coords: r.coords })}
                       </span>
                       {/* Vòng lặp tự sửa: cell đang được spawn lại (lỗi tạm
@@ -294,7 +299,7 @@ export function OrchestratorPanel({
                                 ? `Lỗi tạm thời (429/5xx/timeout) — đang thử lại lần ${live}`
                                 : `Đã cần ${final} lần thử — lỗi tạm thời được tự động sửa`
                             }
-                            className="flex flex-shrink-0 items-center gap-0.5 rounded bg-amber-100 px-1 py-0.5 text-[10px] font-medium tabular-nums text-amber-700"
+                            className="flex flex-shrink-0 items-center gap-0.5 rounded-none border border-[#e8993a]/40 bg-[#231a10] px-1 py-0.5 text-[10px] font-medium tabular-nums text-[#e8993a]"
                           >
                             <RotateCw size={9} />
                             {n}
@@ -306,14 +311,14 @@ export function OrchestratorPanel({
                           <Bar value={r.score ?? 0} />
                         </span>
                       )}
-                      <span className="w-20 flex-shrink-0 text-right text-[10px] tabular-nums text-zinc-500">
+                      <span className="w-20 flex-shrink-0 text-right text-[10px] tabular-nums text-[#9fa4ab]">
                         {r.status === 'ok' ? `${(r.latencyMs / 1000).toFixed(1)}s · ${r.chars} chữ` : r.status === 'aborted' ? 'đã huỷ' : 'lỗi'}
                       </span>
                     </button>
                     {expanded === i && (
-                      <div className="border-t border-zinc-200 bg-surface-muted/60 px-3 py-2">
-                        {r.error && <div className="mb-1 text-[11px] text-red-600">{r.error}</div>}
-                        <div className="max-h-56 overflow-auto whitespace-pre-wrap text-[12px] leading-relaxed text-zinc-800">
+                      <div className="border-t border-[#495059] bg-[#161b22] px-3 py-2">
+                        {r.error && <div className="mb-1 text-[11px] text-[#e8704f]">{r.error}</div>}
+                        <div className="max-h-56 overflow-auto whitespace-pre-wrap text-[12px] leading-relaxed text-[#7ea3c7]">
                           {r.output || '(không có nội dung)'}
                         </div>
                       </div>
@@ -326,8 +331,8 @@ export function OrchestratorPanel({
 
           {/* Heatmap + group-by */}
           {state.heatmap && state.heatmap.xLevels.length > 0 && state.heatmap.yLevels.length > 0 && (
-            <div className="rounded-lg border border-zinc-200 p-3">
-              <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">
+            <div className="rounded-none border border-[#495059] bg-[#161b22] p-3">
+              <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-[#6a9fcc]">
                 Heatmap — điểm trung bình
               </div>
               <div className="overflow-x-auto">
@@ -337,8 +342,8 @@ export function OrchestratorPanel({
           )}
 
           {state.groups.length > 0 && (
-            <div className="rounded-lg border border-zinc-200 p-3">
-              <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">
+            <div className="rounded-none border border-[#495059] bg-[#161b22] p-3">
+              <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-[#6a9fcc]">
                 Điểm theo từng mức
               </div>
               <div className="grid gap-4 sm:grid-cols-2">
@@ -351,11 +356,11 @@ export function OrchestratorPanel({
 
           {/* Lỗi */}
           {state.errors.length > 0 && (
-            <div className="rounded-lg border border-red-200 bg-red-50/60 p-3">
-              <div className="mb-1 flex items-center gap-1.5 text-[11px] font-semibold text-red-700">
+            <div className="rounded-none border border-[#e8704f]/40 bg-[#241313] p-3">
+              <div className="mb-1 flex items-center gap-1.5 text-[11px] font-semibold text-[#e8704f]">
                 <AlertTriangle size={12} /> Ghi chú
               </div>
-              <ul className="space-y-0.5 text-[11px] text-red-700">
+              <ul className="space-y-0.5 text-[11px] text-[#e8704f]">
                 {state.errors.map((e, i) => (
                   <li key={`${i}-${e}`}>· {e}</li>
                 ))}
@@ -365,30 +370,30 @@ export function OrchestratorPanel({
 
           {/* Kết quả cuối */}
           {state.answer && (
-            <div className="rounded-lg border border-zinc-200 p-3">
-              <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">
+            <div className="rounded-none border border-[#495059] bg-[#161b22] p-3">
+              <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-[#6a9fcc]">
                 Câu trả lời tổng hợp
               </div>
-              <div className="prose prose-sm max-w-none text-zinc-800">
+              <div className="claude-prose text-[#ebe7e4] text-xs leading-relaxed">
                 <MarkdownRenderer content={state.answer} />
               </div>
             </div>
           )}
 
           {busy && !rows.length && (
-            <div className="flex items-center gap-2 py-8 text-[12px] text-zinc-500">
-              <Loader2 size={14} className="animate-spin" /> Đang chuẩn bị lưới tham số…
+            <div className="flex items-center gap-2 py-8 text-[12px] text-[#9fa4ab]">
+              <Loader2 size={14} className="animate-spin text-[#6a9fcc]" /> Đang chuẩn bị lưới tham số…
             </div>
           )}
         </div>
 
         {/* Footer */}
-        <div className="flex flex-wrap items-center justify-end gap-2 border-t border-zinc-200 px-4 py-3">
+        <div className="flex flex-wrap items-center justify-end gap-2 border-t border-[#495059] bg-[#1c2128] px-4 py-3">
           {busy ? (
             <button
               type="button"
               onClick={onCancel}
-              className="rounded-lg border border-zinc-300 px-3 py-1.5 text-[12px] font-medium text-zinc-700 hover:bg-zinc-100"
+              className="rounded-none border border-[#495059] bg-[#212730] px-3 py-1.5 font-mono text-[12px] font-medium text-[#ebe7e4] hover:border-[#757d89] hover:bg-[#252f3d]"
             >
               Dừng
             </button>
@@ -397,7 +402,7 @@ export function OrchestratorPanel({
               <button
                 type="button"
                 onClick={onClose}
-                className="rounded-lg border border-zinc-300 px-3 py-1.5 text-[12px] font-medium text-zinc-700 hover:bg-zinc-100"
+                className="rounded-none border border-[#495059] bg-[#212730] px-3 py-1.5 font-mono text-[12px] font-medium text-[#ebe7e4] hover:border-[#757d89] hover:bg-[#252f3d]"
               >
                 Đóng
               </button>
@@ -406,7 +411,7 @@ export function OrchestratorPanel({
                   type="button"
                   disabled={!goalDraft.trim()}
                   onClick={() => onRun({ goal: goalDraft.trim(), maxRuns, judge })}
-                  className="rounded-lg border border-zinc-300 px-3 py-1.5 text-[12px] font-medium text-zinc-700 hover:bg-zinc-100 disabled:opacity-40"
+                  className="rounded-none border border-[#495059] bg-[#212730] px-3 py-1.5 font-mono text-[12px] font-medium text-[#ebe7e4] hover:border-[#757d89] hover:bg-[#252f3d] disabled:opacity-40"
                 >
                   Chạy lại
                 </button>
@@ -415,9 +420,9 @@ export function OrchestratorPanel({
                 type="button"
                 onClick={copy}
                 disabled={!state.answer}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 px-3 py-1.5 text-[12px] font-medium text-zinc-700 hover:bg-zinc-100 disabled:opacity-40"
+                className="inline-flex items-center gap-1.5 rounded-none border border-[#495059] bg-[#212730] px-3 py-1.5 font-mono text-[12px] font-medium text-[#ebe7e4] hover:border-[#757d89] hover:bg-[#252f3d] disabled:opacity-40"
               >
-                {copied ? <Check size={13} /> : <Copy size={13} />}
+                {copied ? <Check size={13} className="text-[#64c2b3]" /> : <Copy size={13} />}
                 {copied ? 'Đã chép' : 'Sao chép'}
               </button>
               <button
@@ -427,7 +432,7 @@ export function OrchestratorPanel({
                   onClose();
                 }}
                 disabled={!state.answer}
-                className="rounded-lg border border-zinc-300 px-3 py-1.5 text-[12px] font-medium text-zinc-700 hover:bg-zinc-100 disabled:opacity-40"
+                className="rounded-none border border-[#495059] bg-[#212730] px-3 py-1.5 font-mono text-[12px] font-medium text-[#ebe7e4] hover:border-[#757d89] hover:bg-[#252f3d] disabled:opacity-40"
               >
                 Đưa vào ô nhập
               </button>
@@ -442,7 +447,7 @@ export function OrchestratorPanel({
                 }}
                 disabled={!state.answer || chatBusy}
                 title={chatBusy ? 'Chờ hết lượt đang chạy của hội thoại rồi thêm' : undefined}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-[rgb(var(--brand))] px-3 py-1.5 text-[12px] font-semibold text-white hover:bg-[rgb(var(--brand-hover))] disabled:opacity-40"
+                className="inline-flex items-center gap-1.5 rounded-none bg-[#6a9fcc] px-3.5 py-1.5 font-mono text-[12px] font-semibold text-[#0d1116] transition-colors hover:bg-[#89b8e0] disabled:opacity-40"
               >
                 <MessageSquarePlus size={13} />
                 Thêm vào hội thoại

@@ -509,7 +509,7 @@ export function McpSettingsPanel() {
           type="button"
           onClick={() => void add()}
           disabled={adding}
-          className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50"
+          className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-xs font-medium text-[#0d1116] hover:opacity-90 disabled:opacity-50"
         >
           {adding ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
           Thêm server

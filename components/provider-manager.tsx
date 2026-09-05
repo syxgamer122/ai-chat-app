@@ -12,10 +12,15 @@ import {
   newProviderId,
   syncActiveProviderSnapshot,
   upsertProvider,
+  isSecureKeyPointer,
+  resolveProviderApiKey,
+  secureKeyOf,
+  SECURE_KEY_MARKER,
   type ProviderConfig,
 } from '@/lib/providers';
 import { providerNeedsApiKey, validateProviderBaseUrl } from '@/lib/provider-url';
 import { useAppStore, SERVER_PROVIDER_ID } from '@/lib/store';
+import { desktopSecureStore } from '@/lib/desktop-bridge';
 
 /**
  * Trang lấy API key theo hostname — hiển thị link trực tiếp cạnh ô nhập key
@@ -73,6 +78,25 @@ export function ProviderManager() {
   const [status, setStatus] = useState<string | null>(null);
   /** Ô nhập key nhanh ngay trên card provider đang chọn (id -> giá trị đang gõ). */
   const [keyDraft, setKeyDraft] = useState<Record<string, string>>({});
+  /* Kho mã hoá key (giai đoạn 2 — desktop tự chủ): chỉ tồn tại trên desktop
+   * có safeStorage. secureVaultOn = lựa chọn OPT-IN của người dùng cho lần lưu
+   * key kế tiếp (mặc định tắt — tôn trọng chủ ý "không tự đổi cách lưu key"). */
+  const [vaultAvailable, setVaultAvailable] = useState(false);
+  const [secureVaultOn, setSecureVaultOn] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    const vault = desktopSecureStore();
+    if (!vault) return;
+    void vault
+      .available()
+      .then(({ available }) => {
+        if (alive) setVaultAvailable(available);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   const refresh = useCallback(async () => {
     await ensureProviderSeed();
@@ -143,19 +167,22 @@ export function ProviderManager() {
     setBusyId(p.id);
     setStatus(`Đang kết nối ${p.name}…`);
     try {
+      /* Key trong DB có thể chỉ là CON TRỎ "@secure:" tới vault desktop —
+         route /api/providers/models cần key THẬT nên resolve trước khi gửi. */
+      const apiKey = await resolveProviderApiKey(p.apiKey, p.id);
       const res = await fetch('/api/providers/models', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           ...(accessCode ? { Authorization: `Bearer ${accessCode}` } : {}),
         },
-        body: JSON.stringify({ baseUrl: p.baseUrl, apiKey: p.apiKey }),
+        body: JSON.stringify({ baseUrl: p.baseUrl, apiKey }),
       });
       const data = await res.json();
       if (!res.ok) {
         // 401/403 do thiếu hoặc sai key là ca phổ biến nhất — nói rõ cách sửa.
         const needsKey =
-          !p.apiKey &&
+          !apiKey &&
           providerNeedsApiKey(p.baseUrl) &&
           /40[13]|unauthor|forbidden|key/i.test(`${res.status} ${data?.error ?? ''}`);
         setStatus(
@@ -183,6 +210,15 @@ export function ProviderManager() {
     // Xóa provider là hành động không hoàn tác — hỏi lại cho nhất quán với
     // các chỗ xóa khác (chat, prompt).
     if (!window.confirm(`Xóa nhà cung cấp "${p.name}"?`)) return;
+    // Dọn cả key mã hoá trong vault (nếu có) — entry mồ côi không ai đọc lại.
+    const vault = desktopSecureStore();
+    if (vault) {
+      try {
+        await vault.delete(secureKeyOf(p.id));
+      } catch {
+        /* best-effort: vault hỏng không được chặn việc xóa provider. */
+      }
+    }
     await deleteProvider(p.id);
     await refresh();
     setStatus(`Đã xóa "${p.name}".`);
@@ -195,7 +231,22 @@ export function ProviderManager() {
    */
   const saveKeyInline = async (p: ProviderConfig) => {
     const next = (keyDraft[p.id] ?? '').trim();
-    const record: ProviderConfig = { ...p, apiKey: next, updatedAt: Date.now() };
+    /* Opt-in mã hoá (desktop): key thật vào vault (credential manager của
+     * OS), IndexedDB chỉ giữ con trỏ "@secure:". Vault lỗi → lưu dạng thường
+     * + báo rõ, không chặn người dùng vì một lựa chọn tăng cường. */
+    const vault = desktopSecureStore();
+    let storedKey = next;
+    if (next && secureVaultOn && vault) {
+      try {
+        await vault.set(secureKeyOf(p.id), next);
+        storedKey = SECURE_KEY_MARKER;
+      } catch (e) {
+        setStatus(
+          `Không mã hoá được key (${e instanceof Error ? e.message : String(e)}) — lưu dạng thường.`,
+        );
+      }
+    }
+    const record: ProviderConfig = { ...p, apiKey: storedKey, updatedAt: Date.now() };
     await upsertProvider(record);
     setKeyDraft((d) => {
       const { [p.id]: _drop, ...rest } = d;
@@ -246,6 +297,23 @@ export function ProviderManager() {
           onChange={() => void choose(SERVER_PROVIDER_ID)}
         />
       </label>
+
+      {/* Giai đoạn 2: opt-in lưu key mã hoá — chỉ hiện trên desktop có
+          safeStorage. Ảnh hưởng lần LƯU key kế tiếp (ô key bên dưới / form Sửa). */}
+      {vaultAvailable && (
+        <label className="flex cursor-pointer items-start gap-2 rounded-xl border border-zinc-200 bg-surface-raised px-3 py-2 text-[11px] leading-relaxed text-zinc-700">
+          <input
+            type="checkbox"
+            className="mt-0.5 accent-brand"
+            checked={secureVaultOn}
+            onChange={(e) => setSecureVaultOn(e.target.checked)}
+          />
+          <span>
+            Lưu API key sắp nhập <strong>mã hoá bằng Credential Manager của hệ điều hành</strong>{' '}
+            — IndexedDB chỉ giữ con trỏ, key thật không nằm trong database trình duyệt.
+          </span>
+        </label>
+      )}
 
       {providers.map((p) => {
         const active = activeProviderId === p.id;
@@ -373,7 +441,7 @@ export function ProviderManager() {
                     type="button"
                     onClick={() => void saveKeyInline(p)}
                     disabled={busyId === p.id || draft === undefined || draft.trim() === p.apiKey}
-                    className="flex flex-shrink-0 items-center gap-1 rounded-lg bg-brand px-2.5 py-1.5 text-xs font-medium text-white transition-colors hover:bg-brand-hover disabled:opacity-40"
+                    className="flex flex-shrink-0 items-center gap-1 rounded-lg bg-brand px-2.5 py-1.5 text-xs font-medium text-[#0d1116] transition-colors hover:bg-brand-hover/85 disabled:opacity-40"
                   >
                     {busyId === p.id ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
                     Lưu &amp; test
@@ -443,8 +511,14 @@ export function ProviderManager() {
               className="field-sm font-mono"
               type="password"
               aria-label="API key"
-              placeholder="API key (có thể bỏ trống)"
-              value={editing.apiKey}
+              placeholder={
+                isSecureKeyPointer(editing.apiKey)
+                  ? '(key đã lưu mã hoá — nhập mới để thay)'
+                  : 'API key (có thể bỏ trống)'
+              }
+              /* Key mã hoá chỉ là con trỏ "@secure:" — hiển thị trống; người
+                 dùng không gõ gì thì state vẫn giữ con trỏ, save() giữ nguyên. */
+              value={isSecureKeyPointer(editing.apiKey) ? '' : editing.apiKey}
               onChange={(e) => setEditing({ ...editing, apiKey: e.target.value })}
             />
           ) : (
@@ -456,7 +530,7 @@ export function ProviderManager() {
             <button
               type="button"
               onClick={() => void save()}
-              className="flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-brand-hover"
+              className="flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-xs font-medium text-[#0d1116] transition-colors hover:bg-brand-hover/85"
             >
               <Check size={13} /> Lưu
             </button>

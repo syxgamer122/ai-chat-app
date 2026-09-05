@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronDown, ChevronRight, Zap, CheckCircle2, XCircle, Loader2 } from "lucide-react";
+import { ChevronDown, ChevronRight, CheckCircle2, XCircle, Loader2 } from "lucide-react";
 
 export interface SubagentAnnotation {
   subagent: {
@@ -28,56 +28,57 @@ export function SubagentCard({ annotation }: SubagentCardProps) {
   const isError = phase === "error";
 
   const statusColor = isRunning
-    ? "text-blue-600 dark:text-blue-400"
+    ? "text-[#6a9fcc]"
     : isDone
-      ? "text-emerald-600 dark:text-emerald-400"
-      : "text-red-600 dark:text-red-400";
+      ? "text-[#5db87a]"
+      : "text-[#e8704f]";
 
+  // Một icon duy nhất mang trạng thái thật (spin = đang chạy), thay vì
+  // icon trang trí + icon trạng thái trùng lặp
   const StatusIcon = isRunning ? Loader2 : isDone ? CheckCircle2 : XCircle;
 
   return (
-    <div className="my-2 rounded-lg border border-zinc-200 bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900/50 text-sm">
+    <div className="my-2 rounded-none border border-[#495059] bg-[#212730] font-mono text-xs">
       <button
         type="button"
         onClick={() => setExpanded(!expanded)}
-        className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800/50 rounded-lg transition-colors"
+        aria-expanded={expanded}
+        className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-[#161d27] rounded-none transition-colors"
       >
         {expanded ? (
-          <ChevronDown className="h-3.5 w-3.5 text-zinc-500" />
+          <ChevronDown className="h-3.5 w-3.5 text-[#9fa4ab]" />
         ) : (
-          <ChevronRight className="h-3.5 w-3.5 text-zinc-500" />
+          <ChevronRight className="h-3.5 w-3.5 text-[#9fa4ab]" />
         )}
-        <Zap className={`h-3.5 w-3.5 ${statusColor}`} />
-        <span className={`font-medium ${statusColor}`}>
+        <StatusIcon
+          className={`h-3.5 w-3.5 flex-shrink-0 ${statusColor} ${
+            isRunning ? "animate-spin" : ""
+          }`}
+        />
+        <span className={`font-semibold ${statusColor}`}>
           Subagent
         </span>
-        {isRunning && (
-          <StatusIcon className="h-3.5 w-3.5 animate-spin text-blue-500" />
-        )}
-        {!isRunning && (
-          <StatusIcon className={`h-3.5 w-3.5 ${statusColor}`} />
-        )}
-        <span className="ml-auto text-xs text-zinc-500">
+        <span className="ml-auto text-[11px] text-[#9fa4ab]">
           {turn != null && maxTurns != null && `${turn}/${maxTurns} turns`}
           {toolCalls != null && ` · ${toolCalls} tools`}
         </span>
       </button>
 
       {expanded && (
-        <div className="border-t border-zinc-200 px-3 py-2 dark:border-zinc-700 space-y-1">
+        <div className="border-t border-[#495059] bg-[#161d27] px-3 py-2 space-y-1">
           {task && (
-            <p className="text-xs text-zinc-600 dark:text-zinc-400">
-              <span className="font-medium">Task:</span> {task}
+            <p className="text-[11.5px] text-[#ebe7e4]">
+              <span className="font-semibold text-[#6a9fcc]">Task:</span> {task}
             </p>
           )}
           {result && (
-            <p className="text-xs text-zinc-600 dark:text-zinc-400 whitespace-pre-wrap">
-              <span className="font-medium">Result:</span> {result}
+            <p className="text-[11.5px] text-[#9fa4ab] whitespace-pre-wrap">
+              <span className="font-semibold text-[#5db87a]">Result:</span> {result}
             </p>
           )}
           {error && (
-            <p className="text-xs text-red-600 dark:text-red-400">
-              <span className="font-medium">Error:</span> {error}
+            <p className="text-[11.5px] text-[#e8704f]">
+              <span className="font-semibold">Error:</span> {error}
             </p>
           )}
         </div>

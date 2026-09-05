@@ -18,8 +18,8 @@ import type { McpContentBlock } from '@/lib/mcp/tool-mapper';
 
 /**
  * Trần số ảnh mô tả mỗi tool-result (mặc định). Mỗi ảnh là một request
- * vision; không trần thì một tool trả 50 ảnh sẽ thành 50 lần gọi Gemini
- * và nhét 50 bản mô tả dài vào ngữ cảnh model.
+ * vision qua provider active; không trần thì một tool trả 50 ảnh sẽ thành
+ * 50 lần gọi provider và nhét 50 bản mô tả dài vào ngữ cảnh model.
  */
 export const DEFAULT_MAX_MCP_IMAGES = 4;
 

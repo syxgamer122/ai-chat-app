@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
-import { Check, ChevronDown, Search, Sparkles } from 'lucide-react';
+import { Check, ChevronDown, Search } from 'lucide-react';
 import { useMediaQuery } from '@/lib/hooks/use-media-query';
 
 export interface ModelOption {
@@ -239,34 +239,22 @@ export function ModelSelector({
         aria-expanded={open}
         aria-controls={open ? listId : undefined}
         aria-label={`Model: ${current?.label ?? 'chưa chọn'}`}
-        className="flex h-8 max-w-full items-center gap-1.5 rounded-full px-2.5 text-[12px] font-medium text-zinc-600 transition-colors hover:bg-zinc-200/70 hover:text-zinc-900 disabled:opacity-50"
+        className="relative flex h-8 max-w-full items-center gap-1.5 rounded-none border border-[#495059] bg-[#161d27] px-2.5 font-mono text-[12px] font-medium text-[#ebe7e4] transition-colors after:absolute after:-inset-[6px] after:content-[''] hover:border-[#757d89] hover:bg-[#212730] disabled:opacity-40"
       >
-        {/*
-         * Ẩn icon + chừa chỗ cho nhãn trên mobile: cụm [model][gửi] phải nhường
-         * chỗ cho công cụ, và nhãn model là thứ duy nhất được phép teo lại
-         * (`truncate`) chứ không được đẩy nút gửi ra ngoài thanh.
-         */}
-        <Sparkles size={13} className="hidden flex-none text-brand sm:block" />
+        <span className="hidden sm:inline-block h-1.5 w-1.5 rounded-full bg-[#6a9fcc] flex-none" />
         <span className="min-w-0 max-w-[30vw] truncate sm:max-w-[160px]">{current?.label ?? 'Model'}</span>
-        <ChevronDown size={13} className="flex-none text-zinc-400" />
+        <ChevronDown size={12} className="flex-none text-[#9fa4ab]" />
       </button>
 
       {open && (
         <div
           onKeyDown={onPanelKeyDown}
-          /*
-           * Neo theo TRUNG TÂM nút (left-1/2 -translate-x-1/2): nút nằm giữa
-           * composer nên panel mở cân đối, không tràn sang trái đè lên
-           * sidebar lịch sử chat. `max-w-[calc(100vw-1.5rem)]` kẹp panel
-           * luôn nằm trong màn hình kể cả khung hẹp.
-           */
-          className="surface-panel absolute bottom-full left-1/2 z-50 mb-2 w-[min(620px,calc(100vw-1.5rem))] max-w-[calc(100vw-1.5rem)] -translate-x-1/2 animate-slide-up overflow-hidden rounded-2xl"
+          className="surface-panel absolute bottom-full left-1/2 z-50 mb-2 w-[min(620px,calc(100vw-1.5rem))] max-w-[calc(100vw-1.5rem)] -translate-x-1/2 animate-slide-up overflow-hidden rounded-none border border-[#495059] bg-[#212730]"
         >
-
-          {/* Ô tìm kiếm — lọc nhanh khi danh sách dài (OrcaRouter 190+ model). */}
-          <div className="border-b border-zinc-100 p-2">
-            <div className="flex items-center gap-2 rounded-lg bg-zinc-100/80 px-2.5 py-1.5">
-              <Search size={13} aria-hidden="true" className="shrink-0 text-zinc-500" />
+          {/* Ô tìm kiếm */}
+          <div className="border-b border-[#495059] p-2">
+            <div className="flex items-center gap-2 rounded-none border border-[#495059] bg-[#0d1116] px-2.5 py-1.5">
+              <Search size={12} aria-hidden="true" className="shrink-0 text-[#9fa4ab]" />
               <input
                 ref={searchRef}
                 value={query}
@@ -275,8 +263,8 @@ export function ModelSelector({
                   setCursor(0);
                 }}
                 aria-label="Tìm model"
-                placeholder={`Tìm trong ${models.length} model…`}
-                className="w-full bg-transparent text-[16px] text-zinc-800 outline-none placeholder:text-zinc-500 sm:text-[13px]"
+                placeholder={`$ /model (${models.length} available)...`}
+                className="w-full bg-transparent font-mono text-[12px] text-[#ebe7e4] outline-none placeholder:text-[#9fa4ab]"
               />
             </div>
           </div>
@@ -288,10 +276,10 @@ export function ModelSelector({
             tabIndex={-1}
             aria-label="Danh sách model"
             aria-activedescendant={`${listId}-opt-${cursor}`}
-            className="max-h-[min(480px,60vh)] overflow-y-auto overscroll-contain p-1.5 outline-none"
+            className="max-h-[min(480px,60vh)] overflow-y-auto overscroll-contain p-1.5 outline-none font-mono"
           >
             {visible.length === 0 && (
-              <p className="px-2.5 py-4 text-center text-[13px] text-zinc-500">
+              <p className="px-2.5 py-4 text-center text-xs text-[#9fa4ab]">
                 Không có model nào khớp “{query}”.
               </p>
             )}
@@ -300,7 +288,7 @@ export function ModelSelector({
                 <div key={ci} className="min-w-0">
                   {col.map((g) => (
                     <div key={g.key} className="mb-1.5">
-                      <p className="sticky top-0 z-10 bg-surface-raised/95 px-2 pb-1 pt-1.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">
+                      <p className="sticky top-0 z-10 bg-[#161d27]/95 px-2 pb-1 pt-1.5 font-mono text-[10.5px] font-semibold uppercase tracking-wide text-[#6a9fcc]">
                         {g.label}
                       </p>
                       {g.items.map((m) => {
@@ -316,17 +304,21 @@ export function ModelSelector({
                             aria-selected={active}
                             onClick={() => commit(idx)}
                             onPointerEnter={() => setCursor(idx)}
-                            className={`flex w-full cursor-pointer items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-left ${
-                              focused ? 'bg-zinc-200/80' : 'hover:bg-zinc-100'
+                            className={`flex w-full cursor-pointer items-center justify-between gap-2 rounded-none px-2 py-1.5 text-left transition-colors ${
+                              active
+                                ? 'pi-active-indicator bg-[#252f3d] text-[#ebe7e4]'
+                                : focused
+                                  ? 'bg-[#252f3d] text-[#ebe7e4]'
+                                  : 'hover:bg-[#161d27] text-[#ebe7e4]'
                             }`}
                           >
                             <span className="flex min-w-0 flex-col">
-                              <span className="truncate text-[13px] text-zinc-800">{m.label}</span>
+                              <span className="truncate text-xs font-mono">{m.label}</span>
                               {m.hint && (
-                                <span className="truncate text-[11px] text-zinc-500">{m.hint}</span>
+                                <span className="truncate text-[10px] text-[#9fa4ab]">{m.hint}</span>
                               )}
                             </span>
-                            {active && <Check size={14} className="flex-shrink-0 text-brand" />}
+                            {active && <Check size={13} className="flex-shrink-0 text-[#6a9fcc]" />}
                           </div>
                         );
                       })}

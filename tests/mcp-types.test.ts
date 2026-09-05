@@ -6,7 +6,7 @@ import {
   McpServerConfigSchema,
   McpCallToolPayload,
   McpResolveApprovalPayload,
-} from '../electron/mcp/types.cjs';
+} from '../lib/mcp/types.cjs';
 
 describe('McpServerConfigSchema', () => {
   it('validates stdio config', () => {

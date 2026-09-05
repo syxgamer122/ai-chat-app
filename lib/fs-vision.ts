@@ -8,9 +8,10 @@
  * "nhìn thấy" ảnh chứ không chỉ nhận lời từ chối.
  *
  * Luồng: client đọc bytes ảnh (web: File System Access; desktop: IPC base64)
- * thành data URL → POST /api/vision (server giữ GEMINI_API_KEY) → nhận bản
- * mô tả text → trả về cho model như kết quả tool. Mọi thất bại đều trả object
- * lỗi mạch lạc (không ném ra ngoài) để model đọc được lý do và báo user tử tế.
+ * thành data URL → POST /api/vision (provider active BYOK, headers do caller
+ * truyền) → nhận bản mô tả text → trả về cho model như kết quả tool. Mọi thất
+ * bại đều trả object lỗi mạch lạc (không ném ra ngoài) để model đọc được lý
+ * do và báo user tử tế.
  */
 
 /** Đuôi ảnh chấp nhận cho luồng vision — mirror IMAGE_VISION_EXT_RE của lib/fs-access.ts. */
@@ -38,6 +39,18 @@ export interface WorkspaceImageToolResult {
   error?: string;
 }
 
+/**
+ * Tùy chọn cho lượt gọi /api/vision. File này KHÔNG import store/zustand —
+ * caller (UI) tự lấy headers provider + model vision từ state rồi truyền
+ * xuống, giữ module thuần để test và chạy được ở mọi ngữ cảnh renderer.
+ */
+export interface VisionCallOpts {
+  /** Headers BYOK (x-api-key, x-api-base...) — /api/vision cần để gọi provider active. */
+  headers?: Record<string, string>;
+  /** Model vision client chọn từ danh sách model của provider — route yêu cầu bắt buộc. */
+  model?: string;
+}
+
 const VISION_TIMEOUT_MS = 35_000;
 
 type VisionApiResponse = { ok: true; description: string } | { ok: false; error: string } | null;
@@ -45,14 +58,17 @@ type VisionApiResponse = { ok: true; description: string } | { ok: false; error:
 async function callVisionApi(
   dataUrl: string,
   fetchImpl: typeof fetch,
+  opts?: VisionCallOpts,
 ): Promise<{ ok: true; description: string } | { ok: false; error: string }> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(new Error('timeout')), VISION_TIMEOUT_MS);
   try {
     const res = await fetchImpl('/api/vision', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ dataUrl }),
+      // Gắn headers provider + model vision: /api/vision chỉ mô tả ảnh bằng
+      // provider active của người dùng — thiếu là 400/503 từ route.
+      headers: { 'Content-Type': 'application/json', ...(opts?.headers ?? {}) },
+      body: JSON.stringify({ dataUrl, ...(opts?.model ? { model: opts.model } : {}) }),
       signal: controller.signal,
     });
     const json = (await res.json().catch(() => null)) as VisionApiResponse;
@@ -80,6 +96,7 @@ export async function describeWorkspaceImage(
   rel: string,
   readImage: WorkspaceImageReader,
   fetchImpl: typeof fetch = fetch.bind(globalThis),
+  opts?: VisionCallOpts,
 ): Promise<WorkspaceImageToolResult> {
   let image: WorkspaceImageData;
   try {
@@ -87,7 +104,7 @@ export async function describeWorkspaceImage(
   } catch (e) {
     return { error: e instanceof Error ? e.message : `Không đọc được ảnh "${rel}".` };
   }
-  const r = await callVisionApi(image.dataUrl, fetchImpl);
+  const r = await callVisionApi(image.dataUrl, fetchImpl, opts);
   if (!r.ok) {
     return { path: image.path, kind: 'image', size: image.size, error: r.error };
   }
@@ -108,8 +125,9 @@ export async function describeWorkspaceImage(
 export async function describeMcpImage(
   dataUrl: string,
   fetchImpl: typeof fetch = fetch.bind(globalThis),
+  opts?: VisionCallOpts,
 ): Promise<string> {
-  const r = await callVisionApi(dataUrl, fetchImpl);
+  const r = await callVisionApi(dataUrl, fetchImpl, opts);
   if (!r.ok) throw new Error(r.error);
   return r.description;
 }

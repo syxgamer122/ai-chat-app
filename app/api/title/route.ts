@@ -6,6 +6,7 @@ import { getKeyCandidates, markKeyFailure, markKeySuccess, getKeyLabel } from '@
 import { validateProviderBaseUrl } from '@/lib/provider-url';
 import { sharedFreeBudget } from '@/lib/upstream-queue';
 import { filterSupportedModels, markModelUnsupported } from '@/lib/model-negative-cache';
+import { ACTIVE_MODEL_BODY_FIELD, buildActiveModelChain, isActiveProvider } from '@/lib/aux-llm-chain';
 import {
   checkRateLimit,
   rateLimitHeaders,
@@ -18,6 +19,12 @@ export const runtime = 'nodejs';
 
 const TitleSchema = z.object({
   message: z.string().min(1).max(2000),
+  /* Model người dùng đang chọn — chỉ được ưu tiên khi provider active
+     (xây chuỗi bên dưới); demo bỏ qua để hành vi cũ không đổi.
+     `.catch(undefined)`: tên model rác chỉ bị BỎ QUA, không được kéo cả body
+     fail safeParse — trước đây điều đó khiến route trả 'New Chat' và ghi đè
+     tiêu đề heuristic của client vì một field phụ. */
+  model: ACTIVE_MODEL_BODY_FIELD,
 });
 
 const SECRET_REGEX = /\b(sk|sk-proj|sk-ant|Bearer)\s*[:=]?\s*[A-Za-z0-9_\-]{4,}/gi;
@@ -200,9 +207,19 @@ export async function POST(req: Request) {
     const titleUpstreamBase = providerBase ?? process.env.OPENAI_BASE_URL ?? null;
     // Negative cache dùng chung với /api/chat: bỏ qua model vừa bị gateway
     // từ chối gần đây để sinh tiêu đề không phải trả "thuế thử sai" mỗi lần.
-    const titleModelChain = titleUpstreamBase
+    const filteredTitleChain = titleUpstreamBase
       ? filterSupportedModels(titleUpstreamBase, TITLE_MODEL_CHAIN)
       : [...TITLE_MODEL_CHAIN];
+    /* Provider active là nguồn duy nhất: model người dùng chọn phải được thử
+       ĐẦU TIÊN — chuỗi env chỉ còn là dự phòng khi model đó 404 trên provider
+       của họ (tên crax kiểu 'gpt-5-4-nano' gần như chắc chắn không tồn tại ở
+       provider khác). Demo (không provider) bỏ qua body.model để hành vi cũ
+       không đổi. */
+    const titleModelChain = buildActiveModelChain({
+      providerActive: isActiveProvider(providerBase, customKey),
+      model: parsed.data.model,
+      fallbackChain: filteredTitleChain,
+    });
 
     for (const key of candidateKeys) {
       const openai = createOpenAI({

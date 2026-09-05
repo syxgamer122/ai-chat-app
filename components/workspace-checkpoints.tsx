@@ -164,11 +164,11 @@ export function WorkspaceCheckpointBar({ chatId, busy = false, onNotice }: Props
           type="button"
           disabled={busy || running}
           onClick={() => setOpen(true)}
-          className="flex items-center gap-1.5 rounded-full border border-zinc-300/60 bg-surface-raised px-3 py-1 text-[12px] text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900 disabled:cursor-not-allowed disabled:opacity-50"
+          className="flex items-center gap-1.5 rounded-full border border-[#495059] bg-[#161d27] px-3 py-1 font-mono text-[11px] text-[#6a9fcc] transition-colors hover:border-[#757d89] hover:bg-[#212730] hover:text-[#ebe7e4] disabled:opacity-40"
           title="Khôi phục các file agent vừa sửa về trạng thái trước đó"
         >
-          <History size={12} aria-hidden />
-          Hoàn tác {ops.length} thay đổi của AI
+          <History size={12} className="text-[#6a9fcc]" aria-hidden />
+          <span>$ undo · {ops.length} changes</span>
         </button>
       </div>
 
@@ -177,23 +177,28 @@ export function WorkspaceCheckpointBar({ chatId, busy = false, onNotice }: Props
           role="dialog"
           aria-modal="true"
           aria-label="Hoàn tác thay đổi của AI"
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4"
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4"
           onClick={() => {
             if (!running) setOpen(false);
           }}
         >
           <div
-            className="flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-zinc-300 bg-surface-raised shadow-panel dark:border-zinc-700"
+            className="pi-frame relative flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-none border border-[#495059] bg-[#212730] font-mono"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="border-b border-zinc-200 px-4 py-3">
-              <div className="text-sm font-semibold text-zinc-900">
-                Khôi phục {ops.length} file về trước lượt sửa của AI
+            <span className="pi-corner-tl" />
+            <span className="pi-corner-tr" />
+            <span className="pi-corner-bl" />
+            <span className="pi-corner-br" />
+
+            <div className="border-b border-[#495059] bg-[#161d27] px-4 py-3">
+              <div className="flex items-center gap-2 font-pixel text-[16px] font-semibold text-[#ebe7e4] [image-rendering:pixelated]">
+                <span className="font-bold text-[#6a9fcc]">$</span>
+                <span className="text-[#6a9fcc]">undo</span>
+                <span>· Khôi phục {ops.length} file về trước lượt sửa của AI</span>
               </div>
-              <div className="mt-0.5 text-[11px] text-zinc-600">
-                Lượt sửa lúc{' '}
-                {new Date(target.createdAt).toLocaleString('vi-VN')} — thao tác ghi đĩa trực
-                tiếp, không qua AI.
+              <div className="mt-0.5 text-[11px] text-[#9fa4ab]">
+                Lượt sửa lúc {new Date(target.createdAt).toLocaleString('vi-VN')}
               </div>
             </div>
 
@@ -204,7 +209,7 @@ export function WorkspaceCheckpointBar({ chatId, busy = false, onNotice }: Props
                   return (
                     <li
                       key={f.path}
-                      className="rounded-lg border border-zinc-200 bg-surface-muted px-3 py-2"
+                      className="rounded-none border border-[#495059] bg-[#161d27] px-3 py-2"
                     >
                       <details
                         onToggle={(e) => {
@@ -212,37 +217,36 @@ export function WorkspaceCheckpointBar({ chatId, busy = false, onNotice }: Props
                           if (el.open && pv.status === 'idle') void loadPreview(f);
                         }}
                       >
-                        <summary className="cursor-pointer select-none font-mono text-[12px] text-zinc-800">
+                        <summary className="cursor-pointer select-none font-mono text-[12px] text-[#ebe7e4]">
                           <span
-                            className={`mr-2 rounded px-1 py-0.5 font-sans text-[10px] font-medium ${
+                            className={`mr-2 rounded-none px-1.5 py-0.5 font-mono text-[10px] ${
                               f.existedBefore
-                                ? 'bg-amber-100 text-amber-700'
-                                : 'bg-red-100 text-red-700'
+                                ? 'border border-[#6a9fcc]/30 bg-[#6a9fcc]/10 text-[#6a9fcc]'
+                                : 'border border-[#e8704f]/30 bg-[#e8704f]/10 text-[#e8704f]'
                             }`}
                           >
-                            {f.existedBefore ? 'ghi đè lại' : 'xoá file mới'}
+                            {f.existedBefore ? 'restore' : 'delete new'}
                           </span>
                           {f.path}
                         </summary>
                         {pv.status === 'idle' && (
-                          <p className="mt-2 text-[11px] text-zinc-500">Mở để xem diff…</p>
+                          <p className="mt-2 text-[11px] text-[#9fa4ab]">Mở để xem diff…</p>
                         )}
                         {pv.status === 'loading' && (
-                          <p className="mt-2 flex items-center gap-1.5 text-[11px] text-zinc-500">
+                          <p className="mt-2 flex items-center gap-1.5 text-[11px] text-[#6a9fcc]">
                             <Loader2 size={11} className="animate-spin" /> Đang đọc file hiện tại…
                           </p>
                         )}
                         {pv.status === 'unavailable' && (
-                          <p className="mt-2 text-[11px] text-amber-600">{pv.note}</p>
+                          <p className="mt-2 text-[11px] text-[#e8704f]">{pv.note}</p>
                         )}
                         {pv.status === 'ready' && (
                           <>
-                            <p className="mt-2 text-[11px] text-zinc-500">
-                              <span className="text-emerald-600">+{pv.adds}</span>{' '}
-                              <span className="text-red-600">-{pv.dels}</span> — nội dung sẽ được
-                              khôi phục:
+                            <p className="mt-2 text-[11px] text-[#9fa4ab]">
+                              <span className="text-[#5db87a]">+{pv.adds}</span>{' '}
+                              <span className="text-[#e8704f]">-{pv.dels}</span> — nội dung sẽ khôi phục:
                             </p>
-                            <pre className="mt-1 max-h-56 overflow-auto whitespace-pre-wrap break-all rounded-md bg-white p-2 font-mono text-[11px] leading-relaxed text-zinc-800">
+                            <pre className="mt-1 max-h-56 overflow-auto whitespace-pre-wrap break-all rounded-none border border-[#495059] bg-[#0d1116] p-2 font-mono text-[11px] leading-relaxed text-[#ebe7e4]">
                               {pv.text}
                             </pre>
                           </>
@@ -254,16 +258,16 @@ export function WorkspaceCheckpointBar({ chatId, busy = false, onNotice }: Props
               </ul>
             </div>
 
-            <div className="flex items-center justify-between gap-2 border-t border-zinc-200 px-4 py-3">
-              <span className="text-[11px] text-zinc-600">
-                File chưa lưu khác trên đĩa (bạn tự sửa ngoài app) sẽ bị ghi đè.
+            <div className="flex items-center justify-between gap-2 border-t border-[#495059] bg-[#161d27] px-4 py-2.5">
+              <span className="text-[11px] text-[#9fa4ab]">
+                $ Esc to cancel
               </span>
               <div className="flex gap-2">
                 <button
                   type="button"
                   disabled={running}
                   onClick={() => setOpen(false)}
-                  className="rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 transition-colors hover:bg-zinc-100 disabled:opacity-50"
+                  className="rounded-none border border-[#495059] bg-[#252f3d] px-3 py-1.5 text-xs text-[#ebe7e4] transition-colors hover:border-[#757d89] disabled:opacity-50"
                 >
                   Để nguyên
                 </button>
@@ -271,7 +275,7 @@ export function WorkspaceCheckpointBar({ chatId, busy = false, onNotice }: Props
                   type="button"
                   disabled={running || busy}
                   onClick={() => void performRestore()}
-                  className="flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-brand-hover disabled:opacity-60"
+                  className="flex items-center gap-1.5 rounded-none bg-[#6a9fcc] px-3.5 py-1.5 text-xs font-semibold text-[#0d1116] transition-colors hover:bg-[#6a9fcc]/85 disabled:opacity-60"
                 >
                   {running ? (
                     <Loader2 size={13} className="animate-spin" aria-hidden />

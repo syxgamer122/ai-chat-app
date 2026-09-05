@@ -36,25 +36,25 @@ export function BranchSwitcher({
     <div
       role="group"
       aria-label="Điều hướng giữa các nhánh"
-      className="inline-flex items-center gap-1 rounded-md border border-zinc-200 bg-surface-raised/80 px-1 py-0.5 shadow-sm backdrop-blur-sm"
+      className="inline-flex items-center gap-0.5 rounded-none border border-[#495059] bg-[#161d27] px-1 py-0.5"
     >
       <button
         type="button"
         data-no-swipe="true"
         disabled={disabled || !canGoPrevious}
         onClick={onPrevious}
-        className={`rounded p-1 text-zinc-600 transition-colors hover:bg-zinc-200 hover:text-zinc-900 disabled:pointer-events-none disabled:opacity-30 ${hitArea}`}
+        className={`rounded-none p-0.5 text-[#9fa4ab] transition-colors hover:bg-[#252f3d] hover:text-[#6a9fcc] disabled:pointer-events-none disabled:opacity-20 ${hitArea}`}
         aria-label="Nhánh trước"
         title="Nhánh trước · Alt + ←"
       >
-        <ChevronLeft size={15} strokeWidth={2} aria-hidden="true" />
+        <ChevronLeft size={13} strokeWidth={2} aria-hidden="true" />
       </button>
 
       <span
         aria-live="polite"
-        className="min-w-10 select-none text-center font-mono text-[11px] tabular-nums text-zinc-600"
+        className="min-w-8 select-none text-center font-mono text-[10.5px] tabular-nums text-[#6a9fcc]"
       >
-        {currentIndex + 1} / {total}
+        {currentIndex + 1}/{total}
       </span>
 
       <button
@@ -62,11 +62,11 @@ export function BranchSwitcher({
         data-no-swipe="true"
         disabled={disabled || !canGoNext}
         onClick={onNext}
-        className={`rounded p-1 text-zinc-600 transition-colors hover:bg-zinc-200 hover:text-zinc-900 disabled:pointer-events-none disabled:opacity-30 ${hitArea}`}
+        className={`rounded-none p-0.5 text-[#9fa4ab] transition-colors hover:bg-[#252f3d] hover:text-[#6a9fcc] disabled:pointer-events-none disabled:opacity-20 ${hitArea}`}
         aria-label="Nhánh sau"
         title="Nhánh sau · Alt + →"
       >
-        <ChevronRight size={15} strokeWidth={2} aria-hidden="true" />
+        <ChevronRight size={13} strokeWidth={2} aria-hidden="true" />
       </button>
     </div>
   );

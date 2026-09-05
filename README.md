@@ -27,8 +27,8 @@ Vyen đọc tự do nhưng ghi có kỷ luật: mọi thao tác ghi file / chạ
 
 ### Workspace & công cụ file
 
-- **Kết nối workspace**: bấm 📁 trên trình duyệt (File System Access API — Chrome/Edge) hoặc mở thư mục trong bản desktop qua IPC có path-guard. Agent dùng bộ tool `fs_list` / `fs_read` / `fs_search` / `fs_edit` / `fs_write` chạy ngay trên máy bạn — server không bao giờ chạm vào file.
-- **Đọc thông minh**: `fs_read` trả tối đa 24.000 ký tự, đọc tiếp bằng `start_line`/`line_count`; `fs_search` tìm chuỗi/regex toàn workspace (bỏ qua node_modules/.git/dist/.next...) trả tối đa 30 dòng kèm `file:dòng`. Ảnh trong workspace (.png/.jpg/.webp/.heic/.heif) được mô tả bằng Gemini vision qua `/api/vision` — agent "nhìn thấy" screenshot/diagram thay vì nhận bytes rác.
+- **Kết nối workspace**: bấm 📁 trên trình duyệt (File System Access API — Chrome/Edge) hoặc mở thư mục trong bản desktop/CLI. Agent dùng bộ tool `fs_list` / `fs_read` / `fs_search` / `fs_edit` / `fs_write` chạy ngay trên máy bạn — server không bao giờ chạm vào file.
+- **Đọc thông minh**: `fs_read` trả tối đa 24.000 ký tự, đọc tiếp bằng `start_line`/`line_count`; `fs_search` tìm chuỗi/regex toàn workspace (bỏ qua node_modules/.git/dist/.next...) trả tối đa 30 dòng kèm `file:dòng`. Ảnh trong workspace (.png/.jpg/.webp/.heic/.heif) được mô tả bằng model vision của Nhà cung cấp đang bật (qua `/api/vision` — BYOK như mọi route LLM, chọn model trong Cài đặt → Nhà cung cấp) — agent "nhìn thấy" screenshot/diagram thay vì nhận bytes rác.
 - **Sửa có kỷ luật**: `fs_edit` dùng khối SEARCH/REPLACE phải khớp nguyên văn và duy nhất, **bắt buộc đọc file trước khi sửa** (tool từ chối nếu chưa đọc); `fs_write` bị chặn ghi đè cả file >200 dòng — buộc sửa cục bộ. Mọi ghi file luôn qua **modal diff phê duyệt**.
 
 ### Duyệt & tự động hóa
@@ -42,6 +42,12 @@ Vyen đọc tự do nhưng ghi có kỷ luật: mọi thao tác ghi file / chạ
 - **`shell_run`**: chạy lệnh trong workspace (cmd.exe/sh) sau khi bạn duyệt, timeout mặc định 120s (tối đa 600s). Output vượt 2000 dòng hoặc 50KB bị cắt giữ phần cuối (chứa lỗi), bản full lưu vào temp file kèm `savedTo` — agent đọc lại được bằng chính `fs_read` (ngoại lệ duy nhất ngoài workspace, chỉ file do app ghi trong phiên hiện tại; kiểu Goose).
 - **Auto-debug**: lệnh test/build/lint thất bại trả kèm `retryGuidance` hướng dẫn agent sửa rồi chạy lại — tối đa 3 lần thử, dừng khi không tiến triển; lệnh destructive không bao giờ tự retry.
 - **Bộ tool git**: `git_status` / `git_diff` / `git_log` đọc tự do, `git_add` xem như an toàn (không cần duyệt riêng), `git_commit` phải duyệt message trước khi tạo commit.
+
+### Tự chủ & bảo mật key (bản desktop)
+
+- **Không cần key của server**: mọi route LLM (chat, tiêu đề, nén ngữ cảnh, orchestrator, vision) chạy hoàn toàn với Nhà cung cấp của bạn (BYOK) — sau khi cấu hình provider trong Cài đặt, bản desktop không phụ thuộc biến môi trường nào. Key pool/chain của server chỉ còn vai trò cho chế độ demo web.
+- **LLM fetch qua Web/bridge**: bản desktop (launcher Edge/Chrome `--app`) gọi gateway trực tiếp từ Web (không gắn header Origin lạ) nên các gateway chặn origin của trình duyệt thường không còn là rào cản (đang dùng cho tạo ảnh; response buffer, trần 10MB/300s, header qua allowlist).
+- **Kho key mã hoá opt-in**: bật "Lưu API key mã hoá" trong Cài đặt → Nhà cung cấp để key nằm trong Credential Manager của hệ điều hành (safeStorage — DPAPI/Keychain/libsecret); IndexedDB chỉ giữ con trỏ `@secure:`, key thật không bao giờ ghi plaintext. Vault lỗi/thiếu → từ chối lưu mã hoá rõ ràng, không lặng lẽ hạ cấp.
 
 ### MCP
 
@@ -59,7 +65,7 @@ Vyen đọc tự do nhưng ghi có kỷ luật: mọi thao tác ghi file / chạ
 - **Compaction**: hội thoại dài tự nén qua `/api/compact` — phần cũ thay bằng summary, dữ kiện quan trọng (file đã chạm, yêu cầu đã nêu) sống sót qua nhiều lần nén.
 - **Thanh trượt suy luận**: 4 mức low/medium/high/max; mức nào khả dụng đọc từ metadata `/v1/models` (chuẩn OpenRouter) nên model không hỗ trợ không nhận tham số rác.
 - **Ngân sách tool**: tối đa 32 lần gọi tool mỗi lượt (đếm theo hội thoại, không reset khi client resubmit), tự chặn gọi trùng tham số và phát hiện doom-loop để bảo model đổi hướng; kết quả tool bị cắt ở 24.000 ký tự.
-- **Sinh ảnh/video**: nút trong ô nhập gọi thẳng gateway để tạo ảnh hoặc video ngay trong khung chat, tự fallback qua server khi gateway chặn CORS.
+- **Sinh ảnh/video**: nút trong ô nhập gọi thẳng gateway để tạo ảnh hoặc video ngay trong khung chat, tự fallback qua server khi gateway chặn CORS. Trên bản desktop (launcher Edge/Chrome), tạo ảnh gọi gateway trực tiếp từ Web nên gateway chặn origin kiểu crax vẫn gọi được.
 - **Emulated tool-calling**: model không hỗ trợ function calling vẫn dùng được toàn bộ tool — schema render thành text trong system prompt, model trả khối `<tool_call>` JSON, server parse + thực thi + vòng lặp (trần 10 vòng, 5 call/vòng, chống model tự bịa kết quả tool).
 
 ## Tech stack
@@ -70,10 +76,10 @@ Vyen đọc tự do nhưng ghi có kỷ luật: mọi thao tác ghi file / chạ
 | UI | React 19, Tailwind CSS, lucide-react |
 | Trạng thái | Zustand (persist localStorage) |
 | Lưu trữ | Dexie (IndexedDB) — schema 5 phiên bản có migration |
-| AI | AI SDK (`ai` + `@ai-sdk/openai`), stream qua Edge runtime |
+| AI | AI SDK (`ai` + `@ai-sdk/openai`), stream qua API routes Node.js |
 | Virtualization | @tanstack/react-virtual |
-| Desktop | Electron (main bọc Next.js local, IPC + path-guard) |
-| MCP | `@modelcontextprotocol/sdk` (client chạy trong Electron main) |
+| Desktop | Launcher Edge/Chrome `--app` vào Next.js local (cửa sổ riêng, ~35MB RAM) |
+| MCP | `@modelcontextprotocol/sdk` (client chạy trong bridge Node.js của desktop/CLI, phê duyệt 4 cấp) |
 
 ## Chạy dự án
 
@@ -85,32 +91,33 @@ npm run start
 npm test         # unit tests (vitest)
 npm run lint     # eslint
 
-# Bản desktop (Electron bọc Next.js local)
-npm run app:dev  # dev server + Electron
-npm run app:prod # next build rồi chạy Electron
+# Bản desktop (launcher Edge/Chrome --app nhẹ — không Electron/Tauri)
+npm run app        # mặc định: mở cửa sổ app Edge/Chrome --app vào Next.js local
+npm run desktop    # alias của app
+npm run cli        # CLI: npx tsx bin/vyen.ts cli
+# Desktop tự chủ: chỉ cần cấu hình Nhà cung cấp trong app — không cần .env.local
 ```
 
 ## Biến môi trường (`.env.local`)
 
 | Biến | Bắt buộc | Mô tả |
 |---|---|---|
-| `OPENAI_API_KEY` | ✅ | API key chính cho gateway |
+| `OPENAI_API_KEY` | — | API key cho gateway ở CHẾ ĐỘ DEMO web (người dùng có provider riêng thì không cần) |
 | `OPENAI_API_KEYS` | — | Nhiều key cách nhau bởi `,` `;` hoặc xuống dòng — bật failover pool |
 | `OPENAI_BASE_URL` | — | Gateway tương thích OpenAI (vd `https://anticode.vn/v1`) |
 | `ACCESS_CODE` | — | Yêu cầu mã truy cập (Bearer) khi gọi `/api/chat` và `/api/title` |
 | `ALLOWED_ORIGIN_HOSTS` | — | Host origin phụ được chấp nhận, cách nhau `,` |
 | `DIAG_SECRET` | — | Bật `/api/diag` (mặc định **khóa 403**); gọi: `curl -H "x-diag-secret: ..." /api/diag` |
 | `MODEL_ALIAS_MAP` | — | JSON map tên model nội bộ → tên thật trên gateway, không cần deploy lại |
-| `TITLE_MODEL_CHAIN` | — | Chuỗi model sinh tiêu đề, mặc định `gpt-4o-mini,gpt-4.1-mini,gpt-5.6-terra,deepseek-chat` |
+| `TITLE_MODEL_CHAIN` | — | Chuỗi model dự phòng sinh tiêu đề khi không có provider active, mặc định `gpt-5-4-nano,gpt-4o-mini,gpt-5-6-terra,deepseek-v4-flash`; có provider active thì model người dùng đang chọn được ưu tiên trước (tương tự `COMPACT_MODEL_CHAIN`, `ORCHESTRATE_MODEL_CHAIN`) |
 | `CHAT_DEBUG_ERRORS` | — | `true` để kèm body lỗi upstream vào message |
-| `GEMINI_API_KEY` | — | Gemini vision cho `/api/vision` — mô tả ảnh workspace/ảnh MCP trả về cho model (chấp nhận cả `GOOGLE_API_KEY`) |
 
 ## Kiến trúc
 
 ```
 app/api/chat    — TRUNG TÂM điều phối: same-origin + access-code + rate-limit →
                   key pool failover → model chain fallback → data stream
-                  (heartbeat 10s, idle 60s, budget 270s). Ghép server tools
+                  (heartbeat 10s, idle 90s, budget 270s). Ghép server tools
                   (web/weather/memory), khai báo client tools (fs_*/shell/git/
                   plan/lesson/delegate) cho model gọi, chạy delegate + subagent
                   relay phía server, và loop emulated tool-calling khi model
@@ -119,16 +126,20 @@ app/api/chat/subagent-relay — POST kết quả tool client mà renderer thực
                   hộ subagent đang chạy server-side
 app/api/orchestrate — SSE orchestrator sweep: plan → spawn N agent song song →
                   ranking + heatmap → synthesize
-app/api/vision   — Gemini vision: mô tả ảnh workspace / ảnh MCP thành text
+app/api/vision   — mô tả ảnh workspace / ảnh MCP thành text bằng model
+                  vision của provider active (BYOK — client gửi headers
+                  provider + model vision đã chọn)
 app/api/compact  — nén hội thoại dài thành summary có state tích lũy
 app/api/title    — sinh tiêu đề, chống prompt-injection, heuristic fallback
 app/api/web      — proxy tra cứu web: DuckDuckGo lite→html + đọc trang
                   (SSRF guard từng hop redirect, trần 1.5MB/12s mỗi trang)
 app/api/diag     — chẩn đoán upstream (khóa mặc định, secret qua header)
 
-electron/        — desktop app: main.cjs bọc Next.js local (next dev/start),
-                  ipc.cjs thực thi fs_*/shell/git trên máy thật qua IPC có
-                  path-guard, mcp/ quản lý MCP server (stdio/SSE/http)
+app/api/bridge   — cầu nối desktop: endpoint local-only + token, chuyển tiếp
+                  fs/shell/git/MCP xuống Node bridge server của launcher
+scripts/launch-desktop.cjs — launcher mặc định: mở cửa sổ Edge/Chrome --app
+                  vào Next.js local (tự start dev server nếu chưa chạy)
+bin/vyen.ts       — CLI Vyen (`npm run cli` / `npm run vyen`)
 
 lib/             — logic agent thuần, test được trong node:
                   agent-tools (server + client tool defs), emulated-agent,
@@ -168,6 +179,6 @@ Message gốc mang `parentId = '__ROOT__'` (IndexedDB không index được `nul
 
 ## Ghi chú triển khai (Vercel)
 
-- Routes API chạy Edge runtime; lưu ý Next 16 đang deprecate Edge — cân nhắc chuyển `nodejs` runtime trong tương lai.
+- Routes API khai báo tường minh `export const runtime = 'nodejs'` — đã rời Edge trước khi Next 16 deprecate.
 - Rate limit in-memory per-isolate: chỉ là lớp chống spam nhẹ, cần Upstash Redis nếu muốn chính xác toàn cục.
 - Origin cho phép: `localhost`, `127.0.0.1`, `[::1]` + các host Vercel tự động; thêm domain riêng qua `ALLOWED_ORIGIN_HOSTS`.

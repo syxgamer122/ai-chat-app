@@ -59,20 +59,45 @@ const config: Config = {
           DEFAULT: 'rgb(var(--line) / <alpha-value>)',
           strong: 'rgb(var(--line-strong) / <alpha-value>)',
         },
-        aurora: {
-          from: 'rgb(var(--aurora-from) / <alpha-value>)',
-          via: 'rgb(var(--aurora-via) / <alpha-value>)',
-          to: 'rgb(var(--aurora-to) / <alpha-value>)',
-          accent: 'rgb(var(--aurora-accent) / <alpha-value>)',
-        },
+        /** DESIGN.md Pi Harness x Pixel Tokens */
+        'bg-deep': 'rgb(var(--bg-deep) / <alpha-value>)',
+        'bg-canvas': 'rgb(var(--bg-canvas) / <alpha-value>)',
+        'panel-bg': 'rgb(var(--panel-bg) / <alpha-value>)',
+        'panel-soft': 'rgb(var(--panel-soft) / <alpha-value>)',
+        'border-hairline': 'rgb(var(--border-hairline) / <alpha-value>)',
+        'border-hover': 'rgb(var(--border-hover) / <alpha-value>)',
+        'text-primary': 'rgb(var(--text-primary) / <alpha-value>)',
+        'text-muted': 'rgb(var(--text-muted) / <alpha-value>)',
+        'accent-steel': 'rgb(var(--accent-steel) / <alpha-value>)',
+        'accent-thread': 'rgb(var(--accent-thread) / <alpha-value>)',
+        'status-success': 'rgb(var(--status-success) / <alpha-value>)',
+        'status-warning': 'rgb(var(--status-warning) / <alpha-value>)',
+        'status-error': 'rgb(var(--status-error) / <alpha-value>)',
+      },
+      borderRadius: {
+        none: '0px',
+        sm: '0px',
+        DEFAULT: '0px',
+        md: '0px',
+        lg: '0px',
+        xl: '0px',
+        '2xl': '0px',
+        '3xl': '0px',
+        full: '9999px',
       },
       boxShadow: {
-        /** Nút/chip mang màu thương hiệu. */
-        brand: '0 4px 16px -6px rgb(var(--brand) / 0.6)',
-        'brand-lg': '0 8px 32px -8px rgb(var(--brand) / 0.35)',
-        /** Panel nổi (dropdown, menu, dialog). */
-        panel: '0 12px 32px -16px rgb(15 23 42 / 0.18)',
-        card: '0 8px 24px -12px rgb(15 23 42 / 0.18)',
+        none: 'none',
+        DEFAULT: 'none',
+        sm: 'none',
+        md: 'none',
+        lg: 'none',
+        xl: 'none',
+        '2xl': 'none',
+        inner: 'none',
+        brand: 'none',
+        'brand-lg': 'none',
+        panel: 'none',
+        card: 'none',
       },
       fontFamily: {
         /*
@@ -81,6 +106,8 @@ const config: Config = {
          * subset tiếng Việt) không bao giờ được dùng.
          */
         sans: ['var(--font-sans)', ...defaultTheme.fontFamily.sans],
+        mono: ['var(--font-mono)', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'Monaco', 'Consolas', 'monospace'],
+        pixel: ['var(--font-pixel)', 'Pixelify Sans', 'Minecraft', 'monospace'],
       },
       maxWidth: {
         /** Chiều rộng cột hội thoại — dùng chung cho message list & composer. */
@@ -99,11 +126,35 @@ const config: Config = {
           from: { opacity: '0', transform: 'translateY(6px)' },
           to: { opacity: '1', transform: 'translateY(0)' },
         },
+        /*
+         * Ba keyframes dưới thay framer-motion trong components/effects —
+         * tham số (giá trị/duration/ease) copy nguyên từ transition cũ để
+         * HÀNH VI hiệu ứng không đổi, chỉ đổi cách triển khai (CSS thuần).
+         */
+        'fx-bar-bounce': {
+          '0%, 100%': { height: '4px' },
+          '50%': { height: '22px' },
+        },
+        'fx-dot-bounce': {
+          '0%, 100%': { transform: 'translateY(0)', opacity: '0.4' },
+          '50%': { transform: 'translateY(-5px)', opacity: '1' },
+        },
+        // Vệt quét ShimmerLine: framer chạy 1.4s + repeatDelay 0.4s — CSS
+        // không có repeatDelay nên gộp độ trễ vào cuối chu kỳ 1.8s: quét
+        // chiếm 1.4/1.8 ≈ 77.8% chu kỳ rồi đứng yên 0.4s.
+        'fx-sweep': {
+          '0%': { transform: 'translateX(-120%)' },
+          '77.8%': { transform: 'translateX(360%)' },
+          '100%': { transform: 'translateX(360%)' },
+        },
       },
       animation: {
         'fade-in': 'fade-in 160ms ease-out',
         'pop-in': 'pop-in 160ms ease-out',
         'slide-up': 'slide-up 180ms ease-out',
+        'fx-bar-bounce': 'fx-bar-bounce 1.1s ease-in-out infinite',
+        'fx-dot-bounce': 'fx-dot-bounce 0.9s ease-in-out infinite',
+        'fx-sweep': 'fx-sweep 1.8s ease-in-out infinite',
       },
     },
   },

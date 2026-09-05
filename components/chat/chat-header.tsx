@@ -1,13 +1,10 @@
 /*
- * Header hội thoại: tiêu đề, xuất/nhập, xoá chat.
+ * Header hội thoại: tiêu đề, xuất/nhập, xoá chat — Vyen minimal topbar
  */
 import React, { memo } from 'react';
-import { X, Trash2, Menu, Scissors } from 'lucide-react';
+import { Trash2, Menu, Scissors } from 'lucide-react';
 import { ChatExportMenu } from '@/components/chat-export-menu';
 
-/* ------------------------------------------------------------------ */
-/* Subcomponent 1: Memoized ChatHeader                                 */
-/* ------------------------------------------------------------------ */
 interface ChatHeaderProps {
   title?: string;
   hasMessages: boolean;
@@ -38,24 +35,22 @@ export const ChatHeader = memo(function ChatHeader({
   onCompact,
 }: ChatHeaderProps) {
   return (
-    /*
-     * `h-14` + `pt-safe` khiến notch ăn vào chiều cao cố định làm bóp nội dung
-     * header. Dùng min-height + padding để header tự cao thêm đúng phần an toàn.
-     */
-    <header className="sticky top-0 z-20 flex min-h-14 flex-shrink-0 items-center justify-between gap-2 border-b border-zinc-200/60 bg-surface/90 px-3 pb-2 pt-safe-2 backdrop-blur md:px-5">
+    <header className="sticky top-0 z-20 flex min-h-10 flex-shrink-0 items-center justify-between gap-2 border-b border-[#495059] bg-[#0d1116] px-3 py-1.5 pt-safe-2 md:px-5">
       <div className="flex min-w-0 items-center gap-2">
         <button
           type="button"
           onClick={onOpenSidebar}
           aria-label={sidebarCollapsed ? 'Mở rộng thanh bên' : 'Mở thanh bên'}
-          className={`icon-btn-md ${sidebarCollapsed ? '' : 'md:hidden'}`}
+          className={`icon-btn-sm ${sidebarCollapsed ? '' : 'md:hidden'}`}
         >
-          <Menu size={17} />
+          <Menu size={16} />
         </button>
-        {/* h2 (không phải h1): h1 thuộc trạng thái rỗng / nội dung trang. */}
-        <h2 className="truncate text-[14px] font-semibold tracking-tight text-zinc-700">
-          {title ?? 'Cuộc trò chuyện mới'}
-        </h2>
+
+        <div className="flex min-w-0 items-center">
+          <h2 className="truncate font-pixel text-[16px] font-semibold tracking-[0.05em] text-[#ebe7e4] [image-rendering:pixelated]">
+            {title ?? 'new-session'}
+          </h2>
+        </div>
       </div>
 
       <div className="flex items-center gap-1">
@@ -68,29 +63,29 @@ export const ChatHeader = memo(function ChatHeader({
             title={
               compactBusy
                 ? 'Đang nén hội thoại...'
-                : 'Nén phần hội thoại cũ thành tóm tắt để chat nhẹ hơn'
+                : 'Nén phần hội thoại cũ thành tóm tắt'
             }
-            className="icon-btn-sm"
+            className="icon-btn-sm text-[#9fa4ab] hover:text-[#6a9fcc]"
           >
-            <Scissors size={16} className={compactBusy ? 'animate-pulse' : ''} />
+            <Scissors size={14} />
           </button>
         )}
         <ChatExportMenu chatId={currentChatId} />
 
         {hasMessages &&
           (confirmClear ? (
-            <div className="surface-panel flex animate-pop-in items-center gap-1.5 p-1">
+            <div className="flex items-center gap-1 rounded-none border border-[#495059] bg-[#161d27] p-1 font-mono text-xs">
               <button
                 type="button"
                 onClick={onDeleteChat}
-                className="rounded-md px-2.5 py-1 text-xs font-medium text-red-600 transition-colors hover:bg-red-50 dark:hover:bg-red-500/10"
+                className="rounded-none px-2 py-0.5 font-medium text-[#e8704f] transition-colors hover:bg-[#e8704f]/10"
               >
-                Xóa hẳn
+                Xóa
               </button>
               <button
                 type="button"
                 onClick={() => onSetConfirmClear(false)}
-                className="rounded-md px-2.5 py-1 text-xs text-zinc-600 transition-colors hover:bg-zinc-100"
+                className="rounded-none px-2 py-0.5 text-[#9fa4ab] transition-colors hover:bg-[#252f3d]"
               >
                 Hủy
               </button>
@@ -101,13 +96,12 @@ export const ChatHeader = memo(function ChatHeader({
               onClick={() => onSetConfirmClear(true)}
               aria-label="Xóa cuộc trò chuyện"
               title="Xóa cuộc trò chuyện này"
-              className="icon-btn-sm icon-btn-danger"
+              className="icon-btn-sm icon-btn-danger text-[#9fa4ab] hover:text-[#e8704f]"
             >
-              <Trash2 size={16} />
+              <Trash2 size={14} />
             </button>
           ))}
       </div>
     </header>
   );
 });
-

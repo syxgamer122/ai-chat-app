@@ -97,7 +97,16 @@ let katexModule: any = null;
 function loadKatex(): Promise<any> {
   if (katexModule) return Promise.resolve(katexModule);
   if (!katexModulePromise) {
-    katexModulePromise = import('rehype-katex').then((m) => {
+    // CSS của KaTeX (~23.8KB) đi CÙNG chunk JS của rehype-katex: import trong
+    // cùng biểu thức dynamic import để webpack gộp vào một chunk tải theo nhu
+    // cầu. Trước đây CSS này nằm trong @import đầu globals.css nên mọi người
+    // dùng đều trả kể cả khi không bao giờ xem công thức. Vì module này bị
+    // message-item import tĩnh (nằm trong chunk khởi động), import CSS tĩnh
+    // ở đây sẽ chỉ đẩy vấn đề trở lại CSS chính — phải là dynamic import.
+    katexModulePromise = Promise.all([
+      import('rehype-katex'),
+      import('katex/dist/katex.min.css'),
+    ]).then(([m]) => {
       katexModule = m.default ?? m;
       return katexModule;
     });
@@ -211,14 +220,14 @@ const CodeBlock = memo(function CodeBlock({
   return (
     <div className="claude-code-block my-4">
       {/* Thanh công cụ nằm trên nền tối → dùng border/chữ sáng cho đủ tương phản. */}
-      <div className="flex items-center justify-between border-b border-white/10 bg-surface-code-header px-3 py-1.5">
-        <span className="font-mono text-[11px] font-medium text-[rgb(161,161,170)]">
+      <div className="flex items-center justify-between border-b border-[#495059] bg-[#161d27] px-3 py-1.5">
+        <span className="font-mono text-[11px] font-medium text-[#9fa4ab]">
           {language || 'text'}
         </span>
         <button
           type="button"
           onClick={onCopy}
-          className="flex items-center gap-1 rounded px-1 py-0.5 text-[11px] text-[rgb(161,161,170)] transition-colors hover:bg-white/10 hover:text-zinc-100"
+          className="flex items-center gap-1 rounded-none px-1 py-0.5 text-[11px] text-[#9fa4ab] transition-colors hover:bg-white/10 hover:text-[#ebe7e4]"
           aria-label={copied ? 'Đã chép đoạn mã' : 'Chép đoạn mã'}
         >
           {copied ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}

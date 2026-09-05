@@ -1,6 +1,6 @@
 /**
- * Adapter filesystem cho Vyen desktop (Electron).
- * Mọi op đi qua window.vyen IPC bridge (electron/ipc.cjs),
+ * Adapter filesystem cho Vyen desktop (Tauri).
+ * Mọi op đi qua window.vyen IPC bridge (lib/ipc.cjs),
  * giữ nguyên contract với lib/fs-access.ts để chat-interface
  * không phải fork logic diff/search.
  */

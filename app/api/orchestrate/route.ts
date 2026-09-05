@@ -27,6 +27,7 @@ import { getKeyCandidates, markKeyFailure, markKeySuccess, getKeyLabel } from '@
 import { validateProviderBaseUrl } from '@/lib/provider-url';
 import { sharedFreeBudget, acquireUpstreamSlot } from '@/lib/upstream-queue';
 import { filterSupportedModels, markModelUnsupported } from '@/lib/model-negative-cache';
+import { ACTIVE_MODEL_BODY_FIELD, isActiveProvider, prependActiveModel } from '@/lib/aux-llm-chain';
 import { nonStreamingFetch } from '@/lib/non-streaming-fetch';
 import {
   checkRateLimit,
@@ -169,8 +170,11 @@ const OrchestrateSchema = z.object({
   concurrency: z.number().int().min(1).max(6).default(2),
   /** Bật chấm điểm từng kết quả (thêm N lượt gọi LLM). */
   judge: z.boolean().default(true),
-  /** Model do client chọn — dùng cho worker (phần sinh nội dung). */
-  model: z.string().max(64).optional(),
+  /** Model do client chọn — dùng cho worker (phần sinh nội dung). Cùng field
+      với /api/title và /api/compact: regex chặn tên rác khỏi lên đầu chuỗi,
+      `.catch(undefined)` để tên rác chỉ bị bỏ qua thay vì giết cả lượt chạy
+      lưới (`bad_schema`) — worker vẫn có chuỗi dự phòng để chạy. */
+  model: ACTIVE_MODEL_BODY_FIELD,
 });
 
 /* ------------------------------------------------------------------ */
@@ -225,9 +229,15 @@ export async function POST(req: Request) {
       : getKeyCandidates().keys.slice(0, 3);
 
   const chain = filterSupportedModels(upstreamBase, ORCHESTRATE_MODEL_CHAIN);
-  const workerModel = body.model?.trim();
-  /* Model người dùng chọn được ưu tiên cho worker; chuỗi dự phòng đi sau. */
-  const workerChain = workerModel ? [workerModel, ...chain.filter((m) => m !== workerModel)] : [...chain];
+  /* Model người dùng chọn được ưu tiên cho worker; chuỗi dự phòng đi sau.
+     Giữ hành vi cũ: worker ưu tiên body.model kể cả khi KHÔNG có provider —
+     demo vẫn chọn được model từ catalog mặc định của máy chủ. */
+  const workerChain = prependActiveModel(body.model, chain);
+  /* Provider active là nguồn duy nhất: model người dùng phải dẫn đầu TOÀN
+     CỘC, không chỉ worker — planner/judge/synthesize cũng chạy theo
+     workerChain, vì tên env kiểu crax gần như chắc chắn không tồn tại trên
+     provider của người dùng. Demo giữ env chain cho các vai trò điều phối. */
+  const roleChain = isActiveProvider(providerBase, customKey) ? workerChain : chain;
 
   const contextText = body.context.length
     ? body.context
@@ -240,7 +250,8 @@ export async function POST(req: Request) {
 
   /**
    * Một lượt gọi LLM: xếp hàng (gateway free) → thử key × model → text.
-   * `chainOverride` cho phép worker dùng model người dùng chọn.
+   * `chainOverride` cho phép worker dùng model người dùng chọn; các vai trò
+   * khác mặc định theo `roleChain` (workerChain khi provider active).
    */
   async function callLlm(args: {
     system: string;
@@ -254,7 +265,7 @@ export async function POST(req: Request) {
       if (!slot.ok) throw new Error(`Gateway đang bận — thử lại sau ${slot.retryAfterSec}s`);
     }
 
-    const models = args.chainOverride ?? chain;
+    const models = args.chainOverride ?? roleChain;
     let lastError = 'Không có model khả dụng.';
     let lastStatus: number | undefined;
 

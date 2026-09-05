@@ -26,11 +26,11 @@ const STATUS_META: Record<
   SubtaskStatus,
   { Icon: typeof Circle; className: string; label: string }
 > = {
-  pending: { Icon: Circle, className: "text-zinc-400", label: "Chờ" },
-  in_progress: { Icon: Loader2, className: "animate-spin text-blue-500", label: "Đang làm" },
-  done: { Icon: CheckCircle2, className: "text-emerald-500", label: "Xong" },
-  failed: { Icon: XCircle, className: "text-red-500", label: "Lỗi" },
-  skipped: { Icon: CircleMinus, className: "text-zinc-400", label: "Bỏ qua" },
+  pending: { Icon: Circle, className: "text-[#9fa4ab]", label: "Chờ" },
+  in_progress: { Icon: Loader2, className: "animate-spin text-[#6a9fcc]", label: "Đang làm" },
+  done: { Icon: CheckCircle2, className: "text-[#5db87a]", label: "Xong" },
+  failed: { Icon: XCircle, className: "text-[#e8704f]", label: "Lỗi" },
+  skipped: { Icon: CircleMinus, className: "text-[#9fa4ab]", label: "Bỏ qua" },
 };
 
 interface PlanPanelProps {
@@ -45,11 +45,11 @@ export function PlanPanel({ plan, onHide }: PlanPanelProps) {
 
   return (
     <div
-      className="mx-auto w-full max-w-3xl px-3 pb-2"
+      className="mx-auto w-full max-w-thread px-4 pb-2 font-mono"
       role="region"
       aria-label={`Kế hoạch: ${plan.title}`}
     >
-      <div className="rounded-xl border border-zinc-200 bg-white/80 text-sm shadow-sm backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/70">
+      <div className="rounded-none border border-[#495059] bg-[#212730] text-xs">
         <div className="flex items-center gap-2 px-3 py-2">
           <button
             type="button"
@@ -58,27 +58,28 @@ export function PlanPanel({ plan, onHide }: PlanPanelProps) {
             aria-expanded={expanded}
           >
             {expanded ? (
-              <ChevronDown className="h-3.5 w-3.5 flex-shrink-0 text-zinc-500" />
+              <ChevronDown className="h-3.5 w-3.5 flex-shrink-0 text-[#9fa4ab]" />
             ) : (
-              <ChevronRight className="h-3.5 w-3.5 flex-shrink-0 text-zinc-500" />
+              <ChevronRight className="h-3.5 w-3.5 flex-shrink-0 text-[#9fa4ab]" />
             )}
             <ListTodo
-              className={`h-4 w-4 flex-shrink-0 ${
-                anyActive ? "text-blue-500 dark:text-blue-400" : "text-emerald-500"
+              className={`h-3.5 w-3.5 flex-shrink-0 ${
+                anyActive ? "text-[#6a9fcc]" : "text-[#5db87a]"
               }`}
               aria-hidden
             />
-            <span className="truncate font-medium text-zinc-800 dark:text-zinc-200">
+            <span className="truncate font-semibold text-[#ebe7e4]">
+              <span className="text-[#6a9fcc] mr-1">$</span>
               {plan.title}
             </span>
-            <span className="ml-auto flex-shrink-0 text-xs tabular-nums text-zinc-500">
+            <span className="ml-auto flex-shrink-0 text-[11px] tabular-nums text-[#6a9fcc]">
               {prog.done}/{prog.total} · {prog.percentComplete}%
             </span>
           </button>
           <button
             type="button"
             onClick={onHide}
-            className="rounded-md p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800 dark:hover:text-zinc-300"
+            className="rounded-none p-1 text-[#9fa4ab] hover:bg-[#252f3d] hover:text-[#ebe7e4]"
             aria-label="Ẩn kế hoạch"
           >
             <X className="h-3.5 w-3.5" />
@@ -86,19 +87,15 @@ export function PlanPanel({ plan, onHide }: PlanPanelProps) {
         </div>
 
         {/* Thanh tiến độ mảnh — luôn hiển thị kể cả khi thu gọn */}
-        <div className="h-1 overflow-hidden rounded-b-xl bg-zinc-100 dark:bg-zinc-800">
+        <div className="h-1 overflow-hidden bg-[#161d27]">
           <div
-            className={`h-full rounded transition-all duration-500 ${
-              anyActive
-                ? "bg-gradient-to-r from-blue-500 to-emerald-500"
-                : "bg-emerald-500"
-            }`}
-            style={{ width: `${prog.percentComplete}%` }}
+            className={`h-full ${anyActive ? "bg-[#6a9fcc]" : "bg-[#5db87a]"}`}
+            style={{ width: `${Math.max(0, Math.min(100, prog.percentComplete))}%` }}
           />
         </div>
 
         {expanded && (
-          <ol className="space-y-1 border-t border-zinc-200 px-3 py-2 dark:border-zinc-800">
+          <ol className="space-y-1.5 border-t border-[#495059] bg-[#161d27] px-3 py-2">
             {plan.subtasks.map((st) => {
               const meta = STATUS_META[st.status];
               const { Icon } = meta;
@@ -107,21 +104,21 @@ export function PlanPanel({ plan, onHide }: PlanPanelProps) {
                   <Icon className={`mt-0.5 h-3.5 w-3.5 flex-shrink-0 ${meta.className}`} aria-hidden />
                   <div className="min-w-0">
                     <span
-                      className={`text-[13px] leading-5 ${
+                      className={`text-[12px] leading-5 ${
                         st.status === "done"
-                          ? "text-zinc-400 line-through dark:text-zinc-500"
+                          ? "text-[#9fa4ab] line-through"
                           : st.status === "in_progress"
-                            ? "font-medium text-zinc-800 dark:text-zinc-100"
-                            : "text-zinc-600 dark:text-zinc-300"
+                            ? "font-medium text-[#ebe7e4]"
+                            : "text-[#9fa4ab]"
                       }`}
                     >
                       {st.title}
                     </span>
                     {st.description && (
-                      <p className="text-xs text-zinc-500 dark:text-zinc-400">{st.description}</p>
+                      <p className="text-[11px] text-[#9fa4ab]">{st.description}</p>
                     )}
                     {st.files && st.files.length > 0 && (
-                      <p className="mt-0.5 truncate font-mono text-[11px] text-zinc-400 dark:text-zinc-500">
+                      <p className="mt-0.5 truncate font-mono text-[10.5px] text-[#6a9fcc]">
                         {st.files.join(" · ")}
                       </p>
                     )}

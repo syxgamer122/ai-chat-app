@@ -25,8 +25,7 @@ import {
 } from 'lucide-react';
 import { ModelSelector, type ModelOption } from '@/components/model-selector';
 import { ThinkingSlider } from '@/components/thinking-slider';
-import { MorphIcon, SiriWave, TextShimmer, useHaptics } from '@/components/effects';
-import { motion, AnimatePresence } from 'framer-motion';
+import { useHaptics } from '@/components/effects';
 import type { ThinkingLevel } from '@/lib/provider-url';
 import { useSpeechRecognition } from '@/lib/use-speech-recognition';
 import { filterPrompts } from '@/lib/prompt-library';
@@ -102,6 +101,10 @@ interface ComposerProps {
 
 const DEFAULT_MAX_FILE_BYTES = 20 * 1024 * 1024;
 
+/**
+ * Nút icon 32px như Pi toolbar; vùng chạm mở rộng bằng pseudo `after:-inset-6px`
+ * (32+12=44px) để đạt tap target mobile mà không phình thanh công cụ.
+ */
 function ToolbarButton({
   icon: Icon,
   active,
@@ -129,15 +132,15 @@ function ToolbarButton({
       aria-label={label}
       aria-expanded={ariaExpanded}
       title={label}
-      className={`relative flex h-10 w-10 flex-none sm:h-8 sm:w-8 items-center justify-center rounded-lg transition-all duration-150 ${
+      className={`relative flex h-8 w-8 flex-none items-center justify-center rounded-none transition-colors duration-100 after:absolute after:-inset-[6px] after:content-[''] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[#6a9fcc] ${
         active
-          ? 'bg-emerald-500/20 text-emerald-400 shadow-[inset_0_0_0_1px_rgba(16,185,129,0.3)]'
-          : 'text-slate-400 hover:bg-white/10 hover:text-slate-200'
-      } disabled:cursor-not-allowed disabled:opacity-40 ${className ?? ''}`}
+          ? 'bg-[#252f3d] text-[#6a9fcc]'
+          : 'text-[#9fa4ab] hover:bg-[#161d27] hover:text-[#ebe7e4]'
+      } disabled:cursor-not-allowed disabled:opacity-30 ${className ?? ''}`}
     >
-      <Icon size={16} />
+      <Icon size={14} />
       {badge && (
-        <span className="absolute -right-0.5 -top-0.5 flex h-3.5 min-w-[14px] items-center justify-center rounded-full bg-brand px-0.5 text-[9px] font-bold text-white">
+        <span className="absolute -right-0.5 -top-0.5 flex h-3.5 min-w-[14px] items-center justify-center rounded-full bg-[#e8993a] px-0.5 text-[9px] font-mono font-bold text-[#0d1116]">
           {badge}
         </span>
       )}
@@ -160,17 +163,19 @@ function SendButton({
       onClick={isStreaming ? onStop : undefined}
       disabled={!isStreaming && !canSubmit}
       aria-label={isStreaming ? 'Dừng tạo' : 'Gửi tin nhắn'}
-      className={`flex h-10 w-10 flex-none sm:h-8 sm:w-8 items-center justify-center rounded-lg transition-all duration-150 ${
+      className={`relative flex h-8 w-8 flex-none items-center justify-center rounded-none transition-colors duration-100 after:absolute after:-inset-[6px] after:content-[''] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[#6a9fcc] ${
         isStreaming
-          ? 'bg-slate-700 text-slate-200 hover:bg-slate-600'
+          ? 'bg-[#252f3d] text-[#ebe7e4] hover:bg-[#495059]'
           : canSubmit
-            ? 'bg-emerald-600 text-white shadow-[0_0_12px_rgba(16,185,129,0.3)] hover:bg-emerald-500 active:scale-95'
-            : 'bg-white/5 text-slate-600'
+            ? 'bg-[#6a9fcc] text-[#0d1116] hover:bg-[#6a9fcc]/85 active:scale-95'
+            : 'bg-white/[0.04] text-[#9fa4ab]/40'
       }`}
     >
-      <MorphIcon active={isStreaming} inactive={<ArrowUp size={16} strokeWidth={2.5} />}>
-        <Square size={12} className="fill-current" />
-      </MorphIcon>
+      {isStreaming ? (
+        <Square size={11} className="fill-current" aria-hidden="true" />
+      ) : (
+        <ArrowUp size={15} strokeWidth={2.5} aria-hidden="true" />
+      )}
     </button>
   );
 }
@@ -255,22 +260,22 @@ function OverflowMenu({ tools }: { tools: ToolSpec[] }) {
                   t.onClick();
                   setOpen(false);
                 }}
-                className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+                className="flex w-full items-center gap-2.5 rounded-none px-2 py-2 text-left transition-colors hover:bg-[#161d27] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[#6a9fcc] disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <Icon
                   size={15}
-                  className={`flex-none ${t.active ? 'text-emerald-400' : 'text-slate-400'}`}
+                  className={`flex-none ${t.active ? 'text-[#5db87a]' : 'text-[#9fa4ab]'}`}
                 />
-                <span className="min-w-0 flex-1 truncate text-[13px] text-slate-200">
+                <span className="min-w-0 flex-1 truncate text-[13px] text-[#ebe7e4]">
                   {t.shortLabel ?? t.label}
                 </span>
                 {t.badge && (
-                  <span className="flex-none rounded-full bg-brand px-1.5 text-[10px] font-bold text-white">
+                  <span className="flex-none rounded-full bg-[#e8993a] px-1.5 text-[10px] font-bold text-[#0d1116]">
                     {t.badge}
                   </span>
                 )}
                 {t.active && !t.badge && (
-                  <Check size={13} className="flex-none text-emerald-400" />
+                  <Check size={13} className="flex-none text-[#5db87a]" />
                 )}
               </button>
             );
@@ -521,7 +526,7 @@ export function Composer({
       active: autoPilot ?? false,
       disabled: isStreaming,
       label: autoPilot
-        ? `Auto-pilot: ${policyLabel} — click to cycle`
+        ? `Auto-pilot: ${policyLabel} · bấm để đổi`
         : 'Bật Auto-pilot',
       shortLabel: autoPilot ? `AP: ${policyLabel}` : 'Auto-pilot',
       onClick: onCycleAutoPilot,
@@ -535,8 +540,8 @@ export function Composer({
       active: goalLoopActive ?? false,
       disabled: isStreaming && !(goalLoopActive ?? false),
       label: goalLoopActive
-        ? `Goal loop đang chạy${goalLoopInfo ? ` — lượt ${goalLoopInfo}` : ''} — bấm để dừng`
-        : 'Goal loop — gõ mục tiêu vào ô nhập rồi bấm để agent tự lặp đến khi hoàn thành',
+        ? `Goal loop đang chạy${goalLoopInfo ? ` (lượt ${goalLoopInfo})` : ''} · bấm để dừng`
+        : 'Goal loop · gõ mục tiêu vào ô nhập rồi bấm để agent tự lặp đến khi hoàn thành',
       shortLabel: goalLoopActive ? `Goal ${goalLoopInfo ?? ''}`.trim() : 'Goal loop',
       onClick: () => onGoalLoopClick(input),
     });
@@ -547,7 +552,7 @@ export function Composer({
       key: 'orchestrator',
       icon: Network,
       active: orchestratorOpen,
-      label: 'Orchestrator — chạy nhiều agent theo lưới tham số rồi tổng hợp',
+      label: 'Orchestrator · chạy nhiều agent theo lưới tham số rồi tổng hợp',
       shortLabel: 'Orchestrator',
       onClick: onOpenOrchestrator,
     });
@@ -612,139 +617,137 @@ export function Composer({
   const overflowTools = tools.filter((t) => !t.primary);
 
   return (
-    <div className="pb-composer w-full px-4 pt-3">
-      <div className="mx-auto w-full max-w-thread">
-        {canContinue && !isStreaming && (
-          <div className="mb-3 flex justify-center">
-            <button
-              type="button"
-              onClick={onContinue}
-              className="flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[12px] font-medium text-slate-300 backdrop-blur-sm transition-all hover:bg-white/10 hover:text-white"
-            >
-              <CornerDownLeft size={12} />
-              Viết tiếp
-            </button>
+    // Terminal Input Box (DESIGN.md): full-bleed, dính mép trái/phải, viền
+    // hairline 1px, góc vuông. Chỉ chừa safe-area dưới cho iOS.
+    <div className="w-full pb-[env(safe-area-inset-bottom)]">
+      {canContinue && !isStreaming && (
+        <div className="mb-1.5 flex justify-center">
+          <button
+            type="button"
+            onClick={onContinue}
+            className="flex items-center gap-1.5 rounded-none border border-[#495059] bg-[#161d27] px-3 py-1.5 font-mono text-[12px] font-medium text-[#6a9fcc] transition-colors duration-100 hover:border-[#757d89] hover:bg-[#212730] hover:text-[#ebe7e4] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[#6a9fcc]"
+          >
+            <CornerDownLeft size={12} aria-hidden="true" />
+            Viết tiếp
+          </button>
+        </div>
+      )}
+
+      {fileError && (
+        <div role="status" className="notice-warn mb-2 px-2">
+          {fileError}
+        </div>
+      )}
+
+      <form
+        onSubmit={handleSubmit}
+        onDragOver={(e) => {
+          e.preventDefault();
+          setDragging(true);
+        }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDragging(false);
+          acceptFiles(e.dataTransfer?.files ?? null);
+        }}
+        className={`group relative rounded-none border border-[#495059] bg-[#212730] transition-colors duration-100 focus-within:border-[#6a9fcc] ${
+          dragging ? 'border-[#6a9fcc]' : ''
+        }`}
+      >
+        {slashOpen && (
+          <div
+            role="listbox"
+            aria-label="Danh sách prompt"
+            className="absolute bottom-full left-0 right-0 z-30 mb-2 max-h-64 overflow-y-auto rounded-none border border-[#495059] bg-[#212730] p-1 font-mono"
+            onMouseDown={(e) => e.preventDefault()}
+          >
+            {slashMatches.map((p, i) => (
+              <button
+                key={p.id}
+                type="button"
+                role="option"
+                aria-selected={i === slashIndex}
+                id={`slash-opt-${p.id}`}
+                onClick={() => applyPrompt(p)}
+                onMouseEnter={() => setSlashIndex(i)}
+                className={`flex w-full flex-col items-start gap-0.5 rounded-none px-3 py-2 text-left transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[#6a9fcc] ${
+                  i === slashIndex ? 'bg-[#252f3d] text-[#ebe7e4]' : 'text-[#ebe7e4] hover:bg-[#161d27]'
+                }`}
+              >
+                <span className="text-[12.5px] font-medium text-[#ebe7e4]">/{p.title}</span>
+                <span className="line-clamp-1 w-full text-[11px] text-[#9fa4ab]">
+                  {p.content.replace(/\n+/g, ' ').trim()}
+                </span>
+              </button>
+            ))}
+            {onSavePrompt && input.length > 1 && (
+              <button
+                type="button"
+                onClick={() => void quickSavePrompt()}
+                className="flex w-full items-center gap-1.5 border-t border-[#495059] px-3 py-2 text-left font-mono text-[11.5px] text-[#6a9fcc] transition-colors hover:text-[#ebe7e4] hover:bg-[#161d27] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[#6a9fcc]"
+              >
+                <BookmarkPlus size={13} />
+                Lưu nhanh &quot;/{slashQuery}&quot; làm mẫu
+              </button>
+            )}
           </div>
         )}
 
-        <AnimatePresence>
-          {fileError && (
-            <motion.div
-              initial={{ opacity: 0, y: -4 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -4 }}
-              role="status"
-              className="notice-warn mb-2 text-center"
-            >
-              {fileError}
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        <form
-          onSubmit={handleSubmit}
-          onDragOver={(e) => {
-            e.preventDefault();
-            setDragging(true);
-          }}
-          onDragLeave={() => setDragging(false)}
-          onDrop={(e) => {
-            e.preventDefault();
-            setDragging(false);
-            acceptFiles(e.dataTransfer?.files ?? null);
-          }}
-          className={`group relative rounded-2xl border border-white/10 bg-slate-800/50 shadow-[0_0_15px_rgba(16,185,129,0.1)] backdrop-blur-lg transition-all duration-200 focus-within:border-emerald-500/30 focus-within:shadow-[0_0_20px_rgba(16,185,129,0.15)] ${
-            dragging ? 'border-emerald-500/40 ring-2 ring-emerald-500/10' : ''
-          }`}
-        >
-          {slashOpen && (
-            <div
-              role="listbox"
-              aria-label="Danh sách prompt"
-              className="absolute bottom-full left-0 right-0 z-30 mb-2 max-h-64 overflow-y-auto rounded-xl border border-zinc-200 bg-white p-1 shadow-lg dark:border-zinc-800 dark:bg-zinc-950"
-              onMouseDown={(e) => e.preventDefault()}
-            >
-              {slashMatches.map((p, i) => (
-                <button
-                  key={p.id}
-                  type="button"
-                  role="option"
-                  aria-selected={i === slashIndex}
-                  id={`slash-opt-${p.id}`}
-                  onClick={() => applyPrompt(p)}
-                  onMouseEnter={() => setSlashIndex(i)}
-                  className={`flex w-full flex-col items-start gap-0.5 rounded-lg px-3 py-2 text-left transition-colors ${
-                    i === slashIndex ? 'bg-zinc-100 dark:bg-zinc-900' : ''
-                  }`}
-                >
-                  <span className="text-[13px] font-medium text-zinc-900 dark:text-zinc-100">{p.title}</span>
-                  <span className="line-clamp-1 w-full text-[11px] text-zinc-500 dark:text-zinc-400">
-                    {p.content.replace(/\n+/g, ' ').trim()}
-                  </span>
-                </button>
-              ))}
-              {onSavePrompt && input.length > 1 && (
+        {attachments.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 px-3 pt-3">
+            {attachments.map((a) => (
+              <span
+                key={a.id}
+                className="flex max-w-[200px] items-center gap-1.5 rounded-none border border-[#495059] bg-[#161d27] px-2 py-1 font-mono text-[11px] text-[#ebe7e4]"
+              >
+                <Paperclip size={10} aria-hidden="true" className="flex-shrink-0 text-[#6a9fcc]" />
+                <span className="truncate">{a.name}</span>
                 <button
                   type="button"
-                  onClick={() => void quickSavePrompt()}
-                  className="flex w-full items-center gap-1.5 border-t border-zinc-100 px-3 py-2 text-left text-[12px] text-zinc-600 transition-colors hover:text-zinc-900 dark:border-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
+                  onClick={() => onRemoveAttachment(a.id)}
+                  aria-label={`Gỡ ${a.name}`}
+                  className="ml-0.5 rounded-none p-1 text-[#9fa4ab] transition-colors hover:bg-[#252f3d] hover:text-[#ebe7e4] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[#6a9fcc]"
                 >
-                  <BookmarkPlus size={13} />
-                  Lưu nhanh &quot;/{slashQuery}&quot; làm mẫu
+                  <X size={10} aria-hidden="true" />
                 </button>
-              )}
-            </div>
-          )}
+              </span>
+            ))}
+          </div>
+        )}
 
-          {attachments.length > 0 && (
-            <div className="flex flex-wrap gap-1.5 px-3 pt-3">
-              {attachments.map((a) => (
-                <motion.span
-                  key={a.id}
-                  initial={{ opacity: 0, scale: 0.95 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.95 }}
-                  className="flex max-w-[200px] items-center gap-1.5 rounded-md border border-zinc-200 bg-zinc-50 px-2 py-1 text-[11px] text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300"
-                >
-                  <Paperclip size={10} className="flex-shrink-0 text-zinc-400" />
-                  <span className="truncate">{a.name}</span>
-                  <button
-                    type="button"
-                    onClick={() => onRemoveAttachment(a.id)}
-                    aria-label={`Gỡ ${a.name}`}
-                    className="ml-0.5 rounded p-0.5 text-zinc-400 transition-colors hover:bg-zinc-200 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
-                  >
-                    <X size={10} />
-                  </button>
-                </motion.span>
-              ))}
-            </div>
-          )}
+        {(voice.listening || voice.error || webBusy) && (
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3.5 pt-3 font-mono text-[12px] leading-relaxed">
+            {webBusy && (
+              <span className="flex min-w-0 items-center gap-1.5 text-[#9fa4ab]">
+                {/* Con trỏ █ nhấp nháy — tín hiệu "đang chạy" đặc trưng terminal. */}
+                <span aria-hidden="true" className="terminal-cursor" />
+                <span className="truncate">Đang tra cứu web…</span>
+              </span>
+            )}
+            {voice.listening && (
+              <span className="flex min-w-0 items-center gap-2 text-[#9fa4ab]">
+                <span
+                  aria-hidden="true"
+                  className="h-2 w-2 flex-none bg-[#e8704f]"
+                />
+                <span className="truncate">
+                  {voice.interim || 'Đang nghe… nói tiếng Việt nhé'}
+                </span>
+              </span>
+            )}
+            {voice.error && (
+              <span role="alert" className="text-[#e8993a]">
+                {voice.error}
+              </span>
+            )}
+          </div>
+        )}
 
-          {(voice.listening || voice.error || webBusy) && (
-            <div className="flex items-center gap-3 px-4 pt-3 text-[12px] leading-relaxed">
-              {webBusy && (
-                <span className="flex min-w-0 items-center gap-1.5 text-zinc-500 dark:text-zinc-400">
-                  <span className="h-1.5 w-1.5 flex-shrink-0 animate-pulse rounded-full bg-brand" />
-                  <TextShimmer text="Đang tra cứu web…" className="truncate" />
-                </span>
-              )}
-              {voice.listening && (
-                <span className="flex min-w-0 items-center gap-2 text-zinc-500 dark:text-zinc-400">
-                  <SiriWave active />
-                  <span className="truncate">
-                    {voice.interim || 'Đang nghe… nói tiếng Việt nhé'}
-                  </span>
-                </span>
-              )}
-              {voice.error && (
-                <span role="alert" className="text-amber-600 dark:text-amber-400">
-                  {voice.error}
-                </span>
-              )}
-            </div>
-          )}
-
+        <div className="relative flex items-start">
+          <span className="select-none pl-3.5 pt-3 font-mono text-[14px] text-[#757d89] group-focus-within:text-[#6a9fcc]">
+            $
+          </span>
           <TextareaAutosize
             value={input}
             onChange={onInputChange}
@@ -769,95 +772,98 @@ export function Composer({
             aria-activedescendant={
               slashOpen ? `slash-opt-${slashMatches[slashIndex]?.id}` : undefined
             }
-            placeholder="Nhắn tin cho AI..."
-            className="w-full resize-none bg-transparent px-4 pb-1 pt-3 text-[16px] leading-relaxed text-slate-100 outline-none placeholder:text-slate-500 sm:text-[15px]"
+            placeholder="Hỏi bất cứ điều gì, hoặc gõ / để dùng prompt mẫu..."
+              className="w-full resize-none bg-transparent pl-2 pr-4 pb-1 pt-3 font-mono text-[14px] leading-relaxed text-[#ebe7e4] outline-none placeholder:text-[#9fa4ab]"
           />
+        </div>
 
-          <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            hidden
-            onChange={(e) => {
-              acceptFiles(e.target.files);
-              e.target.value = '';
-            }}
-          />
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          hidden
+          onChange={(e) => {
+            acceptFiles(e.target.files);
+            e.target.value = '';
+          }}
+        />
 
-          <div className="flex items-center gap-2 px-2 pb-safe-2 pt-1">
-            {/*
-             * Cụm TRÁI (công cụ). Hai lớp bảo vệ để cụm phải không bao giờ bị
-             * đẩy ra khỏi thanh:
-             *  1. Vùng chứa nút là scroll container (`overflow-x-auto` +
-             *     `min-w-0`) → có thể co về 0 và cuộn ngang thay vì tràn.
-             *  2. Các công cụ phụ gom vào menu "⋯" trên mobile → cụm trái chỉ
-             *     còn 2–3 nút, hiếm khi phải cuộn.
-             * Dùng `grow` (basis auto) chứ không dùng `flex-1` (basis 0%):
-             * với basis 0 cụm này không báo kích thước nội dung, nên khi thiếu
-             * chỗ nó co về 0 và dồn toàn bộ phần thiếu hụt sang bên phải.
-             */}
-            <div className="flex min-w-0 grow shrink-0 items-center gap-0.5 sm:shrink">
-              <div className="no-scrollbar -mx-0.5 -my-1 flex min-w-0 grow items-center gap-0.5 overflow-x-auto overscroll-x-contain px-0.5 py-1">
-                {primaryTools.map((t) => (
-                  <ToolbarButton
-                    key={t.key}
-                    icon={t.icon}
-                    label={t.label}
-                    active={t.active}
-                    disabled={t.disabled}
-                    badge={t.badge}
-                    onClick={t.onClick}
-                  />
-                ))}
-                {overflowTools.map((t) => (
-                  <ToolbarButton
-                    key={t.key}
-                    icon={t.icon}
-                    label={t.label}
-                    active={t.active}
-                    disabled={t.disabled}
-                    badge={t.badge}
-                    onClick={t.onClick}
-                    className="hidden sm:flex"
-                  />
-                ))}
-              </div>
-
-              {overflowTools.length > 0 && <OverflowMenu tools={overflowTools} />}
+        <div className="flex items-center gap-2 px-2 pb-2 pt-1">
+          {/*
+           * Cụm TRÁI (công cụ). Hai lớp bảo vệ để cụm phải không bao giờ bị
+           * đẩy ra khỏi thanh:
+           *  1. Vùng chứa nút là scroll container (`overflow-x-auto` +
+           *     `min-w-0`) → có thể co về 0 và cuộn ngang thay vì tràn.
+           *  2. Các công cụ phụ gom vào menu "⋯" trên mobile → cụm trái chỉ
+           *     còn 2–3 nút, hiếm khi phải cuộn.
+           * Dùng `grow` (basis auto) chứ không dùng `flex-1` (basis 0%):
+           * với basis 0 cụm này không báo kích thước nội dung, nên khi thiếu
+           * chỗ nó co về 0 và dồn toàn bộ phần thiếu hụt sang bên phải.
+           */}
+          <div className="flex min-w-0 grow shrink-0 items-center gap-0.5 sm:shrink">
+            <div className="no-scrollbar -mx-0.5 -my-1 flex min-w-0 grow items-center gap-0.5 overflow-x-auto overscroll-x-contain px-0.5 py-1">
+              {primaryTools.map((t) => (
+                <ToolbarButton
+                  key={t.key}
+                  icon={t.icon}
+                  label={t.label}
+                  active={t.active}
+                  disabled={t.disabled}
+                  badge={t.badge}
+                  onClick={t.onClick}
+                />
+              ))}
+              {overflowTools.map((t) => (
+                <ToolbarButton
+                  key={t.key}
+                  icon={t.icon}
+                  label={t.label}
+                  active={t.active}
+                  disabled={t.disabled}
+                  badge={t.badge}
+                  onClick={t.onClick}
+                  className="hidden sm:flex"
+                />
+              ))}
             </div>
 
-            {/*
-             * Cụm PHẢI (mức suy luận + model + gửi). Không có `shrink-0` ở đây:
-             * cụm được phép co lại (nhãn model tự truncate) nhưng nút gửi và
-             * thanh suy luận thì không — vậy chúng luôn nằm trong thanh.
-             */}
-            <div className="flex min-w-0 items-center gap-1.5 sm:gap-2">
-              {thinkingLevel && onThinkingLevelChange && (
-                <div className="flex-none">
-                  <ThinkingSlider
-                    value={thinkingLevel}
-                    onChange={onThinkingLevelChange}
-                    disabled={isStreaming}
-                    supportedLevels={thinkingSupportedLevels}
-                  />
-                </div>
-              )}
-              <ModelSelector
-                models={models}
-                value={model}
-                onChange={onModelChange}
-                disabled={isStreaming}
-              />
-              <div className="hidden h-4 w-px flex-none bg-white/10 sm:block" />
-              <SendButton
-                isStreaming={isStreaming}
-                canSubmit={canSubmit}
-                onStop={onStop}
-              />
-            </div>
+            {overflowTools.length > 0 && <OverflowMenu tools={overflowTools} />}
           </div>
-        </form>
-      </div>
+
+          {/*
+           * Cụm PHẢI (mức suy luận + model + gửi). Không có `shrink-0` ở đây:
+           * cụm được phép co lại (nhãn model tự truncate) nhưng nút gửi và
+           * thanh suy luận thì không — vậy chúng luôn nằm trong thanh.
+           */}
+          <div className="flex min-w-0 items-center gap-1.5 sm:gap-2">
+            {thinkingLevel && onThinkingLevelChange && (
+              <div className="flex-none">
+                <ThinkingSlider
+                  value={thinkingLevel}
+                  onChange={onThinkingLevelChange}
+                  disabled={isStreaming}
+                  supportedLevels={thinkingSupportedLevels}
+                />
+              </div>
+            )}
+            <ModelSelector
+              models={models}
+              value={model}
+              onChange={onModelChange}
+              disabled={isStreaming}
+            />
+            <div className="hidden h-4 w-px flex-none bg-[#495059] sm:block" />
+            <SendButton
+              isStreaming={isStreaming}
+              canSubmit={canSubmit}
+              onStop={onStop}
+            />
+          </div>
+        </div>
+      </form>
+        <div className="mt-1.5 px-2 font-mono text-[10.5px] text-[#9fa4ab]">
+          Enter để gửi · Shift+Enter xuống dòng · / lệnh nhanh
+        </div>
     </div>
   );
 }

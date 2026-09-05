@@ -83,7 +83,7 @@ function requireMcp() {
   const bridge = mcp();
   if (!bridge) {
     throw new Error(
-      'MCP chỉ khả dụng trong Vyen desktop (Electron). Hãy chạy app bằng npm run app:dev / app:prod.',
+      'MCP chỉ khả dụng trong Vyen desktop. Hãy chạy app bằng npm run app (hoặc npm run desktop).',
     );
   }
   return bridge;

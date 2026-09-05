@@ -15,7 +15,13 @@
 import { useAppStore } from '@/lib/store';
 import type { WebContextPayload, WebPageExtract, WebSearchHit } from '@/lib/web-context';
 
-const REQUEST_TIMEOUT_MS = 15_000;
+/*
+ * 8s cho cả search lẫn fetchPage: gatherWebContext chạy TRƯỚC handleSubmit
+ * nên mỗi giây chờ ở đây là 1 giây trễ toàn bộ lượt gửi. Trang nào không
+ * trả trong 8s gần như chắc chắn không trả kịp — bỏ trang đó
+ * (allSettled) thay vì giữ cả cụm chờ thêm 7s nữa như thời gian 15s cũ.
+ */
+const REQUEST_TIMEOUT_MS = 8_000;
 const MAX_PASTED_URLS = 2;
 const MAX_AUTO_FETCH = 2;
 

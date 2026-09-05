@@ -1,7 +1,7 @@
 'use client';
 
 import { memo, useState } from 'react';
-import { ChevronDown, ChevronRight, Sparkles } from 'lucide-react';
+import { ChevronDown, ChevronRight } from 'lucide-react';
 
 /**
  * Badge "Kết quả Orchestrator" — provenance cho message assistant được "Thêm
@@ -76,26 +76,23 @@ export const OrchestratorBadge = memo(function OrchestratorBadge({
   const canExpand = goal != null || adoptedAt != null;
   const timeText = adoptedAt != null ? formatAdoptedAt(adoptedAt) : '';
 
-  /* Cùng hệ chip với tool-trace: brand nhạt (không shimmer — đây là nhãn
-     tĩnh, không phải trạng thái đang chạy), icon đổi qua biến --brand /
-     aurora theo dark: song song như convention. */
+  /* Cùng hệ chip với tool-trace (DESIGN.md): góc vuông, hairline #495059,
+     nền panel, một theme dark duy nhất. Không glow/shimmer — nhãn tĩnh. */
   const chipClass =
-    'flex max-w-full items-center gap-1.5 rounded-md border px-2.5 py-1 text-[11px] transition-colors ' +
-    'border-brand/20 bg-brand/[0.04] text-zinc-700 dark:border-aurora-from/20 dark:bg-aurora-from/[0.06] dark:text-zinc-300';
+    'flex max-w-full items-center gap-1.5 rounded-none border border-[#495059] bg-[#212730] px-2.5 py-1 font-mono text-[11px] transition-colors duration-100 text-[#9fa4ab]';
   const inner = (
     <>
-      <Sparkles size={12} className="flex-shrink-0 text-brand dark:text-aurora-from" aria-hidden />
-      <span className="flex-shrink-0 font-medium">Kết quả Orchestrator</span>
+      <span className="flex-shrink-0 font-semibold text-[#ebe7e4]">Kết quả Orchestrator</span>
       {meta.length > 0 && (
-        <span className="flex-shrink-0 text-zinc-500 dark:text-zinc-400">{meta.join(' · ')}</span>
+        <span className="flex-shrink-0 text-[#9fa4ab]">{meta.join(' · ')}</span>
       )}
       {goal && (
-        <span className="min-w-0 max-w-[220px] truncate text-zinc-500 dark:text-zinc-400">
+        <span className="min-w-0 max-w-[220px] truncate text-[#9fa4ab]">
           {goal}
         </span>
       )}
-      {canExpand && expanded && <ChevronDown size={11} className="flex-shrink-0 text-zinc-400" aria-hidden />}
-      {canExpand && !expanded && <ChevronRight size={11} className="flex-shrink-0 text-zinc-400" aria-hidden />}
+      {canExpand && expanded && <ChevronDown size={11} className="flex-shrink-0 text-[#9fa4ab]" aria-hidden />}
+      {canExpand && !expanded && <ChevronRight size={11} className="flex-shrink-0 text-[#9fa4ab]" aria-hidden />}
     </>
   );
 
@@ -107,7 +104,7 @@ export const OrchestratorBadge = memo(function OrchestratorBadge({
           onClick={() => setExpanded((prev) => !prev)}
           aria-expanded={expanded}
           title={goal ?? undefined}
-          className={`${chipClass} cursor-pointer hover:border-brand/30 hover:bg-brand/[0.08] dark:hover:border-aurora-from/30 dark:hover:bg-aurora-from/[0.1]`}
+          className={`${chipClass} cursor-pointer hover:border-[#757d89] hover:text-[#ebe7e4]`}
         >
           {inner}
         </button>
@@ -116,15 +113,15 @@ export const OrchestratorBadge = memo(function OrchestratorBadge({
       )}
 
       {expanded && (
-        <div className="mt-1.5 rounded-md border border-zinc-200 bg-zinc-50 px-2.5 py-1.5 text-[11px] text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/50 dark:text-zinc-400">
+        <div className="mt-1.5 rounded-none border border-[#495059] bg-[#161d27] px-2.5 py-1.5 font-mono text-[11px] text-[#9fa4ab]">
           {goal && (
             <p className="whitespace-pre-wrap break-words" title={goal}>
-              <span className="font-medium">Mục tiêu:</span> {goal}
+              <span className="font-medium text-[#ebe7e4]">Mục tiêu:</span> {goal}
             </p>
           )}
           {timeText && (
             <p>
-              <span className="font-medium">Thời gian:</span> {timeText}
+              <span className="font-medium text-[#ebe7e4]">Thời gian:</span> {timeText}
             </p>
           )}
         </div>

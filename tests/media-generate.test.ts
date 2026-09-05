@@ -229,3 +229,98 @@ describe('generateMedia — kiểm tra đầu vào', () => {
     });
   });
 });
+
+/* ------------------------------------------------------------------ */
+/* Desktop (giai đoạn 2): tạo ảnh qua main-process proxy vyen:llm-fetch */
+/* ------------------------------------------------------------------ */
+
+/** Bridge giả — null mặc định để mọi test phía trên chạy đúng đường web. */
+const desktopBridge = vi.hoisted(() => ({
+  current: null as null | { llm: { fetch: ReturnType<typeof vi.fn> } },
+}));
+
+vi.mock('@/lib/desktop-bridge', () => ({
+  vyenDesktop: () => desktopBridge.current,
+}));
+
+describe('generateMedia — ảnh qua main-proxy (desktop)', () => {
+  const okProxy = (body: string, status = 200) => ({
+    ok: status < 400,
+    status,
+    headers: { 'content-type': 'application/json' },
+    bodyText: body,
+  });
+
+  it('desktop có llm.fetch → gọi ẢNH qua proxy, KHÔNG đụng fetch trình duyệt', async () => {
+    const fetchMock = mockFetch(async () => {
+      throw new Error('fetch trình duyệt không được gọi khi đã có proxy');
+    });
+    const proxyFetch = vi.fn(
+      async (
+        _opts: { url: string; method: string; headers: Record<string, string>; body: string; timeoutMs: number },
+      ) => okProxy(JSON.stringify({ data: [{ url: 'https://cdn.example/d.png' }] })),
+    );
+    desktopBridge.current = { llm: { fetch: proxyFetch } };
+
+    try {
+      const res = await generateMedia({ ...baseReq, kind: 'image' });
+      expect(res.url).toBe('https://cdn.example/d.png');
+      expect(fetchMock).not.toHaveBeenCalled();
+      // Proxy nhận đúng endpoint + Bearer key + body có model.
+      const opts = proxyFetch.mock.calls[0][0];
+      expect(opts.url).toBe(`${BASE}/images/generations`);
+      expect(opts.method).toBe('POST');
+      expect(opts.headers.Authorization).toBe('Bearer sk-test');
+      expect(JSON.parse(opts.body).model).toBe('qwen-image-3.0-pro');
+      // Timeout riêng cho tạo ảnh (trần cao của llm-fetch).
+      expect(opts.timeoutMs).toBe(300_000);
+    } finally {
+      desktopBridge.current = null;
+    }
+  });
+
+  it('proxy trả 403 "Origin not allowed" → vẫn đánh dấu originBlocked (caller fallback)', async () => {
+    desktopBridge.current = {
+      llm: {
+        fetch: vi.fn(async () =>
+          okProxy(JSON.stringify({ error: { message: 'Origin not allowed' } }), 403),
+        ),
+      },
+    };
+    try {
+      await expect(generateMedia({ ...baseReq, kind: 'image' })).rejects.toMatchObject({
+        originBlocked: true,
+        status: 403,
+      });
+    } finally {
+      desktopBridge.current = null;
+    }
+  });
+
+  it('proxy trả 401 → lỗi kèm gợi ý kiểm tra key (không phải originBlocked)', async () => {
+    desktopBridge.current = {
+      llm: { fetch: vi.fn(async () => okProxy('{"error":{"message":"bad key"}}', 401)) },
+    };
+    try {
+      await expect(generateMedia({ ...baseReq, kind: 'image' })).rejects.toMatchObject({
+        originBlocked: false,
+        status: 401,
+      });
+    } finally {
+      desktopBridge.current = null;
+    }
+  });
+
+  it('bridge không có llm (shell cũ) → tự dùng fetch trình duyệt như web', async () => {
+    mockFetch(async () =>
+      new Response(JSON.stringify({ data: [{ url: 'https://cdn.example/w.png' }] }), { status: 200 }),
+    );
+    desktopBridge.current = {} as never;
+    try {
+      const res = await generateMedia({ ...baseReq, kind: 'image' });
+      expect(res.url).toBe('https://cdn.example/w.png');
+    } finally {
+      desktopBridge.current = null;
+    }
+  });
+});

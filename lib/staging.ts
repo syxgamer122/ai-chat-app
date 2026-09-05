@@ -21,7 +21,12 @@ const normalizeStagingPath = normalizePathKey;
 export { normalizeStagingPath };
 
 export interface StagedFile {
-  /** Path đã chuẩn hóa — khóa của record. */
+  /**
+   * Path NGUYÊN VĂN từ tool call — dùng để GHI ĐĨA + hiển thị. FS trên
+   * Linux/macOS phân biệt hoa thường: ghi bằng path đã lowercase sẽ tạo file
+   * MỚI (readme.md) thay vì sửa file thật (README.md). Khoá record trong
+   * store là path đã qua normalizeStagingPath, KHÔNG phải field này.
+   */
   path: string;
   /**
    * Nội dung đĩa TẠI THỜI ĐIỂM STAGE ĐẦU TIÊN — dùng cho diff hiển thị.
@@ -34,7 +39,8 @@ export interface StagedFile {
   stagedAt: number;
 }
 
-/** Key = path đã chuẩn hóa. Plain object để serialize JSON được. */
+/** Key của record = path đã chuẩn hóa (normalizeStagingPath). Plain object để
+ *  serialize JSON được. Value giữ path NGUYÊN VĂN để apply ghi đĩa đúng file. */
 export type StagingStore = Record<string, StagedFile>;
 
 export function emptyStagingStore(): StagingStore {
@@ -47,7 +53,10 @@ export function stagingCount(store: StagingStore): number {
 
 /**
  * Đưa nội dung mới vào staging. Nếu file đã staged từ trước: GIỮ `original`
- * của lần đầu (diff so với đĩa gốc), cập nhật content.
+ * và `path` của lần đầu (diff so với đĩa gốc; path đầu tiên là path model
+ * dùng đọc được file trên đĩa — đúng case nhất), cập nhật content.
+ * Record được đặt dưới key = normalizeStagingPath(path) để các lần stage
+ * khác hoa thường/prefix dồn về MỘT record, nhưng `path` giữ nguyên văn.
  * Trả store mới (immutable — caller là React state/ref dễ quản lý).
  */
 export function stageFile(
@@ -61,7 +70,7 @@ export function stageFile(
   return {
     ...store,
     [key]: {
-      path: key,
+      path: existing ? existing.path : path,
       original: existing ? existing.original : diskOriginal,
       content,
       stagedAt: Date.now(),
@@ -69,7 +78,9 @@ export function stageFile(
   };
 }
 
-/** Bỏ một file khỏi staging (reject từng file). Đĩa không bị đụng. */
+/** Bỏ một file khỏi staging (reject từng file). Đĩa không bị đụng.
+ *  Chấp nhận CẢ path nguyên văn lẫn path đã chuẩn hóa — normalizeStagingPath
+ *  đưa hai dạng về cùng một key. */
 export function unstageFile(store: StagingStore, path: string): StagingStore {
   const key = normalizeStagingPath(path);
   if (!(key in store)) return store;

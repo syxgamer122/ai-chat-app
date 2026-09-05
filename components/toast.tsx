@@ -22,14 +22,14 @@ export function Toast({ message, onClose }: ToastProps) {
       aria-live="polite"
       className="pointer-events-none fixed inset-x-0 bottom-[calc(7rem+env(safe-area-inset-bottom))] z-50 flex justify-center px-4"
     >
-      <div className="notice-warn pointer-events-auto flex max-w-md items-start gap-2.5 bg-amber-50/95 shadow-card backdrop-blur animate-slide-up dark:bg-zinc-900/95">
+      <div className="pointer-events-auto flex max-w-md items-start gap-2.5 rounded-none border border-[#e8993a]/40 bg-[#212730] p-3 text-xs font-mono text-[#ebe7e4] animate-slide-up">
         <AlertTriangle size={14} className="mt-0.5 flex-shrink-0 text-amber-600 dark:text-amber-400" />
         <p className="min-w-0 flex-1">{message}</p>
         <button
           type="button"
           onClick={onClose}
           aria-label="Đóng thông báo"
-          className="-mr-1 -mt-0.5 flex-shrink-0 rounded p-0.5 text-amber-700/70 transition-colors hover:bg-amber-100 hover:text-amber-900 dark:text-amber-400/70 dark:hover:bg-amber-500/10 dark:hover:text-amber-300"
+          className="-mr-1 -mt-0.5 flex-shrink-0 rounded-none p-0.5 text-amber-700/70 transition-colors hover:bg-amber-100 hover:text-amber-900 dark:text-amber-400/70 dark:hover:bg-amber-500/10 dark:hover:text-amber-300"
         >
           <X size={13} />
         </button>

@@ -11,6 +11,8 @@ interface Options {
   /** Provider preset đang active — override baseUrl/key của server env. */
   providerBase?: string;
   providerKey?: string;
+  /** Model đang chọn ở client — /api/title ưu tiên khi provider active. */
+  model?: string;
 }
 
 function localTitle(text: string): string {
@@ -22,7 +24,7 @@ function localTitle(text: string): string {
   return words.length ? words.slice(0, 5).join(' ').slice(0, 50) : 'Cuộc trò chuyện mới';
 }
 
-export function useTitleGenerator({ onTitle, accessCode, apiKey, providerBase, providerKey }: Options) {
+export function useTitleGenerator({ onTitle, accessCode, apiKey, providerBase, providerKey, model }: Options) {
   /**
    * Map<conversationId, TitleState>.
    * QUY TẮC BẤT BIẾN: chuyển sang 'pending' TRƯỚC khi fetch,
@@ -76,7 +78,7 @@ export function useTitleGenerator({ onTitle, accessCode, apiKey, providerBase, p
             ...(outboundKey ? { 'x-api-key': outboundKey } : {}),
             ...(providerBase ? { 'x-api-base': providerBase } : {}),
           },
-          body: JSON.stringify({ message: firstUserMessage.slice(0, 2000) }),
+          body: JSON.stringify({ message: firstUserMessage.slice(0, 2000), ...(model ? { model } : {}) }),
           signal: controller.signal,
           cache: 'no-store',
         });
@@ -102,7 +104,7 @@ export function useTitleGenerator({ onTitle, accessCode, apiKey, providerBase, p
         state.current.set(conversationId, 'settled');
       }
     },
-    [onTitle, accessCode, apiKey, providerBase, providerKey],
+    [onTitle, accessCode, apiKey, providerBase, providerKey, model],
   );
 
   /** Gọi khi load conversation đã có title sẵn từ Dexie. */

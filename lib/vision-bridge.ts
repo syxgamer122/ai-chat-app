@@ -7,23 +7,20 @@
  * "nó không thấy ảnh của mình".
  *
  * Giải pháp (port ý tưởng từ opencode-vision-bridge): trước khi gọi upstream,
- * ảnh (data URL) được gửi cho Gemini free kèm prompt "mô tả chi tiết + chép
- * nguyên văn mọi chữ", phần ảnh trong message được THAY bằng bản mô tả text.
- * Model biết nhìn ảnh không bị động vào. Gemini lỗi/hết quota/thiếu key →
- * giữ nguyên attachment (trở về hành vi cũ), không bao giờ làm hỏng tin nhắn.
+ * ảnh (data URL) được gửi cho MODEL VISION CỦA PROVIDER ACTIVE của người dùng
+ * (gateway tương thích OpenAI — BYOK như mọi route LLM khác) kèm prompt
+ * "mô tả chi tiết + chép nguyên văn mọi chữ", phần ảnh trong message được
+ * THAY bằng bản mô tả text. Model biết nhìn ảnh không bị động vào. Provider
+ * lỗi/hết quota/thiếu key → giữ nguyên attachment (trở về hành vi cũ), không
+ * bao giờ làm hỏng tin nhắn.
  *
  * Cache mô tả theo SHA-256 của ảnh: cùng một ảnh gửi lại (vd tin nhắn sau
- * trong cùng hội thoại) không gọi Gemini lần nữa — tiết kiệm quota free tier.
+ * trong cùng hội thoại) không gọi provider lần nữa — tiết kiệm quota.
  */
 
-/**
- * Model Gemini dùng để mô tả — bản flash-LITE: hạng rẻ nhất, không "think"
- * (không đốt output token cho suy nghĩ) và free-tier rộng nhất, dư sức đọc
- * chữ/mô tả ảnh. Đã verify với key mới: 2.5-flash bị khóa ("no longer
- * available to new users"), 3.5-flash-lite thì OK. Khi Google khai tử tiếp,
- * đổi tại đây hoặc set env GEMINI_VISION_MODEL mà không cần sửa code.
- */
-export const DEFAULT_GEMINI_MODEL = 'gemini-3.5-flash-lite';
+import { createOpenAI } from '@ai-sdk/openai';
+import { generateText, APICallError } from 'ai';
+import { createNonStreamingFetch } from '@/lib/non-streaming-fetch';
 
 export const VISION_BRIDGE_PROMPT =
   'You are describing images for a text-only AI assistant that cannot see ' +
@@ -54,7 +51,7 @@ interface ImagePayload {
 /**
  * Chỉ nhận data URL base64 (`data:image/...;base64,...`) — hình thức client
  * lưu blob trong IndexedDB và gửi lên route. Ảnh http(s) remote không bridge
- * được ở đây (Gemini REST cần file API riêng cho URL) nên giữ nguyên.
+ * được ở đây (provider cần tải URL riêng) nên giữ nguyên.
  */
 export function extractImageDataUrl(url: string): ImagePayload | null {
   const m = /^data:(image\/[a-z0-9.+-]+);base64,([A-Za-z0-9+/=\s]+)$/i.exec(url ?? '');
@@ -68,38 +65,6 @@ export function shouldBridgeImages(model: {
   media?: unknown;
 }): boolean {
   return model.supportsImages === false && !model.media;
-}
-
-export function buildGeminiPayload(images: ImagePayload[], prompt: string): unknown {
-  return {
-    contents: [
-      {
-        parts: [
-          { text: prompt },
-          ...images.map((img) => ({
-            inline_data: { mime_type: img.mimeType, data: img.base64 },
-          })),
-        ],
-      },
-    ],
-    // Model 3.x là thinking model: thought token trừ vào maxOutputTokens —
-    // budget thấp quá sẽ trả text RỖNG (finishReason MAX_TOKENS).
-    generationConfig: { temperature: 0.2, maxOutputTokens: 2_048 },
-  };
-}
-
-/** Bóc text từ response `generateContent`; không có candidate hợp lệ → null. */
-export function parseGeminiDescription(json: unknown): string | null {
-  const candidates = (json as { candidates?: unknown } | null)?.candidates;
-  if (!Array.isArray(candidates) || !candidates.length) return null;
-  const parts = (candidates[0] as { content?: { parts?: unknown } })?.content?.parts;
-  if (!Array.isArray(parts)) return null;
-  const text = parts
-    .map((p) => (p && typeof p === 'object' ? (p as { text?: unknown }).text : undefined))
-    .filter((t): t is string => typeof t === 'string')
-    .join('')
-    .trim();
-  return text || null;
 }
 
 export function appendDescription(content: string, description: string): string {
@@ -118,7 +83,7 @@ export function appendDescription(content: string, description: string): string 
 
 /**
  * Lớp chốt hạ (port từ prime-agent `transform-messages.ts`): model chữ thuần
- * mà vẫn còn ảnh trong message (không có GEMINI_API_KEY, Gemini lỗi, hoặc là
+ * mà vẫn còn ảnh trong message (chưa cấu hình provider, bridge lỗi, hoặc là
  * ảnh http(s) remote không bridge được) → thay ảnh bằng một dòng placeholder
  * thay vì gửi image part cho upstream để nhận 400 hoặc bị bỏ qua im lặng.
  * Người dùng ít nhất thấy model "biết" là đã từng có ảnh.
@@ -187,92 +152,176 @@ async function imageDigestKey(base64: string): Promise<string> {
 }
 
 /* ------------------------------------------------------------------ */
-/* Gọi Gemini                                                          */
+/* Gọi model vision của provider active                                */
 /* ------------------------------------------------------------------ */
 
-const GEMINI_TIMEOUT_MS = 25_000;
+const VISION_TIMEOUT_MS = 25_000;
 const RETRY_DELAYS_MS = [0, 800, 2_000];
-
-/**
- * Chuỗi model dự phòng khi model chính bị Google khai tử (đã xảy ra với
- * 2.5-flash: trả 404 "no longer available"). Thứ tự: bản lite rẻ nhất trước —
- * tier lite luôn có hạn mức free rộng nhất nên cũng là lựa chọn tối ưu mặc
- * định, không chỉ là phương án dự phòng.
- */
-const MODEL_FALLBACK_CHAIN = [
-  DEFAULT_GEMINI_MODEL,
-  'gemini-3.1-flash-lite',
-  'gemini-flash-lite-latest',
-];
-
-/** Model đã biết là chết trong tiến trình này — bỏ hẳn khỏi chuỗi, đỡ tốn một round-trip 404. */
-const deadModels = new Set<string>();
-
-function resolveModelChain(requested?: string): string[] {
-  const preferred = requested?.trim() || DEFAULT_GEMINI_MODEL;
-  const chain = [preferred, ...MODEL_FALLBACK_CHAIN.filter((m) => m !== preferred)];
-  return chain.filter((m) => !deadModels.has(m));
-}
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export interface BridgeDeps {
+  /** API key của provider active; provider không cần key thì caller gửi 'provider-no-key'. */
   apiKey: string;
-  geminiModel?: string;
+  /** Base URL đã qua validateProviderBaseUrl; thiếu → createOpenAI dùng mặc định OpenAI. */
+  baseUrl?: string;
+  /** Model vision do caller chỉ định từ danh sách model của provider — bắt buộc. */
+  model: string;
+  /** fetch tùy biến (route ghép req.signal / test nhét mock); thiếu → global fetch.
+      Bridge tự bọc thêm lớp patch `stream:false` quanh giá trị này. */
   fetchImpl?: typeof fetch;
+  /**
+   * Chiếm một lượt ngân sách gateway dùng chung, gọi NGAY TRƯỚC mỗi lượt gọi
+   * provider thật. Lười có chủ ý: ảnh đã có mô tả trong cache thì không lượt
+   * gọi nào xảy ra nên KHÔNG được chiếm slot — nếu chiếm sớm ở tầng route,
+   * mỗi lượt chat có ảnh cũ trong history sẽ đốt ngân sách vô ích, và lúc hết
+   * ngân sách còn đánh mất luôn mô tả đã nằm sẵn trong cache.
+   *
+   * Trả false = hết ngân sách → nhóm ảnh đó không được mô tả (caller giữ
+   * attachment nguyên trạng, không có lỗi nào bị ném ra).
+   *
+   * Một lượt chiếm phủ cả chuỗi retry của nhóm ảnh (tối đa 3 lượt fetch) —
+   * cùng quy ước với /api/chat: một request có thể tự retry bên trong.
+   */
+  acquireSlot?: () => Promise<boolean>;
+}
+
+/** Abort đến từ bên ngoài timeout của chính lượt gọi (client hủy ở tầng route). */
+function isAbortLike(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const name = (error as { name?: unknown }).name;
+  const message = (error as { message?: unknown }).message;
+  return name === 'AbortError' || (typeof message === 'string' && /abort/i.test(message));
+}
+
+/**
+ * Gateway trả 400 CHỈ vì tham số `temperature` — model suy luận (o1/gpt-5,
+ * "search preview"...) chỉ nhận giá trị mặc định. Nhận diện hẹp có chủ ý: 400
+ * khác (ảnh HEIC, model sai tên) vẫn dừng ngay như trước, không đốt thêm lượt.
+ * Xét cả responseBody vì có gateway nhét lý do vào body thay vì `error.message`.
+ */
+function isTemperatureRejected(error: unknown): boolean {
+  if (!APICallError.isInstance(error) || error.statusCode !== 400) return false;
+  return /temperature/i.test(`${error.message ?? ''} ${error.responseBody ?? ''}`);
 }
 
 /**
  * Gửi NHÓM ảnh trong một request (một mô tả cho cả nhóm — cùng cách plugin
  * gốc gom nhiều ảnh thành một call để tiết kiệm RPM). Trả null khi nên bỏ
- * qua: lỗi mạng, 4xx (trừ 429), response không đọc được, hoặc hết lượt retry.
- *
- * Model chạy theo chuỗi fallback: model hiện tại trả 404 (bị khai tử) thì
- * chuyển ngay sang model kế tiếp mà không đốt lượt retry; model chết được ghi
- * nhớ để các request sau bỏ qua.
+ * qua: hết ngân sách gateway (acquireSlot false), hết lượt retry (lỗi
+ * mạng/timeout), 4xx trừ 429, hoặc response không đọc được. Caller tự fallback
+ * (giữ attachment nguyên trạng).
  */
 async function describeImageBatch(
   images: ImagePayload[],
   deps: BridgeDeps,
 ): Promise<string | null> {
-  const fetchImpl = deps.fetchImpl ?? fetch.bind(globalThis);
-  const chain = resolveModelChain(deps.geminiModel);
+  /* Chiếm ngân sách gateway dùng chung NGAY TRƯỚC lượt gọi thật — chỉ ở đây
+     mới biết chắc là sẽ gọi provider (ảnh đã cache thì hàm này không được
+     gọi). Hết ngân sách → trả null như mọi thất bại khác, caller giữ
+     attachment nguyên trạng. */
+  if (deps.acquireSlot && !(await deps.acquireSlot())) return null;
 
-  for (let ci = 0; ci < chain.length; ci++) {
-    const model = chain[ci];
-    // Chỉ model ĐẦU tiên được đủ số lần retry; model dự phòng chạy single-shot
-    // — nếu cả chuỗi cùng sập thì không nhân thời gian chờ lên gấp bội.
-    const attempts = ci === 0 ? RETRY_DELAYS_MS.length : 1;
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
-    for (let attempt = 0; attempt < attempts; attempt++) {
-      if (RETRY_DELAYS_MS[attempt]) await sleep(RETRY_DELAYS_MS[attempt]);
-      const timeout = new AbortController();
-      const timer = setTimeout(() => timeout.abort(new Error('Gemini timeout')), GEMINI_TIMEOUT_MS);
-      try {
-        const res = await fetchImpl(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-goog-api-key': deps.apiKey },
-          body: JSON.stringify(buildGeminiPayload(images, VISION_BRIDGE_PROMPT)),
-          signal: timeout.signal,
-        });
-        if (res.status === 404 || res.status === 400) {
-          // 404 = model bị khai tử → ghi nhớ chết vĩnh viễn trong tiến trình.
-          // 400 có thể do payload (ảnh lỗi) chứ không phải model → chỉ nhảy
-          // model kế mà không đưa vào danh sách đen.
-          if (res.status === 404) deadModels.add(model);
-          break;
-        }
-        if (res.status === 429 || res.status >= 500) continue; // quá tải → thử lại
-        if (!res.ok) return null;
-        const json = (await res.json().catch(() => null)) as unknown;
-        return parseGeminiDescription(json);
-      } catch {
-        continue; // lỗi mạng/timeout → retry; hết lượt thì thoát vòng
-      } finally {
-        clearTimeout(timer);
+  /* Cờ do vòng retry hạ khi gateway chê `temperature` (model suy luận chỉ
+     nhận giá trị mặc định). Phải xoá ở TẦNG FETCH chứ không chỉ "không truyền
+     vào generateText": ai v4 luôn gắn temperature mặc định 0 vào body
+     (prepareCallSettings), mà OpenAI từ chối cả 0 cho o1/gpt-5 — bỏ field đi
+     mới là điều gateway cần. */
+  let stripTemperature = false;
+  const withoutTemperature =
+    (underlying: typeof fetch): typeof fetch =>
+    async (input, init) => {
+      if (!stripTemperature || !init?.body || typeof init.body !== 'string') {
+        return underlying(input, init);
       }
+      try {
+        const parsed = JSON.parse(init.body) as Record<string, unknown>;
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          delete parsed.temperature;
+          return underlying(input, { ...init, body: JSON.stringify(parsed) });
+        }
+      } catch {
+        // Body không phải JSON — gửi nguyên trạng.
+      }
+      return underlying(input, init);
+    };
+
+  // Quirk crax: thiếu `stream` trong body thì gateway trả SSE — generateText
+  // không gửi trường đó (xem lib/non-streaming-fetch.ts). Dùng chung factory
+  // với các route khác thay vì copy lại logic; fetchImpl của caller (route ghép
+  // req.signal / test nhét mock) nằm ở đáy chuỗi bọc.
+  const sdkFetch = createNonStreamingFetch(
+    withoutTemperature(deps.fetchImpl ?? ((input, init) => fetch(input, init))),
+  );
+  const openai = createOpenAI({
+    apiKey: deps.apiKey,
+    baseURL: deps.baseUrl,
+    fetch: sdkFetch,
+  });
+
+  /* Chỉ được sửa tham số MỘT lần: hết cờ thì 400 tiếp theo là 400 thật
+     (không tiêu lượt retry nào của chuỗi delay — `attempt` bị lùi lại). */
+  let temperatureRetried = false;
+
+  for (let attempt = 0; attempt < RETRY_DELAYS_MS.length; attempt++) {
+    if (RETRY_DELAYS_MS[attempt]) await sleep(RETRY_DELAYS_MS[attempt]);
+    // Timeout theo TỪNG lượt thử — gateway treo không được ăn cả chuỗi retry.
+    const controller = new AbortController();
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort(new Error('vision bridge timeout'));
+    }, VISION_TIMEOUT_MS);
+    try {
+      const result = await generateText({
+        model: openai(deps.model),
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'text' as const, text: VISION_BRIDGE_PROMPT },
+              // data-URL string: ai core tự tách mime + base64 (convertToLanguage
+              // -model-prompt) rồi provider đóng gói lại thành image_url — đã
+              // kiểm chứng bằng probe với @ai-sdk/openai 1.3.24.
+              ...images.map((img) => ({
+                type: 'image' as const,
+                image: `data:${img.mimeType};base64,${img.base64}`,
+              })),
+            ],
+          },
+        ],
+        temperature: 0.2,
+        maxTokens: 2_048,
+        // Tự quản retry theo RETRY_DELAYS_MS — tắt retry mặc định của SDK
+        // (default 2, exponential backoff) để không nhân đôi thời gian chờ.
+        maxRetries: 0,
+        abortSignal: controller.signal,
+      });
+      const text = result.text.trim();
+      return text || null;
+    } catch (error) {
+      // Lỗi HTTP từ gateway: 429/5xx là tạm thời → thử lại; 4xx khác (sai
+      // model, ảnh định dạng provider không đọc được như HEIC...) là lỗi của
+      // request — thử lại bao nhiêu lần cũng vứt, dừng ngay trả null.
+      if (APICallError.isInstance(error)) {
+        if (!temperatureRetried && isTemperatureRejected(error)) {
+          temperatureRetried = true;
+          stripTemperature = true;
+          attempt -= 1; // lượt "sửa tham số" không tính vào ngân sách retry
+          continue;
+        }
+        const st = error.statusCode;
+        if (st === undefined || st === 429 || st >= 500) continue;
+        return null;
+      }
+      // Abort KHÔNG do timeout của mình (client hủy request ở tầng route)
+      // → dừng hẳn, retry chỉ phí thời gian của người đã hủy.
+      if (!timedOut && isAbortLike(error)) return null;
+      continue; // timeout/lỗi mạng → thử lại theo chuỗi delay
+    } finally {
+      clearTimeout(timer);
     }
   }
   return null;
@@ -280,8 +329,8 @@ async function describeImageBatch(
 
 /**
  * Mô tả MỘT ảnh data-URL — dùng bởi /api/vision cho luồng "agent đọc ảnh trong
- * workspace" (fs_read trên file ảnh). Dùng chung chuỗi model + retry với
- * bridge tin nhắn; trả null khi không bridge được (caller tự quyết fallback).
+ * workspace" (fs_read trên file ảnh). Dùng chung đường gọi + retry với bridge
+ * tin nhắn; trả null khi không bridge được (caller tự quyết fallback).
  */
 export async function describeImageDataUrl(
   dataUrl: string,
@@ -293,9 +342,10 @@ export async function describeImageDataUrl(
 }
 
 /**
- * Thay mọi ảnh data-URL trong messages bằng mô tả Gemini. Message không có
- * ảnh data-URL được giữ nguyên tham chiếu; có ảnh mà Gemini fail → giữ nguyên
- * message đó (không bridge nửa chừng). Không đổi gì khi không cần bridge.
+ * Thay mọi ảnh data-URL trong messages bằng bản mô tả của model vision. Message
+ * không có ảnh data-URL được giữ nguyên tham chiếu; có ảnh mà provider fail →
+ * giữ nguyên message đó (không bridge nửa chừng). Không đổi gì khi không cần
+ * bridge.
  */
 export async function bridgeImagesInMessages(
   messages: readonly BridgeableMessage[],
@@ -339,7 +389,7 @@ export async function bridgeImagesInMessages(
         deps,
       );
       if (text === null) {
-        out.push(message); // Gemini hỏng → giữ message nguyên trạng
+        out.push(message); // provider hỏng → giữ message nguyên trạng
         continue;
       }
       for (const i of uncached) {
@@ -372,9 +422,4 @@ export async function bridgeImagesInMessages(
 /** Dùng cho test — xoá cache mô tả giữa các case. */
 export function resetVisionBridgeCache(): void {
   descriptionCache.clear();
-}
-
-/** Dùng cho test — xoá danh sách model đã chết giữa các case. */
-export function resetVisionBridgeDeadModels(): void {
-  deadModels.clear();
 }

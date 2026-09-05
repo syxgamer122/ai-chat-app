@@ -67,11 +67,13 @@ import { resetToolCallBudget } from '@/lib/tool-call-budget';
 import { pollinationsMarkdown } from '@/lib/pollinations';
 import { judgeInjection } from '@/lib/injection-guard';
 import { bridgeImagesInMessages, downgradeImagesToPlaceholders, shouldBridgeImages, type BridgeableMessage } from '@/lib/vision-bridge';
+import { ACTIVE_MODEL_BODY_FIELD } from '@/lib/aux-llm-chain';
 import { checkRateLimit, getClientIp, checkSameOrigin, verifyAccessAuth } from '@/lib/security';
 
 /**
- * Giữ nguyên edge runtime cho chat (không đổi sang nodejs trong phạm vi thay
- * đổi này — nodejs bị cắt cứng theo maxDuration, cần đo lại trước khi đổi).
+ * Route này chạy trên Node.js runtime (KHÔNG phải Edge Function) — mọi ghi chú
+ * về "edge" dưới đây chỉ còn giá trị lịch sử. Ngân sách thời gian (STREAM_BUDGET_MS,
+ * VIDEO_BUDGET_MS) vẫn đặt dưới trần 300s của Vercel function streaming.
  *
  * Tạo ảnh/video ĐI QUA route này với mọi gateway chặn cross-origin — crax trả
  * 403 cho bất kỳ request có header `Origin`, tức là mọi lời gọi từ trình duyệt,
@@ -79,8 +81,7 @@ import { checkRateLimit, getClientIp, checkSameOrigin, verifyAccessAuth } from '
  * crax và tự fallback về đây.
  *
  * Video vẫn kịp: đo thực tế crax `qwen-video-2.0-pro` xong trong 120-126s,
- * byte đầu < 1.7s — nằm trong trần 300s của Vercel (kể cả Hobby) và thoả điều
- * kiện edge "phải gửi byte đầu trong 25s để được stream tiếp".
+ * byte đầu < 1.7s — nằm trong trần 300s của Vercel.
  */
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -108,6 +109,12 @@ const IDLE_TIMEOUT_MS = 90_000;
 const HEARTBEAT_MS = 10_000;
 const MAX_BODY_BYTES = 4.5 * 1024 * 1024;
 const MAX_FAILOVER_KEYS = 3;
+
+/* Vision bridge chờ hàng đợi gateway free ngắn hơn lượt chat chính (mặc định
+   12s của acquireUpstreamSlot): mô tả ảnh chỉ là phần PHỤ và đã có phương án
+   hạ cấp (placeholder), không đáng để người dùng chờ thêm chục giây trước khi
+   token đầu tiên của câu trả lời xuất hiện. */
+const BRIDGE_QUEUE_WAIT_MS = 4_000;
 
 /* Port từ prime-agent (`isRetryableError`): lỗi TẠM THỜI của gateway thì thử
    lại ĐÚNG model đó một lần (kèm backoff ngắn) trước khi đốt model/key kế
@@ -675,9 +682,20 @@ const MessageSchema = z.object({
 const BodySchema = z.object({
   id: z.string().max(256).optional(),
   messages: z.array(MessageSchema).min(1).max(100),
-  model: z.string().min(1).max(64).optional(),
+  /* Trần dài bằng validator provider-override (regex tới 120 ký tự phía dưới)
+     và lib/store.ts (120): schema chặn 64 sẽ từ chối model `vendor/repo/name`
+     dài hợp lệ mà mọi tầng sau đó đều chấp nhận. */
+  model: z.string().min(1).max(120).optional(),
   temperature: z.number().min(0).max(2).optional(),
   thinkingLevel: z.enum(THINKING_LEVELS).optional(),
+  /* Model vision do client chọn từ danh sách model của provider, dùng cho
+     vision-bridge khi model chính không xem được ảnh (supportsImages=false):
+     ảnh đính kèm được mô tả bằng model này (qua provider active) trước khi
+     thay vào tin nhắn. Thiếu → bridge không chạy, ảnh rơi về placeholder.
+     Dùng ACTIVE_MODEL_BODY_FIELD (`.catch(undefined)`): tên rác chỉ BỎ QUA
+     bridge, tuyệt đối không được làm cả body fail schema → giết lượt chat vì
+     một field phụ của tính năng mô tả ảnh. */
+  visionModel: ACTIVE_MODEL_BODY_FIELD,
   system: z.string().max(8_000).optional(),
   /* Compaction: tóm tắt phần cũ + ranh giới "tin cuối thuộc phần đã nén". */
   contextSummary: z.string().max(16_000).optional(),
@@ -942,7 +960,7 @@ export async function POST(req: Request) {
       });
     }
 
-    const { model, temperature, system, thinkingLevel, contextSummary, compactBoundaryId, webContext, liveContext, pdfContexts, agentTools, memories, skills, workspace: workspaceState, forceEmulatedTools, agentMode, staging, mcpTools: mcpToolList, id: conversationId } =
+    const { model, temperature, system, thinkingLevel, visionModel, contextSummary, compactBoundaryId, webContext, liveContext, pdfContexts, agentTools, memories, skills, workspace: workspaceState, forceEmulatedTools, agentMode, staging, mcpTools: mcpToolList, id: conversationId } =
       parsed.data;
     const messages = attachToolResultParts(parsed.data.messages);
 
@@ -1070,7 +1088,11 @@ export async function POST(req: Request) {
     /* Quality score (EWMA): sắp xếp MỀM chuỗi theo độ tin cậy gần đây —
        model đang khỏe được thử trước, model trục trặc tụt xuống sau. */
     if (upstreamBase) modelChain = reorderModelsByQuality(upstreamBase, modelChain);
-    const targetModel = modelConfig.providerModel;
+    /* Model user chọn (hoặc mặc định) — KHÔNG dùng tên này bên trong vòng
+       failover: ở đó `targetModel = modelChain[modelIndex]` là model THẬT
+       đang gọi. Trước đây hai biến trùng tên (shadow) khiến reasoning effort
+       tính từ model cũ vẫn được gửi theo model failover (sửa A14). */
+    const selectedProviderModel = modelConfig.providerModel;
 
     // Model/base từng chê function calling trong 10 phút qua → bỏ tools ngay
     // từ đầu, khỏi tốn một lượt fail.
@@ -1093,15 +1115,9 @@ export async function POST(req: Request) {
        xem lib/emulated-agent). Nhờ tool-support-cache, model bị gateway chê
        một lần sẽ đi đường này ngay từ request kế tiếp. */
     const emulatedMode = (agentTools ?? true) && !allowAgentTools;
-    let reasoningEffort: ThinkingLevel | null = null;
-    if (thinkingLevel && effortBase) {
-      if (supportsThinkingLevel(effortBase)) {
-        reasoningEffort = thinkingLevel;
-      } else {
-        const cap = await getReasoningCapability(effortBase, targetModel);
-        if (cap) reasoningEffort = resolveNearestEffort(thinkingLevel, cap);
-      }
-    }
+    /* Mức suy luận (reasoningEffort) KHÔNG tính ở đây: nó phụ thuộc model
+       THẬT của từng ô failover (targetModel trong vòng lặp bên dưới), tính
+       một lần từ model đầu tiên sẽ gửi mức cũ theo model kế tiếp (sửa A14). */
     /* Compaction: bỏ mọi tin thuộc phần ĐÃ nén (trước/trên boundary) TRƯỚC
        khi áp trần 50 tin — nội dung phần đó được thay thế bằng contextSummary
        chèn vào đầu system. Tìm lần xuất hiện CUỐI của boundary id: user có thể
@@ -1139,24 +1155,75 @@ export async function POST(req: Request) {
     });
 
     /* Vision bridge: model chữ thuần (supportsImages=false) + tin nhắn có ảnh
-       data-URL + server có GEMINI_API_KEY → thay ảnh bằng mô tả của Gemini
-       trước khi gọi upstream. Mọi lỗi bridge đều được bỏ qua — attachment giữ
-       nguyên như hành vi cũ, không bao giờ làm hỏng tin nhắn. */
+       data-URL + client đã chọn model vision → ảnh được mô tả bằng PROVIDER
+       ACTIVE của chính lượt gọi này trước khi thay vào tin nhắn. Mọi lỗi bridge
+       đều được bỏ qua — attachment giữ nguyên như hành vi cũ, không bao giờ làm
+       hỏng tin nhắn. */
     let bridgeMessages: readonly BridgeableMessage[] = sanitizedContextMessages;
-    const geminiApiKey = (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '').trim();
     if (
-      geminiApiKey &&
+      (providerBase || customKey) &&
+      visionModel &&
       shouldBridgeImages(modelConfig) &&
       sanitizedContextMessages.some((m) =>
         m.experimental_attachments?.some((a) => a.contentType?.startsWith('image/')),
       )
     ) {
+      /* Bridge đi qua ĐÚNG gateway dùng chung của lượt chat này, nên phải
+         xếp hàng như mọi lượt gọi LLM khác (khối acquireUpstreamSlot bên dưới
+         lo cho lượt chat chính). Không xếp hàng = nhảy hàng: một tin nhắn kèm
+         ảnh chiếm ngân sách IP-chung mà queue không thấy.
+
+         Slot được chiếm LƯỜI (callback, do bridge gọi ngay trước mỗi lượt gọi
+         provider) chứ không chiếm sẵn ở đây: ảnh đã có mô tả trong cache thì
+         bridge không gọi provider, chiếm trước sẽ đốt ngân sách vô ích cho
+         mọi lượt chat có ảnh cũ trong history.
+
+         Hết ngân sách → bridge trả null cho nhóm ảnh đó, attachment giữ
+         nguyên và lớp downgradeImagesToPlaceholders bên dưới biến thành
+         placeholder. CÓ CHỦ Ý: chat quan trọng hơn mô tả ảnh, không được vì
+         hàng đợi mà giết lượt chat.
+         Ghi chú: một slot phủ cả chuỗi retry (tối đa 3 lượt fetch) của nhóm
+         ảnh — cùng quy ước với lượt chat (một request tự retry nội bộ). */
+      const bridgeBase = providerBase ?? process.env.OPENAI_BASE_URL;
+      const bridgeNeedsQueue = Boolean(bridgeBase && sharedFreeBudget(bridgeBase));
+      /* Hết ngân sách MỘT lần là bỏ bridge cho toàn bộ lượt này: mỗi lần chờ
+         hàng đợi tốn tới BRIDGE_QUEUE_WAIT_MS, mà history có thể chứa nhiều
+         tin nhắn kèm ảnh — thử lại từng nhóm sẽ cộng dồn thành hàng chục giây
+         chờ cho một thứ vốn có phương án hạ cấp (placeholder). */
+      let bridgeQueueExhausted = false;
       try {
         bridgeMessages = await bridgeImagesInMessages(sanitizedContextMessages, {
-          apiKey: geminiApiKey,
-          geminiModel: process.env.GEMINI_VISION_MODEL || undefined,
+          apiKey: customKey ?? 'provider-no-key',
+          // Không có providerBase thì dùng env base như mọi lượt gọi khác
+          // của route — cùng một upstream, không nguồn thứ hai.
+          baseUrl: bridgeBase,
+          model: visionModel,
+          /* Ghép req.signal: user bấm Stop giữa lúc bridge chạy thì lượt gọi
+             provider dừng theo, không để 25s × 3 retry chạy tiếp ở nền.
+             generateText tự đính kèm signal timeout của nó vào init.signal
+             nên phải AbortSignal.any cả hai, không chọn một bên. */
+          fetchImpl: ((input, init) => {
+            const inner = init?.signal;
+            const merged = inner ? AbortSignal.any([inner, req.signal]) : req.signal;
+            return fetch(input, { ...init, signal: merged });
+          }) as typeof fetch,
+          ...(bridgeNeedsQueue && bridgeBase
+            ? {
+                acquireSlot: async () => {
+                  if (bridgeQueueExhausted) return false;
+                  const slot = await acquireUpstreamSlot(bridgeBase, BRIDGE_QUEUE_WAIT_MS);
+                  if (!slot.ok) {
+                    bridgeQueueExhausted = true;
+                    console.info(
+                      `[req:${requestId}] vision bridge bị bỏ qua: gateway free hết ngân sách (thử lại sau ~${slot.retryAfterSec}s), ảnh sẽ thành placeholder`,
+                    );
+                  }
+                  return slot.ok;
+                },
+              }
+            : {}),
         });
-        console.info(`[req:${requestId}] vision bridge: ảnh đã thay bằng mô tả cho model ${targetModel}`);
+        console.info(`[req:${requestId}] vision bridge: ảnh đã thay bằng mô tả cho model ${selectedProviderModel}`);
       } catch (bridgeError) {
         console.warn(
           `[req:${requestId}] vision bridge lỗi, giữ attachment nguyên trạng: ${sanitizeErrorMessage(bridgeError)}`,
@@ -1165,7 +1232,7 @@ export async function POST(req: Request) {
     }
 
     /* Lớp chốt hạ (port từ prime-agent): model không xem được ảnh mà message
-       VẪN còn ảnh — không có Gemini key, Gemini lỗi với message đó, hoặc ảnh
+       VẪN còn ảnh — chưa cấu hình provider, bridge lỗi với message đó, hoặc ảnh
        http(s) remote không bridge được — thì thay ảnh bằng placeholder text.
        Gửi image part thẳng cho model chữ là 400 hoặc bị nuốt im lặng; placeholder
        giúp model ít nhất biết user từng gửi ảnh và trả lời tử tế hơn. */
@@ -1174,7 +1241,7 @@ export async function POST(req: Request) {
       if (downgraded !== bridgeMessages) {
         bridgeMessages = downgraded;
         console.info(
-          `[req:${requestId}] ảnh còn sót sau vision bridge đã thay bằng placeholder cho model ${targetModel}`,
+          `[req:${requestId}] ảnh còn sót sau vision bridge đã thay bằng placeholder cho model ${selectedProviderModel}`,
         );
       }
     }
@@ -1273,7 +1340,7 @@ export async function POST(req: Request) {
     const upstreamHost =
       hostOf(providerBase) ?? hostOf(process.env.OPENAI_BASE_URL) ?? 'api.openai.com';
     console.info(
-      `[req:${requestId}] start model=${targetModel} upstream=${providerBase ? hostOf(providerBase) ?? providerBase : upstreamHost} keys=${candidateKeys.length}`,
+      `[req:${requestId}] start model=${selectedProviderModel} upstream=${providerBase ? hostOf(providerBase) ?? providerBase : upstreamHost} keys=${candidateKeys.length}`,
     );
 
     return createDataStreamResponse({
@@ -1542,6 +1609,13 @@ export async function POST(req: Request) {
                           '\n_(Ảnh từ Pollinations.AI — dự phòng miễn phí vì gateway chính không trả ảnh)_\n',
                           'reasoning',
                         );
+                        /* Sửa A4: đường thoát này cũng phải dọn timer + ghi công
+                           cho key như mọi đường thành công khác — để return không
+                           dọn thì request giữ nguyên 2 timer (idle + budget tới
+                           290s) sau khi stream đã khép. */
+                        clearIdle();
+                        clearTimeout(budgetTimer);
+                        markKeySuccess(apiKey);
                         writeFinish('stop');
                         return;
                       }
@@ -1645,7 +1719,15 @@ export async function POST(req: Request) {
                    điểm ("thời tiết Đà Lạt" → prefetch nhầm) và khi đó model
                    không còn đường sửa. Nay tool vẫn còn, chỉ thêm ghi chú nói
                    rằng dữ liệu đã có sẵn để model không gọi lại vô ích. */
-                 const serverTools = allowAgentTools || forceEmulatedTools
+                 /* Sửa A3/A5: đường GIẢ LẬP (emulatedMode do negative-cache
+                   tool-support, hoặc retryAsEmulated sau khi gateway chê
+                   tools) vẫn chạy tool THẬT qua runEmulatedLoop — registry
+                   rỗng ở đây là tước mất web_search/web_fetch/weather/
+                   exchange_rates/memory_save của model chỉ vì gateway không
+                   nhận field `tools`. Chỉ đường "user tắt agentTools hẳn"
+                   (emulatedMode=false) mới thực sự không build. */
+                 const emulatedToolPath = emulatedMode || retryAsEmulated;
+                 const serverTools = allowAgentTools || forceEmulatedTools || emulatedToolPath
                    ? buildAgentTools({
                        memories: chatMemories,
                        allowedHosts: provenanceUrls,
@@ -1659,8 +1741,13 @@ export async function POST(req: Request) {
                   * main, route không có đường sang đó. Model gọi → stream kết
                   * thúc bằng 'tool-calls' → forward sang renderer (cùng cơ chế
                   * với fs_*) → renderer chạy IPC rồi resubmit kết quả.
+                  *
+                  * Sửa A5: cùng điều kiện serverTools — đường emulated nhận
+                  * MCP qua clientTools + extraToolDocs của runEmulatedLoop,
+                  * để allowAgentTools=false một mình không được phép làm MCP
+                  * biến mất im lặng.
                   */
-                 const mcpTools = allowAgentTools
+                 const mcpTools = allowAgentTools || forceEmulatedTools || emulatedToolPath
                    ? mapMcpTools(mcpToolList ?? [])
                    : mapMcpTools([]);
                  /**
@@ -2026,6 +2113,22 @@ export async function POST(req: Request) {
                     }
                   : {};
 
+                /* Sửa A14: tính mức suy luận theo model ĐANG gọi của ô failover
+                   này (targetModel), không theo model user chọn ban đầu — model
+                   kế tiếp trong chain có thể không hỗ trợ mức của model trước.
+                   getReasoningCapability có cache 5 phút nên chi phí lặp lại
+                   giữa các ô gần như bằng 0; fast-path supportsThinkingLevel
+                   không tốn network. */
+                let reasoningEffort: ThinkingLevel | null = null;
+                if (thinkingLevel && effortBase) {
+                  if (supportsThinkingLevel(effortBase)) {
+                    reasoningEffort = thinkingLevel;
+                  } else {
+                    const cap = await getReasoningCapability(effortBase, targetModel);
+                    if (cap) reasoningEffort = resolveNearestEffort(thinkingLevel, cap);
+                  }
+                }
+
                 const result = streamText({
                   model: openai(targetModel),
                   messages: core,
@@ -2076,34 +2179,51 @@ export async function POST(req: Request) {
                   /* Gom text đầu stream để soi "lỗi trá hình HTTP 200": crax
                      trả finish_reason 'stop' bình thường nhưng nội dung là
                      thông báo hết quota backend. Không bắt thì app lưu nguyên
-                     thông báo đó như câu trả lời và KHÔNG failover. Chỉ soi
-                     tới khi có byte thật đầu tiên được phát đi. */
-                  let sniffBuffer = '';
-                  let pseudoErrorChecked = false;
+                     thông báo đó như câu trả lời và KHÔNG failover.
+
+                     Sửa A22 ("kết nối nhanh hơn"): chỉ GHÌ token đầu trong
+                     40 ký tự (mọi mẫu lỗi gateway đều khớp ngay trong khoảng
+                     đó — mẫu ngắn nhất "[notion is unavailable" = 23 ký tự)
+                     thay vì 120 như trước, token đầu tới user nhanh hơn ba
+                     lần. Sau khi đã nhả token vẫn sniff TIẾP trên luồng đang
+                     chảy trong cửa sổ 600 ký tự đầu (đúng cửa sổ mà
+                     looksLikePseudoError tự soi): pseudo-error ló ra giữa
+                     chừng ném UPSTREAM_POOL_EXHAUSTED — catch bên dưới phát
+                     error part rồi dừng, thay vì để lọt vào hội thoại. */
+                  const SNIFF_HOLD_CHARS = 40;
+                  const SNIFF_WINDOW_CHARS = 600;
+                  let sniffHead = '';
+                  let sniffReleased = false;
+                  const throwPseudoError = () => {
+                    throw new ChatUpstreamError(
+                      `Gateway ${upstreamHost} báo hết dung lượng cho model '${targetModel}': ` +
+                        extractPseudoErrorMessage(sniffHead),
+                      'UPSTREAM_POOL_EXHAUSTED',
+                      requestId,
+                    );
+                  };
 
                   for await (const part of (result as any).fullStream) {
                     resetIdleTimer();
                     switch (part.type) {
                       case 'text-delta': {
-                        if (!pseudoErrorChecked && emittedChars === 0) {
-                          sniffBuffer += String(part.textDelta ?? '');
-                          // Chờ đủ dữ liệu để quyết (thông báo lỗi luôn dài),
-                          // hoặc chốt sớm khi đã thấy dấu hiệu rõ ràng.
-                          if (looksLikePseudoError(sniffBuffer)) {
-                            throw new ChatUpstreamError(
-                              `Gateway ${upstreamHost} báo hết dung lượng cho model '${targetModel}': ` +
-                                extractPseudoErrorMessage(sniffBuffer),
-                              'UPSTREAM_POOL_EXHAUSTED',
-                              requestId,
-                            );
-                          }
-                          if (sniffBuffer.length < 120) break; // giữ lại, chưa phát
-                          pseudoErrorChecked = true;
-                          writeText(sniffBuffer, 'text');
-                          sniffBuffer = '';
+                        if (!sniffReleased) {
+                          sniffHead += String(part.textDelta ?? '');
+                          // Chờ đủ dữ liệu để quyết, hoặc chốt sớm khi đã thấy
+                          // dấu hiệu rõ ràng.
+                          if (looksLikePseudoError(sniffHead)) throwPseudoError();
+                          if (sniffHead.length < SNIFF_HOLD_CHARS) break; // giữ lại, chưa phát
+                          sniffReleased = true;
+                          writeText(sniffHead, 'text');
                           break;
                         }
                         writeText(part.textDelta, 'text');
+                        // Token đã nhả nhưng cửa sổ sniff chưa đóng: lỗi trá
+                        // hình bộc lộ sau token đầu vẫn bị bắt.
+                        if (sniffHead.length < SNIFF_WINDOW_CHARS) {
+                          sniffHead += String(part.textDelta ?? '');
+                          if (looksLikePseudoError(sniffHead)) throwPseudoError();
+                        }
                         break;
                       }
                       case 'reasoning':
@@ -2177,9 +2297,12 @@ export async function POST(req: Request) {
                     case 'finish':
                     case 'step-finish':
                       if (part.usage) {
+                        /* Sửa A10: lượt agent nhiều step phát finish/step-finish
+                           MỖI vòng tool — gán đè sẽ chỉ còn usage của step cuối
+                           (undercount thống kê). Cộng dồn như đường emulated. */
                         usage = {
-                          promptTokens: part.usage.promptTokens ?? 0,
-                          completionTokens: part.usage.completionTokens ?? 0,
+                          promptTokens: (usage?.promptTokens ?? 0) + (part.usage.promptTokens ?? 0),
+                          completionTokens: (usage?.completionTokens ?? 0) + (part.usage.completionTokens ?? 0),
                         };
                       }
                       if (typeof part.finishReason === 'string') finishReason = part.finishReason;
@@ -2190,11 +2313,13 @@ export async function POST(req: Request) {
                   if (streamError) break;
                 }
 
-                /* Câu trả lời ngắn hơn ngưỡng sniff vẫn còn nằm trong buffer —
-                   phải xả ra, nếu không sẽ nuốt mất nội dung hợp lệ. */
-                if (sniffBuffer) {
-                  writeText(sniffBuffer, 'text');
-                  sniffBuffer = '';
+                /* Câu trả lời ngắn hơn ngưỡng hold vẫn còn nằm trong buffer —
+                   phải xả ra, nếu không sẽ nuốt mất nội dung hợp lệ. Chỉ xả
+                   khi CHƯA nhả (sniffReleased=false): sau khi đã nhả,
+                   sniffHead chỉ còn là cửa sổ sniff, không phải text chờ phát. */
+                if (!sniffReleased && sniffHead) {
+                  writeText(sniffHead, 'text');
+                  sniffHead = '';
                 }
 
                 clearIdle();
@@ -2258,7 +2383,11 @@ export async function POST(req: Request) {
                  * đường chẩn đoán bên dưới để người dùng nhận được lỗi rõ ràng —
                  * tránh kết thúc stream âm thầm với bong bóng trống.
                  */
-                const isLastModelInChain = targetModel === modelChain[modelChain.length - 1];
+                /* Sửa A13: so VỊ TRÍ chứ không so giá trị — chain có thể chứa
+                   cùng một tên model ở nhiều vị trí (biến thể trùng sau khi
+                   filter/reorder); so giá trị khiến ô giữa chain bị coi là
+                   "model cuối" và failover dừng sớm, bỏ sót phần chain còn lại. */
+                const isLastModelInChain = modelIndex === modelChain.length - 1;
                 const isLastKeyAttempt = attempt === candidateKeys.length - 1;
 
                 /* Gateway/model không hỗ trợ function calling (lỗi 400 nhắc
@@ -2286,16 +2415,32 @@ export async function POST(req: Request) {
                    Model khác trong chain thường vẫn chạy, nên chuyển tiếp thay
                    vì báo lỗi. KHÔNG phạt key: lỗi thuộc về pool tài khoản của
                    gateway, không phải key của người dùng. */
-                if (
-                  e instanceof ChatUpstreamError &&
-                  e.code === 'UPSTREAM_POOL_EXHAUSTED' &&
-                  emittedChars === 0
-                ) {
-                  recordModelOutcome(upstreamBase ?? '', targetModel, false);
-                  console.warn(
-                    `[req:${requestId}] Pool của "${targetModel}" hết dung lượng -> thử model tiếp theo.`,
-                  );
-                  if (!(isLastModelInChain && isLastKeyAttempt)) continue;
+                if (e instanceof ChatUpstreamError && e.code === 'UPSTREAM_POOL_EXHAUSTED') {
+                  if (emittedChars === 0 && !(isLastModelInChain && isLastKeyAttempt)) {
+                    recordModelOutcome(upstreamBase ?? '', targetModel, false);
+                    console.warn(
+                      `[req:${requestId}] Pool của "${targetModel}" hết dung lượng -> thử model tiếp theo.`,
+                    );
+                    continue;
+                  }
+                  /* Sửa A16 (+A22 sniff giữa luồng): hết sạch key/model mà pool
+                     vẫn cạn, hoặc pseudo-error phát hiện SAU khi đã nhả token
+                     (không thể đổi model im lặng được nữa) — trả ĐÚNG mã và
+                     thông điệp "hết dung lượng" thay vì để diagnoseUpstreamError
+                     ghi đè bằng chẩn đoán chung (ChatUpstreamError không mang
+                     status → nhầm thành "Không kết nối được tới AI Provider"). */
+                  if (emittedChars === 0) {
+                    recordModelOutcome(upstreamBase ?? '', targetModel, false);
+                    console.warn(
+                      `[req:${requestId}] Pool của "${targetModel}" hết dung lượng và đã hết key/model để thử.`,
+                    );
+                  } else {
+                    console.warn(
+                      `[req:${requestId}] Pool của "${targetModel}" hết dung lượng giữa luồng (đã phát ${emittedChars} ký tự).`,
+                    );
+                  }
+                  writeAnnotation({ error: 'UPSTREAM_POOL_EXHAUSTED' });
+                  throw e;
                 }
 
                 if (is404 && emittedChars === 0 && !(isLastModelInChain && isLastKeyAttempt)) {
@@ -2348,7 +2493,7 @@ export async function POST(req: Request) {
                      ? `AI Provider ${upstreamHost} ngừng gửi token trong ${Math.round(IDLE_TIMEOUT_MS / 1000)} giây, phiên stream đã bị hủy.`
                     : isVideoModel(targetModel)
                       ? `Video chưa xong trong ${budgetSec} giây — vượt giới hạn thời gian của nền tảng. Thử mô tả ngắn/đơn giản hơn, hoặc tạo lại.`
-                      : `Phản hồi vượt quá ngân sách ${budgetSec} giây của Edge Function và đã bị cắt.`;
+                      : `Phản hồi vượt quá ngân sách ${budgetSec} giây của phiên stream và đã bị cắt.`;
                   console.error(`[req:${requestId}][${code}] key=${keyLabel} model=${targetModel}`);
                   writeAnnotation({ error: code });
                   throw new ChatUpstreamError(diagMsg, code, requestId);
