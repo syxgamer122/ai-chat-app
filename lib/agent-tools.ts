@@ -935,6 +935,45 @@ export const CLIENT_TOOL_DEFS = {
         .describe("brief = kèm tóm tắt bối cảnh phiên cha; mặc định 'fresh'"),
     }),
   }),
+
+  /* ------------------------------------------------------------------ */
+  /* Background shell — lệnh chạy NGỀM, hỏi kết quả sau                  */
+  /* (port ý tưởng pi-background-tasks; process sống qua restart app)     */
+  /* ------------------------------------------------------------------ */
+
+  bg_run: tool({
+    description:
+      'CHẠY LỆNH NGẦM (background): lệnh chạy detached, trả jobId NGAY để bạn làm việc khác, ' +
+      'không đợi lệnh xong. Dùng cho việc DÀI (test suite, build, crawl). Lệnh vẫn đi qua cơ chế ' +
+      'duyệt như shell_run. Sau đó hỏi bg_status với jobId để xem tiến độ/kết quả; bg_stop để dừng. ' +
+      'Không dùng cho lệnh ngắn — shell_run trực tiếp sẽ đơn giản hơn.',
+    parameters: z.object({
+      command: z.string().min(1).max(500).describe('Lệnh cần chạy nền (chạy tại workspace root)'),
+      timeout_secs: z
+        .number()
+        .int()
+        .min(1)
+        .max(3600)
+        .optional()
+        .describe('Trần thời gian giây (mặc định 3600). Hết giờ lệnh bị dừng'),
+    }),
+  }),
+
+  bg_status: tool({
+    description:
+      'XEM TRẠNG THÁI lệnh nền: có job_id → trạng thái + exit code + đuôi output của job đó; ' +
+      'không có job_id → liệt kê mọi job gần nhất. Lệnh nền vẫn chạy cả khi app khởi động lại.',
+    parameters: z.object({
+      job_id: z.string().max(80).optional().describe('Id nhận từ bg_run; bỏ trống = liệt kê tất cả'),
+    }),
+  }),
+
+  bg_stop: tool({
+    description: 'DỪNG một lệnh nền đang chạy theo job_id.',
+    parameters: z.object({
+      job_id: z.string().min(1).max(80).describe('Id nhận từ bg_run'),
+    }),
+  }),
 } as const;
 
 export type ClientToolSet = typeof CLIENT_TOOL_DEFS;

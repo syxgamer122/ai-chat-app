@@ -30,6 +30,20 @@ export interface VyenFsStat {
   mtimeMs?: number;
 }
 
+/** Job lệnh shell chạy nền (bg_run) — meta do lib/bg-jobs.cjs ghi trên đĩa. */
+export interface VyenBgJob {
+  id: string;
+  command: string;
+  status: 'running' | 'done' | 'failed' | 'stopped';
+  exitCode: number | null;
+  startedAt: number;
+  finishedAt?: number;
+  pid?: number;
+  note?: string;
+  /** Đuôi log (tối đa ~2000 ký tự) — log đầy đủ ở file bg-jobs. */
+  outputTail?: string;
+}
+
 export interface VyenRunResult {
   code: number | null;
   signal: string | null;
@@ -264,6 +278,11 @@ export interface VyenBridge {
   };
   shell: {
     run(opts: { command: string; cwd?: string; timeoutMs?: number }): Promise<VyenRunResult>;
+    /** Spawn detached — trả jobId NGAY, output ghi file, sống qua restart. */
+    runBg(opts: { command: string; timeoutSecs?: number }): Promise<{ jobId: string; pid?: number; note?: string; error?: string }>;
+    /** Không có id → liệt kê mọi job (đã reconcile job pid chết sau restart). */
+    bgStatus(id?: string): Promise<{ jobs: VyenBgJob[] }>;
+    bgStop(id: string): Promise<{ ok: true; note?: string }>;
   };
   git: {
     status(): Promise<VyenGitStatus>;
@@ -459,6 +478,9 @@ function createWebBridge(): VyenBridge {
     },
     shell: {
       run: (opts) => callWebBridge<VyenRunResult>('vyen:shell-run', opts),
+      runBg: (opts) => callWebBridge<{ jobId: string; pid?: number; note?: string; error?: string }>('vyen:bg-run', opts),
+      bgStatus: (id?: string) => callWebBridge<{ jobs: VyenBgJob[] }>('vyen:bg-status', { id }),
+      bgStop: (id: string) => callWebBridge<{ ok: true; note?: string }>('vyen:bg-stop', { id }),
     },
     git: {
       status: () => callWebBridge<VyenGitStatus>('vyen:git-status'),

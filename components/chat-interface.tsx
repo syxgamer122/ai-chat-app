@@ -1126,7 +1126,7 @@ export default function ChatInterface() {
         return JSON.stringify({ error: `Tool không tồn tại: ${toolCall.toolName}` });
       }
       const isDesktop = isVyenDesktop();
-      const desktopOnly = new Set(['shell_run', 'git_status', 'git_diff', 'git_log', 'git_add', 'git_commit']);
+      const desktopOnly = new Set(['shell_run', 'git_status', 'git_diff', 'git_log', 'git_add', 'git_commit', 'bg_run', 'bg_status', 'bg_stop']);
       if (desktopOnly.has(toolCall.toolName) && !isDesktop) {
         return JSON.stringify({ error: 'Tool này chỉ khả dụng trong Vyen desktop (Electron). Hãy chạy app bằng npm run app:dev / app:prod.' });
       }
@@ -1548,6 +1548,34 @@ export default function ChatInterface() {
               }
             }
             return JSON.stringify(result);
+          }
+          case 'bg_run': {
+            const command = String(args.command ?? '');
+            const timeoutSecs =
+              typeof args.timeout_secs === 'number' ? Math.min(Math.max(args.timeout_secs, 1), 3600) : undefined;
+            // Cùng cổng duyệt với shell_run — lệnh nền không được bypass approval.
+            const approved = await autoApproveShell({ command, cwd: undefined });
+            if (!approved) {
+              return JSON.stringify({ approved: false, note: 'Người dùng TỪ CHỐI chạy lệnh nền này.' });
+            }
+            const bridge = (await import('@/lib/desktop-bridge')).vyenDesktop()!;
+            const r = await bridge.shell.runBg({ command, timeoutSecs });
+            return JSON.stringify(r);
+          }
+          case 'bg_status': {
+            const bridge = (await import('@/lib/desktop-bridge')).vyenDesktop()!;
+            const r = await bridge.shell.bgStatus(
+              typeof args.job_id === 'string' && args.job_id ? args.job_id : undefined,
+            );
+            return JSON.stringify(r);
+          }
+          case 'bg_stop': {
+            const jobId = String(args.job_id ?? '');
+            if (!jobId) {
+              return JSON.stringify({ error: 'Thiếu job_id — lấy từ kết quả của bg_run.' });
+            }
+            const bridge = (await import('@/lib/desktop-bridge')).vyenDesktop()!;
+            return JSON.stringify(await bridge.shell.bgStop(jobId));
           }
           case 'git_status': {
             const bridge = (await import('@/lib/desktop-bridge')).vyenDesktop()!;
