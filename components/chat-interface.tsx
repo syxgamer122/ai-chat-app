@@ -133,6 +133,15 @@ import {
 import { CLIENT_TOOL_NAMES } from '@/lib/agent-tools';
 import { shouldAutoApprove } from '@/lib/auto-pilot';
 import {
+  acquirePostEditSlot,
+  attachPostEditCheck,
+  detectPostEditCommands,
+  emptyPostEditThrottle,
+  POST_EDIT_CHECK_TIMEOUT_MS,
+  type PostEditCheckOutcome,
+  type PostEditThrottleState,
+} from '@/lib/post-edit-check';
+import {
   callMcpTool,
   isMcpAvailable,
   listMcpServers,
@@ -529,6 +538,9 @@ export default function ChatInterface() {
 
   /** Auto-debug loop state: track retry attempts per command. */
   const debugLoopRef = useRef<DebugStore>(emptyDebugStore());
+
+  /** Post-edit verification: throttle 60s/conversation — slot chiếm trước async. */
+  const postEditThrottleRef = useRef<PostEditThrottleState>(emptyPostEditThrottle());
 
   /* Plan checklist (plan_create/plan_update): nạp từ kv theo chat, cập nhật
      trực tiếp từ handler của tool để UI phản ánh ngay trong lúc stream. */
@@ -1135,6 +1147,61 @@ export default function ChatInterface() {
       // Lấy deps cho web path (desktop không cần)
       const wsForFs = !isDesktop ? await requireWorkspace().then((r) => (r.ok ? r.deps : null)) : null;
       const args = (toolCall.args ?? {}) as Record<string, unknown>;
+      /* Post-edit verification (ý tưởng pi-lens, thu gọn): sau khi ghi file
+         THÀNH CÔNG ở đường legacy, chạy lint/typecheck khai báo trong
+         package.json (allow-list tên script, tối đa 2 lệnh) và gắn kết quả
+         vào tool result để model thấy lỗi NGAY trong lượt. Throttle 60s theo
+         hội thoại, và VẪN đi qua autoApproveShell — chính sách duyệt của
+         user không bị bypass; bị từ chối thì bỏ qua check im lặng. */
+      const runPostEditChecks = async (): Promise<PostEditCheckOutcome[] | null> => {
+        if (!isDesktop) return null; // web không có shell — bỏ qua im lặng
+        // Key throttle đọc tại chỗ từ store (như capChatId) — không đưa vào deps.
+        const throttleKey = useAppStore.getState().currentChatId ?? '';
+        if (!acquirePostEditSlot(postEditThrottleRef.current, throttleKey, Date.now())) return null;
+        let pkgRaw = '';
+        try {
+          const probe = await desktopFsRead('package.json');
+          pkgRaw = String((probe as unknown as Record<string, unknown>)?.content ?? '');
+        } catch {
+          return null; // không đọc được package.json — không có gì để check
+        }
+        let pkg: unknown;
+        try {
+          pkg = JSON.parse(pkgRaw);
+        } catch {
+          return null;
+        }
+        const commands = detectPostEditCommands(pkg);
+        const outcomes: PostEditCheckOutcome[] = [];
+        for (const c of commands) {
+          let approved = false;
+          try {
+            approved = await autoApproveShell({ command: c.command, cwd: undefined });
+          } catch {
+            approved = false;
+          }
+          if (!approved) break; // policy từ chối → dừng cả vòng, result giữ nguyên
+          try {
+            const bridge = (await import('@/lib/desktop-bridge')).vyenDesktop()!;
+            const r = await bridge.shell.run({ command: c.command, timeoutMs: POST_EDIT_CHECK_TIMEOUT_MS });
+            const output = r.stderr?.trim() ? `${r.stdout ?? ''}\n${r.stderr}` : (r.stdout ?? '');
+            outcomes.push({
+              command: c.command,
+              exitCode: r.code ?? null,
+              ok: r.code === 0,
+              output,
+            });
+          } catch {
+            outcomes.push({
+              command: c.command,
+              exitCode: null,
+              ok: false,
+              output: '(lệnh check thất bại — không ảnh hưởng kết quả của edit)',
+            });
+          }
+        }
+        return outcomes;
+      };
       try {
         switch (toolCall.toolName) {
           case 'fs_list': {
@@ -1318,7 +1385,9 @@ export default function ChatInterface() {
             }
             const res = isDesktop ? await desktopFsWrite(path, current) : await fsWrite(wsForFs!, path, current);
             if (turnCaptureRef.current) void saveTurnCapture(turnCaptureRef.current);
-            return JSON.stringify({ applied: true, blocks: applied.length, strategies: applied, ...res });
+            const editChecks = await runPostEditChecks();
+            const editResult = JSON.stringify({ applied: true, blocks: applied.length, strategies: applied, ...res });
+            return editChecks ? attachPostEditCheck(editResult, editChecks) : editResult;
           }
           case 'fs_write': {
             const path = String(args.path ?? '');
@@ -1420,7 +1489,9 @@ export default function ChatInterface() {
             }
             const writeRes = isDesktop ? await desktopFsWrite(path, content) : await fsWrite(wsForFs!, path, content);
             if (turnCaptureRef.current) void saveTurnCapture(turnCaptureRef.current);
-            return JSON.stringify({ written: true, ...writeRes });
+            const writeChecks = await runPostEditChecks();
+            const writeResult = JSON.stringify({ written: true, ...writeRes });
+            return writeChecks ? attachPostEditCheck(writeResult, writeChecks) : writeResult;
           }
           case 'shell_run': {
             const command = String(args.command ?? '');
