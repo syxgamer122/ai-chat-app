@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   WebOpError,
+  archiveFallbackUrl,
   capHits,
   fetchReadablePage,
   searchWeb,
+  shouldTryArchive,
   __clearSearchCache,
 } from '@/lib/web-backend';
 
@@ -127,5 +129,68 @@ describe('fetchReadablePage', () => {
     vi.stubGlobal('fetch', spy);
     await expect(fetchReadablePage('http://127.0.0.1:8080/admin')).rejects.toBeInstanceOf(WebOpError);
     expect(spy).not.toHaveBeenCalled();
+  });
+});
+
+describe('archive fallback (cứu link chết 404/410)', () => {
+  it('helper lỗi: chỉ WebOpError + WEB_UPSTREAM_STATUS + upstream 404/410', () => {
+    expect(shouldTryArchive(new WebOpError('x', 502, 'WEB_UPSTREAM_STATUS', 404))).toBe(true);
+    expect(shouldTryArchive(new WebOpError('x', 502, 'WEB_UPSTREAM_STATUS', 410))).toBe(true);
+    expect(shouldTryArchive(new WebOpError('x', 502, 'WEB_UPSTREAM_STATUS', 403))).toBe(false);
+    expect(shouldTryArchive(new WebOpError('x', 502, 'WEB_UPSTREAM_STATUS', 500))).toBe(false);
+    expect(shouldTryArchive(new WebOpError('x', 502, 'WEB_UPSTREAM_STATUS'))).toBe(false);
+    expect(shouldTryArchive(new WebOpError('x', 400, 'WEB_URL_BLOCKED', 404))).toBe(false);
+    expect(shouldTryArchive(new Error('lỗi thường'))).toBe(false);
+  });
+
+  it('helper URL: http(s) → wayback; đã là archive / phi-http / rác → null', () => {
+    expect(archiveFallbackUrl('https://example.com/a')).toBe(
+      'https://web.archive.org/web/2/https://example.com/a',
+    );
+    expect(archiveFallbackUrl('http://example.com')).toBe(
+      'https://web.archive.org/web/2/http://example.com',
+    );
+    expect(archiveFallbackUrl('https://web.archive.org/web/2/https://example.com')).toBeNull();
+    expect(archiveFallbackUrl('ftp://example.com')).toBeNull();
+    expect(archiveFallbackUrl('không phải url')).toBeNull();
+  });
+
+  it('404 gốc → thử archive đúng MỘT lần, thành công → note + giữ url gốc', async () => {
+    const spy = vi.fn(async (url: string) => {
+      if (String(url).startsWith('https://example.com/chet')) return htmlRes('<html></html>', 404);
+      return htmlRes('<html><body><p>Nội dung lưu trữ</p></body></html>');
+    });
+    vi.stubGlobal('fetch', spy);
+    const page = await fetchReadablePage('https://example.com/chet');
+    expect(spy).toHaveBeenCalledTimes(2);
+    expect(String(spy.mock.calls[1][0])).toContain('web.archive.org');
+    expect(page.url).toBe('https://example.com/chet');
+    expect(page.content).toContain('[Nội dung từ Internet Archive');
+    expect(page.content).toContain('Nội dung lưu trữ');
+  });
+
+  it('archive cũng chết → ném lại lỗi GỐC (upstream 404), không phải lỗi archive', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => htmlRes('<html></html>', 404)));
+    await expect(fetchReadablePage('https://example.com/chet')).rejects.toMatchObject({
+      code: 'WEB_UPSTREAM_STATUS',
+      upstreamStatus: 404,
+    });
+  });
+
+  it('trang 403/500 hoặc trang sống → KHÔNG đụng archive', async () => {
+    const spy403 = vi.fn(async () => htmlRes('<html></html>', 403));
+    vi.stubGlobal('fetch', spy403);
+    await expect(fetchReadablePage('https://example.com/x')).rejects.toBeTruthy();
+    expect(spy403).toHaveBeenCalledTimes(1);
+
+    const spy500 = vi.fn(async () => htmlRes('<html></html>', 500));
+    vi.stubGlobal('fetch', spy500);
+    await expect(fetchReadablePage('https://example.com/x')).rejects.toBeTruthy();
+    expect(spy500).toHaveBeenCalledTimes(1);
+
+    const spyOk = vi.fn(async () => htmlRes('<html><body><p>Trang sống</p></body></html>'));
+    vi.stubGlobal('fetch', spyOk);
+    await fetchReadablePage('https://example.com/song');
+    expect(spyOk).toHaveBeenCalledTimes(1);
   });
 });

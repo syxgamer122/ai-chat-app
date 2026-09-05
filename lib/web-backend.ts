@@ -22,6 +22,8 @@ export class WebOpError extends Error {
     message: string,
     public readonly status: number,
     public readonly code: string,
+    /** Status THẬT của upstream khi mình bọc nó vào lỗi trung gian (vd 502 bọc 404). */
+    public readonly upstreamStatus?: number,
   ) {
     super(message);
   }
@@ -666,10 +668,15 @@ export interface ReadablePage {
 }
 
 /** Fetch một URL public và trích văn bản "đủ đọc cho LLM". */
-export async function fetchReadablePage(rawUrl: string): Promise<ReadablePage> {
+async function fetchReadablePageOnce(rawUrl: string): Promise<ReadablePage> {
   const res = await guardedFetch(rawUrl, FETCH_TIMEOUT_MS);
   if (!res.ok) {
-    throw new WebOpError(`Trang trả về HTTP ${res.status}.`, 502, 'WEB_UPSTREAM_STATUS');
+    throw new WebOpError(
+      `Trang trả về HTTP ${res.status}.`,
+      502,
+      'WEB_UPSTREAM_STATUS',
+      res.status,
+    );
   }
 
   // Hop cuối sau redirect phải lại qua guard (guardedFetch đã kiểm từng hop,
@@ -715,6 +722,63 @@ export async function fetchReadablePage(rawUrl: string): Promise<ReadablePage> {
     content: capText(extracted.text, MAX_TEXT_CHARS),
     truncated: extracted.text.length > MAX_TEXT_CHARS,
   };
+}
+
+/**
+ * Cứu link chết qua Internet Archive (lấy cảm hứng từ Hound, page 3 pi.dev —
+ * gói đó là Pi-extension-only không nối qua MCP được, nên port ý tưởng).
+ * Chỉ chạy cho 404/410: 403 là anti-bot (archive không giúp), 5xx là lỗi
+ * tạm thời của chính trang (nếu trang sống lại, lần fetch sau thành công).
+ */
+export function shouldTryArchive(error: unknown): boolean {
+  return (
+    error instanceof WebOpError &&
+    error.code === 'WEB_UPSTREAM_STATUS' &&
+    (error.upstreamStatus === 404 || error.upstreamStatus === 410)
+  );
+}
+
+/**
+ * URL Wayback cho link chết. Null khi không phải http(s) hoặc đích đã là
+ * archive — nếu không sẽ rơi vào vòng lặp tự-fallback.
+ */
+export function archiveFallbackUrl(rawUrl: string): string | null {
+  const trimmed = (rawUrl ?? '').trim();
+  if (!/^https?:\/\//i.test(trimmed)) return null;
+  let hostname = '';
+  try {
+    hostname = new URL(trimmed).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+  if (hostname === 'web.archive.org' || hostname.endsWith('.web.archive.org')) return null;
+  return `https://web.archive.org/web/2/${trimmed}`;
+}
+
+/**
+ * Wrapper công khai: trang gốc chết (404/410) → thử ĐÚNG MỘT lần bản lưu
+ * trữ của Wayback. Archive hụt → ném lại LỖI GỐC (404/410), không phải lỗi
+ * của archive — caller không cần biết fallback từng chạy. URL trả về giữ
+ * nguyên trang gốc để model trích dẫn đúng nguồn.
+ */
+export async function fetchReadablePage(rawUrl: string): Promise<ReadablePage> {
+  try {
+    return await fetchReadablePageOnce(rawUrl);
+  } catch (error) {
+    if (!shouldTryArchive(error)) throw error;
+    const archiveUrl = archiveFallbackUrl(rawUrl);
+    if (!archiveUrl) throw error;
+    try {
+      const page = await fetchReadablePageOnce(archiveUrl);
+      return {
+        ...page,
+        url: rawUrl.slice(0, WEB_LIMITS.hitUrlChars),
+        content: `[Nội dung từ Internet Archive — trang gốc đã chết]\n\n${page.content}`,
+      };
+    } catch {
+      throw error;
+    }
+  }
 }
 
 /**
