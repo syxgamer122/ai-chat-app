@@ -40,6 +40,19 @@ export default function Home() {
     document.documentElement.classList.add('dark');
   }, [theme]);
 
+  /* Preload chunk Cài đặt lúc idle: lần bấm Cài đặt đầu tiên không còn đóng
+     băng main thread để parse chunk (CDP baseline: longtask đỉnh 353ms).
+     Chỉ tải, không pre-mount nội dung. */
+  useEffect(() => {
+    const load = () => { void import('@/components/settings-dialog'); };
+    if (typeof window.requestIdleCallback === 'function') {
+      window.requestIdleCallback(load, { timeout: 4000 });
+    } else {
+      const h = window.setTimeout(load, 2500);
+      return () => window.clearTimeout(h);
+    }
+  }, []);
+
   /* Trạng thái mới nhất cho handler phím tắt. Đọc qua ref để listener KHÔNG
      phải gắn/gỡ lại mỗi lần thu gọn sidebar hay mở settings — trước đây
      effect phụ thuộc `isSidebarCollapsed` + `isSettingsOpen` nên cứ đổi là

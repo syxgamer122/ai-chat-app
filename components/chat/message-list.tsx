@@ -6,7 +6,7 @@ import type { Message } from 'ai/react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { ArrowDown } from 'lucide-react';
 import { ChatErrorBoundary } from '@/components/chat-error-boundary';
-import { MessageItem, AssistantAvatar, type BranchInfo } from './message-item';
+import { MessageItem, type BranchInfo } from './message-item';
 
 /* ------------------------------------------------------------------ */
 /* Subcomponent 2: Memoized MessageList with Virtualization           */
@@ -47,8 +47,8 @@ function friendlyErrorMessage(raw?: string): string {
 
 /**
  * Hàng "AI đang xử lý" — hiện giữa lúc chờ token đầu tiên (user vừa gửi,
- * hoặc regenerate chưa nhả chữ). Avatar + chấm nảy + số giây đã chờ để
- * người dùng biết hệ thống còn hoạt động, không phải treo.
+ * hoặc regenerate chưa nhả chữ). Chấm nảy + số giây đã chờ để người dùng biết
+ * hệ thống còn hoạt động, không phải treo.
  */
 function ThinkingIndicator() {
   const [elapsedSec, setElapsedSec] = useState(0);
@@ -64,8 +64,7 @@ function ThinkingIndicator() {
 
   return (
     <div className="mx-auto flex max-w-thread items-start gap-3 px-4 py-3 md:px-4">
-      <AssistantAvatar />
-      <p className="flex min-w-0 items-baseline gap-2 py-1 font-mono text-xs">
+      <p className="flex min-w-0 items-baseline gap-2 py-1 font-mono text-xs" role="status">
         <span className="text-[#9fa4ab]">$</span>
         <span className="text-[#ebe7e4]">đang soạn câu trả lời</span>
         <span className="text-[#9fa4ab]">{elapsedSec >= 1 ? `${elapsedSec}s` : ''}</span>

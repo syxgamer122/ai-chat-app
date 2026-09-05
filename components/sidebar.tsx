@@ -16,7 +16,7 @@ import { MD_QUERY, useMediaQuery } from '@/lib/hooks/use-media-query';
 import { BackupReminder } from '@/components/backup-reminder';
 import { VyenLogo } from '@/components/vyen-logo';
 import {
-  Plus, MessageSquare, Pin, Trash2, Search, Settings as SettingsIcon,
+  Plus, Pin, Trash2, Search, Settings as SettingsIcon,
   X, MoreHorizontal, FileJson, FileText, Loader2, PanelLeftClose, PanelLeftOpen,
   Sun, Moon, Monitor,
 } from 'lucide-react';
@@ -137,17 +137,13 @@ const ChatItem = memo(function ChatItem({
           : 'text-[#9fa4ab] hover:bg-[#161d27] hover:text-[#ebe7e4]'
       }`}
     >
-      <div className="flex w-full items-center justify-between gap-1 px-2.5 py-1.5">
+      <div className="flex w-full items-center justify-between gap-1 px-2.5 py-1">
         <button
           type="button"
           onClick={() => onSelect(chat.id)}
           aria-current={isActive ? 'true' : undefined}
           className="flex min-w-0 flex-1 items-center gap-2 rounded-none text-left outline-none"
         >
-          <MessageSquare
-            size={13}
-            className={`flex-shrink-0 ${isActive ? 'text-[#6a9fcc]' : 'text-[#9fa4ab]'}`}
-          />
           <span className={`truncate text-[12.5px] ${isActive ? 'font-medium text-[#ebe7e4]' : 'text-[#9fa4ab]'}`}>
             {titleSegments ? <Highlight segments={titleSegments} /> : chat.title}
           </span>

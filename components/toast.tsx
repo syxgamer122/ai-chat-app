@@ -4,9 +4,13 @@
  * Toast thông báo. `chat-interface` vốn có state `notice` + `showNotice()` gọi
  * ở ~10 chỗ (tệp quá lớn, stream gián đoạn, lỗi chuyển nhánh…) nhưng chưa bao
  * giờ được render — mọi thông báo lỗi đều bị mất. Component này lấp chỗ đó.
+ *
+ * Nguồn notice giờ là lib/notice-store (leaf store): ToastHost tự订阅, ChatInterface
+ * chỉ import showNotice() để gọi — một toast không còn re-render cây chat.
  */
-import React from 'react';
+import React, { useEffect } from 'react';
 import { AlertTriangle, X } from 'lucide-react';
+import { clearNotice, useNotice } from '@/lib/notice-store';
 
 interface ToastProps {
   message: string | null;
@@ -36,4 +40,14 @@ export function Toast({ message, onClose }: ToastProps) {
       </div>
     </div>
   );
+}
+
+export function ToastHost() {
+  const notice = useNotice();
+
+  useEffect(() => {
+    return () => clearNotice();
+  }, []);
+
+  return <Toast message={notice} onClose={clearNotice} />;
 }

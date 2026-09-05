@@ -42,8 +42,11 @@ describe('BgJobStore', () => {
     expect(store.readTail('bg-4', 20)).toBe('');
   });
 
-  it('list sắp mới nhất trước; runningCount chỉ đếm running', () => {
+  it('list sắp mới nhất trước; runningCount chỉ đếm running', async () => {
     store.create({ id: 'bg-a', command: 'a' });
+    // startedAt đo bằng Date.now() (độ phân giải ms): 2 create cùng tick làm
+    // thứ tự sort không định — tách tick để điều kiện đầu vào tất định.
+    await new Promise((r) => setTimeout(r, 5));
     store.create({ id: 'bg-b', command: 'b' });
     store.update('bg-a', { status: 'done', exitCode: 0 });
     expect(store.list().map((j) => j.id)).toEqual(['bg-b', 'bg-a']);

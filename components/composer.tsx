@@ -1,6 +1,14 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, {
+  memo,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import TextareaAutosize from 'react-textarea-autosize';
 import {
   ArrowUp,
@@ -10,9 +18,9 @@ import {
   FileText,
   Film,
   FolderOpen,
-  FolderX,
   Globe,
   ImagePlus,
+  Loader2,
   Mic,
   MoreHorizontal,
   Network,
@@ -23,10 +31,7 @@ import {
   X,
   Zap,
 } from 'lucide-react';
-import { ModelSelector, type ModelOption } from '@/components/model-selector';
-import { ThinkingSlider } from '@/components/thinking-slider';
 import { useHaptics } from '@/components/effects';
-import type { ThinkingLevel } from '@/lib/provider-url';
 import { useSpeechRecognition } from '@/lib/use-speech-recognition';
 import { filterPrompts } from '@/lib/prompt-library';
 
@@ -53,50 +58,12 @@ export interface MediaActions {
   video?: MediaAction;
 }
 
-interface ComposerProps {
-  input: string;
-  onInputChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => void;
-  onSubmit: (e: React.FormEvent) => void;
-  onKeyDown: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
-  isStreaming: boolean;
-  onStop: () => void;
-  attachments: Attachment[];
-  onAddFiles: (files: FileList | File[] | null) => void;
-  onRemoveAttachment: (id: string) => void;
-  onAppendText?: (text: string) => void;
-  slashPrompts?: SlashPrompt[];
-  onApplyPrompt?: (content: string) => void;
-  onSavePrompt?: (title: string, content: string) => void | Promise<void>;
-  models: ModelOption[];
-  model: string;
-  onModelChange: (id: string) => void;
-  thinkingLevel?: ThinkingLevel;
-  thinkingSupportedLevels?: ThinkingLevel[] | null;
-  onThinkingLevelChange?: (level: ThinkingLevel) => void;
-  mediaActions?: MediaActions;
-  onGenerateMedia?: (action: MediaAction, kind: 'image' | 'video') => void;
-  webSearch?: boolean;
-  onToggleWebSearch?: () => void;
-  agentMode?: 'plan' | 'act';
-  onToggleAgentMode?: () => void;
-  autoPilot?: boolean;
-  approvalPolicy?: "always" | "smart" | "never";
-  onCycleAutoPilot?: () => void;
-  goalLoopActive?: boolean;
-  goalLoopInfo?: string;
-  onGoalLoopClick?: (goalText: string) => void;
-  stagedFileCount?: number;
-  onOpenStaging?: () => void;
-  /** Orchestrator: panel quét tham số đang mở? */
-  orchestratorOpen?: boolean;
-  onOpenOrchestrator?: () => void;
-  webBusy?: boolean;
-  workspace?: { connected: boolean; name: string | null };
-  onPickWorkspace?: () => void;
-  onDisconnectWorkspace?: () => void;
-  canContinue?: boolean;
-  onContinue?: () => void;
-  maxFileBytes?: number;
+export interface ComposerApi {
+  getText: () => string;
+  setText: (text: string) => void;
+  appendText: (text: string) => void;
+  clear: () => void;
+  focus: () => void;
 }
 
 const DEFAULT_MAX_FILE_BYTES = 20 * 1024 * 1024;
@@ -181,36 +148,27 @@ function SendButton({
 }
 
 /**
- * Mô tả một nút công cụ trên thanh dưới khung nhập.
- *
- * `primary: true` = luôn hiện thẳng trên thanh (kể cả mobile). Các nút còn lại
- * vẫn hiện thẳng từ `sm` trở lên, nhưng bị gom vào menu "⋯" trên mobile — nếu
- * không, 10 nút × 40px = 400px sẽ đẩy cụm [model][gửi] ra khỏi thanh trên màn
- * hình 375px.
+ * Mô tả một mục trong menu "Tác vụ".
  */
-interface ToolSpec {
+interface TaskSpec {
   key: string;
   icon: React.ElementType;
-  /** Nhãn đầy đủ — dùng cho tooltip/aria và làm dự phòng trong menu. */
+  /** Nhãn đầy đủ — tooltip/aria. */
   label: string;
-  /**
-   * Nhãn gọn dùng trong menu "⋯". Label gốc nhiều nút viết theo dạng hành động
-   * ("Tắt tìm kiếm web", "Chuyển sang ACT mode") nên không hợp để liệt kê.
-   */
+  /** Nhãn gọn trong menu. */
   shortLabel?: string;
   active?: boolean;
   disabled?: boolean;
   badge?: string;
   onClick: () => void;
-  primary?: boolean;
 }
 
 /**
- * Menu "⋯" chứa các công cụ không đủ chỗ trên mobile.
- * Chỉ render ở kích thước < sm (`sm:hidden`); từ sm trở lên các nút này hiện
- * thẳng trên thanh.
+ * Menu "Tác vụ ⋯" — mọi công cụ phụ của agent (mode, web, autopilot, goal,
+ * orchestrator, workspace, staging, media, mic) nằm ở đây để thanh nhập giữ
+ * đúng ba nút chính: đính kèm, thư mục, gửi/dừng.
  */
-function OverflowMenu({ tools }: { tools: ToolSpec[] }) {
+function TaskMenu({ tasks }: { tasks: TaskSpec[] }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
 
@@ -230,25 +188,25 @@ function OverflowMenu({ tools }: { tools: ToolSpec[] }) {
     };
   }, [open]);
 
-  const activeCount = tools.filter((t) => t.active).length;
+  const activeCount = tasks.filter((t) => t.active).length;
 
   return (
-    <div ref={wrapRef} className="relative sm:hidden">
+    <div ref={wrapRef} className="relative">
       <ToolbarButton
         icon={open ? X : MoreHorizontal}
         active={activeCount > 0}
         onClick={() => setOpen((v) => !v)}
-        label="Công cụ khác"
+        label="Tác vụ"
         badge={activeCount > 1 ? String(activeCount) : undefined}
         ariaExpanded={open}
       />
       {open && (
         <div
           role="menu"
-          aria-label="Công cụ khác"
-          className="surface-panel absolute bottom-full left-0 z-40 mb-2 w-[min(15rem,calc(100vw-2rem))] animate-slide-up overflow-hidden p-1.5"
+          aria-label="Tác vụ"
+          className="surface-panel absolute bottom-full right-0 z-40 mb-2 w-[min(16rem,calc(100vw-2rem))] animate-slide-up overflow-hidden p-1.5"
         >
-          {tools.map((t) => {
+          {tasks.map((t) => {
             const Icon = t.icon;
             return (
               <button
@@ -286,26 +244,63 @@ function OverflowMenu({ tools }: { tools: ToolSpec[] }) {
   );
 }
 
-export function Composer({
-  input,
-  onInputChange,
+interface ComposerProps {
+  onSubmit: (draft: string) => Promise<boolean>;
+  isStreaming: boolean;
+  onStop: () => void;
+  attachments: Attachment[];
+  onAddFiles: (files: FileList | File[] | null) => void;
+  onRemoveAttachment: (id: string) => void;
+  slashPrompts?: SlashPrompt[];
+  onSavePrompt?: (title: string, content: string) => void | Promise<void>;
+  mediaActions?: MediaActions;
+  onGenerateMedia?: (action: MediaAction, kind: 'image' | 'video', prompt: string) => void;
+  webSearch?: boolean;
+  onToggleWebSearch?: () => void;
+  agentMode?: 'plan' | 'act';
+  onToggleAgentMode?: () => void;
+  autoPilot?: boolean;
+  approvalPolicy?: 'always' | 'smart' | 'never';
+  onCycleAutoPilot?: () => void;
+  goalLoopActive?: boolean;
+  goalLoopInfo?: string;
+  onGoalLoopClick?: (goalText: string) => void;
+  stagedFileCount?: number;
+  onOpenStaging?: () => void;
+  /** Orchestrator: panel quét tham số đang mở? */
+  orchestratorOpen?: boolean;
+  onOpenOrchestrator?: () => void;
+  webBusy?: boolean;
+  workspace?: { connected: boolean; name: string | null };
+  onPickWorkspace?: () => Promise<void>;
+  onDisconnectWorkspace?: () => void;
+  sendOnEnter: boolean;
+  isTouchDevice: boolean;
+  canContinue?: boolean;
+  onContinue?: () => void;
+  maxFileBytes?: number;
+  /** API mệnh lệnh: suggestion/voice ngoài (adopt orchestrator…) ghi draft. */
+  composerApiRef?: React.MutableRefObject<ComposerApi | null>;
+}
+
+/**
+ * Ô nhập terminal (DESIGN.md): full-bleed, hairline, prompt glyph.
+ *
+ * Draft là state NỘI BỘ composer: mỗi keystroke không re-render ChatInterface
+ * (trước đây input nằm ở useChat trong component 4.8k dòng — gõ một phím là
+ * re-render cả cây). onSubmit nhận snapshot draft và trả true nếu tin nhắn đã
+ * được đẩy vào pipeline — composer chỉ xoá draft khi được nhận, và chỉ xoá nếu
+ * draft chưa bị gõ tiếp trong lúc chờ.
+ */
+export const Composer = memo(function Composer({
   onSubmit,
-  onKeyDown,
   isStreaming,
   onStop,
   attachments,
   onAddFiles,
   onRemoveAttachment,
-  onAppendText,
   slashPrompts,
-  onApplyPrompt,
   onSavePrompt,
-  models,
-  model,
-  onModelChange,
-  thinkingLevel,
-  thinkingSupportedLevels,
-  onThinkingLevelChange,
   mediaActions,
   onGenerateMedia,
   webSearch,
@@ -320,40 +315,62 @@ export function Composer({
   onGoalLoopClick,
   stagedFileCount,
   onOpenStaging,
-  /**
-   * Orchestrator: mở panel quét tham số — chạy N agent theo N cấu hình khác
-   * nhau rồi tổng hợp. Không thay đổi luồng gửi tin nhắn.
-   */
   orchestratorOpen,
   onOpenOrchestrator,
   webBusy,
   workspace,
   onPickWorkspace,
   onDisconnectWorkspace,
+  sendOnEnter,
+  isTouchDevice,
   canContinue,
   onContinue,
   maxFileBytes = DEFAULT_MAX_FILE_BYTES,
+  composerApiRef,
 }: ComposerProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const composingRef = useRef(false);
   const [dragging, setDragging] = useState(false);
   const [fileError, setFileError] = useState<string | null>(null);
+  const [draft, setDraft] = useState('');
+  const [pickPending, setPickPending] = useState(false);
 
   const voice = useSpeechRecognition({
     lang: 'vi-VN',
-    onFinalText: useCallback(
-      (text: string) => {
-        onAppendText?.(text);
-      },
-      [onAppendText],
-    ),
+    onFinalText: useCallback((text: string) => {
+      setDraft((d) => d + (d.length > 0 && !/\s$/.test(d) ? ' ' : '') + text);
+    }, []),
   });
+
+  useImperativeHandle(
+    composerApiRef,
+    () => ({
+      getText: () => draft,
+      setText: (text: string) => {
+        setDraft(text);
+        requestAnimationFrame(() => {
+          const el = textareaRef.current;
+          if (el) {
+            el.focus();
+            el.setSelectionRange(el.value.length, el.value.length);
+          }
+        });
+      },
+      appendText: (text: string) => {
+        setDraft((d) => d + (d.length > 0 && !/\s$/.test(d) ? ' ' : '') + text);
+      },
+      clear: () => setDraft(''),
+      focus: () => textareaRef.current?.focus(),
+    }),
+    [draft],
+  );
 
   const [slashIndex, setSlashIndex] = useState(0);
   const [slashDismissed, setSlashDismissed] = useState(false);
 
   const slashQuery =
-    input.startsWith('/') && !input.includes('\n') ? input.slice(1) : null;
+    draft.startsWith('/') && !draft.includes('\n') ? draft.slice(1) : null;
 
   const slashMatches = useMemo(
     () => (slashQuery === null ? [] : filterPrompts(slashPrompts ?? [], slashQuery)),
@@ -370,29 +387,36 @@ export function Composer({
 
   const applyPrompt = useCallback(
     (prompt: SlashPrompt) => {
-      onApplyPrompt?.(prompt.content);
+      setDraft(prompt.content);
+      requestAnimationFrame(() => {
+        const el = textareaRef.current;
+        if (el) {
+          el.focus();
+          el.setSelectionRange(el.value.length, el.value.length);
+        }
+      });
       setSlashDismissed(true);
     },
-    [onApplyPrompt],
+    [],
   );
 
   const quickSavePrompt = useCallback(async () => {
-    if (!onSavePrompt || input.length <= 1) return;
+    if (!onSavePrompt || draft.length <= 1) return;
     const title = (slashQuery ?? '').trim() || `Prompt ${new Date().toLocaleDateString('vi-VN')}`;
-    await onSavePrompt(title.slice(0, 80), input);
+    await onSavePrompt(title.slice(0, 80), draft);
     setSlashDismissed(true);
-  }, [input, onSavePrompt, slashQuery]);
+  }, [draft, onSavePrompt, slashQuery]);
 
-  const hasContent = input.trim().length > 0 || attachments.length > 0;
+  const hasContent = draft.trim().length > 0 || attachments.length > 0;
   const canSubmit = hasContent && !isStreaming;
-  const canGenerateMedia = Boolean(onGenerateMedia) && input.trim().length > 0 && !isStreaming;
+  const canGenerateMedia = Boolean(onGenerateMedia) && draft.trim().length > 0 && !isStreaming;
 
   const startMedia = useCallback(
     (action: MediaAction | undefined, kind: 'image' | 'video') => {
       if (!action || !onGenerateMedia || !canGenerateMedia) return;
-      onGenerateMedia(action, kind);
+      onGenerateMedia(action, kind, draft);
     },
-    [canGenerateMedia, onGenerateMedia],
+    [canGenerateMedia, onGenerateMedia, draft],
   );
 
   const acceptFiles = useCallback(
@@ -410,6 +434,19 @@ export function Composer({
     },
     [maxFileBytes, onAddFiles],
   );
+
+  const haptics = useHaptics();
+
+  const submitDraft = useCallback(async () => {
+    if (!canSubmit) return;
+    const text = draft;
+    const accepted = await onSubmit(text);
+    if (accepted) {
+      // Chỉ xoá khi draft KHÔNG bị gõ tiếp trong lúc chờ (web search có thể
+      // mất tới ~15s) — draft mới của người dùng luôn được giữ.
+      setDraft((d) => (d === text ? '' : d));
+    }
+  }, [canSubmit, draft, onSubmit]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -444,68 +481,47 @@ export function Composer({
         }
       }
 
-      onKeyDown(e);
-    },
-    [slashOpen, slashMatches, slashIndex, applyPrompt, onKeyDown],
-  );
-
-  const haptics = useHaptics();
-  const handleSubmit = useCallback(
-    (e: React.FormEvent) => {
-      if (!canSubmit) {
-        e.preventDefault();
+      if (e.key === 'Escape') {
+        onStop();
         return;
       }
-      haptics.trigger('light');
-      onSubmit(e);
+      if (e.key === 'Enter' && !e.shiftKey && !isTouchDevice && sendOnEnter) {
+        e.preventDefault();
+        void submitDraft();
+      }
     },
-    [canSubmit, onSubmit, haptics],
+    [slashOpen, slashMatches, slashIndex, applyPrompt, onStop, isTouchDevice, sendOnEnter, submitDraft],
   );
 
-  /**
-   * Danh sách công cụ — khai báo thành data (thay vì JSX rải rác) để có thể
-   * render 2 lần: hiện thẳng trên thanh, và gom vào menu "⋯" trên mobile.
-   * Thứ tự trong mảng = thứ tự trong menu.
-   */
-  const tools: ToolSpec[] = [
-    {
-      key: 'attach',
-      icon: Paperclip,
-      label: 'Đính kèm tệp',
-      onClick: () => fileInputRef.current?.click(),
-      primary: true,
+  const handleFormSubmit = useCallback(
+    (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!canSubmit) return;
+      haptics.trigger('light');
+      void submitDraft();
     },
-  ];
+    [canSubmit, submitDraft, haptics],
+  );
 
-  if (voice.supported) {
-    tools.push({
-      key: 'voice',
-      icon: voice.listening ? Square : Mic,
-      active: voice.listening,
-      label: voice.listening ? 'Dừng nhận diện giọng nói' : 'Nhập bằng giọng nói',
-      shortLabel: voice.listening ? 'Dừng ghi âm' : 'Giọng nói',
-      onClick: () => {
-        voice.clearError();
-        voice.toggle();
-      },
-      primary: true,
-    });
-  }
+  const handlePickWorkspace = useCallback(async () => {
+    if (!onPickWorkspace || pickPending) return;
+    // Pressed/pending state renders ngay trong cùng tick của click — nhãn
+    // phản hồi tức thì thay vì im lặng chờ dialog native (baseline: 252ms).
+    setPickPending(true);
+    try {
+      await onPickWorkspace();
+    } finally {
+      setPickPending(false);
+    }
+  }, [onPickWorkspace, pickPending]);
 
-  if (onToggleWebSearch) {
-    tools.push({
-      key: 'web',
-      icon: Globe,
-      active: webSearch,
-      disabled: isStreaming,
-      label: webSearch ? 'Tắt tìm kiếm web' : 'Bật tìm kiếm web',
-      shortLabel: 'Tìm kiếm web',
-      onClick: onToggleWebSearch,
-    });
-  }
+  /**
+   * Menu "Tác vụ" — khai báo thành data để giữ nguyên thứ tự và nhãn.
+   */
+  const tasks: TaskSpec[] = [];
 
   if (onToggleAgentMode) {
-    tools.push({
+    tasks.push({
       key: 'agent-mode',
       icon: Pencil,
       active: agentMode === 'plan',
@@ -516,11 +532,23 @@ export function Composer({
     });
   }
 
+  if (onToggleWebSearch) {
+    tasks.push({
+      key: 'web',
+      icon: Globe,
+      active: webSearch,
+      disabled: isStreaming,
+      label: webSearch ? 'Tắt tìm kiếm web' : 'Bật tìm kiếm web',
+      shortLabel: 'Tìm kiếm web',
+      onClick: onToggleWebSearch,
+    });
+  }
+
   if (onCycleAutoPilot) {
     const policyLabel = approvalPolicy === 'never' ? 'YOLO'
       : approvalPolicy === 'always' ? 'Always ask'
       : 'Smart';
-    tools.push({
+    tasks.push({
       key: 'auto-pilot',
       icon: Zap,
       active: autoPilot ?? false,
@@ -534,7 +562,7 @@ export function Composer({
   }
 
   if (onGoalLoopClick) {
-    tools.push({
+    tasks.push({
       key: 'goal-loop',
       icon: Target,
       active: goalLoopActive ?? false,
@@ -543,12 +571,12 @@ export function Composer({
         ? `Goal loop đang chạy${goalLoopInfo ? ` (lượt ${goalLoopInfo})` : ''} · bấm để dừng`
         : 'Goal loop · gõ mục tiêu vào ô nhập rồi bấm để agent tự lặp đến khi hoàn thành',
       shortLabel: goalLoopActive ? `Goal ${goalLoopInfo ?? ''}`.trim() : 'Goal loop',
-      onClick: () => onGoalLoopClick(input),
+      onClick: () => onGoalLoopClick(draft),
     });
   }
 
   if (onOpenOrchestrator) {
-    tools.push({
+    tasks.push({
       key: 'orchestrator',
       icon: Network,
       active: orchestratorOpen,
@@ -558,21 +586,10 @@ export function Composer({
     });
   }
 
-  if (onPickWorkspace) {
-    tools.push({
-      key: 'workspace',
-      icon: FolderOpen,
-      active: workspace?.connected,
-      label: workspace?.connected ? `Workspace: ${workspace.name}` : 'Kết nối thư mục làm việc',
-      shortLabel: 'Thư mục làm việc',
-      onClick: onPickWorkspace,
-    });
-  }
-
   if (onDisconnectWorkspace && workspace?.connected) {
-    tools.push({
+    tasks.push({
       key: 'workspace-disconnect',
-      icon: FolderX,
+      icon: FolderOpen,
       disabled: isStreaming,
       label: `Ngắt kết nối: ${workspace.name ?? 'workspace'}`,
       shortLabel: 'Ngắt thư mục làm việc',
@@ -581,7 +598,7 @@ export function Composer({
   }
 
   if (onOpenStaging && (stagedFileCount ?? 0) > 0) {
-    tools.push({
+    tasks.push({
       key: 'staging',
       icon: FileText,
       label: `${stagedFileCount} file đang staged`,
@@ -592,7 +609,7 @@ export function Composer({
   }
 
   if (mediaActions?.image) {
-    tools.push({
+    tasks.push({
       key: 'image',
       icon: ImagePlus,
       disabled: !canGenerateMedia,
@@ -603,7 +620,7 @@ export function Composer({
   }
 
   if (mediaActions?.video) {
-    tools.push({
+    tasks.push({
       key: 'video',
       icon: Film,
       disabled: !canGenerateMedia,
@@ -613,8 +630,19 @@ export function Composer({
     });
   }
 
-  const primaryTools = tools.filter((t) => t.primary);
-  const overflowTools = tools.filter((t) => !t.primary);
+  if (voice.supported) {
+    tasks.push({
+      key: 'voice',
+      icon: voice.listening ? Square : Mic,
+      active: voice.listening,
+      label: voice.listening ? 'Dừng nhận diện giọng nói' : 'Nhập bằng giọng nói',
+      shortLabel: voice.listening ? 'Dừng ghi âm' : 'Giọng nói',
+      onClick: () => {
+        voice.clearError();
+        voice.toggle();
+      },
+    });
+  }
 
   return (
     // Terminal Input Box (DESIGN.md): full-bleed, dính mép trái/phải, viền
@@ -640,7 +668,7 @@ export function Composer({
       )}
 
       <form
-        onSubmit={handleSubmit}
+        onSubmit={handleFormSubmit}
         onDragOver={(e) => {
           e.preventDefault();
           setDragging(true);
@@ -681,7 +709,7 @@ export function Composer({
                 </span>
               </button>
             ))}
-            {onSavePrompt && input.length > 1 && (
+            {onSavePrompt && draft.length > 1 && (
               <button
                 type="button"
                 onClick={() => void quickSavePrompt()}
@@ -749,8 +777,9 @@ export function Composer({
             $
           </span>
           <TextareaAutosize
-            value={input}
-            onChange={onInputChange}
+            ref={textareaRef}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
             onKeyDown={handleKeyDown}
             onCompositionStart={() => {
               composingRef.current = true;
@@ -772,7 +801,7 @@ export function Composer({
             aria-activedescendant={
               slashOpen ? `slash-opt-${slashMatches[slashIndex]?.id}` : undefined
             }
-            placeholder="Hỏi bất cứ điều gì, hoặc gõ / để dùng prompt mẫu..."
+            placeholder="Nêu việc cho agent, hoặc gõ / để dùng prompt mẫu..."
               className="w-full resize-none bg-transparent pl-2 pr-4 pb-1 pt-3 font-mono text-[14px] leading-relaxed text-[#ebe7e4] outline-none placeholder:text-[#9fa4ab]"
           />
         </div>
@@ -789,69 +818,30 @@ export function Composer({
         />
 
         <div className="flex items-center gap-2 px-2 pb-2 pt-1">
-          {/*
-           * Cụm TRÁI (công cụ). Hai lớp bảo vệ để cụm phải không bao giờ bị
-           * đẩy ra khỏi thanh:
-           *  1. Vùng chứa nút là scroll container (`overflow-x-auto` +
-           *     `min-w-0`) → có thể co về 0 và cuộn ngang thay vì tràn.
-           *  2. Các công cụ phụ gom vào menu "⋯" trên mobile → cụm trái chỉ
-           *     còn 2–3 nút, hiếm khi phải cuộn.
-           * Dùng `grow` (basis auto) chứ không dùng `flex-1` (basis 0%):
-           * với basis 0 cụm này không báo kích thước nội dung, nên khi thiếu
-           * chỗ nó co về 0 và dồn toàn bộ phần thiếu hụt sang bên phải.
-           */}
+          {/* Cụm TRÁI: đính kèm + thư mục + Tác vụ. Vùng chứa co được (min-w-0). */}
           <div className="flex min-w-0 grow shrink-0 items-center gap-0.5 sm:shrink">
-            <div className="no-scrollbar -mx-0.5 -my-1 flex min-w-0 grow items-center gap-0.5 overflow-x-auto overscroll-x-contain px-0.5 py-1">
-              {primaryTools.map((t) => (
-                <ToolbarButton
-                  key={t.key}
-                  icon={t.icon}
-                  label={t.label}
-                  active={t.active}
-                  disabled={t.disabled}
-                  badge={t.badge}
-                  onClick={t.onClick}
-                />
-              ))}
-              {overflowTools.map((t) => (
-                <ToolbarButton
-                  key={t.key}
-                  icon={t.icon}
-                  label={t.label}
-                  active={t.active}
-                  disabled={t.disabled}
-                  badge={t.badge}
-                  onClick={t.onClick}
-                  className="hidden sm:flex"
-                />
-              ))}
-            </div>
-
-            {overflowTools.length > 0 && <OverflowMenu tools={overflowTools} />}
+            <ToolbarButton
+              icon={Paperclip}
+              label="Đính kèm tệp"
+              onClick={() => fileInputRef.current?.click()}
+            />
+            {onPickWorkspace && (
+              <ToolbarButton
+                icon={pickPending ? Loader2 : FolderOpen}
+                className={pickPending ? 'animate-spin' : undefined}
+                active={workspace?.connected}
+                label={
+                  workspace?.connected
+                    ? `Workspace: ${workspace.name}`
+                    : 'Kết nối thư mục làm việc'
+                }
+                onClick={handlePickWorkspace}
+              />
+            )}
           </div>
 
-          {/*
-           * Cụm PHẢI (mức suy luận + model + gửi). Không có `shrink-0` ở đây:
-           * cụm được phép co lại (nhãn model tự truncate) nhưng nút gửi và
-           * thanh suy luận thì không — vậy chúng luôn nằm trong thanh.
-           */}
-          <div className="flex min-w-0 items-center gap-1.5 sm:gap-2">
-            {thinkingLevel && onThinkingLevelChange && (
-              <div className="flex-none">
-                <ThinkingSlider
-                  value={thinkingLevel}
-                  onChange={onThinkingLevelChange}
-                  disabled={isStreaming}
-                  supportedLevels={thinkingSupportedLevels}
-                />
-              </div>
-            )}
-            <ModelSelector
-              models={models}
-              value={model}
-              onChange={onModelChange}
-              disabled={isStreaming}
-            />
+          <div className="flex flex-none items-center gap-1.5">
+            <TaskMenu tasks={tasks} />
             <div className="hidden h-4 w-px flex-none bg-[#495059] sm:block" />
             <SendButton
               isStreaming={isStreaming}
@@ -866,4 +856,4 @@ export function Composer({
         </div>
     </div>
   );
-}
+});

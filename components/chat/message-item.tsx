@@ -12,18 +12,6 @@ import { stripMarkdownForSpeech } from '@/lib/speech-text';
 import { useTts } from '@/lib/use-tts';
 import { ToolTrace } from '@/components/chat/tool-trace';
 import { OrchestratorBadge, getOrchestratorAdoptedAnnotation } from '@/components/chat/orchestrator-badge';
-import { VyenMark } from '@/components/vyen-logo';
-
-export function AssistantAvatar() {
-  return (
-    <div
-      aria-hidden="true"
-      className="mt-0.5 flex h-7 w-7 flex-shrink-0 select-none items-center justify-center rounded-none border border-[#495059] bg-[#212730] text-[#6a9fcc]"
-    >
-      <VyenMark size={14} />
-    </div>
-  );
-}
 
 function ThinkingBlock({ reasoning, isStreaming }: { reasoning: string; isStreaming: boolean }) {
   const [open, setOpen] = useState(false);
@@ -135,144 +123,146 @@ export const MessageItem = memo(
 
     if (m.role === 'user') {
       return (
-        <div className="group flex w-full justify-end px-4 py-1.5">
-          <div className="flex max-w-[88%] md:max-w-[72%] flex-col items-end gap-1">
-            {m.experimental_attachments && m.experimental_attachments.length > 0 && (
-              <div className="mb-2 flex flex-wrap gap-2 justify-end">
-                {m.experimental_attachments.map((att, idx) => (
-                  <div key={idx} className="relative overflow-hidden rounded-none border border-[#495059] bg-[#212730]">
-                    {att.contentType?.startsWith('image/') ? (
-                      <img
-                        src={att.url}
-                        alt={att.name ?? 'attachment'}
-                        className="max-h-48 max-w-xs object-cover"
-                        loading="eager"
-                        decoding="async"
-                        onLoad={onContentResize}
-                        onError={onContentResize}
-                      />
-                    ) : (
-                      <div className="flex items-center gap-2 px-3 py-2 text-xs font-mono text-[#ebe7e4]">
-                        <Paperclip size={12} className="text-[#6a9fcc]" />
-                        <span className="truncate max-w-[150px]">{att.name}</span>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {isEditing ? (
-              <div className="flex w-full min-w-[280px] flex-col gap-2 rounded-none border border-[#495059] bg-[#161d27] p-3">
-                <TextareaAutosize
-                  value={draft}
-                  onChange={(e) => onDraftChange(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (sendOnEnter && e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault();
-                      onSaveEdit(m.id);
-                    }
-                    if (e.key === 'Escape') onCancelEdit();
-                  }}
-                  aria-label="Sửa nội dung tin nhắn"
-                  className="w-full resize-none bg-transparent font-mono text-sm text-[#ebe7e4] outline-none placeholder:text-[#9fa4ab]"
-                  autoFocus
-                />
-                <div className="flex justify-end gap-2 border-t border-[#495059] pt-2 text-xs font-mono">
-                  <button
-                    type="button"
-                    onClick={onCancelEdit}
-                    className="rounded-none px-2.5 py-1 text-[#9fa4ab] transition-colors hover:bg-[#252f3d] hover:text-[#ebe7e4]"
-                  >
-                    Hủy
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => onSaveEdit(m.id)}
-                    className="rounded-none bg-[#6a9fcc] px-3 py-1 font-medium text-[#0d1116] transition-colors hover:bg-[#6a9fcc]/85"
-                  >
-                    Lưu & Gửi lại
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div className="relative rounded-none border border-[#495059] bg-[#212730] px-4 py-2.5 text-[17px] leading-relaxed text-[#ebe7e4]">
-                <div
-                  className={`claude-prose claude-prose-bubble ${
-                    isLongUserMsg && !isExpanded ? 'relative max-h-36 overflow-hidden' : ''
-                  }`}
-                >
-                  <ErrorBoundary resetKey={`${m.id}:${m.content.length}`}>
-                    <MarkdownRenderer
-                      content={sanitizeContent(m.content)}
-                      isStreaming={isStreaming}
-                      throttleMs={throttleMs}
+        <div className="group w-full px-4 py-1.5">
+          {m.experimental_attachments && m.experimental_attachments.length > 0 && (
+            <div className="mb-1.5 flex flex-wrap gap-2">
+              {m.experimental_attachments.map((att, idx) => (
+                <div key={idx} className="relative overflow-hidden rounded-none border border-[#495059] bg-[#212730]">
+                  {att.contentType?.startsWith('image/') ? (
+                    <img
+                      src={att.url}
+                      alt={att.name ?? 'attachment'}
+                      className="max-h-48 max-w-xs object-cover"
+                      loading="eager"
+                      decoding="async"
+                      onLoad={onContentResize}
+                      onError={onContentResize}
                     />
-                  </ErrorBoundary>
-
-                  {isLongUserMsg && !isExpanded && (
-                    <div className="pointer-events-none absolute bottom-0 left-0 right-0 h-12 bg-gradient-to-t from-[#212730] via-[#212730]/70 to-transparent" />
+                  ) : (
+                    <div className="flex items-center gap-2 px-3 py-2 text-xs font-mono text-[#ebe7e4]">
+                      <Paperclip size={12} className="text-[#6a9fcc]" />
+                      <span className="truncate max-w-[150px]">{att.name}</span>
+                    </div>
                   )}
                 </div>
+              ))}
+            </div>
+          )}
 
-                {isLongUserMsg && (
-                  <button
-                    type="button"
-                    onClick={() => setIsExpanded((prev) => !prev)}
-                    aria-expanded={isExpanded}
-                    className="mt-1.5 inline-flex items-center gap-1 font-mono text-[11px] font-medium text-[#6a9fcc] transition-colors hover:text-[#ebe7e4]"
-                  >
-                    {isExpanded ? (
-                      <>
-                        <ChevronUp size={12} />
-                        <span>Thu gọn</span>
-                      </>
-                    ) : (
-                      <>
-                        <ChevronDown size={12} />
-                        <span>Xem thêm ({m.content.length.toLocaleString('vi-VN')} ký tự)</span>
-                      </>
-                    )}
-                  </button>
-                )}
+          {isEditing ? (
+            <div className="flex w-full min-w-[280px] flex-col gap-2 rounded-none border border-[#495059] bg-[#161d27] p-3">
+              <TextareaAutosize
+                value={draft}
+                onChange={(e) => onDraftChange(e.target.value)}
+                onKeyDown={(e) => {
+                  if (sendOnEnter && e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    onSaveEdit(m.id);
+                  }
+                  if (e.key === 'Escape') onCancelEdit();
+                }}
+                aria-label="Sửa nội dung tin nhắn"
+                className="w-full resize-none bg-transparent font-mono text-sm text-[#ebe7e4] outline-none placeholder:text-[#9fa4ab]"
+                autoFocus
+              />
+              <div className="flex justify-end gap-2 border-t border-[#495059] pt-2 text-xs font-mono">
+                <button
+                  type="button"
+                  onClick={onCancelEdit}
+                  className="rounded-none px-2.5 py-1 text-[#9fa4ab] transition-colors hover:bg-[#252f3d] hover:text-[#ebe7e4]"
+                >
+                  Hủy
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onSaveEdit(m.id)}
+                  className="rounded-none bg-[#6a9fcc] px-3 py-1 font-medium text-[#0d1116] transition-colors hover:bg-[#6a9fcc]/85"
+                >
+                  Lưu & Gửi lại
+                </button>
               </div>
-            )}
+            </div>
+          ) : (
+            <div
+              className={`relative flex items-start gap-2 ${
+                isLongUserMsg && !isExpanded ? 'max-h-36 overflow-hidden' : ''
+              }`}
+            >
+              <span
+                aria-hidden="true"
+                className="select-none flex-none pt-px font-mono text-[13.5px] font-semibold leading-relaxed text-[#6a9fcc]"
+              >
+                &gt;
+              </span>
+              <span
+                className="sr-only"
+              >
+                Bạn:
+              </span>
+              <div className="min-w-0 flex-1 whitespace-pre-wrap break-words font-mono text-[13.5px] leading-relaxed text-[#ebe7e4]">
+                {sanitizeContent(m.content)}
+              </div>
 
-            {!isEditing && (
-              <div className="msg-actions mt-0.5 flex items-center gap-1">
-                {branchInfo && (
-                  <BranchSwitcher
-                    currentIndex={branchInfo.currentIndex}
-                    total={branchInfo.total}
-                    isTouchDevice={isTouchDevice}
-                    disabled={isStreaming}
-                    onPrevious={() => onSwitchBranch(m.id, 'previous')}
-                    onNext={() => onSwitchBranch(m.id, 'next')}
-                  />
-                )}
-                <ActionButton
-                  icon={isCopied ? Check : Copy}
-                  onClick={() => onCopy(m)}
-                  label="Sao chép"
-                  active={isCopied}
+              {isLongUserMsg && !isExpanded && (
+                <div className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-[#161d27] via-[#161d27]/70 to-transparent" />
+              )}
+            </div>
+          )}
+
+          {isLongUserMsg && !isEditing && (
+            <button
+              type="button"
+              onClick={() => setIsExpanded((prev) => !prev)}
+              aria-expanded={isExpanded}
+              className="ml-4 mt-0.5 inline-flex items-center gap-1 font-mono text-[11px] font-medium text-[#6a9fcc] transition-colors hover:text-[#ebe7e4]"
+            >
+              {isExpanded ? (
+                <>
+                  <ChevronUp size={12} />
+                  <span>Thu gọn</span>
+                </>
+              ) : (
+                <>
+                  <ChevronDown size={12} />
+                  <span>Xem thêm ({m.content.length.toLocaleString('vi-VN')} ký tự)</span>
+                </>
+              )}
+            </button>
+          )}
+
+          {!isEditing && (
+            <div className="msg-actions mt-0.5 flex items-center gap-1">
+              {branchInfo && (
+                <BranchSwitcher
+                  currentIndex={branchInfo.currentIndex}
+                  total={branchInfo.total}
+                  isTouchDevice={isTouchDevice}
+                  disabled={isStreaming}
+                  onPrevious={() => onSwitchBranch(m.id, 'previous')}
+                  onNext={() => onSwitchBranch(m.id, 'next')}
                 />
-                <ActionButton
-                  icon={Pencil}
-                  onClick={() => onStartEdit(m)}
-                  label="Chỉnh sửa"
-                />
-              </div>
-            )}
-          </div>
+              )}
+              <ActionButton
+                icon={isCopied ? Check : Copy}
+                onClick={() => onCopy(m)}
+                label="Sao chép"
+                active={isCopied}
+              />
+              <ActionButton
+                icon={Pencil}
+                onClick={() => onStartEdit(m)}
+                label="Chỉnh sửa"
+              />
+            </div>
+          )}
         </div>
       );
     }
 
     return (
-      <div className="group flex w-full items-start gap-3 px-4 py-2">
-        <AssistantAvatar />
-
+      <div className="group w-full px-4 py-2">
         <div className="min-w-0 flex-1 space-y-2">
+          <span className="sr-only">Trợ lý:</span>
           {m.experimental_attachments && m.experimental_attachments.length > 0 && (
             <div className="flex flex-wrap gap-2">
               {m.experimental_attachments.map((att, idx) => (

@@ -1,14 +1,12 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import dynamic from 'next/dynamic';
 import { db, addMemory, deleteMemory, MAX_MEMORIES, MAX_MEMORY_CHARS, type PromptTemplate } from '@/lib/db';
 import { useAppStore, SERVER_PROVIDER_ID, ALL_TOOL_CATEGORIES, TOOL_CATEGORY_LABELS, isApiModelId, isPermissionOverride, type PermissionOverride } from '@/lib/store';
 import { exportJson, exportMarkdown, importBackup, type ImportMode } from '@/lib/backup';
 import { X, Download, Upload, Loader2, ShieldAlert, Pencil, Trash2 } from 'lucide-react';
 import { VyenMark } from '@/components/vyen-logo';
-import { ProviderManager } from '@/components/provider-manager';
-import { UsageStats } from '@/components/usage-stats';
-import { McpSettingsPanel } from '@/components/mcp/mcp-settings-panel';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { savePrompt, deletePrompt } from '@/lib/prompt-library';
 import {
@@ -23,6 +21,30 @@ import {
 } from '@/lib/auto-backup';
 
 type Status = { kind: 'idle' | 'busy' | 'ok' | 'error'; message?: string };
+
+function SectionLoading() {
+  return (
+    <div className="flex items-center gap-2 py-6 font-mono text-xs text-[#9fa4ab]" role="status">
+      <span className="terminal-cursor" aria-hidden="true" />
+      <span>Đang tải mục cài đặt…</span>
+    </div>
+  );
+}
+
+/* Ba section nặng (provider + MCP panel, thống kê) tách chunk riêng: shell
+   dialog + tab Chung mount tức thì, section chỉ tải khi tab được ghé lần đầu. */
+const ProviderManager = dynamic(
+  () => import('@/components/provider-manager').then((m) => m.ProviderManager),
+  { ssr: false, loading: SectionLoading },
+);
+const UsageStats = dynamic(
+  () => import('@/components/usage-stats').then((m) => m.UsageStats),
+  { ssr: false, loading: SectionLoading },
+);
+const McpSettingsPanel = dynamic(
+  () => import('@/components/mcp/mcp-settings-panel').then((m) => m.McpSettingsPanel),
+  { ssr: false, loading: SectionLoading },
+);
 
 /**
  * PWA: nút cài đặt lên thiết bị (Chrome/Edge/Android);
@@ -555,7 +577,19 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const updatePerf = useAppStore((s) => s.updatePerf);
   const activeProviderId = useAppStore((s) => s.activeProviderId);
   const [tab, setTab] = useState<SettingsTab>('chung');
+  /* Tab ĐÃ ghé được giữ mount (ẩn bằng hidden) — draft ở tab Prompt/Ghi nhớ
+     không bốc hơi khi người dùng sang tab khác xem rồi quay lại. */
+  const [visited, setVisited] = useState<Set<SettingsTab>>(() => new Set<SettingsTab>(['chung']));
   const show = (t: SettingsTab) => tab === t;
+  const switchTab = useCallback((t: SettingsTab) => {
+    setTab(t);
+    setVisited((prev) => {
+      if (prev.has(t)) return prev;
+      const next = new Set(prev);
+      next.add(t);
+      return next;
+    });
+  }, []);
 
   const [importMode, setImportMode] = useState<ImportMode>('merge');
   const [status, setStatus] = useState<Status>({ kind: 'idle' });
@@ -652,7 +686,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
       e.key === 'ArrowRight'
         ? (i + 1) % SETTINGS_TABS.length
         : (i - 1 + SETTINGS_TABS.length) % SETTINGS_TABS.length;
-    setTab(SETTINGS_TABS[next].id);
+    switchTab(SETTINGS_TABS[next].id);
     (e.currentTarget.parentElement?.children[next] as HTMLElement | undefined)?.focus();
   };
 
@@ -708,7 +742,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                 aria-selected={tab === t.id}
                 aria-controls={`settings-panel-${t.id}`}
                 tabIndex={tab === t.id ? 0 : -1}
-                onClick={() => setTab(t.id)}
+                onClick={() => switchTab(t.id)}
                 onKeyDown={onTabKeyDown}
                 className={`flex-shrink-0 rounded-none px-2.5 py-1 text-xs font-mono transition-colors duration-100 ${
                   tab === t.id
@@ -728,7 +762,8 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
           aria-labelledby={`settings-tab-${tab}`}
           className="settings-panel min-h-0 flex-1 overflow-y-auto px-5 py-5 sm:px-6"
         >
-          {show('chung') && (
+{visited.has('chung') && (
+          <div className={show('chung') ? 'contents' : 'hidden'}>
             <>
               <div className="space-y-4">
                 <div>
@@ -997,9 +1032,11 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                 </div>
               </div>
             </>
+          </div>
           )}
 
-          {show('provider') && (
+{visited.has('provider') && (
+          <div className={show('provider') ? 'contents' : 'hidden'}>
             <>
               {activeProviderId === SERVER_PROVIDER_ID && (
                 <div>
@@ -1059,21 +1096,33 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                 />
               </div>
             </>
+          </div>
           )}
 
-          {show('stats') && (
+{visited.has('stats') && (
+          <div className={show('stats') ? 'contents' : 'hidden'}>
             <div>
               <h3 className="mb-2 text-sm font-semibold text-zinc-800">Thống kê token sử dụng</h3>
               <UsageStats />
             </div>
+          </div>
           )}
 
-          {show('prompts') && <PromptLibrarySection />}
+{visited.has('prompts') && (
+          <div className={show('prompts') ? 'contents' : 'hidden'}>
+            <PromptLibrarySection />
+          </div>
+          )}
 
-          {show('memory') && <MemoriesSection />}
+{visited.has('memory') && (
+          <div className={show('memory') ? 'contents' : 'hidden'}>
+            <MemoriesSection />
+          </div>
+          )}
 
 
-          {show('data') && (
+{visited.has('data') && (
+          <div className={show('data') ? 'contents' : 'hidden'}>
             <>
               <AutoBackupSection />
 
@@ -1189,6 +1238,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                 </button>
               </div>
             </>
+          </div>
           )}
         </div>
       </div>

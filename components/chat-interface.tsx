@@ -17,10 +17,6 @@ import {
   getSiblings,
   findDeepestLeafId,
 } from '@/lib/tree-utils';
-import {
-  Send, StopCircle, RefreshCcw, ArrowDown, Paperclip, X, Menu,
-  ChevronLeft, ChevronRight,
-} from 'lucide-react';
 import { useBranchKeyboardShortcuts } from '@/lib/use-branch-keyboard-shortcuts';
 import { useSwipeBranch } from '@/lib/use-swipe-branch';
 import { repairSessionIfNeeded, repairAndBroadcastSession } from '@/lib/tree-repair';
@@ -37,7 +33,7 @@ import {
   serializeRunState,
 } from '@/lib/run-lifecycle';
 import { Composer, type MediaAction, type MediaActions } from '@/components/composer';
-import { Toast } from '@/components/toast';
+import { ToastHost } from '@/components/toast';
 import type { ModelOption } from '@/components/model-selector';
 import { useTitleGenerator } from '@/lib/use-title-generator';
 import { ensurePromptSeed, savePrompt } from '@/lib/prompt-library';
@@ -197,6 +193,7 @@ import {
   type LessonCategory,
 } from '@/lib/lessons';
 import { normalizePathKey } from '@/lib/path-utils';
+import { showNotice } from '@/lib/notice-store';
 import { DiffConfirm, type DiffConfirmState } from '@/components/diff-confirm';
 import { ShellConfirm } from '@/components/shell-confirm';
 import type { StagingPanelState } from '@/components/staging-panel';
@@ -208,11 +205,11 @@ import { gatherPdfContexts } from '@/lib/use-pdf-context';
 import { gatherLiveContext } from '@/lib/live-tools';
 import { addMemory, listMemories } from '@/lib/db';
 import { compressImageFiles } from '@/lib/image-compress';
-import { ChatHeader } from './chat/chat-header';
+import { StatusLine } from './chat/status-line';
 import { MessageList } from './chat/message-list';
-import { ContextMeter } from '@/components/context-meter';
 import { WorkspaceCheckpointBar } from '@/components/workspace-checkpoints';
 import type { BranchInfo } from './chat/message-item';
+import type { ComposerApi } from '@/components/composer';
 
 /* Ba panel overlay lớn (staging/orchestrator/plan) chỉ mở theo yêu cầu —
    import tĩnh kéo cả ba (kèm heatmap, diff view, subtask UI) vào chunk
@@ -443,7 +440,6 @@ export default function ChatInterface() {
   }, []);
 
   const [attachments, setAttachments] = useState<File[]>([]);
-  const [notice, setNotice] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -455,6 +451,11 @@ export default function ChatInterface() {
    */
   const [mediaBusy, setMediaBusy] = useState(false);
   const mediaAbortRef = useRef<AbortController | null>(null);
+
+  /** API mệnh lệnh của composer (draft-local): adopt/voice/suggestion ghi draft. */
+  const composerApiRef = useRef<ComposerApi | null>(null);
+  /** Mục tiêu seed cho orchestrator lúc mở panel (đọc draft 1 lần, không sync). */
+  const [orchestratorSeed, setOrchestratorSeed] = useState('');
 
   const [allStoredMessages, setAllStoredMessages] = useState<StoredMessage[]>([]);
   const [activeLeafId, setActiveLeafId] = useState<string | null>(null);
@@ -480,28 +481,8 @@ export default function ChatInterface() {
     activeLeafIdRef.current = activeLeafId;
   }, [activeLeafId]);
 
-  const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reloadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const showNotice = useCallback((message: string, duration = 4000) => {
-    setNotice(message);
-    if (noticeTimer.current) {
-      clearTimeout(noticeTimer.current);
-    }
-    noticeTimer.current = setTimeout(() => {
-      setNotice(null);
-      noticeTimer.current = null;
-    }, duration);
-  }, []);
-
-  const onClearNotice = useCallback(() => {
-    if (noticeTimer.current) {
-      clearTimeout(noticeTimer.current);
-      noticeTimer.current = null;
-    }
-    setNotice(null);
-  }, []);
 
   const createdObjectUrls = useRef<Set<string>>(new Set());
 
@@ -662,7 +643,7 @@ export default function ChatInterface() {
     updateStaging(clearStaging(store));
     setStagingPanelOpen(false);
     showNotice(`Đã apply ${files.length} file vào đĩa.`);
-  }, [readCaptureForPath, showNotice, updateStaging]);
+  }, [readCaptureForPath, updateStaging]);
 
   /** Reject từng file — chỉ xóa khỏi overlay, đĩa không bị đụng. */
   const rejectStagedFile = useCallback((path: string) => {
@@ -674,7 +655,7 @@ export default function ChatInterface() {
     updateStaging(clearStaging(stagingRef.current));
     setStagingPanelOpen(false);
     showNotice('Đã hủy tất cả thay đổi staged (đĩa không bị ảnh hưởng).');
-  }, [updateStaging, showNotice]);
+  }, [updateStaging]);
 
   const addFiles = useCallback((files: FileList | File[] | null) => {
     if (!files) return;
@@ -705,7 +686,7 @@ export default function ChatInterface() {
         }
         setAttachments((prev) => [...prev, ...ok].slice(0, MAX_FILES));
       });
-  }, [showNotice]);
+  }, []);
 
   const removeAttachment = useCallback((index: number) => {
     setAttachments((prev) => prev.filter((_, i) => i !== index));
@@ -959,7 +940,7 @@ export default function ChatInterface() {
       showNotice(`Đã kết nối thư mục: ${r.name}`, 3000);
     }
     setWorkspace(getWorkspaceInfo());
-  }, [showNotice]);
+  }, []);
 
   /**
    * Ngắt kết nối workspace: xoá handle khỏi bộ nhớ + IndexedDB (web) hoặc
@@ -980,7 +961,7 @@ export default function ChatInterface() {
       setWorkspace(getWorkspaceInfo());
     }
     showNotice('Đã ngắt kết nối thư mục làm việc.', 3000);
-  }, [showNotice]);
+  }, []);
 
   /** Build API headers cho fetch calls — gộp logic trùng lặp từ useChat + performCompaction.
    *  Khai báo TRƯỚC handleClientToolCall: luồng mô tả ảnh (fs_read ảnh, ảnh MCP)
@@ -1727,7 +1708,7 @@ export default function ChatInterface() {
       }
     },
     [
-      showNotice,
+
       /* showDiffModal/showShellModal KHÔNG có ở đây: thân callback chỉ còn gọi
          autoApproveShell/autoApproveDiff (chúng tự phụ thuộc hai hàm đó). Khai
          báo thừa làm callback đổi danh tính vô cớ. */
@@ -1821,8 +1802,8 @@ export default function ChatInterface() {
   });
 
   const {
-    messages, setMessages, input, setInput, handleInputChange,
-    handleSubmit, stop, reload, append, isLoading, error, data,
+    messages, setMessages,
+    stop, reload, append, isLoading, error, data,
   } = useChat({
     id: chatKey,
     /**
@@ -2171,7 +2152,7 @@ export default function ChatInterface() {
     return () => {
       cancelled = true;
     };
-  }, [hydrateRun, showNotice]);
+  }, [hydrateRun]);
 
   /**
    * Ghi trạng thái run xuống kv để lần boot sau có cái mà khôi phục.
@@ -2246,7 +2227,7 @@ export default function ChatInterface() {
         }
       });
     }
-  }, [messages, showNotice]);
+  }, [messages]);
 
   const compaction = currentChat?.compaction;
   // Marker chỉ hợp lệ khi ranh giới vẫn nằm trên projection nhánh đang mở
@@ -2412,7 +2393,7 @@ export default function ChatInterface() {
       /* Cửa sổ ngữ cảnh phụ thuộc vào danh sách model của provider đang active
          (resolveContextWindow). Thiếu thì đổi provider mà compaction vẫn tính
          theo cửa sổ của provider trước. */
-      buildApiHeaders, showNotice, model, activeProvider?.models,
+      buildApiHeaders, model, activeProvider?.models,
     ],
   );
 
@@ -2552,10 +2533,10 @@ export default function ChatInterface() {
       }
       const started = startGoalLoop(chatId, { instruction: goal });
       setGoalLoop(started);
-      setInput('');
+      composerApiRef.current?.clear();
       void append({ role: 'user', content: buildGoalKickoff(started) });
     },
-    [goalLoop, append, setInput, showNotice],
+    [goalLoop, append, composerApiRef],
   );
 
   const continueGenerating = useCallback(() => {
@@ -2730,7 +2711,7 @@ export default function ChatInterface() {
       closeTurnCapture();
       showNotice(lastData.message || 'Kết nối AI bị gián đoạn giữa chừng.');
     }
-  }, [data, showNotice, closeTurnCapture]);
+  }, [data, closeTurnCapture]);
 
   const handleStop = useCallback(() => {
     finishRef.current = 'abort';
@@ -2872,9 +2853,8 @@ export default function ChatInterface() {
          dọn riêng bên dưới. */
       cancelled = true;
     };
-    // showNotice là useCallback([]) — ổn định vĩnh viễn, thêm vào không gây
-    // chạy lại effect nhưng làm lint kiểm tra được đầy đủ.
-  }, [currentChatId, setMessages, showNotice]);
+    // showNotice là hàm module từ lib/notice-store — ổn định vĩnh viễn.
+  }, [currentChatId, setMessages]);
 
   useEffect(() => {
     return () => {
@@ -2886,10 +2866,6 @@ export default function ChatInterface() {
       /* Như trên: Set giữ nguyên danh tính, phải đọc tại lúc unmount. */
       // eslint-disable-next-line react-hooks/exhaustive-deps
       revokeObjectUrls(createdObjectUrls.current);
-
-      if (noticeTimer.current) {
-        clearTimeout(noticeTimer.current);
-      }
 
       if (copiedTimer.current) {
         clearTimeout(copiedTimer.current);
@@ -3130,7 +3106,7 @@ export default function ChatInterface() {
     },
     [
       notifyChatUpdated,
-      showNotice,
+
     ],
   );
 
@@ -3322,12 +3298,12 @@ export default function ChatInterface() {
     return unsubscribe;
     /* Tất cả đều ỔN ĐỊNH nên thêm vào không làm effect chạy lại:
        - setCurrentChatId: selector Zustand
-       - showNotice: useCallback([])
+       - showNotice: hàm module từ lib/notice-store (bất biến)
        - stop: useCallback của useChat (chỉ đọc abortControllerRef)
        - stopRun: stop() của useRunLifecycle — useCallback([publish]), mà
          publish là useCallback([]) nên không bao giờ đổi danh tính
        Khai báo đầy đủ để lint kiểm tra được thật, thay vì tắt cảnh báo. */
-  }, [setMessages, setCurrentChatId, showNotice, stop, stopRun]);
+  }, [setMessages, setCurrentChatId, stop, stopRun]);
 
   useEffect(() => {
     if (!currentChatId) return;
@@ -3479,7 +3455,7 @@ export default function ChatInterface() {
       messages,
       notifyChatUpdated,
       setMessages,
-      showNotice,
+
       stop,
       stopRun,
     ],
@@ -3706,7 +3682,7 @@ export default function ChatInterface() {
       notifyChatUpdated,
       pin,
       setMessages,
-      showNotice,
+
       triggerReload,
     ],
   );
@@ -3941,7 +3917,7 @@ export default function ChatInterface() {
       notifyChatUpdated,
       pin,
       setMessages,
-      showNotice,
+
       triggerReload,
     ],
   );
@@ -4039,24 +4015,30 @@ export default function ChatInterface() {
    * Gửi lượt chat. `modelOverride` dùng cho 2 nút tạo ảnh / tạo video: chỉ
    * lượt này đi bằng model media, model đang chọn trong ModelSelector giữ nguyên.
    */
-  const submitTurn = useCallback(async (modelOverride?: string) => {
-    if ((!input.trim() && attachments.length === 0) || isLoading) return;
+  /**
+   * draftText là SNAPSHOT từ composer (draft-local) — submit không đọc state
+   * `input` của useChat nữa. Trả true = tin nhắn đã được đẩy vào pipeline
+   * (append đã gọi), composer mới dám xoá draft; false = bail (đang bận,
+   * rỗng…) và draft được giữ nguyên.
+   */
+  const submitTurn = useCallback(async (draftText: string, modelOverride?: string): Promise<boolean> => {
+    if ((!draftText.trim() && attachments.length === 0) || isLoading) return false;
     /* B4: gate thêm 2 đường hở — webBusy (tra cứu tới ~15s, isLoading vẫn
        false) và mediaBusy (Enter bypass nút Send đã disabled). */
     if (webBusyRef.current) {
       showNotice('Đang tra cứu web — chờ xíu rồi gửi tiếp nhé.');
-      return;
+      return false;
     }
     if (mediaBusy) {
       showNotice('Đang tạo media — đợi xong hoặc bấm Dừng đã nhé.');
-      return;
+      return false;
     }
 
     // Trình duyệt không có DataTransfer constructor thì không gắn được file —
-    // chặn sớm kèm thông báo, thay vì nuốt lỗi rồi mất luôn tin nhắn.
+    // chặn sớm kèm thông báo, thay vì nuốt lỗi rồi mất tin nhắn.
     if (attachments.length > 0 && typeof DataTransfer !== 'function') {
       showNotice('Trình duyệt không hỗ trợ gửi tệp đính kèm. Hãy bỏ tệp và thử lại.');
-      return;
+      return false;
     }
 
     try {
@@ -4092,7 +4074,7 @@ export default function ChatInterface() {
       }
 
       const isFirstMessage = messages.length === 0;
-      const userText = input.trim();
+      const userText = draftText.trim();
 
       const options: {
         experimental_attachments?: FileList;
@@ -4235,22 +4217,24 @@ export default function ChatInterface() {
        * tắt thủ công.
        */
       if (currentRun().observed === 'starting') setRepairable(true);
-      handleSubmit(undefined, options);
+      /* append thay handleSubmit: draft nằm ở composer nên SDK không còn state
+         `input` để đọc — append nhận nội dung tường minh, cùng ChatRequestOptions
+         (experimental_attachments + per-call body) như handleSubmit cũ. */
+      void append({ role: 'user', content: userText }, options);
       if (isFirstMessage && userText) {
         void generateTitle(chatId, userText);
       }
+      return true;
     } catch (err) {
       console.error('[onSubmit]', err);
+      return false;
     }
     /* beginRun/currentRun/setRepairable là hàm ổn định (useCallback rỗng bên
        trong hook), nên thêm vào đây không làm submitTurn bị tạo lại. */
-  }, [input, attachments, isLoading, mediaBusy, currentChatId, draftId, setCurrentChatId, handleSubmit, pin, generateTitle, messages.length, showNotice, webSearchEnabled, promptTemplates, agentToolsEnabled, forceEmulatedTools, agentMode, stagingEnabled, beginRun, currentRun, setRepairable]);
+  }, [attachments, isLoading, mediaBusy, currentChatId, draftId, setCurrentChatId, append, pin, generateTitle, messages.length, webSearchEnabled, promptTemplates, agentToolsEnabled, forceEmulatedTools, agentMode, stagingEnabled, beginRun, currentRun, setRepairable]);
 
   const onSubmit = useCallback(
-    async (e?: React.FormEvent) => {
-      if (e) e.preventDefault();
-      await submitTurn();
-    },
+    async (draft: string): Promise<boolean> => submitTurn(draft),
     [submitTurn],
   );
 
@@ -4268,8 +4252,8 @@ export default function ChatInterface() {
    * hiện có ghi xuống IndexedDB như một lượt chat bình thường.
    */
   const handleGenerateMedia = useCallback(
-    async (action: MediaAction, kind: 'image' | 'video') => {
-      const prompt = input.trim();
+    async (action: MediaAction, kind: 'image' | 'video', draftPrompt: string) => {
+      const prompt = draftPrompt.trim();
       if (!prompt || isLoading || mediaBusy) return;
 
       // Không gọi thẳng được → đi đường server. Video mất vài phút nên nói
@@ -4278,7 +4262,7 @@ export default function ChatInterface() {
         if (kind === 'video') {
           showNotice('Đang tạo video — thường mất 2–3 phút. Giữ tab này mở.', 6000);
         }
-        void submitTurn(action.modelId);
+        void submitTurn(prompt, action.modelId);
         return;
       }
 
@@ -4313,7 +4297,7 @@ export default function ChatInterface() {
 
       mediaAbortRef.current = controller;
       setMediaBusy(true);
-      setInput('');
+      composerApiRef.current?.clear();
       finishRef.current = 'stop';
       pendingAssistantForkRef.current = null;
       pin(1500);
@@ -4389,41 +4373,21 @@ export default function ChatInterface() {
     [
       activeProvider,
       append,
+      composerApiRef,
       currentChatId,
       draftId,
       generateTitle,
-      input,
       isLoading,
       mediaBusy,
       messages.length,
       pin,
       setCurrentChatId,
-      setInput,
       setMessages,
-      showNotice,
       submitTurn,
     ],
   );
 
-  /** Voice input: nối câu đã nhận diện vào cuối input hiện tại. */
-  const handleAppendVoiceText = useCallback(
-    (text: string) => {
-      setInput((prev) => {
-        const base = prev ?? '';
-        const needsSpace = base.length > 0 && !/\s$/.test(base);
-        return base + (needsSpace ? ' ' : '') + text;
-      });
-    },
-    [setInput],
-  );
-
-  /** Chọn prompt trong slash menu → thay toàn bộ input. */
-  const handleApplyPrompt = useCallback(
-    (content: string) => {
-      setInput(content);
-    },
-    [setInput],
-  );
+  /** Chọn prompt trong slash menu giờ xử lý ngay trong composer (draft-local). */
 
   const handleSaveQuickPrompt = useCallback(async (title: string, content: string) => {
     try {
@@ -4467,9 +4431,9 @@ export default function ChatInterface() {
   const handleOrchestratorAdopt = useCallback(
     (text: string) => {
       if (!text.trim()) return;
-      setInput(text.trim());
+      composerApiRef.current?.setText(text.trim());
     },
-    [setInput],
+    [composerApiRef],
   );
 
   /**
@@ -4586,18 +4550,40 @@ export default function ChatInterface() {
       setCurrentChatId,
       setGoalLoop,
       setMessages,
-      showNotice,
+
     ],
   );
 
-  const onTextareaKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if ((e.nativeEvent as any).isComposing || e.keyCode === 229) return;
-    if (e.key === 'Escape') { handleStop(); return; }
-    if (e.key !== 'Enter' || e.shiftKey) return;
-    if (isTouchDevice || !sendOnEnter) return;
-    e.preventDefault();
-    void onSubmit();
-  }, [handleStop, isTouchDevice, sendOnEnter, onSubmit]);
+  /** Suggestion chip (empty state) → đặt draft composer + focus. */
+  const onSelectSuggestion = useCallback((text: string) => {
+    composerApiRef.current?.setText(text);
+  }, [composerApiRef]);
+
+  const onToggleWebSearch = useCallback(() => {
+    updateSettings({ webSearch: !webSearchEnabled });
+  }, [updateSettings, webSearchEnabled]);
+
+  const onToggleAgentMode = useCallback(() => {
+    updateSettings({ agentMode: agentMode === 'plan' ? 'act' : 'plan' });
+  }, [updateSettings, agentMode]);
+
+  const onCycleAutoPilot = useCallback(() => {
+    if (!autoPilot) updateSettings({ autoPilot: true, approvalPolicy: 'smart' });
+    else if (approvalPolicy === 'smart') updateSettings({ approvalPolicy: 'never' });
+    else if (approvalPolicy === 'never') updateSettings({ autoPilot: false, approvalPolicy: 'smart' });
+    else updateSettings({ autoPilot: true, approvalPolicy: 'smart' });
+  }, [updateSettings, autoPilot, approvalPolicy]);
+
+  const onOpenStaging = useCallback(() => setStagingPanelOpen(true), []);
+
+  const onOpenOrchestrator = useCallback(() => {
+    setOrchestratorSeed(composerApiRef.current?.getText() ?? '');
+    setOrchestratorOpen(true);
+  }, []);
+
+  const onCompact = useCallback(() => {
+    void performCompaction('manual');
+  }, [performCompaction]);
 
   const onOpenSidebar = useCallback(() => {
     // Mobile: mở drawer. Desktop đang thu gọn: mở rộng sidebar.
@@ -4660,18 +4646,41 @@ export default function ChatInterface() {
       {...swipeHandlers}
       className="flex h-full flex-col overflow-hidden bg-transparent touch-pan-y"
     >
-      <ChatHeader
-        title={currentChat?.title}
+      <StatusLine
+        onOpenSidebar={onOpenSidebar}
+        sidebarCollapsed={isSidebarCollapsed}
+        models={MODELS}
+        model={model}
+        onModelChange={handleModelChange}
+        modelSelectorDisabled={isLoading || mediaBusy}
+        agentMode={agentMode}
+        onToggleAgentMode={onToggleAgentMode}
+        agentModeDisabled={isLoading || mediaBusy}
+        workspace={workspace}
+        ctxUsed={contextUsage?.tokens}
+        ctxMax={contextUsage?.max}
+        thinkingLevel={
+          (activeProvider ? supportsThinkingLevel(activeProvider.baseUrl) : serverCaps.thinkingLevel) ||
+          !!modelReasoningCap
+            ? thinkingLevel
+            : undefined
+        }
+        thinkingSupportedLevels={
+          modelReasoningCap && modelReasoningCap.efforts.length > 0
+            ? modelReasoningCap.efforts
+            : null
+        }
+        onThinkingLevelChange={handleThinkingLevelChange}
+        thinkingDisabled={isLoading || mediaBusy}
+        run={{ streaming: isLoading, mediaBusy, webBusy }}
         hasMessages={hasMessages}
+        canCompact={canCompactNow}
+        compactBusy={compactBusy}
+        onCompact={onCompact}
+        currentChatId={currentChatId}
         confirmClear={confirmClear}
         onSetConfirmClear={setConfirmClear}
         onDeleteChat={deleteChat}
-        onOpenSidebar={onOpenSidebar}
-        sidebarCollapsed={isSidebarCollapsed}
-        currentChatId={currentChatId}
-        canCompact={canCompactNow}
-        compactBusy={compactBusy}
-        onCompact={() => void performCompaction('manual')}
       />
 
       {swipeDirection && (
@@ -4716,17 +4725,11 @@ export default function ChatInterface() {
           onSaveEdit={saveEdit}
           onCancelEdit={cancelEdit}
           onDraftChange={setDraft}
-          onSelectSuggestion={setInput}
+          onSelectSuggestion={onSelectSuggestion}
           onReload={reload}
           onContinueGenerating={continueGenerating}
         />
       </div>
-
-      {contextUsage && (
-        <div className="pb-1 pt-2">
-          <ContextMeter used={contextUsage.tokens} max={contextUsage.max} />
-        </div>
-      )}
 
       {/* Undo agent coding: chỉ hiện khi chat này có snapshot restorable. */}
       <WorkspaceCheckpointBar
@@ -4742,44 +4745,33 @@ export default function ChatInterface() {
       )}
 
       <Composer
-        input={input}
-        onInputChange={handleInputChange}
         onSubmit={onSubmit}
-        onKeyDown={onTextareaKeyDown}
         isStreaming={isLoading || mediaBusy}
         onStop={handleStop}
         attachments={composerAttachments}
         onAddFiles={addFiles}
-        onAppendText={handleAppendVoiceText}
         slashPrompts={insertPrompts}
-        onApplyPrompt={handleApplyPrompt}
         onSavePrompt={handleSaveQuickPrompt}
         onRemoveAttachment={handleRemoveAttachmentById}
-        models={MODELS}
-        model={model}
-        onModelChange={handleModelChange}
         mediaActions={mediaActions}
         onGenerateMedia={handleGenerateMedia}
         webSearch={webSearchEnabled}
-        onToggleWebSearch={() => updateSettings({ webSearch: !webSearchEnabled })}
+        onToggleWebSearch={onToggleWebSearch}
         agentMode={agentMode}
-        onToggleAgentMode={() => updateSettings({ agentMode: agentMode === 'plan' ? 'act' : 'plan' })}
+        onToggleAgentMode={onToggleAgentMode}
         autoPilot={autoPilot}
         approvalPolicy={approvalPolicy}
-        onCycleAutoPilot={() => {
-          if (!autoPilot) updateSettings({ autoPilot: true, approvalPolicy: 'smart' });
-          else if (approvalPolicy === 'smart') updateSettings({ approvalPolicy: 'never' });
-          else if (approvalPolicy === 'never') updateSettings({ autoPilot: false, approvalPolicy: 'smart' });
-          else updateSettings({ autoPilot: true, approvalPolicy: 'smart' });
-        }}
+        onCycleAutoPilot={onCycleAutoPilot}
         stagedFileCount={stagingVersion >= 0 ? stagingCount(stagingRef.current) : 0}
-        onOpenStaging={() => setStagingPanelOpen(true)}
+        onOpenStaging={onOpenStaging}
         orchestratorOpen={orchestratorOpen}
-        onOpenOrchestrator={() => setOrchestratorOpen(true)}
+        onOpenOrchestrator={onOpenOrchestrator}
         webBusy={webBusy}
         workspace={workspace}
         onPickWorkspace={pickFolder}
         onDisconnectWorkspace={disconnectFolder}
+        sendOnEnter={sendOnEnter}
+        isTouchDevice={isTouchDevice}
         canContinue={canContinue}
         goalLoopActive={goalLoop?.status === 'active'}
         goalLoopInfo={
@@ -4787,18 +4779,7 @@ export default function ChatInterface() {
         }
         onGoalLoopClick={handleGoalLoopClick}
         onContinue={continueGenerating}
-        thinkingLevel={
-          (activeProvider ? supportsThinkingLevel(activeProvider.baseUrl) : serverCaps.thinkingLevel) ||
-          !!modelReasoningCap
-            ? thinkingLevel
-            : undefined
-        }
-        thinkingSupportedLevels={
-          modelReasoningCap && modelReasoningCap.efforts.length > 0
-            ? modelReasoningCap.efforts
-            : null
-        }
-        onThinkingLevelChange={handleThinkingLevelChange}
+        composerApiRef={composerApiRef}
       />
 
       {/* Thông báo lỗi/cảnh báo từ showNotice() — trước đây không hề được render. */}
@@ -4823,7 +4804,7 @@ export default function ChatInterface() {
           state={orchestrator.state}
           busy={orchestrator.busy}
           chatBusy={isLoading || mediaBusy}
-          initialGoal={input ?? ''}
+          initialGoal={orchestratorSeed}
           onRun={handleOrchestratorRun}
           onCancel={orchestrator.cancel}
           onClose={() => setOrchestratorOpen(false)}
@@ -4831,7 +4812,7 @@ export default function ChatInterface() {
           onAppendToChat={handleOrchestratorAppendToChat}
         />
       )}
-      <Toast message={notice} onClose={onClearNotice} />
+      <ToastHost />
     </div>
   );
 }
