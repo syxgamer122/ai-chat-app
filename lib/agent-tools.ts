@@ -887,11 +887,52 @@ export const CLIENT_TOOL_DEFS = {
       'GIAO TASK cho SUBAGENT độc lập (Goose-style). Subagent chạy với context RIÊNG (không thấy lịch sử chat), ' +
       'có tools giống bạn nhưng KHÔNG thể gọ delegate (không đế quy). Dùng khi: task độc lập cần ' +
       'nhiều bước tool (refactor file, research codebase, chạy test suite...). Max turns mặc định 10, tối đa 25. ' +
-      'Subagent trả kết quả tóm tắt khi xong.',
+      'Chạy NHIỀU TASK SONG SONG: truyền `tasks` (1-4 task, tối đa 3 chạy cùng lúc) thay vì instructions — ' +
+      'kết quả trả về theo mảng đúng thứ tự. mode "scout" = chỉ đọc (không fs_write/fs_edit/shell_run) ' +
+      'dùng cho research/recon; mode "worker" = đầy đủ (mặc định). context "brief" = kèm tóm tắt bối cảnh ' +
+      'hội thoại cha cho subagent (dùng khi task cần hiểu bối cảnh trước đó). Subagent trả kết quả tóm tắt khi xong.',
     parameters: z.object({
-      instructions: z.string().min(10).max(5000).describe('Mô tả task chi tiết cho subagent'),
-      max_turns: z.number().int().min(1).max(25).optional().describe('Số turns tối đa (mặc định 10, max 25)'),
-      timeout_secs: z.number().int().min(30).max(600).optional().describe('Timeout giây (mặc định 300, max 600)'),
+      instructions: z
+        .string()
+        .min(10)
+        .max(5000)
+        .optional()
+        .describe('Mô tả task chi tiết cho subagent (KHÔNG truyền cùng lúc với tasks)'),
+      tasks: z
+        .array(
+          z.object({
+            instructions: z.string().min(10).max(5000).describe('Mô tả task chi tiết'),
+            max_turns: z.number().int().min(1).max(25).optional(),
+            timeout_secs: z.number().int().min(30).max(600).optional(),
+            mode: z.enum(['scout', 'worker']).optional(),
+          }),
+        )
+        .min(1)
+        .max(4)
+        .optional()
+        .describe('1-4 task chạy SONG SONG (tối đa 3 cùng lúc). Khi dùng, KHÔNG truyền instructions'),
+      max_turns: z
+        .number()
+        .int()
+        .min(1)
+        .max(25)
+        .optional()
+        .describe('Số turns tối đa (mặc định 10, max 25). Áp cho mọi task nếu task không tự đè'),
+      timeout_secs: z
+        .number()
+        .int()
+        .min(30)
+        .max(600)
+        .optional()
+        .describe('Timeout giây (mặc định 300, max 600). Áp cho mọi task nếu task không tự đè'),
+      mode: z
+        .enum(['scout', 'worker'])
+        .optional()
+        .describe('scout = chỉ đọc (recon/research), worker = đầy đủ. Mặc định worker'),
+      context: z
+        .enum(['fresh', 'brief'])
+        .optional()
+        .describe("brief = kèm tóm tắt bối cảnh phiên cha; mặc định 'fresh'"),
     }),
   }),
 } as const;

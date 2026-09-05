@@ -506,3 +506,33 @@ export function buildEmergencySummary(input: EmergencySummaryInput): string {
     ? `${summary.slice(0, EMERGENCY_LIMITS.totalChars)}\n…[tóm tắt bị cắt]`
     : summary;
 }
+
+/**
+ * Ngữ cảnh phiên cha cho subagent (delegate `context: 'brief'` — tương đương
+ * fork-pruned của pi-subagents nhưng TẤT ĐỊNH, không tốn call LLM: tái dùng
+ * các bộ trích của compaction). Trả '' khi không trích được gì để caller
+ * bỏ qua việc gắn; caller tự quyết định chèn vào system prompt ở đâu.
+ */
+export function buildSubagentParentBrief(messages: readonly BudgetMessageLike[]): string {
+  const sections: string[] = [];
+
+  const requests = extractUserRequests(messages);
+  if (requests.length) {
+    sections.push(
+      `Yêu cầu người dùng đã nêu:\n${requests.map((r) => `- ${r}`).join('\n')}`,
+    );
+  }
+
+  const ops = extractFileOps(messages);
+  const fileSections = [
+    formatFileGroup('File đã sửa/ghi', [...ops.edited, ...ops.written]),
+    formatFileGroup('File đã đọc', ops.read),
+  ].filter((s): s is string => s !== null);
+  if (fileSections.length) sections.push(fileSections.join('\n'));
+
+  const conclusion = extractLastConclusion(messages);
+  if (conclusion) sections.push(`Kết luận gần nhất của trợ lý:\n${conclusion}`);
+
+  if (!sections.length) return '';
+  return sections.join('\n\n');
+}

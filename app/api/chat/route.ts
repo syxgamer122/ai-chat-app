@@ -30,6 +30,7 @@ import { acquireUpstreamSlot, sharedFreeBudget } from '@/lib/upstream-queue';
 import { pumpSseLines } from '@/lib/sse';
 import { parseLooseJson } from '@/lib/json-repair';
 import { isContextOverflowError } from '@/lib/context-budget';
+import { buildSubagentParentBrief } from '@/lib/context-compaction';
 import { restateUpstreamStatus } from '@/lib/upstream-status-rules';
 import { runEmulatedLoop } from '@/lib/emulated-agent';
 import { executeDelegate } from '@/lib/subagent';
@@ -2034,6 +2035,10 @@ export async function POST(req: Request) {
                         /* Subagent dùng được tool client qua relay renderer —
                            đây là điểm khác biệt với bản cũ (chỉ server tools). */
                         resolveClientTool: relaySubagentTool,
+                        /* context 'brief' của model mới kích hoạt build — lazy
+                           nên đường thường không tốn chi phí trích xuất. */
+                        getParentBrief: () => buildSubagentParentBrief(messages),
+                        conversationId,
                         onProgress: (phase, detail) => {
                           writeAnnotation({ subagent: { phase, ...detail } });
                         },
@@ -2090,7 +2095,7 @@ export async function POST(req: Request) {
                         parameters: CLIENT_TOOL_DEFS.delegate.parameters,
                         execute: async (args: unknown) =>
                           executeDelegate(
-                            args as { instructions?: unknown; max_turns?: unknown; timeout_secs?: unknown },
+                            args as Parameters<typeof executeDelegate>[0],
                             {
                               model: openaiNonStreaming(targetModel),
                               systemBase: composedSystem,
@@ -2104,6 +2109,8 @@ export async function POST(req: Request) {
                                 ? { maxTokens: modelConfig.maxOutputTokens }
                                 : {}),
                               resolveClientTool: relaySubagentTool,
+                              getParentBrief: () => buildSubagentParentBrief(messages),
+                              conversationId,
                               onProgress: (phase, detail) => {
                                 writeAnnotation({ subagent: { phase, ...detail } });
                               },

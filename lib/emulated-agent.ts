@@ -249,8 +249,23 @@ export interface EmulatedLoopOptions {
    * Delegate handler: when model calls 'delegate', this callback runs the
    * subagent inline (server-side) and returns the result string.
    * If not provided, delegate calls are treated as unknown tools.
+   *
+   * Task song song + mode + context đi qua nguyên args (executeDelegate tự
+   * validate lại từng field) — loop chỉ forward, không hiểu ngữ nghĩa.
    */
-  onDelegateCall?: (args: { instructions: string; max_turns?: number; timeout_secs?: number }) => Promise<string>;
+  onDelegateCall?: (args: {
+    instructions?: string;
+    tasks?: Array<{
+      instructions: string;
+      max_turns?: number;
+      timeout_secs?: number;
+      mode?: 'scout' | 'worker';
+    }>;
+    max_turns?: number;
+    timeout_secs?: number;
+    mode?: 'scout' | 'worker';
+    context?: 'fresh' | 'brief';
+  }) => Promise<string>;
 }
 
 export interface EmulatedLoopResult {
@@ -336,9 +351,22 @@ export async function runEmulatedLoop(opts: EmulatedLoopOptions): Promise<Emulat
         let delegateResult: string;
         try {
           delegateResult = await opts.onDelegateCall({
-            instructions: String(call.args.instructions ?? ''),
+            instructions: typeof call.args.instructions === 'string' ? call.args.instructions : undefined,
+            tasks: Array.isArray(call.args.tasks)
+              ? (call.args.tasks as Array<{
+                  instructions: string;
+                  max_turns?: number;
+                  timeout_secs?: number;
+                  mode?: 'scout' | 'worker';
+                }>)
+              : undefined,
             max_turns: typeof call.args.max_turns === 'number' ? call.args.max_turns : undefined,
             timeout_secs: typeof call.args.timeout_secs === 'number' ? call.args.timeout_secs : undefined,
+            mode:
+              call.args.mode === 'scout' || call.args.mode === 'worker'
+                ? call.args.mode
+                : undefined,
+            context: call.args.context === 'brief' ? 'brief' : undefined,
           });
         } catch (err) {
           delegateResult = JSON.stringify({ error: err instanceof Error ? err.message : String(err) });

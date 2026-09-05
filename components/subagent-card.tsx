@@ -12,6 +12,11 @@ export interface SubagentAnnotation {
     toolCalls?: number;
     result?: string;
     error?: string;
+    /** Metadata mới từ executeDelegate — batch song song gắn nhãn lane. */
+    runId?: string;
+    mode?: "scout" | "worker";
+    taskIndex?: number;
+    taskTotal?: number;
   };
 }
 
@@ -21,7 +26,8 @@ interface SubagentCardProps {
 
 export function SubagentCard({ annotation }: SubagentCardProps) {
   const [expanded, setExpanded] = useState(false);
-  const { phase, task, turn, maxTurns, toolCalls, result, error } = annotation.subagent;
+  const { phase, task, turn, maxTurns, toolCalls, result, error, runId, mode, taskIndex, taskTotal } =
+    annotation.subagent;
 
   const isRunning = phase === "start" || phase === "progress";
   const isDone = phase === "done";
@@ -58,6 +64,17 @@ export function SubagentCard({ annotation }: SubagentCardProps) {
         <span className={`font-semibold ${statusColor}`}>
           Subagent
         </span>
+        {mode === "scout" && (
+          <span className="text-[11px] text-[#9fa4ab]">· scout</span>
+        )}
+        {taskIndex != null && taskTotal != null && (
+          <span className="text-[11px] text-[#9fa4ab]">
+            {taskIndex + 1}/{taskTotal}
+          </span>
+        )}
+        {runId && (
+          <span className="text-[11px] text-[#9fa4ab]">#{runId.slice(0, 6)}</span>
+        )}
         <span className="ml-auto text-[11px] text-[#9fa4ab]">
           {turn != null && maxTurns != null && `${turn}/${maxTurns} turns`}
           {toolCalls != null && ` · ${toolCalls} tools`}
