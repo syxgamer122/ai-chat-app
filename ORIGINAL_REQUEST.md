@@ -65,3 +65,84 @@ Nâng cấp hàm `probe()` để nếu trên cổng hiện tại đã có sẵn 
 - [ ] Nếu cổng 3000 đã có sẵn server Vyen hoạt động, launcher nhận diện chính xác và mở giao diện kết nối vào server đó mà không spawn tiến trình thừa.
 - [ ] Bộ test `tests/launch-desktop.test.ts` bổ sung kịch bản giả lập cổng 3000 bị chiếm dụng và xác nhận 100% tests PASS.
 
+## 2026-09-06T07:15:20Z
+
+Trích xuất, chuyển thể và tích hợp toàn diện các mẫu kiến trúc, tính năng cao cấp và cơ chế tối ưu hóa vượt trội từ 6 kho mã nguồn tham chiếu (Hatchet, HumanLayer Skills, Utopia, Anthropic Commerce-Agents, Stably Orca, Arcbox) vào nền tảng Vyen (TypeScript / Node.js / Next.js coding harness) nhằm hoàn thiện hệ thống điều phối đa tác tử, an toàn thực thi và quản lý ngữ cảnh mà không gây hồi quy (100% PASS, zero regression).
+
+Working directory: c:/Users/huumanh/Downloads/ai-chat-app
+Integrity mode: demo
+
+## Reference Repositories & Extracted Capabilities
+
+1. **Hatchet (`hatchet-dev/hatchet`)** — Workflow Durability & Task Graph:
+   - DAG-based task dependency graph resolution (topological ordering, parallel branches).
+   - Checkpointing & durable task state (serialize execution state to disk/memory, pause & resume workflows).
+   - Exponential retry backoff with randomized jitter (`delay = min(max_delay, base * 2^attempt) ± jitter`).
+   - Queue concurrency limits, semaphore slots, and execution timeout/deadline enforcement.
+
+2. **HumanLayer Skills (`humanlayer/skills`)** — Human-in-the-Loop & Modular Skill Lifecycle:
+   - Human-in-the-loop approval interrupts (approval gates for sensitive write/exec actions).
+   - Standardized control-loop structure: Sensor, Controller, Actuator, Disturbance handling.
+   - Visual inspection artifacts (`show-me`: concise diagrams, code-shape sketches, diff visualization).
+   - Instruction optimization patterns (`<important if>` blocks) to prevent instruction drift.
+
+3. **Utopia (`deeplethe/utopia`)** — Temporal Context & Knowledge Ledger:
+   - Bitemporal context tracking (distinguishing valid time vs. transaction time of changes).
+   - Append-only audit ledger (state changes record checkpoints without destructive overwrite; full state replay).
+   - Knowledge ontology and derived fact relationships for codebase context awareness.
+
+4. **Anthropic Commerce-Agents (`anthropics/commerce-agents`)** — Strict Contracts & Guardrail Gates:
+   - Typed tool contracts: strict schema validation (Zod) separating static system rules from dynamic request context.
+   - Provenance-gated writes: resource modifications track originator and validate authorization.
+   - Presentation tool calls: separating interactive UI presentation events from execution logic.
+   - Dual-gate architecture: pre-flight check before tool execution and post-flight critic review.
+
+5. **Stably Orca (`stablyai/orca`)** — Coding Fleet & Parallel Worktrees:
+   - Parallel Git Worktree orchestration: fanning out prompts to parallel agents in isolated worktrees.
+   - Fleet manager for tracking agent states, memory usage, and lifecycle across concurrent workers.
+   - Context packaging and multi-root codebase context indexing.
+
+6. **Arcbox (`arcboxlabs/arcbox`)** — Process Isolation & Sandboxing:
+   - Process sandboxing and environment isolation: scrubbed environment variables, restricted temp directories.
+   - Execution deadlines, process lifecycle tracking, and clean resource teardown.
+   - Safe disposable workspace snapshots for destructive testing runs.
+
+## Requirements
+
+### R1. Durable DAG Workflow Engine & Checkpointing (Hatchet & Orca)
+Nâng cấp tầng điều phối tác vụ hỗ trợ mô hình đồ thị có hướng không chu trình (DAG) cho phép định nghĩa các bước công việc có phụ thuộc lẫn nhau, tự động tính toán nhánh song song độc lập. Trang bị cơ chế tự động thử lại (retry with exponential backoff & jitter) khi gặp lỗi tạm thời và hỗ trợ serialize/deserialize checkpoint tiến trình giúp tạm dừng và khôi phục tác vụ liền mạch.
+
+### R2. Human-in-the-Loop Approval & Visual Inspection (HumanLayer & Commerce-Agents)
+Tích hợp cơ chế ngắt và chờ phê duyệt (approval gate / interrupt) trước khi thực thi các hành động nhạy cảm (sửa file cốt lõi, chạy lệnh shell thay đổi hệ thống). Hỗ trợ trực quan hóa các thay đổi và sơ đồ luồng (visual diff / flow sketch) giúp người dùng dễ dàng thẩm định trước khi cấp quyền.
+
+### R3. Strict Tool Contracts, Provenance & Dual-Gate Guardrails (Commerce-Agents & Arcbox)
+Chuẩn hóa toàn bộ tool catalog với schema validation nghiêm ngặt; mỗi thao tác ghi dữ liệu (file write/patch) đều được gắn nhãn nguồn gốc (provenance tracking). Triển khai cơ chế 2 cổng kiểm soát (pre-flight validation trước khi gọi tool và post-flight critic review sau khi hoàn thành) kết hợp cô lập môi trường thực thi shell (env var scrubbing, process timeout, cwd lockdown).
+
+### R4. Temporal Context Memory & Bitemporal Codebase Ledger (Utopia & HumanLayer)
+Xây dựng module theo dõi lịch sử ngữ cảnh theo dòng thời gian (bitemporal context history) ghi nhận trạng thái codebase trước và sau mỗi milestone theo mô hình append-only, cho phép tác tử tra cứu lại các quyết định kỹ thuật và diff lịch sử mà không làm quá tải token context.
+
+### R5. Full Compatibility, Zero Regression & Comprehensive Test Suite
+Toàn bộ tính năng mới phải được phát triển bằng TypeScript thuần chạy tương thích 100% trong môi trường Node.js CLI và Electron Desktop của Vyen (`lib/teamwork/`, `lib/`, `bin/`), đảm bảo 100% các bộ kiểm thử hiện có tiếp tục PASS (128 test files) và đi kèm các unit/integration test suites mới kiểm chứng toàn bộ các năng lực được bổ sung.
+
+## Acceptance Criteria
+
+### Workflow & Task Orchestration
+- [ ] Engine giải quyết đúng thứ tự topo cho các DAG tasks với các nhánh phụ thuộc và nhánh độc lập song song.
+- [ ] Cơ chế retry với exponential backoff & jitter hoạt động chính xác theo cấu hình số lần thử và độ trễ tối đa.
+- [ ] Hỗ trợ lưu trữ checkpoint trạng thái ra file/bộ nhớ và phục hồi (resume) lại chính xác điểm đã dừng.
+
+### Safety, Guardrails & Human Approval
+- [ ] Interrupt / approval gate tự động kích hoạt khi gặp thao tác nhạy cảm, chỉ tiếp tục khi có tín hiệu confirm.
+- [ ] Tool contract chặn đứng các tham số sai schema hoặc ngoài phạm vi cho phép trước khi tool được thực thi.
+- [ ] Process sandbox lọc sạch các biến môi trường nhạy cảm, áp trần thời gian chạy (timeout) và dọn dẹp tiến trình con khi kết thúc.
+
+### Memory & Context Awareness
+- [ ] Hệ thống bitemporal ledger lưu trữ các bản ghi thay đổi theo dòng thời gian mà không ghi đè mất mát lịch sử.
+- [ ] Tác tử có thể truy vấn nhanh lịch sử thay đổi và lý do đưa ra quyết định của các bước trước đó.
+
+### Verification & Zero Regression
+- [ ] Bổ sung các bài test Vitest độc lập bao phủ toàn diện các module mới (DAG, retry, checkpoint, approval gate, tool contract, sandbox, bitemporal context).
+- [ ] Toàn bộ test suites hiện có của dự án Vyen (128 files, 1850+ tests) tiếp tục PASS 100%, không phát sinh lỗi hay hồi quy.
+- [ ] CLI runner (`bin/teamwork.ts`) và engine API có thể kích hoạt các workflow mới một cách trực tiếp trong môi trường headless.
+
+

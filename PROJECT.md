@@ -1,177 +1,230 @@
-# Project: Teamwork Multi-Agent Runtime Engine & Headless Harness Runner
+# Project: Vyen Multi-Agent Architecture & Capability Enhancement
 
 ## Architecture
-Vyen Teamwork Multi-Agent Runtime Engine is a decoupled, headless orchestration layer implementing a strict 2-phase multi-agent workflow (Explorer → Worker → Critic) conforming to OpenCode/Pi/Hermes specifications. It runs seamlessly both in Headless CLI (Node.js) and Electron Desktop without React UI or IndexedDB dependencies.
-
-```
-                  +----------------------------------------------+
-                  |               User / CLI / Desktop           |
-                  +----------------------------------------------+
-                                         |
-                                         v
-                  +----------------------------------------------+
-                  |         lib/teamwork/engine.ts               |
-                  |  Phase 1: Scope & Plan -> User Confirm Gate  |
-                  |  Phase 2: Milestone Dispatcher & Lifecycle   |
-                  +----------------------------------------------+
-                                   |           |
-            +----------------------+           +----------------------+
-            |                                                         |
-            v                                                         v
-+-------------------------------+                         +-------------------------------+
-|  lib/teamwork/file-lock.ts    |                         |  lib/teamwork/artifacts.ts    |
-|  - Exclusive File Ownership   |                         |  - teamwork/REQUEST.md        |
-|  - Concurrency Guard (max 2)  |                         |  - teamwork/PLAN.md           |
-|  - Disjointness Validator     |                         |  - teamwork/PROGRESS.md       |
-+-------------------------------+                         +-------------------------------+
-            |                                                         |
-            v                                                         v
-+-------------------------------+                         +-------------------------------+
-|  lib/teamwork/tools.ts        |                         |  lib/teamwork/critic.ts       |
-|  - Headless fs, shell, git    |                         |  - Adversarial Verification   |
-|  - Reuses path-guard.cjs      |                         |  - Real test/build runner     |
-|  - Reuses staging.ts          |                         |  - PASS / FAIL-BLOCKED gate   |
-|  - Reuses auto-pilot.ts       |                         |  - Integrity Mode (dev/demo)  |
-|  - Reuses edit-blocks.ts      |                         +-------------------------------+
-+-------------------------------+                                     |
-            |                                                         v
-            v                                             +-------------------------------+
-+-------------------------------+                         |  lib/teamwork/rate-limit.ts   |
-|  lib/teamwork/cli.ts          |                         |  - 429 auto-pause & logging   |
-|  - Node.js standalone runner  |                         |  lib/teamwork/summary.ts      |
-|  - Zero React/Dexie dependency|                         |  - Compact summary <= 20 lines|
-+-------------------------------+                         +-------------------------------+
-```
+Vyen is a high-assurance multi-agent coding harness running dual-mode (headless CLI and desktop Electron). This project extracts, adapts, and integrates architectural patterns from 6 frontier reference codebases into `lib/teamwork/`:
+1. **Hatchet (`hatchet-dev/hatchet`) & Stably Orca (`stablyai/orca`)**: Durable DAG task execution, topological ordering, parallel branches, concurrency semaphores, exponential backoff with randomized jitter, durable state checkpoints, and pause/resume lifecycle.
+2. **HumanLayer (`humanlayer/skills`) & Anthropic Commerce-Agents (`anthropics/commerce-agents`)**: Human-in-the-loop approval interrupts, cryptographic interrupt tokens, visual diff visualizer, ASCII/Unicode flow sketches, code-shape AST outline, `<show-me>` visual inspection artifacts, and cybernetic control loop (Sensor -> Controller -> Actuator -> Disturbance).
+3. **Anthropic Commerce-Agents (`anthropics/commerce-agents`) & Arcbox (`arcboxlabs/arcbox`)**: Typed Zod tool contracts with strict schema validation, provenance-gated writes with SHA-256 hash chains, dual-gate pre-flight and post-flight guardrails, process sandboxing with regex environment variable scrubbing, CWD lockdown, disposable temp directories, and clean process tree teardown.
+4. **Utopia (`deeplethe/utopia`) & HumanLayer (`humanlayer/skills`)**: Bitemporal Codebase Ledger decoupling Valid Time ($T_v$) from Transaction Time ($T_t$), append-only JSONL audit ledger, point-in-time state replay, 3-tier progressive context querying (Index, Decisions, Diffs), and semantic knowledge ontology triples.
+5. **Full Compatibility & Zero Regression Engine**: Seamless integration into `TeamworkEngine` (`lib/teamwork/engine.ts`), `HeadlessToolRunner` (`lib/teamwork/tools.ts`), and `bin/teamwork.ts`, maintaining 100% backward compatibility and passing all existing 128 test files (1850+ tests) plus all new test suites.
 
 ## Feature Inventory
 | # | Feature | Description | Milestone | Source |
 |---|---------|-------------|-----------|--------|
-| 1 | Phase 1 Scope Clarification | 4-element check (Purpose, Scope, Testable Criteria, Working Dir) | M1, M4 | spec_miner_survey_1, ORIGINAL_REQUEST:14 |
-| 2 | Triad Document Generation | Automatic creation of `teamwork/REQUEST.md`, `teamwork/PLAN.md`, `teamwork/PROGRESS.md` | M1 | spec_miner_survey_1, ORIGINAL_REQUEST:14 |
-| 3 | Phase 1 Pause & User Confirmation | Pause gate presenting plan summary to user before modifying any source files | M4 | spec_miner_survey_1, ORIGINAL_REQUEST:14 |
-| 4 | Milestone Roadmap Decomposition | Milestone decomposition (<= 3 milestones) with purpose, exclusive files, verify commands | M1, M4 | spec_miner_survey_1, teamwork-orchestrator.md |
-| 5 | Exclusive File Ownership Lock | Strict mutual exclusive file locks per worker; reject concurrent edits to same file | M1 | spec_miner_survey_1, ORIGINAL_REQUEST:17 |
-| 6 | Concurrency Guard (Max 2 Parallel)| Sequential by default; max 2 parallel only when file sets are 100% disjoint | M1 | spec_miner_survey_1, ORIGINAL_REQUEST:16 |
-| 7 | Headless Tool Runner | Pure Node.js filesystem, shell, and git execution decoupled from React & IndexedDB | M2 | explorer_survey_2, ORIGINAL_REQUEST:21 |
-| 8 | Path-Guard Integration | Workspace boundary enforcement wrapping all file tools via `electron/path-guard.cjs` | M2 | explorer_survey_2, ORIGINAL_REQUEST:23 |
-| 9 | Staging Sandbox Integration | In-RAM diff review overlay reusing `lib/staging.ts` for safe preview | M2 | explorer_survey_2, ORIGINAL_REQUEST:23 |
-| 10 | Auto-Pilot Policy Integration | Shell command whitelisting and destructive command blocking via `lib/auto-pilot.ts` | M2 | explorer_survey_2, ORIGINAL_REQUEST:23 |
-| 11 | Diff Validation Integration | Precise SEARCH/REPLACE block parsing and application via `lib/edit-blocks.ts` | M2 | explorer_survey_2, ORIGINAL_REQUEST:23 |
-| 12 | Adversarial Critic Verifier | Real command runner verifying tests without trusting worker; emits PASS/FAIL-BLOCKED | M3 | spec_miner_survey_1, ORIGINAL_REQUEST:18 |
-| 13 | Integrity Mode Rubric | Multi-mode validation (`development`, `demo`, `benchmark`) blocking facades/dummies | M3 | spec_miner_survey_1, teamwork-critic.md |
-| 14 | Bounded Milestone Retry | Single retry with Critic reproduction feedback; stop and block if retry fails | M3, M4 | spec_miner_survey_1, teamwork-orchestrator.md |
-| 15 | 429 Rate Limit Auto-Pause | Intercept 429 errors, halt immediately, log to `teamwork/PROGRESS.md`, avoid spam | M3 | spec_miner_survey_1, ORIGINAL_REQUEST:28 |
-| 16 | Completion & Blocking Summary | Compact markdown summary <= 20 lines with PROGRESS link, test results, file stats | M3 | spec_miner_survey_1, ORIGINAL_REQUEST:29 |
-| 17 | 2-Phase Orchestrator Engine | Full lifecycle engine coordinating Phase 1, confirmation, and Phase 2 workers | M4 | spec_miner_survey_1, explorer_survey_2 |
-| 18 | Standalone Headless CLI Runner | CLI entry point (`scripts/teamwork-cli.ts` / `lib/teamwork/cli.ts`) runnable via Node/TS | M4 | explorer_survey_2, ORIGINAL_REQUEST:22 |
-| 19 | Electron Desktop Dual-Mode | Clean API/IPC integration point for Electron without React/DOM coupling | M4 | explorer_survey_2, ORIGINAL_REQUEST:24 |
-| 20 | E2E Testing Suite (Tiers 1-4) | Comprehensive opaque-box test suite covering all features, boundaries, combinations | M_E2E | explorer_survey_3, ORIGINAL_REQUEST:33-42 |
-| 21 | Final Verification & 100% Pass | 100% pass on all 83 existing test suites (1082 tests) + all new tests | M5 | explorer_survey_3, ORIGINAL_REQUEST:41 |
-| 22 | Tier 5 Adversarial Hardening | White-box stress testing of race conditions, file locks, 429 recovery, integrity | M5 | Project Pattern, explorer_survey_3 |
+| 1 | DAG Dependency Graph & Topological Sort | Kahn's algorithm topological sorting with cycle detection and parallel independent branches | M1 | Hatchet & Orca |
+| 2 | Async Concurrency Limiter & Semaphore | Slot-based semaphore enforcing concurrency ceiling during DAG branch execution | M1 | Hatchet & Orca |
+| 3 | Exponential Backoff with Randomized Jitter | Configurable backoff formula `delay = min(max_delay, base * 2^attempt) ± jitter` with full/equal jitter | M1 | Hatchet & Orca |
+| 4 | State Checkpoint Serialization | Serialize full task execution state to memory or JSON disk format | M1 | Hatchet & Orca |
+| 5 | Pause and Resume Lifecycle | Seamless pause at any node, restart/resume from last valid checkpoint without re-running completed tasks | M1 | Hatchet & Orca |
+| 6 | Task Idempotency Tokens | Unique execution idempotency tokens preventing duplicate execution on retry | M1 | Hatchet & Orca |
+| 7 | Human-in-the-Loop Approval Gates | Interrupt engine before sensitive operations (destructive writes, critical shell commands) | M2 | HumanLayer & Commerce-Agents |
+| 8 | Cryptographic Interrupt Tokens | HMAC/SHA-256 tokens securing approval/rejection authorizations across process boundaries | M2 | HumanLayer & Commerce-Agents |
+| 9 | Visual Diff Inspection (`show-me`) | Terminal and markdown unified diff viewer with contextual syntax highlighting | M2 | HumanLayer & Commerce-Agents |
+| 10 | ASCII / Unicode Flow Sketches | Concise ASCII graph visualizer illustrating DAG state, active branches, and pending gates | M2 | HumanLayer & Commerce-Agents |
+| 11 | Code-Shape AST Outlining | High-level structural outline of modified files (classes, methods, signatures) for review | M2 | HumanLayer & Commerce-Agents |
+| 12 | Cybernetic Control Loop | Structured Sensor -> Controller -> Actuator -> Disturbance loop for self-correcting agents | M2 | HumanLayer |
+| 13 | Typed Tool Contracts with Zod | Strict schema validation separating static rules from dynamic execution context | M3 | Commerce-Agents |
+| 14 | Provenance-Gated Resource Writes | Every write tagged with worker ID, milestone ID, auth token, and chained SHA-256 hash | M3 | Commerce-Agents |
+| 15 | Dual-Gate Guardrails | Gate 1 (pre-flight schema/lock/path guard) and Gate 2 (post-flight critic review & verifyCommand) | M3 | Commerce-Agents |
+| 16 | Environment Variable Scrubbing | Regex-based filtering stripping API keys, secrets, and sensitive tokens from subprocess env | M3 | Arcbox |
+| 17 | CWD Lockdown & Temp Isolation | Strict working directory confinement and disposable isolated temp directories per worker | M3 | Arcbox |
+| 18 | Process Tree Teardown & Deadlines | Enforce execution deadlines and clean recursive process group termination (taskkill/SIGKILL) | M3 | Arcbox |
+| 19 | Bitemporal Context Ledger | Decouple Valid Time ($T_v$) from Transaction Time ($T_t$) in append-only JSONL ledger | M4 | Utopia |
+| 20 | Historical State Replay & Point-in-Time Query | Reconstruct codebase and milestone state at any $(T_v, T_t)$ coordinate | M4 | Utopia |
+| 21 | Non-Destructive Compensating Rollback | Roll back milestone changes by appending inverse compensating actions | M4 | Utopia |
+| 22 | 3-Tier Progressive Context Querying | Tier 1 Index (~100 tokens), Tier 2 Decisions (~400 tokens), Tier 3 Diffs (~1500 tokens) | M4 | Utopia & HumanLayer |
+| 23 | Semantic Knowledge Ontology | Subject-Predicate-Object triples representing codebase facts and architectural constraints | M4 | Utopia |
+| 24 | TeamworkEngine DAG & Checkpoint Integration | Wire DAG scheduler, backoff retry, and checkpointing into `lib/teamwork/engine.ts` | M5 | Core Vyen Integration |
+| 25 | ToolRunner Strict Contract & Sandbox Integration | Wire Zod tool contracts, provenance, and sandboxing into `lib/teamwork/tools.ts` | M5 | Core Vyen Integration |
+| 26 | CLI & Headless Runner Upgrades | Expose DAG visualization, pause/resume flags, approval prompt, and ledger replay in `bin/teamwork.ts` | M5 | Core Vyen Integration |
+| 27 | Full Compatibility & Zero Regression Verification | Pass 100% of all existing 128 test files (1850+ tests) and all new Vitest suites | M5 | Core Vyen Integration |
 
 ## Milestones
-
 | # | Name | Scope | Dependencies | Status |
-|---|------|-------|--------------|--------|
-| M_E2E | E2E Testing Suite Track | Opaque-box requirement-driven test suite (Tiers 1-4): `TEST_INFRA.md`, `TEST_READY.md`, `tests/teamwork-cli.test.ts`, `tests/teamwork-e2e.test.ts` | None | DONE |
-| M1 | Data Models, File-Locking & Artifacts | `lib/teamwork/types.ts`, `lib/teamwork/file-lock.ts`, `lib/teamwork/artifacts.ts`, `tests/teamwork-file-lock.test.ts`, `tests/teamwork-artifacts.test.ts` | None | DONE |
-| M2 | Headless Tool Runner & Safety Layers | `lib/teamwork/tools.ts`, `tests/teamwork-tools.test.ts` (reusing path-guard, staging, auto-pilot, edit-blocks) | M1 | DONE |
-| M3 | Adversarial Critic, 429 Handler & Summary | `lib/teamwork/critic.ts`, `lib/teamwork/rate-limit.ts`, `lib/teamwork/summary.ts`, `tests/teamwork-critic.test.ts`, `tests/teamwork-rate-limit.test.ts`, `tests/teamwork-summary.test.ts` | M1, M2 | DONE |
-| M4 | 2-Phase Engine, CLI Runner & Dual-Mode | `lib/teamwork/engine.ts`, `lib/teamwork/cli.ts`, `lib/teamwork/index.ts`, `bin/teamwork.ts`, `tests/teamwork-engine.test.ts` | M1, M2, M3 | DONE |
-| M5 | Final E2E Pass & Adversarial Hardening | Phase 1: 100% pass of existing 83 test suites (1082 tests) + all new tests. Phase 2: Tier 5 adversarial stress testing | M_E2E, M4 | DONE |
-
-## Code Layout & Write Ownership
-All new implementation modules are placed under `lib/teamwork/`, `bin/`, and `tests/`:
-- `lib/teamwork/types.ts` (M1)
-- `lib/teamwork/file-lock.ts` (M1)
-- `lib/teamwork/artifacts.ts` (M1)
-- `lib/teamwork/tools.ts` (M2)
-- `lib/teamwork/critic.ts` (M3)
-- `lib/teamwork/rate-limit.ts` (M3)
-- `lib/teamwork/summary.ts` (M3)
-- `lib/teamwork/engine.ts` (M4)
-- `lib/teamwork/cli.ts` (M4)
-- `lib/teamwork/index.ts` (M4)
-- `bin/teamwork.ts` (M4)
-- `tests/teamwork-*.test.ts` (M1-M5, M_E2E)
-
-### Existing Safety Layers Reused (Read-Only)
-- `electron/path-guard.cjs`: `resolveWithin`, `isWithinRoot`
-- `lib/staging.ts`: `stageFile`, `emptyStagingStore`, `stagedFileDiff`, `commitStagedFile`
-- `lib/auto-pilot.ts`: `isSafeCommand`, `isAlwaysBlocked`, `shouldAutoApprove`
-- `lib/edit-blocks.ts`: `parseEditBlocks`, `replaceMostSimilarChunk`
-- `lib/naive-diff.ts`: `lineDiff`, `renderUnifiedDiff`
-- `lib/upstream-status-rules.ts`: `restateUpstreamStatus`
+|---|------|-------|-------------|--------|
+| M1 | Durable DAG Workflow Engine & Checkpointing | `lib/teamwork/dag/`, `lib/teamwork/checkpoint/` | none | PLANNED |
+| M2 | Human-in-the-Loop Approval & Visual Inspection | `lib/teamwork/hitl/`, `lib/teamwork/visual/` | none | PLANNED |
+| M3 | Strict Tool Contracts, Provenance & Process Sandbox | `lib/teamwork/contracts/`, `lib/teamwork/sandbox/` | none | PLANNED |
+| M4 | Temporal Context Memory & Bitemporal Codebase Ledger | `lib/teamwork/ledger/`, `lib/teamwork/context/` | none | PLANNED |
+| M5 | Engine Integration, CLI Runner & Full Regression Pass | `lib/teamwork/engine.ts`, `lib/teamwork/tools.ts`, `lib/teamwork/cli.ts`, `bin/teamwork.ts` | M1, M2, M3, M4 | PLANNED |
+| E2E | E2E Testing Suite (Tiers 1-4) | `tests/e2e-dag.test.ts`, `tests/e2e-hitl.test.ts`, `tests/e2e-contracts-sandbox.test.ts`, `tests/e2e-ledger.test.ts`, `tests/e2e-teamwork-integrated.test.ts` | parallel with M1-M5 | PLANNED |
 
 ## Interface Contracts
 
-### 1. `lib/teamwork/file-lock.ts` ↔ `lib/teamwork/engine.ts`
-```ts
-export class FileLockManager {
-  canAcquire(workerId: string, files: string[]): boolean;
-  acquire(workerId: string, files: string[]): void;
-  release(workerId: string): void;
-  getActiveWorkers(): string[];
-  getActiveLocks(): Map<string, string>;
-  isLocked(filePath: string): boolean;
-  getLockOwner(filePath: string): string | undefined;
+### M1: DAG & Checkpointing (`lib/teamwork/dag/`, `lib/teamwork/checkpoint/`)
+```typescript
+export interface DagNode<T = unknown> {
+  id: string;
+  name: string;
+  dependsOn: string[];
+  execute: (context: DagExecutionContext) => Promise<T>;
+  retryPolicy?: RetryPolicy;
+  timeoutMs?: number;
+}
+
+export interface RetryPolicy {
+  maxRetries: number;
+  baseDelayMs: number;
+  maxDelayMs: number;
+  jitterType: 'full' | 'equal' | 'none';
+}
+
+export interface DagExecutionResult {
+  status: 'COMPLETED' | 'FAILED' | 'PAUSED';
+  nodeResults: Map<string, NodeResult>;
+  checkpointId?: string;
+  durationMs: number;
+}
+
+export interface CheckpointStore {
+  save(checkpoint: Checkpoint): Promise<void>;
+  load(id: string): Promise<Checkpoint | null>;
+  list(workflowId: string): Promise<CheckpointSummary[]>;
+  latest(workflowId: string): Promise<Checkpoint | null>;
 }
 ```
 
-### 2. `lib/teamwork/tools.ts` ↔ `lib/teamwork/critic.ts` & Workers
-```ts
-export interface HeadlessToolEnvironment {
-  workspaceRoot: string;
-  stagingEnabled?: boolean;
-  approvalPolicy?: 'smart' | 'never' | 'always';
+### M2: HITL & Visual (`lib/teamwork/hitl/`, `lib/teamwork/visual/`)
+```typescript
+export interface ApprovalRequest {
+  id: string;
+  token: string;
+  action: 'file_write' | 'shell_exec' | 'milestone_advance';
+  severity: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  description: string;
+  diffSummary?: string;
+  flowSketch?: string;
+  metadata: Record<string, unknown>;
+  createdAt: number;
+  expiresAt?: number;
 }
 
-export class HeadlessToolRunner {
-  constructor(env: HeadlessToolEnvironment);
-  fsList(relPath?: string): Promise<Array<{ name: string; type: 'file' | 'dir'; size?: number }>>;
-  fsRead(relPath: string, opts?: { startLine?: number; lineCount?: number }): Promise<{ content: string; truncated: boolean }>;
-  fsSearch(query: string, isRegex?: boolean): Promise<Array<{ path: string; line: number; text: string }>>;
-  fsEdit(relPath: string, blocksText: string, workerId?: string): Promise<{ applied: boolean; error?: string }>;
-  fsWrite(relPath: string, content: string, workerId?: string): Promise<{ written: boolean; error?: string }>;
-  shellRun(command: string, cwd?: string, timeoutMs?: number): Promise<{ code: number | null; stdout: string; stderr: string; truncated?: boolean }>;
-  gitStatus(): Promise<{ branch: string | null; clean: boolean; status: string }>;
-  gitDiff(relPath?: string, staged?: boolean): Promise<string>;
+export interface ApprovalResponse {
+  requestId: string;
+  decision: 'APPROVED' | 'REJECTED' | 'MODIFIED';
+  approver: string;
+  comments?: string;
+  modifiedPayload?: Record<string, unknown>;
+}
+
+export interface VisualDiffVisualizer {
+  renderDiff(oldContent: string, newContent: string, options?: DiffOptions): string;
+  renderFlowSketch(nodes: DagNode[], activeNodeId?: string): string;
+  renderCodeShape(filePath: string, content: string): string;
+  buildShowMeArtifact(request: ApprovalRequest): string;
 }
 ```
 
-### 3. `lib/teamwork/critic.ts` ↔ `lib/teamwork/engine.ts`
-```ts
-export interface CriticResult {
-  verdict: 'PASS' | 'FAIL-BLOCKED';
-  command: string;
-  exitCode: number | null;
-  outputPreview: string;
-  issues: Array<{ severity: 'blocker' | 'major' | 'minor'; fileLocation: string; description: string }>;
-  passCriteriaMet: boolean;
+### M3: Strict Contracts & Sandbox (`lib/teamwork/contracts/`, `lib/teamwork/sandbox/`)
+```typescript
+export interface ToolContract<TInput, TOutput> {
+  name: string;
+  description: string;
+  inputSchema: z.ZodType<TInput>;
+  outputSchema: z.ZodType<TOutput>;
+  preFlightCheck: (input: TInput, ctx: ToolExecutionContext) => Promise<PreFlightResult>;
+  postFlightReview: (output: TOutput, ctx: ToolExecutionContext) => Promise<PostFlightResult>;
+  execute: (input: TInput, ctx: ToolExecutionContext) => Promise<TOutput>;
 }
 
-export class TeamworkCritic {
-  constructor(tools: HeadlessToolRunner);
-  verifyMilestone(milestone: Milestone, integrityMode?: 'development' | 'demo' | 'benchmark'): Promise<CriticResult>;
+export interface ProvenanceRecord {
+  id: string;
+  workerId: string;
+  milestoneId: string;
+  filePath: string;
+  action: 'create' | 'modify' | 'delete';
+  contentSha256: string;
+  prevRecordHash: string;
+  authorizationToken: string;
+  timestamp: number;
+}
+
+export interface SandboxedProcessOptions {
+  cwd: string;
+  timeoutMs: number;
+  envWhiteList?: string[];
+  scrubSensitiveEnv?: boolean;
+  isolatedTempDir?: boolean;
 }
 ```
 
-### 4. `lib/teamwork/engine.ts` ↔ CLI Runner & Dual-Mode
-```ts
-export interface TeamworkEngineConfig {
-  workspaceRoot: string;
-  model?: LanguageModel;
-  integrityMode?: 'development' | 'demo' | 'benchmark';
-  concurrencyCap?: number; // default: 2
-  confirmPrompt?: () => Promise<boolean>; // Callback for Phase 1 pause gate
-  onEvent?: (event: TeamworkEvent) => void;
+### M4: Bitemporal Ledger & Context (`lib/teamwork/ledger/`, `lib/teamwork/context/`)
+```typescript
+export interface BitemporalRecord<T = unknown> {
+  id: string;
+  entityId: string;
+  validTime: { from: number; to?: number };
+  transactionTime: { recordedAt: number; supersededAt?: number };
+  action: 'INSERT' | 'UPDATE' | 'DELETE' | 'COMPENSATE';
+  payload: T;
+  merkleHash: string;
+  prevHash: string;
 }
 
-export interface TeamworkRunSummary {
-  status: 'COMPLETED' | 'BLOCKED_429' | 'FAILED';
-  milestones: Milestone[];
-  summaryText: string; // <= 20 lines
-  progressFilePath: string;
-  changedFiles: string[];
+export interface TemporalContextQuery {
+  asOfValidTime?: number;
+  asOfTransactionTime?: number;
+  entityId?: string;
+  tier: 1 | 2 | 3;
 }
+```
+
+## Code Layout
+```
+lib/teamwork/
+├── dag/
+│   ├── types.ts
+│   ├── graph.ts
+│   ├── topological-sort.ts
+│   ├── semaphore.ts
+│   ├── backoff.ts
+│   ├── engine.ts
+│   └── index.ts
+├── checkpoint/
+│   ├── types.ts
+│   ├── serializer.ts
+│   ├── memory-store.ts
+│   ├── file-store.ts
+│   └── index.ts
+├── hitl/
+│   ├── types.ts
+│   ├── token.ts
+│   ├── approval-gate.ts
+│   └── index.ts
+├── visual/
+│   ├── types.ts
+│   ├── diff-viewer.ts
+│   ├── flow-sketch.ts
+│   ├── code-shape.ts
+│   ├── show-me.ts
+│   └── index.ts
+├── contracts/
+│   ├── types.ts
+│   ├── tool-contract.ts
+│   ├── provenance.ts
+│   ├── dual-gate.ts
+│   └── index.ts
+├── sandbox/
+│   ├── types.ts
+│   ├── env-scrubber.ts
+│   ├── cwd-lockdown.ts
+│   ├── temp-isolation.ts
+│   ├── process-manager.ts
+│   └── index.ts
+├── ledger/
+│   ├── types.ts
+│   ├── bitemporal.ts
+│   ├── audit-ledger.ts
+│   ├── replay.ts
+│   └── index.ts
+├── context/
+│   ├── types.ts
+│   ├── temporal-context.ts
+│   ├── knowledge-ontology.ts
+│   └── index.ts
+├── engine.ts          # Updated with DAG & Checkpoint delegates
+├── tools.ts           # Updated with Strict Tool Contracts & Sandbox delegates
+├── cli.ts             # Updated CLI interface
+├── index.ts           # Unified barrel export
+└── types.ts           # Extended shared types
 ```
