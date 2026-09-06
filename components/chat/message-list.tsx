@@ -49,6 +49,10 @@ function friendlyErrorMessage(raw?: string): string {
  * Hàng "AI đang xử lý" — hiện giữa lúc chờ token đầu tiên (user vừa gửi,
  * hoặc regenerate chưa nhả chữ). Chấm nảy + số giây đã chờ để người dùng biết
  * hệ thống còn hoạt động, không phải treo.
+ *
+ * Tông màu theo độ chờ (mượn ý @rokiy/pi-ui): <10s bình thường, 10-30s chờ
+ * dài (vàng), >30s đỏ kèm chú thích. Model suy luận nặng từng đo TTFT tới
+ * 60s nên đỏ không có nghĩa là lỗi, chỉ là "còn chờ hơi lâu".
  */
 function ThinkingIndicator() {
   const [elapsedSec, setElapsedSec] = useState(0);
@@ -56,18 +60,29 @@ function ThinkingIndicator() {
   useEffect(() => {
     const startedAt = Date.now();
     setElapsedSec(0);
+    // 100ms cho số lẻ 12.3s: con số chạy thấy được tự nó là tín hiệu "còn sống".
     const timer = setInterval(() => {
-      setElapsedSec(Math.floor((Date.now() - startedAt) / 1000));
-    }, 1000);
+      setElapsedSec((Date.now() - startedAt) / 1000);
+    }, 100);
     return () => clearInterval(timer);
   }, []);
+
+  const slowTone = elapsedSec >= 30;
+  const tone = slowTone
+    ? 'text-[#e8704f]'
+    : elapsedSec >= 10
+      ? 'text-[#e8993a]'
+      : 'text-[#9fa4ab]';
 
   return (
     <div className="mx-auto flex max-w-thread items-start gap-3 px-4 py-3 md:px-4">
       <p className="flex min-w-0 items-baseline gap-2 py-1 font-mono text-xs" role="status">
         <span className="text-[#9fa4ab]">$</span>
         <span className="text-[#ebe7e4]">đang soạn câu trả lời</span>
-        <span className="text-[#9fa4ab]">{elapsedSec >= 1 ? `${elapsedSec}s` : ''}</span>
+        <span className={`tabular-nums ${tone}`}>{elapsedSec >= 1 ? `${elapsedSec.toFixed(1)}s` : ''}</span>
+        {slowTone && (
+          <span className="text-[#e8704f]">model nặng có thể chờ 30-60s</span>
+        )}
         <span className="terminal-cursor" aria-hidden="true" />
       </p>
     </div>

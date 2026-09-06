@@ -35,7 +35,7 @@ interface StatusLineProps {
   onToggleAgentMode?: () => void;
   agentModeDisabled: boolean;
 
-  workspace?: { connected: boolean; name: string | null };
+  workspace?: { connected: boolean; name: string | null; branch?: string | null };
 
   ctxUsed?: number;
   ctxMax?: number;
@@ -171,11 +171,12 @@ export const StatusLine = memo(function StatusLine({
           className="hidden flex-none text-[#9fa4ab] sm:inline"
           title={
             workspace.connected
-              ? `Thư mục làm việc: ${workspace.name}`
+              ? `Thư mục làm việc: ${workspace.name}${workspace.branch ? ` (nhánh ${workspace.branch})` : ''}`
               : 'Chưa kết nối thư mục làm việc, nút thư mục trong thanh nhập'
           }
         >
           ws:{workspace.connected ? workspace.name : '-'}
+          {workspace.connected && workspace.branch ? `·${workspace.branch}` : ''}
         </span>
       )}
 

@@ -740,6 +740,39 @@ export default function ChatInterface() {
 
   /* ---------------- Agent coding: workspace + client tools ---------------- */
   const [workspace, setWorkspace] = useState(getWorkspaceInfo());
+
+  /* Nhánh git cho status line (mượn ý @rokiy/pi-ui): đọc 1 LẦN khi workspace
+     bật kết nối qua desktop bridge; web thuần không có bridge thì thôi, không
+     hiện, không báo lỗi. Đổi nhánh giữa phiên hiếm khi quan trọng tới mức
+     phải theo dõi liên tục. */
+  const [gitBranch, setGitBranch] = useState<string | null>(null);
+  useEffect(() => {
+    if (!workspace?.connected) {
+      setGitBranch(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const bridge = (await import('@/lib/desktop-bridge')).vyenDesktop();
+        if (!bridge || cancelled) return;
+        const result = await bridge.git.status();
+        if (cancelled) return;
+        const branch =
+          typeof result === 'object' && result !== null && 'branch' in result
+            ? String((result as { branch?: unknown }).branch ?? '') || null
+            : null;
+        setGitBranch(branch);
+      } catch {
+        // Repo chưa init hoặc bridge lỗi: segment nhánh thôi không hiện.
+        setGitBranch(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [workspace?.connected, workspace?.name]);
+
   /* B6: hàng đợi diff — model gọi 2 fs_write/fs_edit trong cùng step thì
      promise thứ nhất không bao giờ resolve nếu ghi đè slot. Queue + ref
      mở/đóng: xong cái hiện tại mới shift cái kế. */
@@ -1973,9 +2006,25 @@ export default function ChatInterface() {
         // Ghi usage vào annotation để thống kê token có dữ liệu trong DB.
         const anns = (message.annotations ?? []) as Array<Record<string, unknown>>;
         const lastModel = [...anns].reverse().find((a) => typeof a?.model === 'string')?.model;
+        /* durationMs + est cho dòng thống kê dưới câu trả lời (mượn ý
+           @rokiy/pi-ui): est = true khi completion là ước lượng chars/4 chứ
+           không phải số gateway báo, để UI khỏi hiện chi phí bịa. onFinish
+           chỉ chạy sau khi stream kết thúc, không phải trong render —
+           Date.now() tại đây là điểm đo endedAt chính đáng. */
+        const durationMs =
+          turnStartedAtRef.current !== null
+            ? // eslint-disable-next-line react-hooks/purity
+              Date.now() - turnStartedAtRef.current
+            : undefined;
+        const estimated = !Number(usage?.completionTokens ?? 0);
         const usageAnn = [
           ...anns,
-          { usage: { promptTokens, completionTokens }, model: lastModel ?? model },
+          {
+            usage: { promptTokens, completionTokens },
+            model: lastModel ?? model,
+            ...(durationMs ? { durationMs } : {}),
+            ...(estimated ? { est: true } : {}),
+          },
         ];
         setMessages((prev) =>
           prev.map((m) =>
@@ -2276,6 +2325,14 @@ export default function ChatInterface() {
    * chuyển true) để không đọc usage cũ của lượt trước.
    */
   const lastUsageRef = useRef<{ promptTokens: number; completionTokens: number; finishReason?: string } | null>(null);
+
+  /**
+   * Mốc bắt đầu lượt trả lời hiện tại (submitTurn / regenerate) — onFinish
+   * dùng để tính durationMs ghi vào usage annotation. KHÔNG reset giữa các
+   * bước tool-calls của cùng lượt: thời lượng hiển thị là wall-clock của cả
+   * lượt, không phải từng bước con.
+   */
+  const turnStartedAtRef = useRef<number | null>(null);
 
   /**
    * Nén phần cũ: gọi /api/compact rồi lưu marker vào ChatSession.
@@ -3562,6 +3619,7 @@ export default function ChatInterface() {
         return;
       }
 
+      turnStartedAtRef.current = Date.now();
       const chatId = currentChatId;
       const currentRows =
         allStoredMessagesRef.current;
@@ -4070,6 +4128,13 @@ export default function ChatInterface() {
 
     try {
       finishRef.current = 'stop';
+      /* Ref đồng hồ lượt trả lời: submitTurn và handleRegenerate là hai đường
+         submit khác nhau nên không dùng được startedAt của run-lifecycle
+         (chỉ beginRun ở submitTurn ghi). Ghi ref trong callback là cố ý —
+         rule immutability của react-hooks v7 phân tích tĩnh không phân biệt
+         callback chạy-lâu-sau-render với code render. */
+      // eslint-disable-next-line react-hooks/immutability
+      turnStartedAtRef.current = Date.now();
 
       /**
        * Đây là lượt gửi bình thường,
@@ -4705,7 +4770,7 @@ export default function ChatInterface() {
         agentMode={agentMode}
         onToggleAgentMode={onToggleAgentMode}
         agentModeDisabled={isLoading || mediaBusy}
-        workspace={workspace}
+        workspace={workspace ? { ...workspace, branch: gitBranch } : workspace}
         ctxUsed={contextUsage?.tokens}
         ctxMax={contextUsage?.max}
         thinkingLevel={

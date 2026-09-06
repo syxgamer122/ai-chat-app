@@ -40,6 +40,8 @@ describe('DESIGN.md — Pi Harness × Pixel/Minecraft Identity verification', ()
     '../components/backup-reminder.tsx',
     '../components/chat/message-list.tsx',
     '../components/chat/message-item.tsx',
+    '../components/chat/message-usage.tsx',
+    '../components/message-status-badge.tsx',
     '../components/chat/status-line.tsx',
     '../components/chat/tool-trace.tsx',
     '../components/chat/orchestrator-badge.tsx',

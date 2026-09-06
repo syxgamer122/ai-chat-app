@@ -11,6 +11,7 @@ import { stripEmulatedToolMarkup } from '@/lib/text-tool-guard';
 import { stripMarkdownForSpeech } from '@/lib/speech-text';
 import { useTts } from '@/lib/use-tts';
 import { ToolTrace } from '@/components/chat/tool-trace';
+import { MessageUsage } from '@/components/chat/message-usage';
 import { OrchestratorBadge, getOrchestratorAdoptedAnnotation } from '@/components/chat/orchestrator-badge';
 
 function ThinkingBlock({ reasoning, isStreaming }: { reasoning: string; isStreaming: boolean }) {
@@ -342,6 +343,8 @@ export const MessageItem = memo(
               </div>
             );
           })()}
+
+          {m.role === 'assistant' && <MessageUsage annotations={(m as { annotations?: unknown }).annotations} />}
 
           {m.role === 'assistant' && (m as any).status === 'aborted' && (
             <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-[#495059] pt-2 font-mono">
