@@ -2,11 +2,23 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { DEFAULT_MODEL_ID, normalizeModelId } from '@/lib/models';
 import {
+  sanitizeModelFavorites,
+  sanitizeRecentModels,
+  type ModelFavorite,
+  type RecentModel,
+} from '@/lib/model-meta';
+import {
   DEFAULT_THINKING_LEVEL,
   isThinkingLevel,
   type ProviderModel,
   type ThinkingLevel,
 } from '@/lib/provider-url';
+import {
+  ALL_TOOL_CATEGORIES,
+  TOOL_CATEGORY_LABELS,
+  TOOL_CATEGORY_MAP,
+  type ToolCategory,
+} from '@/lib/tool-catalog';
 
 /** id provider "dùng cấu hình env của server" — định nghĩa ở store để tránh vòng import. */
 export const SERVER_PROVIDER_ID = '__server__';
@@ -56,57 +68,11 @@ export interface PerfSettings {
  */
 export type PermissionOverride = 'default' | 'auto' | 'ask' | 'deny';
 
-/**
- * Category groups for per-tool permission overrides.
- * Each category maps to one or more tool names.
- */
-export type ToolCategory =
-  | 'fs_read'
-  | 'fs_write'
-  | 'shell'
-  | 'git'
-  | 'web'
-  | 'memory'
-  | 'plan'
-  | 'delegate';
-
-/** Map from tool name → category for quick lookup. */
-export const TOOL_CATEGORY_MAP: Record<string, ToolCategory> = {
-  fs_read: 'fs_read',
-  fs_list: 'fs_read',
-  fs_search: 'fs_read',
-  fs_edit: 'fs_write',
-  fs_write: 'fs_write',
-  shell_run: 'shell',
-  git_status: 'git',
-  git_diff: 'git',
-  git_log: 'git',
-  git_add: 'git',
-  git_commit: 'git',
-  web_search: 'web',
-  web_fetch: 'web',
-  memory_search: 'memory',
-  memory_save: 'memory',
-  plan_create: 'plan',
-  plan_update: 'plan',
-  delegate: 'delegate',
-};
-
-/** Human-readable labels for each category (UI). */
-export const TOOL_CATEGORY_LABELS: Record<ToolCategory, { label: string; icon: string; tools: string }> = {
-  fs_read: { label: 'File Reading', icon: '📂', tools: 'fs_read, fs_list, fs_search' },
-  fs_write: { label: 'File Editing', icon: '✏️', tools: 'fs_edit, fs_write' },
-  shell: { label: 'Shell Commands', icon: '💻', tools: 'shell_run' },
-  git: { label: 'Git Operations', icon: '🔀', tools: 'git_status, git_diff, git_log, git_add, git_commit' },
-  web: { label: 'Web Tools', icon: '🌐', tools: 'web_search, web_fetch' },
-  memory: { label: 'Memory', icon: '🧠', tools: 'memory_search, memory_save' },
-  plan: { label: 'Plans', icon: '📋', tools: 'plan_create, plan_update' },
-  delegate: { label: 'Subagent', icon: '🤖', tools: 'delegate' },
-};
-
-export const ALL_TOOL_CATEGORIES: ToolCategory[] = [
-  'fs_read', 'fs_write', 'shell', 'git', 'web', 'memory', 'plan', 'delegate',
-];
+/* Taxonomy tool category đã dời về lib/tool-catalog.ts (nguồn sự thật duy
+   nhất, bao phủ cả bg_*). Re-export giữ tên cũ để mọi importer hiện tại
+   (settings-dialog, auto-pilot, tests) không phải sửa import. */
+export { ALL_TOOL_CATEGORIES, TOOL_CATEGORY_LABELS, TOOL_CATEGORY_MAP };
+export type { ToolCategory };
 
 /** Per-category permission overrides. All default to 'default'. */
 export type ToolPermissions = Record<ToolCategory, PermissionOverride>;
@@ -114,6 +80,20 @@ export type ToolPermissions = Record<ToolCategory, PermissionOverride>;
 export function isPermissionOverride(v: unknown): v is PermissionOverride {
   return v === 'default' || v === 'auto' || v === 'ask' || v === 'deny';
 }
+
+/**
+ * Nhãn hiển thị tiếng Việt của 4 giá trị PermissionOverride. Nguồn chung duy
+ * nhất cho select trong Cài đặt và panel Công cụ & quyền: trước đây hai nơi
+ * mỗi nơi một bộ nhãn tiếng Anh, đổi chỗ nào cũng drift. Chỉ đổi LABEL ở đây;
+ * VALUE phải giữ nguyên vì là giá trị persist trong localStorage
+ * ('ai-chat-settings' v2).
+ */
+export const PERMISSION_OPTIONS: ReadonlyArray<{ value: PermissionOverride; label: string }> = [
+  { value: 'default', label: 'Mặc định' },
+  { value: 'auto', label: 'Tự duyệt' },
+  { value: 'ask', label: 'Luôn hỏi' },
+  { value: 'deny', label: 'Chặn' },
+];
 
 /**
  * Tên model có gửi được lên route LLM hay không. Mọi route (chat/title/compact/
@@ -183,6 +163,10 @@ export interface Settings {
   approvalPolicy: 'always' | 'smart' | 'never';
   /** Per-tool permission overrides by category. */
   toolPermissions: ToolPermissions;
+  /** Model yêu thích của picker: set (id, providerId), cap 30, không cần migrate. */
+  modelFavorites: ModelFavorite[];
+  /** Model dùng gần đây: mới nhất đứng đầu, cap 6, scoped theo provider. */
+  recentModels: RecentModel[];
   apiKey?: string;
   accessCode?: string;
 }
@@ -235,6 +219,8 @@ const DEFAULT_SETTINGS: Settings = {
   autoPilot: false,
   approvalPolicy: 'smart',
   toolPermissions: { fs_read: 'default', fs_write: 'default', shell: 'default', git: 'default', web: 'default', memory: 'default', plan: 'default', delegate: 'default' },
+  modelFavorites: [],
+  recentModels: [],
   apiKey: '',
   accessCode: '',
 };
@@ -305,6 +291,10 @@ export const useAppStore = create<AppState>()(
           autoPilot: s.settings.autoPilot,
           approvalPolicy: s.settings.approvalPolicy,
           toolPermissions: s.settings.toolPermissions,
+          /* Yêu thích + Gần đây của model picker: lựa chọn của người dùng,
+             thiếu khoá là F5 mất toàn bộ shortcut trong picker. */
+          modelFavorites: s.settings.modelFavorites,
+          recentModels: s.settings.recentModels,
         },
       }),
       merge: (persisted, current) => {
@@ -353,6 +343,10 @@ export const useAppStore = create<AppState>()(
                 ? p.settings.approvalPolicy
                 : current.settings.approvalPolicy,
             toolPermissions: validateToolPermissions(p.settings?.toolPermissions, current.settings.toolPermissions),
+            /* Entry rác từ storage bị vứt ở đây chứ không throw: merge chạy
+               ở rehydrate, throw là trắng màn hình. */
+            modelFavorites: sanitizeModelFavorites(p.settings?.modelFavorites),
+            recentModels: sanitizeRecentModels(p.settings?.recentModels),
             apiKey: '',
             accessCode: '',
           },

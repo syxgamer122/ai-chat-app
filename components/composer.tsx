@@ -28,12 +28,14 @@ import {
   Pencil,
   Square,
   Target,
+  Wrench,
   X,
   Zap,
 } from 'lucide-react';
 import { useHaptics } from '@/components/effects';
 import { useSpeechRecognition } from '@/lib/use-speech-recognition';
 import { filterPrompts } from '@/lib/prompt-library';
+import { TOOL_CATALOG } from '@/lib/tool-catalog';
 
 export interface Attachment {
   id: string;
@@ -81,6 +83,7 @@ function ToolbarButton({
   badge,
   className,
   ariaExpanded,
+  buttonRef,
 }: {
   icon: React.ElementType;
   active?: boolean;
@@ -90,9 +93,11 @@ function ToolbarButton({
   badge?: string;
   className?: string;
   ariaExpanded?: boolean;
+  buttonRef?: React.Ref<HTMLButtonElement>;
 }) {
   return (
     <button
+      ref={buttonRef}
       type="button"
       onClick={onClick}
       disabled={disabled}
@@ -157,20 +162,35 @@ interface TaskSpec {
   label: string;
   /** Nhãn gọn trong menu. */
   shortLabel?: string;
+  /** Mô tả một dòng dưới nhãn: nói rõ mục này LÀM GÌ, chống "tool lộn xộn". */
+  description?: string;
   active?: boolean;
   disabled?: boolean;
   badge?: string;
+  /** Mục mở panel overlay: focus nút Tác vụ trước khi chạy để panel đóng
+   * xong trả focus về đúng nút đã mở (không rơi về body). */
+  returnsFocusToTrigger?: boolean;
   onClick: () => void;
+}
+
+/** Nhóm mục trong menu "Tác vụ": Chế độ / Tra cứu & media / Nâng cao. */
+interface TaskGroupSpec {
+  key: string;
+  label: string;
+  items: TaskSpec[];
 }
 
 /**
  * Menu "Tác vụ ⋯" — mọi công cụ phụ của agent (mode, web, autopilot, goal,
  * orchestrator, workspace, staging, media, mic) nằm ở đây để thanh nhập giữ
- * đúng ba nút chính: đính kèm, thư mục, gửi/dừng.
+ * đúng ba nút chính: đính kèm, thư mục, gửi/dừng. Mục chia 3 nhóm có mô tả
+ * một dòng; header nhóm chỉ là nhãn trình bày (aria-hidden) nên không phá
+ * semantics menu: item vẫn là menuitem, Tab đi theo thứ tự trực quan.
  */
-function TaskMenu({ tasks }: { tasks: TaskSpec[] }) {
+function TaskMenu({ groups }: { groups: TaskGroupSpec[] }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -188,7 +208,7 @@ function TaskMenu({ tasks }: { tasks: TaskSpec[] }) {
     };
   }, [open]);
 
-  const activeCount = tasks.filter((t) => t.active).length;
+  const activeCount = groups.reduce((acc, g) => acc + g.items.filter((t) => t.active).length, 0);
 
   return (
     <div ref={wrapRef} className="relative">
@@ -199,45 +219,64 @@ function TaskMenu({ tasks }: { tasks: TaskSpec[] }) {
         label="Tác vụ"
         badge={activeCount > 1 ? String(activeCount) : undefined}
         ariaExpanded={open}
+        buttonRef={triggerRef}
       />
       {open && (
         <div
           role="menu"
           aria-label="Tác vụ"
-          className="surface-panel absolute bottom-full right-0 z-40 mb-2 w-[min(16rem,calc(100vw-2rem))] animate-slide-up overflow-hidden p-1.5"
+          className="surface-panel absolute bottom-full right-0 z-40 mb-2 w-[min(18rem,calc(100vw-2rem))] animate-slide-up overflow-hidden p-1.5"
         >
-          {tasks.map((t) => {
-            const Icon = t.icon;
-            return (
-              <button
-                key={t.key}
-                type="button"
-                role="menuitem"
-                disabled={t.disabled}
-                onClick={() => {
-                  t.onClick();
-                  setOpen(false);
-                }}
-                className="flex w-full items-center gap-2.5 rounded-none px-2 py-2 text-left transition-colors hover:bg-[#161d27] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[#6a9fcc] disabled:cursor-not-allowed disabled:opacity-40"
+          {groups.map((group) => (
+            <div key={group.key} role="presentation">
+              <div
+                aria-hidden="true"
+                className="px-2 pb-1 pt-1.5 text-[10.5px] font-semibold uppercase tracking-wide text-[#6a9fcc]"
               >
-                <Icon
-                  size={15}
-                  className={`flex-none ${t.active ? 'text-[#5db87a]' : 'text-[#9fa4ab]'}`}
-                />
-                <span className="min-w-0 flex-1 truncate text-[13px] text-[#ebe7e4]">
-                  {t.shortLabel ?? t.label}
-                </span>
-                {t.badge && (
-                  <span className="flex-none rounded-full bg-[#e8993a] px-1.5 text-[10px] font-bold text-[#0d1116]">
-                    {t.badge}
-                  </span>
-                )}
-                {t.active && !t.badge && (
-                  <Check size={13} className="flex-none text-[#5db87a]" />
-                )}
-              </button>
-            );
-          })}
+                {group.label}
+              </div>
+              {group.items.map((t) => {
+                const Icon = t.icon;
+                return (
+                  <button
+                    key={t.key}
+                    type="button"
+                    role="menuitem"
+                    disabled={t.disabled}
+                    onClick={() => {
+                      if (t.returnsFocusToTrigger) triggerRef.current?.focus();
+                      t.onClick();
+                      setOpen(false);
+                    }}
+                    className="flex w-full items-center gap-2.5 rounded-none px-2 py-2 text-left transition-colors hover:bg-[#161d27] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[#6a9fcc] disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    <Icon
+                      size={15}
+                      className={`flex-none ${t.active ? 'text-[#5db87a]' : 'text-[#9fa4ab]'}`}
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[13px] text-[#ebe7e4]">
+                        {t.shortLabel ?? t.label}
+                      </span>
+                      {t.description && (
+                        <span className="block truncate text-[10.5px] leading-tight text-[#9fa4ab]">
+                          {t.description}
+                        </span>
+                      )}
+                    </span>
+                    {t.badge && (
+                      <span className="flex-none rounded-full bg-[#e8993a] px-1.5 text-[10px] font-bold text-[#0d1116]">
+                        {t.badge}
+                      </span>
+                    )}
+                    {t.active && !t.badge && (
+                      <Check size={13} className="flex-none text-[#5db87a]" />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          ))}
         </div>
       )}
     </div>
@@ -267,6 +306,8 @@ interface ComposerProps {
   onGoalLoopClick?: (goalText: string) => void;
   stagedFileCount?: number;
   onOpenStaging?: () => void;
+  /** Mở panel "Công cụ & quyền" (catalog tool + quyền theo nhóm). */
+  onOpenToolsPanel?: () => void;
   /** Orchestrator: panel quét tham số đang mở? */
   orchestratorOpen?: boolean;
   onOpenOrchestrator?: () => void;
@@ -315,6 +356,7 @@ export const Composer = memo(function Composer({
   onGoalLoopClick,
   stagedFileCount,
   onOpenStaging,
+  onOpenToolsPanel,
   orchestratorOpen,
   onOpenOrchestrator,
   webBusy,
@@ -516,31 +558,24 @@ export const Composer = memo(function Composer({
   }, [onPickWorkspace, pickPending]);
 
   /**
-   * Menu "Tác vụ" — khai báo thành data để giữ nguyên thứ tự và nhãn.
+   * Menu "Tác vụ": khai báo thành data, chia 3 nhóm (Chế độ / Tra cứu &
+   * media / Nâng cao). Nhãn và hành vi giữ nguyên bản cũ, mỗi mục thêm mô tả
+   * một dòng để người dùng biết mục đó làm gì trước khi bấm.
    */
-  const tasks: TaskSpec[] = [];
+  const modeTasks: TaskSpec[] = [];
+  const lookupTasks: TaskSpec[] = [];
+  const advancedTasks: TaskSpec[] = [];
 
   if (onToggleAgentMode) {
-    tasks.push({
+    modeTasks.push({
       key: 'agent-mode',
       icon: Pencil,
       active: agentMode === 'plan',
       disabled: isStreaming,
       label: agentMode === 'plan' ? 'Chuyển sang ACT mode' : 'Chuyển sang PLAN mode',
       shortLabel: 'PLAN mode',
+      description: 'PLAN chỉ đọc, ACT được ghi file và chạy lệnh',
       onClick: onToggleAgentMode,
-    });
-  }
-
-  if (onToggleWebSearch) {
-    tasks.push({
-      key: 'web',
-      icon: Globe,
-      active: webSearch,
-      disabled: isStreaming,
-      label: webSearch ? 'Tắt tìm kiếm web' : 'Bật tìm kiếm web',
-      shortLabel: 'Tìm kiếm web',
-      onClick: onToggleWebSearch,
     });
   }
 
@@ -548,7 +583,7 @@ export const Composer = memo(function Composer({
     const policyLabel = approvalPolicy === 'never' ? 'YOLO'
       : approvalPolicy === 'always' ? 'Always ask'
       : 'Smart';
-    tasks.push({
+    modeTasks.push({
       key: 'auto-pilot',
       icon: Zap,
       active: autoPilot ?? false,
@@ -557,12 +592,65 @@ export const Composer = memo(function Composer({
         ? `Auto-pilot: ${policyLabel} · bấm để đổi`
         : 'Bật Auto-pilot',
       shortLabel: autoPilot ? `AP: ${policyLabel}` : 'Auto-pilot',
+      description: 'Chạy nhiều bước liền, không phải duyệt từng bước',
       onClick: onCycleAutoPilot,
     });
   }
 
+  if (onToggleWebSearch) {
+    lookupTasks.push({
+      key: 'web',
+      icon: Globe,
+      active: webSearch,
+      disabled: isStreaming,
+      label: webSearch ? 'Tắt tìm kiếm web' : 'Bật tìm kiếm web',
+      shortLabel: 'Tìm kiếm web',
+      description: 'Cho phép agent tìm kiếm web khi trả lời',
+      onClick: onToggleWebSearch,
+    });
+  }
+
+  if (mediaActions?.image) {
+    lookupTasks.push({
+      key: 'image',
+      icon: ImagePlus,
+      disabled: !canGenerateMedia,
+      label: `Tạo ảnh bằng ${mediaActions.image.label}`,
+      shortLabel: 'Tạo ảnh',
+      description: 'Dùng nội dung ô nhập làm prompt tạo ảnh',
+      onClick: () => startMedia(mediaActions.image, 'image'),
+    });
+  }
+
+  if (mediaActions?.video) {
+    lookupTasks.push({
+      key: 'video',
+      icon: Film,
+      disabled: !canGenerateMedia,
+      label: `Tạo video bằng ${mediaActions.video.label}`,
+      shortLabel: 'Tạo video',
+      description: 'Dùng nội dung ô nhập làm prompt tạo video',
+      onClick: () => startMedia(mediaActions.video, 'video'),
+    });
+  }
+
+  if (voice.supported) {
+    lookupTasks.push({
+      key: 'voice',
+      icon: voice.listening ? Square : Mic,
+      active: voice.listening,
+      label: voice.listening ? 'Dừng nhận diện giọng nói' : 'Nhập bằng giọng nói',
+      shortLabel: voice.listening ? 'Dừng ghi âm' : 'Giọng nói',
+      description: 'Nhập ô nhập bằng giọng nói tiếng Việt',
+      onClick: () => {
+        voice.clearError();
+        voice.toggle();
+      },
+    });
+  }
+
   if (onGoalLoopClick) {
-    tasks.push({
+    advancedTasks.push({
       key: 'goal-loop',
       icon: Target,
       active: goalLoopActive ?? false,
@@ -571,78 +659,63 @@ export const Composer = memo(function Composer({
         ? `Goal loop đang chạy${goalLoopInfo ? ` (lượt ${goalLoopInfo})` : ''} · bấm để dừng`
         : 'Goal loop · gõ mục tiêu vào ô nhập rồi bấm để agent tự lặp đến khi hoàn thành',
       shortLabel: goalLoopActive ? `Goal ${goalLoopInfo ?? ''}`.trim() : 'Goal loop',
+      description: 'Agent tự lặp từng lượt tới khi xong mục tiêu',
       onClick: () => onGoalLoopClick(draft),
     });
   }
 
   if (onOpenOrchestrator) {
-    tasks.push({
+    advancedTasks.push({
       key: 'orchestrator',
       icon: Network,
       active: orchestratorOpen,
       label: 'Orchestrator · chạy nhiều agent theo lưới tham số rồi tổng hợp',
       shortLabel: 'Orchestrator',
+      description: 'Chạy nhiều agent theo lưới tham số rồi tổng hợp',
       onClick: onOpenOrchestrator,
     });
   }
 
-  if (onDisconnectWorkspace && workspace?.connected) {
-    tasks.push({
-      key: 'workspace-disconnect',
-      icon: FolderOpen,
-      disabled: isStreaming,
-      label: `Ngắt kết nối: ${workspace.name ?? 'workspace'}`,
-      shortLabel: 'Ngắt thư mục làm việc',
-      onClick: onDisconnectWorkspace,
-    });
-  }
-
   if (onOpenStaging && (stagedFileCount ?? 0) > 0) {
-    tasks.push({
+    advancedTasks.push({
       key: 'staging',
       icon: FileText,
       label: `${stagedFileCount} file đang staged`,
       shortLabel: 'File đã staged',
       badge: String(stagedFileCount),
+      description: 'Xem diff, Apply hoặc Reject trước khi ghi đĩa',
       onClick: onOpenStaging,
     });
   }
 
-  if (mediaActions?.image) {
-    tasks.push({
-      key: 'image',
-      icon: ImagePlus,
-      disabled: !canGenerateMedia,
-      label: `Tạo ảnh bằng ${mediaActions.image.label}`,
-      shortLabel: 'Tạo ảnh',
-      onClick: () => startMedia(mediaActions.image, 'image'),
+  if (onDisconnectWorkspace && workspace?.connected) {
+    advancedTasks.push({
+      key: 'workspace-disconnect',
+      icon: FolderOpen,
+      disabled: isStreaming,
+      label: `Ngắt kết nối: ${workspace.name ?? 'workspace'}`,
+      shortLabel: 'Ngắt thư mục làm việc',
+      description: 'Gỡ kết nối thư mục làm việc hiện tại khỏi phiên',
+      onClick: onDisconnectWorkspace,
     });
   }
 
-  if (mediaActions?.video) {
-    tasks.push({
-      key: 'video',
-      icon: Film,
-      disabled: !canGenerateMedia,
-      label: `Tạo video bằng ${mediaActions.video.label}`,
-      shortLabel: 'Tạo video',
-      onClick: () => startMedia(mediaActions.video, 'video'),
+  if (onOpenToolsPanel) {
+    advancedTasks.push({
+      key: 'tools-panel',
+      icon: Wrench,
+      label: 'Công cụ & quyền…',
+      description: `Xem ${TOOL_CATALOG.length} tool AI đang có và đặt quyền`,
+      returnsFocusToTrigger: true,
+      onClick: onOpenToolsPanel,
     });
   }
 
-  if (voice.supported) {
-    tasks.push({
-      key: 'voice',
-      icon: voice.listening ? Square : Mic,
-      active: voice.listening,
-      label: voice.listening ? 'Dừng nhận diện giọng nói' : 'Nhập bằng giọng nói',
-      shortLabel: voice.listening ? 'Dừng ghi âm' : 'Giọng nói',
-      onClick: () => {
-        voice.clearError();
-        voice.toggle();
-      },
-    });
-  }
+  const taskGroups: TaskGroupSpec[] = [
+    { key: 'mode', label: 'Chế độ', items: modeTasks },
+    { key: 'lookup-media', label: 'Tra cứu & media', items: lookupTasks },
+    { key: 'advanced', label: 'Nâng cao', items: advancedTasks },
+  ].filter((g) => g.items.length > 0);
 
   return (
     // Terminal Input Box (DESIGN.md): full-bleed, dính mép trái/phải, viền
@@ -841,7 +914,7 @@ export const Composer = memo(function Composer({
           </div>
 
           <div className="flex flex-none items-center gap-1.5">
-            <TaskMenu tasks={tasks} />
+            <TaskMenu groups={taskGroups} />
             <div className="hidden h-4 w-px flex-none bg-[#495059] sm:block" />
             <SendButton
               isStreaming={isStreaming}

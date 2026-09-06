@@ -24,12 +24,14 @@ describe('DESIGN.md — Pi Harness × Pixel/Minecraft Identity verification', ()
    */
   const TOKENIZED_COMPONENTS = [
     '../components/composer.tsx',
-    '../components/thinking-slider.tsx',
+    '../components/thinking-menu.tsx',
     '../components/model-selector.tsx',
+    '../components/chat-export-menu.tsx',
     '../components/sidebar.tsx',
     '../components/branch-switcher.tsx',
     '../components/staging-panel.tsx',
     '../components/plan-panel.tsx',
+    '../components/tools-panel.tsx',
     '../components/subagent-card.tsx',
     '../components/diff-confirm.tsx',
     '../components/shell-confirm.tsx',
@@ -177,7 +179,7 @@ describe('DESIGN.md — Pi Harness × Pixel/Minecraft Identity verification', ()
 
   it('nút có nhãn trong thanh composer nới vùng chạm lên mốc 44px của mobile', () => {
     // Nút cao 36px (h-8 ở base 18px) nên cần thêm 8px; `after:-inset-6px` cho 48px.
-    for (const rel of ['../components/thinking-slider.tsx', '../components/model-selector.tsx']) {
+    for (const rel of ['../components/thinking-menu.tsx', '../components/model-selector.tsx']) {
       const code = fs.readFileSync(path.resolve(__dirname, rel), 'utf8');
       const trigger = code.split('aria-haspopup')[1]?.split('>')[0] ?? '';
       expect(trigger, `${rel}: trigger thiếu vùng chạm mở rộng`).toMatch(/after:-inset-\[6px\]/);

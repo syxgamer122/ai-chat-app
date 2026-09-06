@@ -16,6 +16,10 @@ import { streamText, tool, type CoreMessage } from 'ai';
 import { z } from 'zod';
 import { resolveWithin } from '../path-guard.cjs';
 import { runMonkeyCodeSast } from '../security-sast';
+import { renderToolsCommand } from './cli-surface';
+
+// Re-export để test khóa được việc REPL dùng đúng pure builder dùng chung.
+export { renderToolsCommand };
 
 export interface CliAgentToolResult {
   ok: boolean;
@@ -919,6 +923,7 @@ export async function startInteractiveCli(
   console.log(`   /model <name>         - Thay đổi model LLM`);
   console.log(`   /provider <url>       - Thay đổi provider URL`);
   console.log(`   /history              - Xem lịch sử hội thoại`);
+  console.log(`   /tools [tên]          - Xem catalog tool hoặc chi tiết một tool`);
   console.log(`   /read, :read <path>   - Đọc nội dung file với đánh số dòng`);
   console.log(`   /write, :write <path> - Ghi nội dung vào file`);
   console.log(`   /edit, :edit <path>   - Sửa file (SEARCH / REPLACE)`);
@@ -1016,10 +1021,21 @@ Các lệnh khả dụng:
   /init                             Khởi tạo ngữ cảnh dự án
   /compact                          Kiểm tra bộ nhớ context
   /teamwork <goal>                  Khởi chạy Teamwork 2-phase Multi-Agent
+  /tools [tên]                      Xem catalog tool hoặc chi tiết một tool
   /clear                            Xóa màn hình & reset ngữ cảnh
   /exit                             Thoát
   <bất kỳ câu hỏi / yêu cầu nào>    Kích hoạt LLM reasoning & tool-calling loop!
 `);
+      rl.prompt();
+      continue;
+    }
+
+    /* /tools dùng chung pure builder với `vyen tool list` (lib/cli/cli-surface)
+       để hai nơi không thể drift metadata catalog. So sánh qua lower như các
+       lệnh lân cận để /TOOLS, :Tools cũng nhận. */
+    if (lower.startsWith('/tools') || lower.startsWith(':tools')) {
+      const toolArg = trimmed.replace(/^[\/:]tools\b/i, '').trim();
+      console.log(renderToolsCommand(toolArg));
       rl.prompt();
       continue;
     }

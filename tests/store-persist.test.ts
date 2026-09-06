@@ -63,6 +63,8 @@ const REQUIRED_SETTING_KEYS = [
   'autoPilot',
   'approvalPolicy',
   'toolPermissions',
+  'modelFavorites',
+  'recentModels',
 ] as const;
 
 describe('partialize — đủ khoá settings sống qua reload', () => {
@@ -112,6 +114,58 @@ describe('merge — khôi phục persisted không cần tăng version', () => {
       useAppStore.getState(),
     );
     expect(merged.settings?.perf).toMatchObject({ throttleMs: 250 });
+  });
+
+  it('modelFavorites + recentModels từ storage đè lên default rỗng', () => {
+    const { merge } = useAppStore.persist.getOptions() as PersistOptions;
+    const merged = merge!(
+      {
+        settings: {
+          modelFavorites: [{ id: 'gpt-5-6-sol', providerId: '__server__' }],
+          recentModels: [{ id: 'kimi-k3', providerId: '__server__', ts: 123 }],
+        },
+      },
+      useAppStore.getState(),
+    );
+    expect(merged.settings?.modelFavorites).toEqual([
+      { id: 'gpt-5-6-sol', providerId: '__server__' },
+    ]);
+    expect(merged.settings?.recentModels).toEqual([
+      { id: 'kimi-k3', providerId: '__server__', ts: 123 },
+    ]);
+  });
+
+  it('entry rác trong favorites/recents bị vứt, entry tốt sống sót (không throw)', () => {
+    const { merge } = useAppStore.persist.getOptions() as PersistOptions;
+    const merged = merge!(
+      {
+        settings: {
+          modelFavorites: [
+            { id: 'ok', providerId: 'p1' },
+            { id: '', providerId: 'p1' },
+            null,
+            'junk',
+          ],
+          recentModels: [
+            { id: 'ok', providerId: 'p1', ts: 5 },
+            { id: 'bad-ts', providerId: 'p1', ts: 'x' as unknown as number },
+            { id: 'no-ts', providerId: 'p1' },
+          ],
+        },
+      },
+      useAppStore.getState(),
+    );
+    expect(merged.settings?.modelFavorites).toEqual([{ id: 'ok', providerId: 'p1' }]);
+    expect(merged.settings?.recentModels).toEqual([{ id: 'ok', providerId: 'p1', ts: 5 }]);
+  });
+
+  it('storage không có hai field mới (bản cũ) → default mảng rỗng, không undefined', () => {
+    const { merge } = useAppStore.persist.getOptions() as PersistOptions;
+    const merged = merge!({ settings: {} }, useAppStore.getState());
+    expect(Array.isArray(merged.settings?.modelFavorites)).toBe(true);
+    expect(Array.isArray(merged.settings?.recentModels)).toBe(true);
+    expect(merged.settings?.modelFavorites).toEqual([]);
+    expect(merged.settings?.recentModels).toEqual([]);
   });
 });
 

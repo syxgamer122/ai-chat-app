@@ -21,6 +21,7 @@ import {
   XCircle,
 } from 'lucide-react';
 import { SubagentCard, getSubagentAnnotations } from '@/components/subagent-card';
+import { resolveToolEntry } from '@/lib/tool-catalog';
 
 interface ToolEvent {
   id: string;
@@ -145,8 +146,12 @@ function formatToolDetail(text: string) {
 function ToolChip({ ev }: { ev: ToolEvent }) {
   const [expanded, setExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
-  const meta = TOOL_META[ev.name] ?? { label: ev.name, Icon: Wrench };
-  const { Icon } = meta;
+  const meta = TOOL_META[ev.name];
+  // Mô tả tooltip lấy từ catalog (khớp cả tên di sản như read/bash qua alias),
+  // nhãn fallback cũng theo catalog để chip lạ vẫn đọc được tiếng Việt.
+  const catalogEntry = resolveToolEntry(ev.name);
+  const { Icon } = meta ?? { Icon: Wrench };
+  const label = meta?.label ?? catalogEntry?.shortLabel ?? ev.name;
 
   const displayParam = formatToolDetail(ev.args);
   const hasOutput = Boolean(ev.summary && ev.summary.trim());
@@ -177,6 +182,7 @@ function ToolChip({ ev }: { ev: ToolEvent }) {
         onClick={() => hasOutput && setExpanded(!expanded)}
         disabled={!hasOutput}
         aria-expanded={hasOutput ? expanded : undefined}
+        title={catalogEntry?.description}
         className={`flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left ${
           hasOutput ? 'cursor-pointer hover:bg-white/[0.04]' : 'cursor-default'
         }`}
@@ -185,7 +191,7 @@ function ToolChip({ ev }: { ev: ToolEvent }) {
           <span className="text-[#6a9fcc] font-bold text-[11px]">$</span>
           <div className="flex items-center gap-1 font-semibold text-[#ebe7e4]">
             <Icon size={12} className="text-[#6a9fcc]" />
-            <span>{meta.label}</span>
+            <span>{label}</span>
           </div>
 
           {displayParam && (

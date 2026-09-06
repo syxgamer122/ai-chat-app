@@ -48,7 +48,7 @@ export function StagingPanel({
   // Escape nghe ở document chứ không phải onKeyDown trên container: click vào
   // vùng diff (không focusable) đẩy focus về document.body, keydown khi đó
   // không đi qua dialog nên handler trên container câm. Cùng chuẩn với
-  // ThinkingSlider và OverflowMenu trong composer. Không nghe khi panel rỗng
+  // ThinkingMenu và OverflowMenu trong composer. Không nghe khi panel rỗng
   // (render null) để không cướp Escape của UI khác.
   useEffect(() => {
     if (!files.length) return;

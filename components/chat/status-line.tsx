@@ -9,9 +9,10 @@
 import React, { memo } from 'react';
 import { Menu, Scissors, Trash2 } from 'lucide-react';
 import { ModelSelector, type ModelOption } from '@/components/model-selector';
-import { ThinkingSlider } from '@/components/thinking-slider';
+import { ThinkingMenu } from '@/components/thinking-menu';
 import { ChatExportMenu } from '@/components/chat-export-menu';
 import { computeMeter, fmt, type ContextMeterTone } from '@/components/context-meter';
+import type { ModelFavorite, RecentModel } from '@/lib/model-meta';
 import type { ThinkingLevel } from '@/lib/provider-url';
 
 interface StatusLineProps {
@@ -22,6 +23,13 @@ interface StatusLineProps {
   model: string;
   onModelChange: (id: string) => void;
   modelSelectorDisabled: boolean;
+  /** id provider đang active: Gần đây/Yêu thích của picker scoped theo đây. */
+  modelProviderId: string;
+  /** true khi danh sách model là catalog built-in (hiện section Đề xuất). */
+  modelCatalogBuiltin: boolean;
+  modelFavorites: ModelFavorite[];
+  modelRecents: RecentModel[];
+  onToggleModelFavorite: (id: string) => void;
 
   agentMode?: 'plan' | 'act';
   onToggleAgentMode?: () => void;
@@ -36,6 +44,8 @@ interface StatusLineProps {
   thinkingSupportedLevels?: ThinkingLevel[] | null;
   onThinkingLevelChange?: (level: ThinkingLevel) => void;
   thinkingDisabled: boolean;
+  /** Model bắt buộc luôn suy luận (metadata reasoning.mandatory). */
+  thinkingMandatory?: boolean;
 
   run: { streaming: boolean; mediaBusy: boolean; webBusy: boolean };
 
@@ -68,6 +78,11 @@ export const StatusLine = memo(function StatusLine({
   model,
   onModelChange,
   modelSelectorDisabled,
+  modelProviderId,
+  modelCatalogBuiltin,
+  modelFavorites,
+  modelRecents,
+  onToggleModelFavorite,
   agentMode,
   onToggleAgentMode,
   agentModeDisabled,
@@ -78,6 +93,7 @@ export const StatusLine = memo(function StatusLine({
   thinkingSupportedLevels,
   onThinkingLevelChange,
   thinkingDisabled,
+  thinkingMandatory,
   run,
   hasMessages,
   canCompact,
@@ -119,6 +135,11 @@ export const StatusLine = memo(function StatusLine({
           value={model}
           onChange={onModelChange}
           disabled={modelSelectorDisabled}
+          providerId={modelProviderId}
+          builtinCatalog={modelCatalogBuiltin}
+          favorites={modelFavorites}
+          recents={modelRecents}
+          onToggleFavorite={onToggleModelFavorite}
         />
       </div>
 
@@ -188,11 +209,12 @@ export const StatusLine = memo(function StatusLine({
 
       {thinkingLevel && onThinkingLevelChange && (
         <div className="flex-none">
-          <ThinkingSlider
+          <ThinkingMenu
             value={thinkingLevel}
             onChange={onThinkingLevelChange}
             disabled={thinkingDisabled}
             supportedLevels={thinkingSupportedLevels}
+            mandatory={thinkingMandatory}
           />
         </div>
       )}

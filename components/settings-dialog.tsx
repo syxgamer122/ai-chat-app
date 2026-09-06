@@ -3,10 +3,11 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { db, addMemory, deleteMemory, MAX_MEMORIES, MAX_MEMORY_CHARS, type PromptTemplate } from '@/lib/db';
-import { useAppStore, SERVER_PROVIDER_ID, ALL_TOOL_CATEGORIES, TOOL_CATEGORY_LABELS, isApiModelId, isPermissionOverride, type PermissionOverride } from '@/lib/store';
+import { useAppStore, SERVER_PROVIDER_ID, ALL_TOOL_CATEGORIES, TOOL_CATEGORY_LABELS, PERMISSION_OPTIONS, isApiModelId, isPermissionOverride, type PermissionOverride } from '@/lib/store';
 import { exportJson, exportMarkdown, importBackup, type ImportMode } from '@/lib/backup';
 import { X, Download, Upload, Loader2, ShieldAlert, Pencil, Trash2 } from 'lucide-react';
 import { VyenMark } from '@/components/vyen-logo';
+import { TOOL_CATEGORY_ICON_COMPONENTS } from '@/components/tool-category-icons';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { savePrompt, deletePrompt } from '@/lib/prompt-library';
 import {
@@ -925,11 +926,14 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                   <div className="space-y-1.5">
                     {ALL_TOOL_CATEGORIES.map((cat) => {
                       const info = TOOL_CATEGORY_LABELS[cat];
+                      const CategoryIcon = TOOL_CATEGORY_ICON_COMPONENTS[info.icon];
                       const current = settings.toolPermissions?.[cat] ?? 'default';
                       return (
                         <div key={cat} className="flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
                           <span className="min-w-0 flex-1 text-xs text-zinc-700">
-                            <span className="mr-1.5">{info.icon}</span>
+                            {CategoryIcon && (
+                              <CategoryIcon size={12} aria-hidden="true" className="mr-1.5 inline-block flex-shrink-0 text-zinc-500" />
+                            )}
                             <span className="font-medium">{info.label}</span>
                             <span className="ml-1 text-[10px] text-zinc-400">({info.tools})</span>
                           </span>
@@ -941,10 +945,11 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                             }}
                             className="field-sm w-28 text-[11px]"
                           >
-                            <option value="default">Default</option>
-                            <option value="auto">Auto-approve</option>
-                            <option value="ask">Always ask</option>
-                            <option value="deny">Block</option>
+                            {PERMISSION_OPTIONS.map((o) => (
+                              <option key={o.value} value={o.value}>
+                                {o.label}
+                              </option>
+                            ))}
                           </select>
                         </div>
                       );

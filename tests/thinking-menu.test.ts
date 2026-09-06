@@ -1,13 +1,22 @@
 /**
- * Logic điều hướng menu mức suy luận (ThinkingSlider).
+ * Logic menu mức suy luận (ThinkingMenu).
  *
  * Repo chạy vitest ở environment 'node' (không jsdom/happy-dom, không
  * @testing-library) nên phần keyboard wiring (Escape, focus) không test render
- * được; bước mũi tên và việc chọn item nhận focus lúc mở menu được tách thành
- * hàm thuần (`stepLevelCursor`, `resolveOpenFocusIndex`) để test tại đây.
+ * được; các mảnh thuần được tách ra để test tại đây:
+ *  - stepLevelCursor / resolveOpenFocusIndex: điều hướng + focus lúc mở menu
+ *    (port nguyên vẹn từ bản menu cũ);
+ *  - menuSubtitle / supportedLevelsText / snappedTitle: copy phụ đề và trạng
+ *    thái snapped theo metadata model.
  */
 import { describe, expect, it } from 'vitest';
-import { resolveOpenFocusIndex, stepLevelCursor } from '@/components/thinking-slider';
+import {
+  menuSubtitle,
+  resolveOpenFocusIndex,
+  snappedTitle,
+  stepLevelCursor,
+  supportedLevelsText,
+} from '@/components/thinking-menu';
 
 const ALL = [true, true, true, true];
 
@@ -80,5 +89,57 @@ describe('resolveOpenFocusIndex', () => {
   it('trả -1 khi mọi mức đều khóa hoặc danh sách rỗng', () => {
     expect(resolveOpenFocusIndex(2, [false, false, false, false])).toBe(-1);
     expect(resolveOpenFocusIndex(0, [])).toBe(-1);
+  });
+});
+
+describe('supportedLevelsText', () => {
+  it('mức tiếng Việt theo thang low → max bất kể thứ tự khai báo', () => {
+    expect(supportedLevelsText(['low', 'high'])).toBe('Thấp, Cao');
+    expect(supportedLevelsText(['high', 'low'])).toBe('Thấp, Cao');
+    expect(supportedLevelsText(['low', 'medium', 'high', 'max'])).toBe(
+      'Thấp, Trung bình, Cao, Tối đa',
+    );
+  });
+
+  it('danh sách rỗng → chuỗi rỗng', () => {
+    expect(supportedLevelsText([])).toBe('');
+  });
+});
+
+describe('menuSubtitle — phụ đề theo metadata', () => {
+  it('không có metadata: mô tả tính năng chung', () => {
+    expect(menuSubtitle(null, false)).toBe('Điều khiển độ sâu phân tích của AI');
+    expect(menuSubtitle(undefined, false)).toBe('Điều khiển độ sâu phân tích của AI');
+  });
+
+  it('khai báo subset: liệt kê đúng các mức hỗ trợ', () => {
+    expect(menuSubtitle(['low', 'high'], false)).toBe('Model hỗ trợ: Thấp, Cao');
+  });
+
+  it('toggle-only (efforts rỗng): gateway tự dịch', () => {
+    expect(menuSubtitle([], false)).toBe('Gateway tự dịch mức thành bật/tắt');
+  });
+
+  it('mandatory: nối câu luôn suy luận vào mọi biến thể', () => {
+    expect(menuSubtitle(null, true)).toBe(
+      'Điều khiển độ sâu phân tích của AI · Model này luôn suy luận',
+    );
+    expect(menuSubtitle([], true)).toBe(
+      'Gateway tự dịch mức thành bật/tắt · Model này luôn suy luận',
+    );
+    expect(menuSubtitle(['max'], true)).toBe(
+      'Model hỗ trợ: Tối đa · Model này luôn suy luận',
+    );
+  });
+});
+
+describe('snappedTitle — mức yêu cầu không được hỗ trợ', () => {
+  it('nêu rõ mức hiệu lực và mức bị từ chối', () => {
+    expect(snappedTitle('max', 'high')).toBe(
+      'Mức suy luận: Cao (Model không hỗ trợ Tối đa, đang gửi Cao)',
+    );
+    expect(snappedTitle('medium', 'low')).toBe(
+      'Mức suy luận: Thấp (Model không hỗ trợ Trung bình, đang gửi Thấp)',
+    );
   });
 });

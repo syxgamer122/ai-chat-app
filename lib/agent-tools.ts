@@ -28,6 +28,7 @@ import { judgeInjection } from '@/lib/injection-guard';
 import { getToolCallBudget, checkDoomLoop } from '@/lib/tool-call-budget';
 import { MAX_TOOL_CALLS_PER_TURN, TOOL_RESULT_MAX_CHARS } from '@/lib/tool-limits';
 import { isMcpToolKey } from '@/lib/mcp/tool-mapper';
+import { TOOL_CATALOG } from '@/lib/tool-catalog';
 
 export type AgentToolSet = ReturnType<typeof buildAgentTools>;
 
@@ -614,28 +615,14 @@ function getDocRegistry(): Record<string, ToolLikeForDocs> {
   return docRegistryCache;
 }
 
-export const ALL_TOOL_PROTOCOL_NAMES: readonly string[] = Object.freeze([
-  'web_search',
-  'web_fetch',
-  'weather',
-  'exchange_rates',
-  'memory_search',
-  'memory_save',
-  'fs_list',
-  'fs_read',
-  'fs_search',
-  'fs_edit',
-  'fs_write',
-  'shell_run',
-  'git_status',
-  'git_diff',
-  'git_log',
-  'git_add',
-  'git_commit',
-  'plan_create',
-  'plan_update',
-  'lesson_save',
-]);
+/**
+ * Sinh từ TOOL_CATALOG, nguồn sự thật duy nhất. Bản viết tay trước đây đã
+ * drift: thiếu delegate + bg_run/bg_status/bg_stop nên manual emulated không
+ * bao giờ mô tả chúng. Ai thêm tool vào catalog là list này tự đủ.
+ */
+export const ALL_TOOL_PROTOCOL_NAMES: readonly string[] = Object.freeze(
+  TOOL_CATALOG.map((t) => t.name),
+);
 
 /**
  * Render manual ĐẦY ĐỦ (mô tả + chữ ký args) cho các tool khả dụng.
@@ -674,30 +661,12 @@ export function formatToolProtocolManual(
 /**
  * Danh sách TÊN tool kèm nhãn cực ngắn — dùng cho đường native, nơi mô tả
  * đầy đủ đã đi qua trường `tools` của API. Chỉ để nhắc model rằng những
- * capability này tồn tại và nên chủ động dùng.
+ * capability này tồn tại và nên chủ động dùng. Nhãn lấy từ TOOL_CATALOG
+ * (bản viết tay cũ thiếu delegate + bg_*).
  */
-const TOOL_SHORT_LABELS: Record<string, string> = {
-  web_search: 'tìm web',
-  web_fetch: 'đọc URL',
-  weather: 'thời tiết',
-  exchange_rates: 'tỷ giá',
-  memory_search: 'tra ghi nhớ',
-  memory_save: 'lưu ghi nhớ',
-  fs_list: 'liệt kê thư mục',
-  fs_read: 'đọc file',
-  fs_search: 'tìm trong workspace',
-  fs_edit: 'sửa file (ưu tiên)',
-  fs_write: 'ghi cả file',
-  shell_run: 'chạy shell',
-  git_status: 'git status',
-  git_diff: 'git diff',
-  git_log: 'git log',
-  git_add: 'git add',
-  git_commit: 'git commit',
-  plan_create: 'tạo plan',
-  plan_update: 'cập nhật plan',
-  lesson_save: 'lưu bài học',
-};
+export const TOOL_SHORT_LABELS: Record<string, string> = Object.fromEntries(
+  TOOL_CATALOG.map((t) => [t.name, t.shortLabel]),
+);
 
 export function formatToolNameList(toolNames: Iterable<string>): string {
   const parts: string[] = [];

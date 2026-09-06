@@ -11,6 +11,7 @@ import {
   type StoredMessage,
 } from '@/lib/db';
 import { AVAILABLE_MODELS, MEDIA_MODELS } from '@/lib/models';
+import { deriveModelOption, toggleFavorite, upsertRecent } from '@/lib/model-meta';
 import {
   reconstructActiveThread,
   reconstructActiveThreadSafe,
@@ -129,6 +130,11 @@ import {
 import { CLIENT_TOOL_NAMES } from '@/lib/agent-tools';
 import { shouldAutoApprove } from '@/lib/auto-pilot';
 import {
+  isToolDenied,
+  TOOL_CATEGORY_LABELS,
+  TOOL_CATEGORY_MAP,
+} from '@/lib/tool-catalog';
+import {
   acquirePostEditSlot,
   attachPostEditCheck,
   detectPostEditCommands,
@@ -229,6 +235,10 @@ const PlanPanel = dynamic(
   () => import('@/components/plan-panel').then((m) => m.PlanPanel),
   { ssr: false },
 );
+const ToolsPanel = dynamic(
+  () => import('@/components/tools-panel').then((m) => m.ToolsPanel),
+  { ssr: false },
+);
 
 /* Trần đính kèm. Đặt ở MODULE scope: trước đây khai báo trong thân component
    nên tạo lại mỗi render và làm eslint cảnh báo thiếu dependency ở
@@ -246,6 +256,9 @@ export default function ChatInterface() {
   const updateSettings = useAppStore((s) => s.updateSettings);
 
   const model = useAppStore((s) => s.settings.model);
+  /** Yêu thích + Gần đây của model picker: scoped theo activeProviderId. */
+  const modelFavorites = useAppStore((s) => s.settings.modelFavorites);
+  const recentModels = useAppStore((s) => s.settings.recentModels);
   /**
    * Model MÔ TẢ ẢNH (người dùng chọn trong Cài đặt → Nhà cung cấp). Rỗng =
    * luồng ảnh tắt: /api/vision đòi model bắt buộc nên gọi mà không có chỉ
@@ -361,26 +374,21 @@ export default function ChatInterface() {
 
   const MODELS: ModelOption[] = useMemo(() => {
     if (activeProvider?.models?.length) {
-      const base = activeProvider.models.map((m) => ({
-        id: m.id,
-        label: m.name || m.id,
-        hint: m.contextLength
-          ? `${Math.round(m.contextLength / 1000)}k ngữ cảnh`
-          : activeProvider.name,
-      }));
+      const base = activeProvider.models.map((m) => deriveModelOption(m));
       // Bổ sung model media built-in mà /v1/models của gateway không khai báo.
       const known = new Set(base.map((m) => m.id));
       const extra = mediaCatalog
         .filter((m) => !known.has(m.id))
-        .map((m) => ({ id: m.id, label: m.label, hint: 'Tạo ảnh / video' }));
+        .map((m) => {
+          const cfg = MEDIA_MODELS.find((c) => c.id === m.id);
+          return cfg ? deriveModelOption(cfg) : { id: m.id, label: m.label };
+        });
       return [...base, ...extra];
     }
     // Provider của server: bỏ model media nếu gateway env không hỗ trợ.
-    return AVAILABLE_MODELS.filter((m) => serverCaps.media || m.media === undefined).map((m) => ({
-      id: m.id,
-      label: m.name,
-      hint: m.description,
-    }));
+    return AVAILABLE_MODELS.filter((m) => serverCaps.media || m.media === undefined).map((m) =>
+      deriveModelOption(m),
+    );
   }, [activeProvider, mediaCatalog, serverCaps.media]);
 
   /**
@@ -516,6 +524,9 @@ export default function ChatInterface() {
   const orchestrator = useOrchestrator();
   /** Chặn ghép 2 lần cùng một kết quả (double-click trước khi panel kịp đóng). */
   const orchestratorAdoptLockRef = useRef(false);
+
+  /** Panel "Công cụ & quyền": toàn bộ catalog tool + quyền auto-pilot theo nhóm. */
+  const [toolsPanelOpen, setToolsPanelOpen] = useState(false);
 
   /** Auto-debug loop state: track retry attempts per command. */
   const debugLoopRef = useRef<DebugStore>(emptyDebugStore());
@@ -1105,6 +1116,19 @@ export default function ChatInterface() {
            kẹt ở state `call` mãi mãi khi onToolCall không trả gì → stream treo
            vĩnh viễn. Nhánh default cuối switch đã làm đúng — đồng bộ hoá. */
         return JSON.stringify({ error: `Tool không tồn tại: ${toolCall.toolName}` });
+      }
+      /* Quyền nhóm "Chặn": kiểm tra TRƯỚC mọi nhánh thực thi (desktop-only,
+         workspace, switch) để không đường nào chạy khi nhóm bị deny. Tool bị
+         chặn nhận về lỗi có tên nhóm; modal duyệt không xuất hiện. Tool MCP
+         và server tool không đi qua funnel này nên không bị ảnh hưởng. */
+      if (isToolDenied(toolCall.toolName, toolPermissions)) {
+        const category = TOOL_CATEGORY_MAP[toolCall.toolName];
+        return JSON.stringify({
+          error:
+            `Tool "${toolCall.toolName}" không chạy: nhóm ` +
+            `"${TOOL_CATEGORY_LABELS[category]?.label ?? String(category)}" đang bị đặt quyền ` +
+            'Chặn trong panel Công cụ & quyền. Hãy báo người dùng và chờ họ đổi quyền nếu cần dùng lại.',
+        });
       }
       const isDesktop = isVyenDesktop();
       const desktopOnly = new Set(['shell_run', 'git_status', 'git_diff', 'git_log', 'git_add', 'git_commit', 'bg_run', 'bg_status', 'bg_stop']);
@@ -1715,6 +1739,9 @@ export default function ChatInterface() {
       autoApproveShell,
       autoApproveDiff,
       readCaptureForPath,
+      /* Cổng deny ở đầu funnel đọc toolPermissions trực tiếp: người dùng chặn
+         nhóm giữa phiên mà handler giữ closure cũ là tool vẫn chạy. */
+      toolPermissions,
       /* Các giá trị này ĐỌC TRỰC TIẾP trong thân callback (guard plan-mode
          của fs_edit/fs_write, nhánh staging, materialize draft chat). Thiếu
          chúng thì callback giữ nguyên giá trị CŨ mãi mãi: người dùng bật PLAN
@@ -4576,6 +4603,8 @@ export default function ChatInterface() {
 
   const onOpenStaging = useCallback(() => setStagingPanelOpen(true), []);
 
+  const onOpenToolsPanel = useCallback(() => setToolsPanelOpen(true), []);
+
   const onOpenOrchestrator = useCallback(() => {
     setOrchestratorSeed(composerApiRef.current?.getText() ?? '');
     setOrchestratorOpen(true);
@@ -4629,9 +4658,24 @@ export default function ChatInterface() {
 
   const handleModelChange = useCallback(
     (newModelId: string) => {
-      updateSettings({ model: newModelId });
+      // Điểm ghi Gần đây duy nhất: chọn model trong picker = dùng model đó.
+      // Effect auto-reset model khi đổi provider KHÔNG ghi recents (model bị
+      // ép chọn chứ không phải user chọn).
+      updateSettings({
+        model: newModelId,
+        recentModels: upsertRecent(recentModels, newModelId, activeProviderId, Date.now()),
+      });
     },
-    [updateSettings],
+    [updateSettings, recentModels, activeProviderId],
+  );
+
+  const handleToggleModelFavorite = useCallback(
+    (id: string) => {
+      updateSettings({
+        modelFavorites: toggleFavorite(modelFavorites, id, activeProviderId),
+      });
+    },
+    [updateSettings, modelFavorites, activeProviderId],
   );
 
   const handleThinkingLevelChange = useCallback(
@@ -4653,6 +4697,11 @@ export default function ChatInterface() {
         model={model}
         onModelChange={handleModelChange}
         modelSelectorDisabled={isLoading || mediaBusy}
+        modelProviderId={activeProviderId}
+        modelCatalogBuiltin={!activeProvider?.models?.length}
+        modelFavorites={modelFavorites}
+        modelRecents={recentModels}
+        onToggleModelFavorite={handleToggleModelFavorite}
         agentMode={agentMode}
         onToggleAgentMode={onToggleAgentMode}
         agentModeDisabled={isLoading || mediaBusy}
@@ -4665,13 +4714,10 @@ export default function ChatInterface() {
             ? thinkingLevel
             : undefined
         }
-        thinkingSupportedLevels={
-          modelReasoningCap && modelReasoningCap.efforts.length > 0
-            ? modelReasoningCap.efforts
-            : null
-        }
+        thinkingSupportedLevels={modelReasoningCap ? modelReasoningCap.efforts : null}
         onThinkingLevelChange={handleThinkingLevelChange}
         thinkingDisabled={isLoading || mediaBusy}
+        thinkingMandatory={modelReasoningCap?.mandatory ?? false}
         run={{ streaming: isLoading, mediaBusy, webBusy }}
         hasMessages={hasMessages}
         canCompact={canCompactNow}
@@ -4764,6 +4810,7 @@ export default function ChatInterface() {
         onCycleAutoPilot={onCycleAutoPilot}
         stagedFileCount={stagingVersion >= 0 ? stagingCount(stagingRef.current) : 0}
         onOpenStaging={onOpenStaging}
+        onOpenToolsPanel={onOpenToolsPanel}
         orchestratorOpen={orchestratorOpen}
         onOpenOrchestrator={onOpenOrchestrator}
         webBusy={webBusy}
@@ -4811,6 +4858,9 @@ export default function ChatInterface() {
           onAdopt={handleOrchestratorAdopt}
           onAppendToChat={handleOrchestratorAppendToChat}
         />
+      )}
+      {toolsPanelOpen && (
+        <ToolsPanel open={toolsPanelOpen} onClose={() => setToolsPanelOpen(false)} />
       )}
       <ToastHost />
     </div>
