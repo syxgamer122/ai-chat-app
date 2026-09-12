@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { DEFAULT_MODEL_ID, normalizeModelId } from '@/lib/models';
+import { isQueueMode, type QueueMode } from '@/lib/message-queue';
 import {
   sanitizeModelFavorites,
   sanitizeRecentModels,
@@ -124,6 +125,10 @@ export interface Settings {
   systemPrompt: string;
   perf: PerfSettings;
   sendOnEnter: boolean;
+  /** P3.1 (Pi steeringMode): Enter khi agent đang chạy — 'one-at-a-time' | 'all'. */
+  steeringMode: QueueMode;
+  /** P3.1 (Pi followUpMode): Alt+Enter khi agent chạy — chỉ bắn khi agent rảnh. */
+  followUpMode: QueueMode;
   /** Tự động nén hội thoại khi ước lượng token gần trần context của model. */
   autoCompact: boolean;
   /** Bật tra cứu web cho tin nhắn tiếp theo (nút Globe trong composer). */
@@ -210,6 +215,8 @@ const DEFAULT_SETTINGS: Settings = {
      giá trị của họ qua merge. */
   perf: { throttleMs: 50, animations: true },
   sendOnEnter: true,
+  steeringMode: 'one-at-a-time',
+  followUpMode: 'one-at-a-time',
   autoCompact: true,
   webSearch: false,
   agentTools: true,
@@ -279,6 +286,8 @@ export const useAppStore = create<AppState>()(
           systemPrompt: s.settings.systemPrompt,
           perf: s.settings.perf,
           sendOnEnter: s.settings.sendOnEnter,
+          steeringMode: s.settings.steeringMode,
+          followUpMode: s.settings.followUpMode,
           autoCompact: s.settings.autoCompact,
           webSearch: s.settings.webSearch,
           /* Hai toggle tool cũng là lựa chọn của người dùng bấm trong composer
@@ -342,6 +351,12 @@ export const useAppStore = create<AppState>()(
               p.settings?.approvalPolicy === 'always' || p.settings?.approvalPolicy === 'smart' || p.settings?.approvalPolicy === 'never'
                 ? p.settings.approvalPolicy
                 : current.settings.approvalPolicy,
+            steeringMode: isQueueMode(p.settings?.steeringMode)
+              ? p.settings.steeringMode
+              : current.settings.steeringMode,
+            followUpMode: isQueueMode(p.settings?.followUpMode)
+              ? p.settings.followUpMode
+              : current.settings.followUpMode,
             toolPermissions: validateToolPermissions(p.settings?.toolPermissions, current.settings.toolPermissions),
             /* Entry rác từ storage bị vứt ở đây chứ không throw: merge chạy
                ở rehydrate, throw là trắng màn hình. */

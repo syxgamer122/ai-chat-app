@@ -34,6 +34,7 @@ import {
   type AgentToolSet,
 } from '@/lib/agent-tools';
 import { stripEmulatedToolMarkup } from '@/lib/text-tool-guard';
+import { executeToolBatch, type ToolBatchItem } from '@/lib/tool-batch';
 import {
   EMU_MAX_CALLS_PER_ROUND,
   EMU_MAX_ROUNDS,
@@ -339,7 +340,76 @@ export async function runEmulatedLoop(opts: EmulatedLoopOptions): Promise<Emulat
     messages.push({ role: 'assistant', content: text });
 
     const resultBlocks: string[] = [];
-    for (const call of calls) {
+
+    /* P2.1 — Parallel server-tool batch (kiến trúc Pi): nếu TẤT CẢ call trong
+       round là server tool, gom vào executeToolBatch (preflight tuần tự →
+       Promise.all → TOOL_RESULT theo thứ tự source). Có delegate / client call
+       → giữ nguyên vòng lặp tuần tự cũ từng dòng. */
+    const hasDelegateCall = calls.some((call) => call.name === 'delegate' && opts.onDelegateCall);
+    const hasClientCall = calls.some((call) => opts.clientTools?.has(call.name));
+    if (!hasDelegateCall && (!hasClientCall || opts.resolveClientTool) && calls.length > 1) {
+      const items: ToolBatchItem[] = calls.map((call, k) => ({
+        id: `emu-${round}-${totalCalls + 1 + k}`,
+        name: call.name,
+        args: call.args,
+      }));
+      const outcomes = await executeToolBatch(items, {
+        execute: async (item, index) => {
+          const call = calls[index];
+          if (opts.clientTools?.has(item.name)) {
+            /* Relay mode: chờ renderer — giữ tuần tự ở tầng batch vì modal
+               duyệt renderer không chồng được (tool-batch classify sequential
+               cũng ép về tuần tự ở đây). */
+            const resolve = opts.resolveClientTool;
+            if (!resolve) return JSON.stringify({ error: `Tool client "${item.name}" không có relay.` });
+            try {
+              return await resolve({
+                toolCallId: item.id,
+                toolName: item.name,
+                args: call.args,
+              });
+            } catch (err) {
+              return JSON.stringify({ error: err instanceof Error ? err.message : String(err) });
+            }
+          }
+          const toolDef = opts.tools[item.name as keyof AgentToolSet];
+          try {
+            return toolDef?.execute
+              ? await toolDef.execute(call.args as never, {} as never)
+              : { note: 'Công cụ không tồn tại.' };
+          } catch {
+            return { note: 'Công cụ tạm thời không khả dụng.' };
+          }
+        },
+        onStart: (item) => {
+          opts.onAnnotation({
+            tool: { id: item.id, name: item.name, phase: 'start', args: summarizeToolArgs(item.name, item.args) },
+          });
+        },
+        onSettled: (item, outcome) => {
+          const display = typeof outcome.result === 'string' ? outcome.result : summarizeToolResult(item.name, outcome.result);
+          opts.onAnnotation({
+            tool: { id: item.id, name: item.name, phase: 'done', summary: String(display).slice(0, 200) },
+          });
+        },
+      });
+      totalCalls += calls.length;
+      // TOOL_RESULT theo thứ tự source — bất biến deterministic của Pi.
+      calls.forEach((call, k) => {
+        const result = outcomes[k].result;
+        if (
+          call.name === 'memory_save' &&
+          typeof result === 'object' &&
+          result !== null &&
+          (result as { accepted?: boolean }).accepted === true &&
+          typeof (result as { text?: unknown }).text === 'string'
+        ) {
+          opts.onMemoryProposal?.((result as { text: string }).text);
+        }
+        const serialized = typeof result === 'string' ? result : serializeToolResult(result, EMU_MAX_RESULT_CHARS);
+        resultBlocks.push(`[TOOL_RESULT name=${call.name}]\n${serialized}\n[/TOOL_RESULT]`);
+      });
+    } else for (const call of calls) {
       /* Tool CLIENT (fs_*): yield turn — route forward part, client thực thi
          trên máy user, resubmit mang kết quả trở lại và loop chạy tiếp. */
             /* Delegate: run subagent inline (server-side) via callback. */

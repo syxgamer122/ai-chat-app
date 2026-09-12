@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { db, addMemory, deleteMemory, MAX_MEMORIES, MAX_MEMORY_CHARS, type PromptTemplate } from '@/lib/db';
 import { useAppStore, SERVER_PROVIDER_ID, ALL_TOOL_CATEGORIES, TOOL_CATEGORY_LABELS, PERMISSION_OPTIONS, isApiModelId, isPermissionOverride, type PermissionOverride } from '@/lib/store';
+import { isQueueMode } from '@/lib/message-queue';
 import { exportJson, exportMarkdown, importBackup, type ImportMode } from '@/lib/backup';
 import { X, Download, Upload, Loader2, ShieldAlert, Pencil, Trash2 } from 'lucide-react';
 import { VyenMark } from '@/components/vyen-logo';
@@ -980,6 +981,44 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                     className="mt-0.5 h-4 w-4 flex-shrink-0 rounded accent-brand"
                   />
                 </label>
+
+                <div className="flex items-start justify-between gap-3">
+                  <span className="min-w-0">
+                    <span className="block text-sm font-medium text-zinc-700">
+                      Tin xếp hàng khi AI đang chạy
+                    </span>
+                    <span className="mt-0.5 block text-[11px] leading-relaxed text-zinc-600">
+                      Enter khi AI đang trả lời = steering (gửi ngay khi lượt xong), Alt+Enter =
+                      follow-up (gửi khi AI rảnh). Chọn cách bắn hàng đợi khi đến lượt.
+                    </span>
+                  </span>
+                  <span className="flex flex-shrink-0 flex-col gap-1">
+                    <select
+                      aria-label="Chế độ steering"
+                      value={settings.steeringMode}
+                      onChange={(e) => {
+                        const v: unknown = e.target.value;
+                        updateSettings({ steeringMode: isQueueMode(v) ? v : 'one-at-a-time' });
+                      }}
+                      className="field"
+                    >
+                      <option value="one-at-a-time">Steering: từng tin</option>
+                      <option value="all">Steering: tất cả</option>
+                    </select>
+                    <select
+                      aria-label="Chế độ follow-up"
+                      value={settings.followUpMode}
+                      onChange={(e) => {
+                        const v: unknown = e.target.value;
+                        updateSettings({ followUpMode: isQueueMode(v) ? v : 'one-at-a-time' });
+                      }}
+                      className="field"
+                    >
+                      <option value="one-at-a-time">Follow-up: từng tin</option>
+                      <option value="all">Follow-up: tất cả</option>
+                    </select>
+                  </span>
+                </div>
 
                 <label htmlFor="auto-compact-toggle" className="flex items-start justify-between gap-3">
                   <span className="min-w-0">

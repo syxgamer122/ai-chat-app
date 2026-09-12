@@ -284,7 +284,7 @@ function TaskMenu({ groups }: { groups: TaskGroupSpec[] }) {
 }
 
 interface ComposerProps {
-  onSubmit: (draft: string) => Promise<boolean>;
+  onSubmit: (draft: string, opts?: { queueAs?: 'steer' | 'follow-up' }) => Promise<boolean>;
   isStreaming: boolean;
   onStop: () => void;
   attachments: Attachment[];
@@ -322,6 +322,8 @@ interface ComposerProps {
   maxFileBytes?: number;
   /** API mệnh lệnh: suggestion/voice ngoài (adopt orchestrator…) ghi draft. */
   composerApiRef?: React.MutableRefObject<ComposerApi | null>;
+  /** P3.1 (Alt+↑): lấy lại tin đã queue mới nhất vào ô nhập. false = queue rỗng. */
+  onTakeBackQueued?: () => boolean;
 }
 
 /**
@@ -369,6 +371,7 @@ export const Composer = memo(function Composer({
   onContinue,
   maxFileBytes = DEFAULT_MAX_FILE_BYTES,
   composerApiRef,
+  onTakeBackQueued,
 }: ComposerProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -450,7 +453,10 @@ export const Composer = memo(function Composer({
   }, [draft, onSavePrompt, slashQuery]);
 
   const hasContent = draft.trim().length > 0 || attachments.length > 0;
-  const canSubmit = hasContent && !isStreaming;
+  /* P3.1: KHÔNG chặn khi đang stream — Enter/Alt+Enter khi agent chạy là
+     steering/follow-up queue (onSubmit ở ChatInterface tự route). SendButton
+     vẫn hiện Stop khi streaming (type="button"), nên đổi này không phá nút dừng. */
+  const canSubmit = hasContent;
   const canGenerateMedia = Boolean(onGenerateMedia) && draft.trim().length > 0 && !isStreaming;
 
   const startMedia = useCallback(
@@ -479,16 +485,19 @@ export const Composer = memo(function Composer({
 
   const haptics = useHaptics();
 
-  const submitDraft = useCallback(async () => {
-    if (!canSubmit) return;
-    const text = draft;
-    const accepted = await onSubmit(text);
-    if (accepted) {
-      // Chỉ xoá khi draft KHÔNG bị gõ tiếp trong lúc chờ (web search có thể
-      // mất tới ~15s) — draft mới của người dùng luôn được giữ.
-      setDraft((d) => (d === text ? '' : d));
-    }
-  }, [canSubmit, draft, onSubmit]);
+  const submitDraft = useCallback(
+    async (opts?: { queueAs?: 'steer' | 'follow-up' }) => {
+      if (!canSubmit) return;
+      const text = draft;
+      const accepted = await onSubmit(text, opts);
+      if (accepted) {
+        // Chỉ xoá khi draft KHÔNG bị gõ tiếp trong lúc chờ (web search có thể
+        // mất tới ~15s) — draft mới của người dùng luôn được giữ.
+        setDraft((d) => (d === text ? '' : d));
+      }
+    },
+    [canSubmit, draft, onSubmit],
+  );
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -523,6 +532,17 @@ export const Composer = memo(function Composer({
         }
       }
 
+      /* P3.1: Alt+Enter = follow-up queue (Pi); Alt+↑ = lấy lại tin đã queue. */
+      if (e.key === 'Enter' && e.altKey && !isTouchDevice) {
+        e.preventDefault();
+        void submitDraft({ queueAs: 'follow-up' });
+        return;
+      }
+      if (e.key === 'ArrowUp' && e.altKey && !isTouchDevice) {
+        e.preventDefault();
+        onTakeBackQueued?.();
+        return;
+      }
       if (e.key === 'Escape') {
         onStop();
         return;
@@ -532,7 +552,7 @@ export const Composer = memo(function Composer({
         void submitDraft();
       }
     },
-    [slashOpen, slashMatches, slashIndex, applyPrompt, onStop, isTouchDevice, sendOnEnter, submitDraft],
+    [slashOpen, slashMatches, slashIndex, applyPrompt, onStop, isTouchDevice, sendOnEnter, submitDraft, onTakeBackQueued],
   );
 
   const handleFormSubmit = useCallback(
@@ -925,7 +945,7 @@ export const Composer = memo(function Composer({
         </div>
       </form>
         <div className="mt-1.5 px-2 font-mono text-[10.5px] text-[#9fa4ab]">
-          Enter để gửi · Shift+Enter xuống dòng · / lệnh nhanh
+          Enter để gửi · Shift+Enter xuống dòng · Enter/Alt+Enter khi AI chạy = xếp hàng · Alt+↑ lấy lại · / lệnh nhanh
         </div>
     </div>
   );

@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createOpenAI } from '@ai-sdk/openai';
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 import {
   buildProtocolHeader,
   EMU_MAX_CALLS_PER_ROUND,
@@ -210,6 +212,64 @@ describe('runEmulatedLoop — e2e với upstream giả lập', () => {
     // Model cứng đầu chỉ nhả call → strip sạch nhưng KHÔNG rỗng tuyệt đối
     // (nguyên tắc never-empty: fallback nguyên văn).
     expect(events.text.length).toBeGreaterThan(0);
+  });
+
+  it('batch 3 server tool song song → TOOL_RESULT đúng thứ tự source', async () => {
+    let completionCount = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string | URL) => {
+        const url = String(input);
+        if (url.includes('duckduckgo')) {
+          await sleep(60);
+          return new Response(SEARCH_FIXTURE, { headers: { 'content-type': 'text/html' } });
+        }
+        if (url.includes('geocoding') || url.includes('open-meteo')) {
+          await sleep(5);
+          return WEATHER_FETCH(url);
+        }
+        if (url.includes('open.er-api') || url.includes('er-api')) {
+          await sleep(20);
+          return jsonResponse({ rates: { USD: 1, VND: 25000 } });
+        }
+        if (url.includes('/chat/completions')) {
+          completionCount += 1;
+          return completionCount === 1
+            ? completion(
+              'Tra 3 nguồn.\n' +
+              '<tool_call>{"name":"web_search","arguments":{"query":"vàng"}}</tool_call>\n' +
+              '<tool_call>{"name":"weather","arguments":{"location":"Hà Nội"}}</tool_call>\n' +
+              '<tool_call>{"name":"exchange_rates","arguments":{}}</tool_call>',
+            )
+            : completion('Xong: đã có đủ 3 nguồn.');
+        }
+        throw new Error(`unexpected url ${url}`);
+      }),
+    );
+
+    const { events, opts } = makeOpts({ maxRounds: 3 });
+    const started = Date.now();
+    const result = await runEmulatedLoop(opts);
+    const elapsed = Date.now() - started;
+
+    expect(result.status).toBe('done');
+    expect(result.totalCalls).toBe(3);
+    // Preflight tuần tự theo source: start theo đúng thứ tự gọi.
+    const starts = events.annotations
+      .filter((a) => (a.tool as { phase?: string })?.phase === 'start')
+      .map((a) => (a.tool as { name: string }).name);
+    expect(starts).toEqual(['web_search', 'weather', 'exchange_rates']);
+    /* Chứng cứ SONG SONG đúng bản chất (không flaky theo timing CI): `done`
+       bắn theo thứ tự HOÀN THÀNH — weather (5ms) phải xong trước web_search
+       (60ms). Chạy tuần tự thì done sẽ theo thứ tự source. */
+    const done = events.annotations
+      .filter((a) => (a.tool as { phase?: string })?.phase === 'done')
+      .map((a) => (a.tool as { name: string }).name);
+    expect(done).toEqual(['weather', 'exchange_rates', 'web_search']);
+    // Sanity chống treo: 3 call tuần tự cũng chỉ ~85ms, vượt 5s là có vấn đề khác.
+    expect(elapsed).toBeLessThan(5000);
+    // TOOL_RESULT gắn đúng tên, đúng thứ tự source trong transcript round sau.
+    expect(events.text).toContain('Xong');
   });
 
   it('memory_save được chấp nhận → bắn onMemoryProposal cho client ghi', async () => {

@@ -47,6 +47,7 @@ import {
   type ThinkingLevel,
 } from '@/lib/provider-url';
 import { estimatePromptTokens, shouldCompact, evaluateUsageTrigger, splitForCompaction } from '@/lib/context-budget';
+import { drainQueue, enqueueMessage, isQueueMode, type QueueMode } from '@/lib/message-queue';
 import { CLIENT_MAX_STEPS } from '@/lib/tool-limits';
 import {
   resolveContextWindow,
@@ -281,6 +282,13 @@ export default function ChatInterface() {
   const activeProviderId = useAppStore((s) => s.activeProviderId);
   const activeProvider = useAppStore((s) => s.activeProvider);
   const sendOnEnter = useAppStore((s) => s.settings.sendOnEnter);
+  /** P3.1 — Steering (Enter khi đang chạy) vs Follow-up (Alt+Enter). */
+  const steeringMode = useAppStore((s) =>
+    isQueueMode(s.settings.steeringMode) ? s.settings.steeringMode : 'one-at-a-time',
+  ) as QueueMode;
+  const followUpMode = useAppStore((s) =>
+    isQueueMode(s.settings.followUpMode) ? s.settings.followUpMode : 'one-at-a-time',
+  ) as QueueMode;
   const autoCompactEnabled = useAppStore((s) => s.settings.autoCompact);
   const webSearchEnabled = useAppStore((s) => s.settings.webSearch);
   /** Tắt = model không nhận tool nào (chat thuần, không agent coding). */
@@ -737,6 +745,20 @@ export default function ChatInterface() {
   const [webBusy, setWebBusy] = useState(false);
   /** Ref đồng bộ để submitTurn gate đồng bộ (state có thể stale 1 render). */
   const webBusyRef = useRef(false);
+  /**
+   * P3.1 — Hàng đợi steering/follow-up (ref đồng bộ + state render chip).
+   * Ref là nguồn sự thật cho onFinish drain; state chỉ để render + đếm.
+   */
+  const steeringRef = useRef<string[]>([]);
+  const followUpRef = useRef<string[]>([]);
+  const [steeringCount, setSteeringCount] = useState(0);
+  const [followUpCount, setFollowUpCount] = useState(0);
+  const steeringModeRef = useRef<QueueMode>('one-at-a-time');
+  const followUpModeRef = useRef<QueueMode>('one-at-a-time');
+  useEffect(() => {
+    steeringModeRef.current = steeringMode;
+    followUpModeRef.current = followUpMode;
+  }, [steeringMode, followUpMode]);
 
   /* ---------------- Agent coding: workspace + client tools ---------------- */
   const [workspace, setWorkspace] = useState(getWorkspaceInfo());
@@ -2054,6 +2076,18 @@ export default function ChatInterface() {
       if (finishReason !== 'tool-calls' && finishRef.current !== 'error') {
         succeedRun();
 
+        /* P3.1 — Drain queue đúng thứ tự Pi: steering trước, rồi goal-continue,
+           rồi follow-up. Mỗi drain chỉ append MỘT lượt (one-at-a-time mặc
+           định); useChat resubmit xong onFinish kế tiếp drain tiếp. Steering
+           đi thẳng (không qua goal-stop như tin thủ công). */
+        const steerDrained = drainQueue(steeringRef.current, steeringModeRef.current);
+        if (steerDrained.taken.length > 0) {
+          steeringRef.current = steerDrained.rest;
+          setSteeringCount(steerDrained.rest.length);
+          void append({ role: 'user', content: steerDrained.taken.join('\n\n') });
+          return;
+        }
+
         /* Goal Loop gate — lượt assistant vừa THẬT SỰ kết thúc (không phải
            resubmit tool-calls, không phải error). Verdict đọc/ghi trực tiếp
            lib store (conversation-scoped) qua evaluateGoalTurn; decision
@@ -2065,9 +2099,17 @@ export default function ChatInterface() {
           setGoalLoop(verdict.state);
           if (verdict.decision === 'continue' && verdict.steering) {
             void append({ role: 'user', content: verdict.steering });
+            return;
           } else if (verdict.state) {
             showNotice(describeGoalStop(verdict.state), 6000);
           }
+        }
+
+        const followDrained = drainQueue(followUpRef.current, followUpModeRef.current);
+        if (followDrained.taken.length > 0) {
+          followUpRef.current = followDrained.rest;
+          setFollowUpCount(followDrained.rest.length);
+          void append({ role: 'user', content: followDrained.taken.join('\n\n') });
         }
       }
     },
@@ -2808,6 +2850,26 @@ export default function ChatInterface() {
 
     // Hủy luôn lượt tạo ảnh/video đang chạy trực tiếp từ trình duyệt.
     mediaAbortRef.current?.abort();
+    /**
+     * P3.1 (Escape) — abort rồi TRẢ message đã queue về ô nhập: ưu tiên tin
+     * steering mới nhất, hết steering mới tới follow-up.
+     */
+    const steerTakeBack = steeringRef.current[steeringRef.current.length - 1];
+    const followTakeBack = followUpRef.current[followUpRef.current.length - 1];
+    const takeBack = steerTakeBack ?? followTakeBack;
+    /* Clear TOÀN BỘ hàng đợi: tin còn sót sau abort không được tự bắn ở turn
+       kế tiếp (onFinish drain sẽ gặp queue cũ → gửi tin stale). Tin mới nhất
+       về ô nhập, số còn lại bị bỏ kèm thông báo. */
+    const discarded =
+      steeringRef.current.length +
+      followUpRef.current.length -
+      (takeBack !== undefined ? 1 : 0);
+    steeringRef.current = [];
+    followUpRef.current = [];
+    setSteeringCount(0);
+    setFollowUpCount(0);
+    if (takeBack !== undefined) composerApiRef.current?.setText(takeBack);
+    if (discarded > 0) showNotice(`Đã bỏ ${discarded} tin còn lại trong hàng đợi.`, 4000);
     /**
      * Không xóa ngay nếu Assistant đã xuất hiện vì persistence
      * vẫn cần metadata của node đó.
@@ -4325,9 +4387,75 @@ export default function ChatInterface() {
        trong hook), nên thêm vào đây không làm submitTurn bị tạo lại. */
   }, [attachments, isLoading, mediaBusy, currentChatId, draftId, setCurrentChatId, append, pin, generateTitle, messages.length, webSearchEnabled, promptTemplates, agentToolsEnabled, forceEmulatedTools, agentMode, stagingEnabled, beginRun, currentRun, setRepairable]);
 
+  /**
+   * P3.1 — API hàng đợi cho composer (Enter → steer, Alt+Enter → follow-up).
+   * Trả 'sent' (đã append vì idle), 'queued' (đang chạy, đã xếp hàng),
+   * 'dropped' (hàng đợi đầy — composer giữ draft + báo UI).
+   */
+  const queueWhileBusy = useCallback(
+    (text: string, kind: 'steer' | 'follow-up'): 'sent' | 'queued' | 'dropped' => {
+      const trimmed = text.trim();
+      if (!trimmed) return 'dropped';
+      if (!isLoading) return 'sent';
+      const ref = kind === 'steer' ? steeringRef : followUpRef;
+      const setCount = kind === 'steer' ? setSteeringCount : setFollowUpCount;
+      const r = enqueueMessage(ref.current, trimmed);
+      if (r.dropped) {
+        showNotice(
+          kind === 'steer' ? 'Hàng đợi steering đã đầy (5) — đợi agent xong bớt rồi gửi tiếp.' : 'Hàng đợi follow-up đã đầy (5) — đợi agent xong bớt rồi gửi tiếp.',
+          4000,
+        );
+        return 'dropped';
+      }
+      ref.current = r.queue;
+      setCount(r.queue.length);
+      showNotice(
+        kind === 'steer'
+          ? `Đã xếp steering (${r.queue.length}) — sẽ gửi ngay khi turn hiện tại xong.`
+          : `Đã xếp follow-up (${r.queue.length}) — sẽ gửi khi agent hết việc.`,
+        3000,
+      );
+      return 'queued';
+    },
+    [isLoading],
+  );
+
+  /**
+   * P3.1 (Alt+Up) — lấy lại message đã queue mới nhất vào ô nhập để sửa.
+   * Steering trước, rồi follow-up. Hết queue → false (composer giữ draft).
+   */
+  const takeBackQueued = useCallback((): boolean => {
+    const steerLast = steeringRef.current[steeringRef.current.length - 1];
+    if (steerLast !== undefined) {
+      steeringRef.current = steeringRef.current.slice(0, -1);
+      setSteeringCount(steeringRef.current.length);
+      composerApiRef.current?.setText(steerLast);
+      return true;
+    }
+    const followLast = followUpRef.current[followUpRef.current.length - 1];
+    if (followLast !== undefined) {
+      followUpRef.current = followUpRef.current.slice(0, -1);
+      setFollowUpCount(followUpRef.current.length);
+      composerApiRef.current?.setText(followLast);
+      return true;
+    }
+    return false;
+  }, []);
+
+  /**
+   * Router gửi tin (P3.1): idle → submitTurn như cũ; đang chạy → hàng đợi.
+   * Enter không opts → mặc định STEERING (Pi: inject ngay khi turn xong);
+   * Alt+Enter truyền queueAs:'follow-up' (chỉ bắn khi agent rảnh).
+   */
   const onSubmit = useCallback(
-    async (draft: string): Promise<boolean> => submitTurn(draft),
-    [submitTurn],
+    async (draft: string, opts?: { queueAs?: 'steer' | 'follow-up' }): Promise<boolean> => {
+      if (isLoading) {
+        const kind = opts?.queueAs ?? 'steer';
+        return queueWhileBusy(draft, kind) !== 'dropped';
+      }
+      return submitTurn(draft);
+    },
+    [isLoading, submitTurn, queueWhileBusy],
   );
 
   /**
@@ -4892,6 +5020,7 @@ export default function ChatInterface() {
         onGoalLoopClick={handleGoalLoopClick}
         onContinue={continueGenerating}
         composerApiRef={composerApiRef}
+        onTakeBackQueued={takeBackQueued}
       />
 
       {/* Thông báo lỗi/cảnh báo từ showNotice() — trước đây không hề được render. */}
