@@ -20,6 +20,24 @@ describe('PermissionBroker & Capability Policy (OpenMausBot Model)', () => {
       expect(matchesGlob('engine.ts', '*.ts')).toBe(true);
       expect(matchesGlob('tests/engine.test.ts', 'tests/*.test.ts')).toBe(true);
     });
+
+    it('`**/` khớp ZERO segment (không đòi ít nhất một thư mục)', () => {
+      // Hồi quy: bước biên dịch `?` từng chạy sau khi chèn `(?:.*/)?`, phá luôn
+      // chính chuỗi vừa chèn nên mọi glob chứa `**/` đều trượt.
+      expect(matchesGlob('file.ts', '**/*.ts')).toBe(true);
+      expect(matchesGlob('lib/a.ts', 'lib/**/*.ts')).toBe(true);
+      expect(matchesGlob('lib/a/b/c.ts', 'lib/**/*.ts')).toBe(true);
+      expect(matchesGlob('lib/a.ts', 'lib/**')).toBe(true);
+      expect(matchesGlob('other/a.ts', 'lib/**/*.ts')).toBe(false);
+      expect(matchesGlob('lib/a.js', 'lib/**/*.ts')).toBe(false);
+    });
+
+    it('`?` khớp đúng một ký tự, không phải cả segment', () => {
+      expect(matchesGlob('lib/teXm/x.ts', 'lib/te?m/*')).toBe(true);
+      expect(matchesGlob('lib/team/x.ts', 'lib/te?m/*')).toBe(true);
+      expect(matchesGlob('lib/teamm/x.ts', 'lib/te?m/*')).toBe(false);
+      expect(matchesGlob('lib/tem/x.ts', 'lib/te?m/*')).toBe(false);
+    });
   });
 
   it('allows writes within registered scope and denies writes outside', async () => {

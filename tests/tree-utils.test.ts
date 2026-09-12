@@ -59,6 +59,18 @@ describe('tree-utils', () => {
     expect(info.siblings.map((s) => s.id)).toEqual(['u1', 'u2']);
   });
 
+  it('getSiblings với orphan — quy về nhóm root, không cần parentId hint', () => {
+    // Signature 2 tham số: nguồn chân lý là index.parentOf; orphan không có
+    // cha trong index → nhóm root. (Tham số parentIdHint cũ đã bỏ.)
+    const rows = [
+      msg({ id: 'root-a', parentId: ROOT, createdAt: 1 }),
+      msg({ id: 'orphan', parentId: 'da-xoa', createdAt: 2 }),
+    ];
+    const info = getSiblings(rows, 'orphan');
+    expect(info.total).toBe(2);
+    expect(info.siblings.map((s) => s.id).sort()).toEqual(['orphan', 'root-a']);
+  });
+
   it('orphan (cha đã xoá) được quy về root và vẫn đọc được thread', () => {
     const rows = [msg({ id: 'orphan', parentId: 'da-xoa', createdAt: 9 })];
     const result = reconstructActiveThreadSafe(rows, 'orphan');

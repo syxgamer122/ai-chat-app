@@ -160,7 +160,10 @@ export function parseStaging(raw: unknown): StagingStore {
     if (typeof f?.path !== 'string' || !f.path) continue;
     if (typeof f?.content !== 'string') continue;
     if (f.original !== null && typeof f.original !== 'string') continue;
-    out[f.path] = {
+    // Key MUST be the normalized path (same invariant as stageFile/unstageFile).
+    // Re-keying by the raw path made restored overlays invisible to fs_read/fs_edit
+    // and allowed a duplicate record to be created for the same file.
+    out[normalizeStagingPath(f.path)] = {
       path: f.path,
       original: f.original ?? null,
       content: f.content,

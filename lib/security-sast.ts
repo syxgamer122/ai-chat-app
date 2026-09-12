@@ -306,7 +306,9 @@ export const MONKEYCODE_RULES: SastRule[] = [
     remediation: 'Eliminate eval(). Use JSON.parse() for data or safe expression interpreters.',
     match: (line, _idx, _content, relPath) => {
       if (relPath.includes('test') || relPath.endsWith('security-sast.ts')) return false;
-      return /\beval\s*\([a-zA-Z0-9_$\s,+'"`\(\)]+\)/.test(line) && !line.includes('//') && !line.includes('function eval');
+      // Negative lookbehind loại `eval(` nằm TRONG chuỗi literal (vd dòng dò
+      // pattern `lower.includes('eval(')` — bị báo CRITICAL giả).
+      return /(?<!['"`\w])eval\s*\([a-zA-Z0-9_$\s,+'"`\(\)]+\)/.test(line) && !line.includes('//') && !line.includes('function eval');
     },
   },
   {
@@ -575,10 +577,23 @@ export class MonkeyCodeSastScanner {
 
   private scanFileContent(relPath: string, content: string, findings: SastFinding[]) {
     const lines = content.split(/\r?\n/);
+    // Theo dõi block comment nhiều dòng: prose trong /* ... */ thường nhắc tới
+    // "eval(...)", "rm -rf /"... và bị quét như code thật (báo động giả CRITICAL).
+    let inBlockComment = false;
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
       const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith('//') || trimmed.startsWith('/*') || trimmed.startsWith('*')) {
+
+      if (inBlockComment) {
+        if (trimmed.includes('*/')) inBlockComment = false;
+        continue;
+      }
+      if (trimmed.startsWith('/*')) {
+        if (!trimmed.includes('*/')) inBlockComment = true;
+        continue;
+      }
+
+      if (!trimmed || trimmed.startsWith('//') || trimmed.startsWith('*')) {
         continue;
       }
       if (trimmed.includes('sast-ignore') || trimmed.includes('nosec')) {

@@ -35,20 +35,33 @@ const PATTERNS: Pattern[] = [
 
 export const INJECTION_BLOCK_THRESHOLD = 6;
 
-/** Điểm injection của một đoạn text — thuần, không side-effect. */
+/**
+ * Điểm injection của một đoạn text — thuần, không side-effect.
+ * Trả ĐIỂM ĐẦY ĐỦ (không cắt ngắn ở ngưỡng) để caller dùng được cho
+ * xếp hạng/telemetry. Trước đây hàm `break` ngay khi chạm ngưỡng nên điểm
+ * bị kẹp ở mức 6, không phản ánh mức độ thực.
+ */
 export function injectionScore(text: string): number {
   if (!text) return 0;
   let score = 0;
   for (const p of PATTERNS) {
     if (p.re.test(text)) score += p.w;
-    if (score >= INJECTION_BLOCK_THRESHOLD) break;
   }
   return score;
 }
 
 export type InjectionVerdict = 'allow' | 'block';
 
-/** Quyết định cuối: chỉ chặn khi tổng điểm vượt ngưỡng. */
+/** Quyết định cuối: chỉ chặn khi tổng điểm vượt ngưỡng.
+ *  Dừng sớm ngay khi đã đủ ngưỡng (không cần cộng hết mẫu). */
 export function judgeInjection(text: string): InjectionVerdict {
-  return injectionScore(text) >= INJECTION_BLOCK_THRESHOLD ? 'block' : 'allow';
+  if (!text) return 'allow';
+  let score = 0;
+  for (const p of PATTERNS) {
+    if (p.re.test(text)) {
+      score += p.w;
+      if (score >= INJECTION_BLOCK_THRESHOLD) return 'block';
+    }
+  }
+  return 'allow';
 }

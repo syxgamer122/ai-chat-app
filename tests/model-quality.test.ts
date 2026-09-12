@@ -60,5 +60,34 @@ describe('model quality EWMA', () => {
       for (let i = 0; i < 10; i++) recordModelOutcome(BASE, 'x', true);
       expect(reorderModelsByQuality('https://other.example.com', ['x', 'y'])).toEqual(['x', 'y']);
     });
+
+    it('dải theo mốc neo nhất quán — model dải tốt luôn trước dải kém ở MỌI hoán vị đầu vào', () => {
+      // Chuỗi điểm m-high ≈ 0.68, m-mid ≈ 0.48, m-low = 0.5 (NEUTRAL):
+      // anchor 0.68 → m-high dải 0; m-mid & m-low (chênh 0.2/0.18) dải 1.
+      // Comparator theo từng cặp không bắc cầu (0.48≈0.5≈0.68 từng cặp trong
+      // một số ngưỡng) có thể cho dải "lộn" theo thứ tự đầu vào; dải neo thì không.
+      for (let i = 0; i < 2; i++) recordModelOutcome(BASE, 'm-high', true);
+      recordModelOutcome(BASE, 'm-mid', true);
+      recordModelOutcome(BASE, 'm-mid', false);
+
+      const perms = [
+        ['m-low', 'm-mid', 'm-high'],
+        ['m-high', 'm-mid', 'm-low'],
+        ['m-mid', 'm-high', 'm-low'],
+        ['m-mid', 'm-low', 'm-high'],
+      ];
+      for (const perm of perms) {
+        const out = reorderModelsByQuality(BASE, perm);
+        // m-high (dải 0) phải đứng trước cả m-mid lẫn m-low (dải 1).
+        expect(out.indexOf('m-high')).toBeLessThan(out.indexOf('m-mid'));
+        expect(out.indexOf('m-high')).toBeLessThan(out.indexOf('m-low'));
+      }
+    });
+
+    it('trong cùng dải giữ NGUYÊN thứ tự khai báo (stable)', () => {
+      // Cả ba chưa quan sát → cùng điểm NEUTRAL → cùng dải 0 → thứ tự gốc.
+      const many = ['zeta', 'alpha', 'middle', 'beta'];
+      expect(reorderModelsByQuality(BASE, many)).toEqual(many);
+    });
   });
 });

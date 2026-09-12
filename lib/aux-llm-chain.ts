@@ -29,7 +29,7 @@ import { z } from 'zod';
  * gateway có dạng `vendor/model:tag` — vd `deepseek/deepseek-r1-0528:free` —
  * dễ vượt 64, cắt ngắn hơn sẽ chặn oan model hợp lệ.
  */
-export const ACTIVE_MODEL_FIELD = z.string().min(1).max(120).regex(/^[\w.\-:~/]+$/);
+export const ACTIVE_MODEL_FIELD = z.string().min(1).max(120).regex(/^[\w.\-:~/@]+$/);
 
 /**
  * Bản dùng TRONG body schema của route: model rác chỉ bị BỎ QUA, không được

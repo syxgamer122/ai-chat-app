@@ -274,9 +274,10 @@ export function resetRun(state: RunLifecycle, now: number = Date.now()): RunLife
 /* ------------------------------------------------------------------ */
 
 /**
- * Thời gian chờ trước lần repair thứ `attempts + 1`.
- * 1s → 2s → 4s, kẹp 8s. AO dùng 30s→5m cho sandbox; ở đây run sống trong
- * một tab trình duyệt đang có người nhìn vào, nên phải nhanh hơn nhiều.
+ * Thời gian chờ trước lần repair kế tiếp; `repairAttempts` = số lần repair ĐÃ chạy.
+ * Chuỗi thực tế: 1s, 1s, 2s, 4s… (kẹp trần 8s) — hai lần sửa đầu dùng chung mức
+ * base vì lần hỏng đầu thường chỉ là race thoáng qua. AO dùng 30s→5m cho sandbox;
+ * ở đây run sống trong một tab trình duyệt đang có người nhìn vào, nên phải nhanh hơn.
  */
 export function backoffDelay(repairAttempts: number): number {
   if (repairAttempts <= 0) return REPAIR_BACKOFF_BASE_MS;

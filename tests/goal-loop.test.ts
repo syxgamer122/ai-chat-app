@@ -120,7 +120,7 @@ describe('evaluateGoalTurn — luồng chính', () => {
     startGoalLoop(CONV, { instruction: 'sửa bug', maxIterations: 5 }, T0);
     const r = evaluateGoalTurn(CONV, 'Tôi đã đọc code, đang sửa.', T0 + 1_000);
     expect(r.decision).toBe('continue');
-    expect(r.state.iterations).toBe(1);
+    expect(r.state!.iterations).toBe(1);
     expect(r.steering).toContain('sửa bug');
     expect(r.steering).toContain('2/5');
     expect(getGoalLoop(CONV)?.iterations).toBe(1);
@@ -130,8 +130,8 @@ describe('evaluateGoalTurn — luồng chính', () => {
     startGoalLoop(CONV, { instruction: 'sửa bug' }, T0);
     const r = evaluateGoalTurn(CONV, 'Xong. Test pass 25/25. <goal-complete reason="vitest 25/25"/>', T0 + 1_000);
     expect(r.decision).toBe('complete');
-    expect(r.state.status).toBe('succeeded');
-    expect(r.state.stopReason).toBe('goal_complete');
+    expect(r.state!.status).toBe('succeeded');
+    expect(r.state!.stopReason).toBe('goal_complete');
   });
 
   it('hết lượt → exhausted (dù không marker)', () => {
@@ -139,8 +139,8 @@ describe('evaluateGoalTurn — luồng chính', () => {
     evaluateGoalTurn(CONV, 'lần 1', T0 + 1);
     const r = evaluateGoalTurn(CONV, 'lần 2 — khác lần 1', T0 + 2);
     expect(r.decision).toBe('exhausted');
-    expect(r.state.status).toBe('exhausted');
-    expect(r.state.stopReason).toBe('max_iterations');
+    expect(r.state!.status).toBe('exhausted');
+    expect(r.state!.stopReason).toBe('max_iterations');
     expect(r.steering).toBeUndefined();
   });
 
@@ -153,8 +153,8 @@ describe('evaluateGoalTurn — luồng chính', () => {
       if (i < answers.length - 1) expect(last.decision).toBe('continue');
     }
     expect(last?.decision).toBe('stalled');
-    expect(last?.state.status).toBe('stalled');
-    expect(last?.state.stopReason).toBe('no_progress');
+    expect(last?.state!.status).toBe('stalled');
+    expect(last?.state!.stopReason).toBe('no_progress');
   });
 
   it('trả lời lặp 2 lần rồi khác → không stall, reset chuỗi', () => {
@@ -163,7 +163,7 @@ describe('evaluateGoalTurn — luồng chính', () => {
     evaluateGoalTurn(CONV, 'giống nhau', T0 + 2);
     const r = evaluateGoalTurn(CONV, 'hướng mới hoàn toàn', T0 + 3);
     expect(r.decision).toBe('continue');
-    expect(r.state.recentAnswerHashes.length).toBeLessThanOrEqual(GOAL_STALL_THRESHOLD);
+    expect(r.state!.recentAnswerHashes.length).toBeLessThanOrEqual(GOAL_STALL_THRESHOLD);
   });
 
   it('goal đã terminal thì không đếm thêm lượt', () => {
@@ -171,8 +171,8 @@ describe('evaluateGoalTurn — luồng chính', () => {
     evaluateGoalTurn(CONV, 'xong <goal-complete/>', T0 + 1);
     const r = evaluateGoalTurn(CONV, 'tin nhắn sau đó', T0 + 2);
     expect(r.decision).toBe('complete');
-    expect(r.state.iterations).toBe(1);
-    expect(r.state.status).toBe('succeeded');
+    expect(r.state!.iterations).toBe(1);
+    expect(r.state!.status).toBe('succeeded');
   });
 });
 

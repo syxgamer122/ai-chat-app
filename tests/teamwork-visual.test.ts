@@ -219,6 +219,56 @@ export const calculateScore = (count: number): number => count * 10;
     expect(outline.formatted).toContain('[class] [export] UserManager');
     expect(outline.formatted).toContain('[interface] [export] UserProfile');
   });
+
+  it('không nhận từ khoá câu lệnh / lời gọi trần trong class thành method', () => {
+    const sourceCode = `
+export class Child extends Base {
+  constructor(x: number) {
+    super(x);
+  }
+
+  public async run(items: number[]): Promise<void> {
+    if (x) { this.validate(); }
+    for (const i of items) { console.log(i); }
+    while (false) { break; }
+    switch (items.length) { case 0: break; }
+    try { JSON.parse('{}'); } catch (e) { throw e; }
+    return;
+  }
+
+  validate(): void {}
+}
+`;
+    const outline = CodeShapeExtractor.extract('child.ts', sourceCode);
+    const cls = outline.items.find((i) => i.name === 'Child');
+    expect(cls).toBeDefined();
+
+    const names = (cls?.children ?? []).map((c) => c.name);
+    expect(names).toEqual(['constructor', 'run', 'validate']);
+    for (const keyword of ['super', 'if', 'for', 'while', 'switch', 'catch', 'throw', 'return', 'try', 'else']) {
+      expect(names).not.toContain(keyword);
+    }
+  });
+
+  it('vẫn nhận đúng constructor, private và static method', () => {
+    const sourceCode = `
+export class Service {
+  constructor(private readonly url: string) {}
+
+  private async load(): Promise<void> {}
+
+  public static create(url: string): Service {
+    return new Service(url);
+  }
+}
+`;
+    const outline = CodeShapeExtractor.extract('service.ts', sourceCode);
+    const cls = outline.items.find((i) => i.name === 'Service');
+    const names = (cls?.children ?? []).map((c) => c.name);
+    expect(names).toEqual(['constructor', 'load', 'create']);
+    expect(cls?.children?.find((c) => c.name === 'load')?.signature).toContain('[private]');
+    expect(cls?.children?.find((c) => c.name === 'create')?.signature).toContain('[static]');
+  });
 });
 
 describe('ShowMeBuilder - Standardized Markdown Artifacts', () => {

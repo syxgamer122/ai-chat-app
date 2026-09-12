@@ -394,10 +394,17 @@ export async function bridgeImagesInMessages(
       }
       for (const i of uncached) {
         descriptions[i] = text;
+      }
+
+      // CHỈ cache khi batch có đúng 1 ảnh. `describeImageBatch` trả MỘT mô tả gộp cho
+      // cả nhóm, nên gán nó vào key SHA-256 của từng ảnh riêng lẻ sẽ khiến request sau
+      // (chỉ chứa 1 trong các ảnh đó) nhận nhầm mô tả của cả nhóm.
+      if (uncached.length === 1) {
+        const idx = uncached[0];
         if (descriptionCache.size >= DESC_CACHE_MAX) {
           descriptionCache.delete(descriptionCache.keys().next().value as string);
         }
-        descriptionCache.set(keys[i], text);
+        descriptionCache.set(keys[idx], text);
       }
     }
 

@@ -21,7 +21,11 @@ opencode.json
 
 # State runtime của teamwork engine (worktree cách ly, audit)
 .teamwork/
-teamwork/
+# CHỈ thư mục tài liệu teamwork sinh ra ở gốc repo (REQUEST/PLAN/PROGRESS.md).
+# Phải neo bằng dấu "/" đầu dòng: mẫu "teamwork/" không neo sẽ khớp mọi thư mục
+# tên "teamwork" ở mọi cấp — kể cả "lib/teamwork/", khiến TOÀN BỘ mã nguồn
+# multi-agent engine bị git bỏ qua và không bao giờ được commit.
+/teamwork/
 
 # Profile trình duyệt sinh ra khi test launcher desktop
 temp-test-profile/

@@ -19,6 +19,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { FileLockManager } from '@/lib/teamwork/file-lock';
+import { PermissionBroker } from '@/lib/teamwork/permission-broker';
 import {
   commitStagedFile,
   HeadlessToolRunner,
@@ -157,6 +158,37 @@ describe('HeadlessToolRunner — Filesystem Operations (fsList, fsRead, fsWrite,
 
   it('fsList throws on non-directory target', async () => {
     await expect(runner.fsList('README.md')).rejects.toThrow(/not a directory/i);
+  });
+
+  it('fsSearch finds matches across workspace files', async () => {
+    const res = await runner.fsSearch('hello');
+    expect(res.length).toBeGreaterThan(0);
+    expect(res[0].path).toContain('index.ts');
+  });
+
+  it('kiểm quyền ĐỌC theo scope: fsRead/fsList/fsSearch bị từ chối ngoài allowedReadGlobs', async () => {
+    // Scope chỉ cho đọc src/** — README.md nằm ngoài phải bị deny ở CẢ 3 đường
+    // đọc (trước đây allowedReadGlobs được khai báo nhưng không đường nào kiểm).
+    const broker = new PermissionBroker({ workspaceRoot: tempDir, strictMode: true });
+    broker.registerScope({
+      workerId: 'worker-r',
+      allowedReadGlobs: ['src/**'],
+      allowedWriteGlobs: [],
+    });
+    const scoped = new HeadlessToolRunner({
+      workspaceRoot: tempDir,
+      permissionBroker: broker,
+      activeWorkerId: 'worker-r',
+    });
+
+    await expect(scoped.fsRead('README.md')).rejects.toThrow(/Access Denied/i);
+    await expect(scoped.fsList('')).rejects.toThrow(/Access Denied/i);
+    // Từ chối quét cả những file ngoài scope (chỉ match trong src/index.ts).
+    const hits = await scoped.fsSearch('hello');
+    expect(hits.every((h) => h.path.replace(/\\/g, '/').startsWith('src/'))).toBe(true);
+    // File trong scope đọc bình thường.
+    const ok = await scoped.fsRead('src/index.ts');
+    expect(ok.content).toContain('hello world');
   });
 
   it('fsRead reads full file content', async () => {

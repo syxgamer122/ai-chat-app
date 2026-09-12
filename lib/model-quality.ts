@@ -58,20 +58,35 @@ export function getModelQualityScore(baseUrl: string, model: string): number {
 
 /**
  * Sắp xếp lại chuỗi model theo điểm tin cậy (cao → thấp). Stable sort +
- * dead-zone: cặp model chênh < DEAD_ZONE giữ nguyên thứ tự khai báo.
+ * dead-zone: model chênh so với model DẪN ĐẦU chưa tới DEAD_ZONE giữ nguyên
+ * thứ tự khai báo.
+ *
+ * Vì sao phải so với một mốc neo (điểm cao nhất) thay vì so từng cặp:
+ * quan hệ "chênh < DEAD_ZONE thì coi như ngang" KHÔNG bắc cầu (0.5≈0.6≈0.7
+ * nhưng 0.5 vs 0.7 lại khác). Comparator không bắc cầu thì `Array.sort` cho
+ * kết quả phụ thuộc thứ tự đầu vào — đúng thứ mà soft-preference muốn tránh.
+ * Quy về "dải" theo một mốc neo cố định là quan hệ bắc cầu thật.
  */
 export function reorderModelsByQuality(
   baseUrl: string,
   models: readonly string[],
 ): string[] {
   if (!baseUrl || models.length <= 1) return [...models];
-  return models
-    .map((model, index) => ({ model, index }))
+
+  const scored = models.map((model, index) => ({
+    model,
+    index,
+    score: getModelQualityScore(baseUrl, model),
+  }));
+  const anchor = Math.max(...scored.map((s) => s.score));
+
+  return scored
     .sort((a, b) => {
-      const sa = getModelQualityScore(baseUrl, a.model);
-      const sb = getModelQualityScore(baseUrl, b.model);
-      if (Math.abs(sa - sb) < DEAD_ZONE) return a.index - b.index;
-      return sb - sa;
+      // floor (không phải round) để chênh dưới DEAD_ZONE luôn rơi cùng một dải.
+      const bandA = Math.floor((anchor - a.score) / DEAD_ZONE);
+      const bandB = Math.floor((anchor - b.score) / DEAD_ZONE);
+      if (bandA !== bandB) return bandA - bandB;
+      return a.index - b.index;
     })
     .map((x) => x.model);
 }

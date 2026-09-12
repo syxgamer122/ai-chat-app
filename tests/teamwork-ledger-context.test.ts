@@ -105,6 +105,62 @@ describe('Bitemporal Algebra (Tv vs Tt)', () => {
     expect(BitemporalAlgebra.isActiveAt(record, baseTime + 300, baseTime + 200)).toBe(false);
   });
 
+  it('object cấu trúc là NGUỒN CHÂN LÝ — to thiếu nghĩa là mở, không fallback sang field cũ', () => {
+    // Trước đây `{ validTime: { from } }` vẫn fallback `to` sang validTo cũ,
+    // trộn hai mô hình thời gian và tạo khoảng bị đảo (from > to) nên bản
+    // ghi không bao giờ active.
+    const record: BitemporalRecord = {
+      id: 'rec-open-valid',
+      sequence: 4,
+      validFrom: 0,
+      validTo: 500, // field cũ — PHẢI bị bỏ qua khi validTime có mặt
+      validTime: { from: 1000 }, // to thiếu → mở vô hạn
+      txFrom: 0,
+      txTo: 900, // field cũ — phải bị bỏ qua khi transactionTime có mặt
+      transactionTime: { recordedAt: 10 }, // supersededAt thiếu → còn hiệu lực
+      eventType: 'entity_state',
+      action: 'INSERT',
+      milestoneId: 'M1',
+      workerId: 'worker-1',
+      payload: {},
+      prevHash: 'prev',
+      recordHash: 'curr',
+      merkleHash: 'curr',
+    };
+
+    // valid mở từ 1000: trước đó inactive, sau đó active mãi (tx cũng mở).
+    expect(BitemporalAlgebra.isActiveAt(record, 999, 2000)).toBe(false);
+    expect(BitemporalAlgebra.isActiveAt(record, 1000, 2000)).toBe(true);
+    expect(BitemporalAlgebra.isActiveAt(record, 5000, 2000)).toBe(true);
+
+    // getValidRange/getTxRange trực tiếp: KHÔNG dùng validTo/txTo cũ.
+    expect(BitemporalAlgebra.getValidRange(record)).toEqual({ from: 1000, to: null });
+    expect(BitemporalAlgebra.getTxRange(record)).toEqual({ from: 10, to: null });
+  });
+
+  it('KHÔNG có object cấu trúc → giữ hành vi field cũ (validFrom/validTo)', () => {
+    const record: BitemporalRecord = {
+      id: 'rec-legacy',
+      sequence: 5,
+      validFrom: 100,
+      validTo: 200,
+      txFrom: 50,
+      txTo: null,
+      eventType: 'entity_state',
+      action: 'INSERT',
+      milestoneId: 'M1',
+      workerId: 'worker-1',
+      payload: {},
+      prevHash: 'prev',
+      recordHash: 'curr',
+      merkleHash: 'curr',
+    };
+    expect(BitemporalAlgebra.getValidRange(record)).toEqual({ from: 100, to: 200 });
+    expect(BitemporalAlgebra.getTxRange(record)).toEqual({ from: 50, to: null });
+    expect(BitemporalAlgebra.isActiveAt(record, 150, 60)).toBe(true);
+    expect(BitemporalAlgebra.isActiveAt(record, 200, 60)).toBe(false);
+  });
+
   it('detects interval overlaps accurately', () => {
     // [100, 200) and [150, 250) overlap
     expect(BitemporalAlgebra.isIntervalOverlapping(100, 200, 150, 250)).toBe(true);

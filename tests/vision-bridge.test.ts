@@ -294,6 +294,56 @@ describe('vision-bridge — bridgeImagesInMessages qua provider OpenAI-compat', 
     expect(out[1].content).toContain('same');
   });
 
+  it('batch nhiều ảnh: mô tả gộp KHÔNG được cache theo từng ảnh', async () => {
+    // describeImageBatch trả MỘT mô tả cho cả nhóm. Nếu gán vào key của từng
+    // ảnh riêng, request sau chỉ chứa 1 ảnh sẽ nhận nhầm mô tả gộp từ cache.
+    let calls = 0;
+    const batch = await bridgeImagesInMessages(
+      [
+        {
+          role: 'user',
+          content: 'group',
+          experimental_attachments: [
+            { contentType: 'image/png', url: PNG_DATA_URL },
+            { contentType: 'image/png', url: OTHER_PNG_DATA_URL },
+          ],
+        },
+      ],
+      {
+        ...BASE_DEPS,
+        fetchImpl: makeFetch(async () => {
+          calls += 1;
+          return openaiTextResponse('mô tả gộp 2 ảnh');
+        }),
+      },
+    );
+    expect(calls).toBe(1);
+    expect(batch[0].content).toContain('[Ảnh 1]');
+    expect(batch[0].content).toContain('[Ảnh 2]');
+
+    // Request sau chỉ chứa ảnh đầu: PHẢI gọi provider lại (không có cache
+    // per-ảnh từ batch gộp) và nhận mô tả riêng, không phải "mô tả gộp 2 ảnh".
+    const solo = await bridgeImagesInMessages(
+      [
+        {
+          role: 'user',
+          content: 'solo',
+          experimental_attachments: [{ contentType: 'image/png', url: PNG_DATA_URL }],
+        },
+      ],
+      {
+        ...BASE_DEPS,
+        fetchImpl: makeFetch(async () => {
+          calls += 1;
+          return openaiTextResponse('mô tả riêng ảnh 1');
+        }),
+      },
+    );
+    expect(calls).toBe(2); // batch 1 + solo 1 — batch không đẻ cache bẩn
+    expect(solo[0].content).toContain('mô tả riêng ảnh 1');
+    expect(solo[0].content).not.toContain('mô tả gộp 2 ảnh');
+  });
+
   it('không có ảnh data-URL -> trả nguyên messages (cùng tham chiếu)', async () => {
     const messages = [
       { role: 'user', content: 'plain' },

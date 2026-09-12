@@ -54,9 +54,14 @@ describe('smart policy', () => {
   it('auto-approves read-only tools', () => {
     expect(shouldAutoApprove(ctx('fs_read'))).toBe(true);
     expect(shouldAutoApprove(ctx('fs_list'))).toBe(true);
-    expect(shouldAutoApprove(ctx('fs_stat'))).toBe(true);
+    expect(shouldAutoApprove(ctx('fs_search'))).toBe(true);
     expect(shouldAutoApprove(ctx('web_search'))).toBe(true);
-    expect(shouldAutoApprove(ctx('web_extract'))).toBe(true);
+    expect(shouldAutoApprove(ctx('web_fetch'))).toBe(true);
+    expect(shouldAutoApprove(ctx('git_diff'))).toBe(true);
+    expect(shouldAutoApprove(ctx('git_log'))).toBe(true);
+    expect(shouldAutoApprove(ctx('git_status'))).toBe(true);
+    expect(shouldAutoApprove(ctx('git_add'))).toBe(true);
+    expect(shouldAutoApprove(ctx('bg_status'))).toBe(true);
   });
 
   it('auto-approves safe shell commands', () => {

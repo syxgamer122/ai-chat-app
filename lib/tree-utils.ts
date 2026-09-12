@@ -219,21 +219,21 @@ export interface SiblingResult {
 }
 
 /**
- * parentId là tùy chọn và chỉ dùng làm gợi ý — nguồn chân lý là index.parentOf,
- * nhờ vậy orphan vẫn hiện đúng badge nhánh.
+ * Trả về các sibling của `currentId`. Nguồn chân lý là index.parentOf — nhờ vậy
+ * orphan vẫn hiện đúng badge nhánh.
+ *
+ * (Tham số thứ ba `parentIdHint` trước đây không bao giờ được truyền — mọi call
+ * site đều dùng dạng 2 tham số nên nhánh đó là code chết; đã bỏ.)
  */
 export function getSiblings(
   indexOrMessages: TreeIndex | StoredMessage[],
-  parentIdHintOrCurrentId?: string | null,
-  currentIdOrNothing?: string,
+  currentId: string,
 ): SiblingResult {
   const index = resolveIndex(indexOrMessages);
-  const currentId = currentIdOrNothing ?? (parentIdHintOrCurrentId as string);
-  const _parentIdHint = currentIdOrNothing ? parentIdHintOrCurrentId : undefined;
 
   const key = index.parentOf.has(currentId)
     ? (index.parentOf.get(currentId) as string | null)
-    : (_parentIdHint ?? null);
+    : null;
   const siblings = index.children.get(key) ?? [];
   return {
     siblings,

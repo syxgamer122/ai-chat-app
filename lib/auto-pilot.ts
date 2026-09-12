@@ -88,29 +88,40 @@ const ALWAYS_BLOCK_PATTERNS: RegExp[] = [
 /* Read-only tool names                                                 */
 /* ------------------------------------------------------------------ */
 
-/** Tools that only READ data — safe to auto-approve in 'smart' mode. */
+/**
+ * Tools that only READ data — safe to auto-approve in 'smart' mode.
+ * Names MUST match lib/tool-catalog.ts. `git_add` is documented as safe (it only stages
+ * files; nothing reaches the repository until git_commit, which still requires approval).
+ */
 const READ_ONLY_TOOLS = new Set([
   'fs_read',
   'fs_list',
-  'fs_stat',
+  'fs_search',
   'web_search',
-  'web_extract',
+  'web_fetch',
   'memory_search',
-  'memory_list',
-  'lesson_search',
+  'git_diff',
+  'git_log',
+  'git_status',
+  'git_add',
+  'bg_status',
 ]);
 
-/** Tools that WRITE data — require approval in 'smart' mode. */
+/**
+ * Tools that WRITE data — require approval in 'smart' mode.
+ * `shell_run` is intentionally absent: it is classified earlier by command-safety patterns,
+ * so listing it here would be unreachable.
+ */
 const WRITE_TOOLS = new Set([
   'fs_write',
   'fs_edit',
-  'shell_run',
   'git_commit',
   'memory_save',
-  'memory_delete',
   'lesson_save',
   'plan_create',
   'plan_update',
+  'bg_run',
+  'bg_stop',
 ]);
 
 /* ------------------------------------------------------------------ */

@@ -111,7 +111,24 @@ export function getKeyCandidates(scope: UpstreamScope = 'unknown'): KeyCandidate
   };
 }
 
+/**
+ * Sentinel mà các route gửi khi provider active KHÔNG cần API key
+ * (vd gateway tự xác thực). Đây không phải credential thật.
+ */
+export const PROVIDER_NO_KEY_SENTINEL = 'provider-no-key';
+
+/**
+ * Sentinel không bao giờ được ghi vào bảng health: nếu ghi, nó tích luỹ
+ * failure/cooldown/quarantine như một key thật và làm nhiễu `getKeyCandidates()`
+ * lẫn snapshot key pool (các route compact/title/orchestrate/chat đều có thể
+ * truyền sentinel này).
+ */
+function isSyntheticKey(key: string): boolean {
+  return !key || key === PROVIDER_NO_KEY_SENTINEL;
+}
+
 export function markKeySuccess(key: string): void {
+  if (isSyntheticKey(key)) return;
   const current = keyHealthMap.get(key);
   if (!current) return;
   const next: KeyHealth = {
@@ -131,6 +148,7 @@ export function markKeyFailure(
   scope: UpstreamScope = 'unknown',
 ): void {
   if (scope === 'request' || scope === 'transient') return;
+  if (isSyntheticKey(key)) return;
 
   const now = Date.now();
   const current = getHealth(key);

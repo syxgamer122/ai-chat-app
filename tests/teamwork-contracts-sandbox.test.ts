@@ -265,6 +265,73 @@ describe('Milestone 3: Strict Tool Contracts, Provenance & Process Sandbox', () 
       expect(newTracker.getHistory().length).toBe(1);
       expect(newTracker.getHistory()[0].filePath).toBe('test.ts');
     });
+
+    it('hash bao gồm role và parentRecordId — đổi vai trò/mối liên kết bị phát hiện', () => {
+      const tracker = new ProvenanceTracker();
+      tracker.createRecord({
+        context: mockContext,
+        filePath: 'a.ts',
+        action: 'create',
+        contentAfter: 'a',
+      });
+      tracker.createRecord({
+        context: mockContext,
+        filePath: 'b.ts',
+        action: 'create',
+        contentAfter: 'b',
+      });
+      expect(tracker.verifyChainIntegrity().valid).toBe(true);
+
+      // Giả mạo vai trò (worker → orchestrator): hash không đổi là lỗ hổng
+      // "audit trail bất biến" — record claim quyền vượt mức mà chuỗi vẫn xanh.
+      const records = tracker.getHistory() as any[];
+      records[1].role = 'orchestrator';
+      const roleCheck = tracker.verifyChainIntegrity();
+      expect(roleCheck.valid).toBe(false);
+
+      // Khôi phục rồi giả mạo parentRecordId (mối liên kết chuỗi).
+      records[1].role = mockContext.role;
+      expect(tracker.verifyChainIntegrity().valid).toBe(true);
+      records[1].parentRecordId = 'record-fake';
+      expect(tracker.verifyChainIntegrity().valid).toBe(false);
+    });
+
+    it('importFromJson ATOMIC: chuỗi giả mạo → throw và state cũ được khôi phục', () => {
+      const tracker = new ProvenanceTracker();
+      tracker.createRecord({
+        context: mockContext,
+        filePath: 'legit.ts',
+        action: 'create',
+        contentAfter: 'legit',
+      });
+      const prevTip = tracker.getHistory()[tracker.getHistory().length - 1].recordHash;
+
+      const json = tracker.exportToJson();
+      const tampered = JSON.parse(json);
+      tampered[0].action = 'delete'; // giả mạo sau khi xuất
+
+      expect(() => tracker.importFromJson(JSON.stringify(tampered))).toThrow();
+
+      // Tracker phải giữ NGUYÊN chuỗi cũ — bản cũ ghi đè rồi mới verify nên
+      // createRecord() kế tiếp sẽ nối lên tip đã bị sửa.
+      expect(tracker.getHistory().length).toBe(1);
+      expect(tracker.getHistory()[0].filePath).toBe('legit.ts');
+      expect(tracker.verifyChainIntegrity().valid).toBe(true);
+
+      // Tip không đổi → record mới nối tiếp đúng chuỗi cũ.
+      const r2 = tracker.createRecord({
+        context: mockContext,
+        filePath: 'next.ts',
+        action: 'create',
+        contentAfter: 'next',
+      });
+      expect(r2.prevRecordHash).toBe(prevTip);
+    });
+
+    it('importFromJson với payload không phải array → throw', () => {
+      const tracker = new ProvenanceTracker();
+      expect(() => tracker.importFromJson('{"not":"an array"}')).toThrow(/array/i);
+    });
   });
 
   // =========================================================================

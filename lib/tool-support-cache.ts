@@ -7,11 +7,19 @@
  * gateway có thể được nâng cấp giữa chừng — sau 10 phút thử lại.
  */
 
+import { modelCacheKey } from '@/lib/model-negative-cache';
+
 const TTL_MS = 10 * 60_000;
 const entries = new Map<string, number>();
 
+/**
+ * Key chuẩn hoá dùng CHUNG với model-negative-cache / model-lockout
+ * (host lowercase + model lowercase). Trước đây key dùng nguyên chuỗi baseUrl
+ * nên cùng một gateway viết khác nhau (có/không dấu `/` cuối, khác hoa thường)
+ * tạo ra entry riêng → cache miss, phải fail thêm một lượt vô ích.
+ */
 function key(base: string, model: string): string {
-  return `${base || 'default'}::${model}`;
+  return base ? modelCacheKey(base, model) : `default::${model.toLowerCase()}`;
 }
 
 /** true nếu cặp base+model vừa bị đánh dấu chê tools trong TTL hiện tại. */

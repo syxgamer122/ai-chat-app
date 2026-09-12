@@ -2065,7 +2065,7 @@ export default function ChatInterface() {
           setGoalLoop(verdict.state);
           if (verdict.decision === 'continue' && verdict.steering) {
             void append({ role: 'user', content: verdict.steering });
-          } else {
+          } else if (verdict.state) {
             showNotice(describeGoalStop(verdict.state), 6000);
           }
         }

@@ -1005,7 +1005,7 @@ export async function POST(req: Request) {
     /* Agentic tools: bật mặc định. Nếu gateway/model chê tham số tools
        (function calling không hỗ trợ), tắt trong phạm vi request này và thử
        lại — ghi nhớ theo base+model để các request sau khỏi dính lại. */
-    let allowAgentTools = (agentTools ?? true) && true; // điều chỉnh sau khi biết model
+    let allowAgentTools = agentTools ?? true; // điều chỉnh sau khi biết model
     let retriedWithoutTools = false;
     /** Gateway vừa chê tools param ở lượt này → retry bằng đường GIẢ LẬP
         (protocol text) thay vì bỏ tools hoàn toàn — model vẫn agent được. */
@@ -1323,6 +1323,21 @@ export async function POST(req: Request) {
       getStickyKey(conversationId),
     );
 
+    /* Kiểm tra key TRƯỚC khi chiếm slot của gateway free dùng chung: request chắc
+       chắn không gọi được upstream thì không nên tiêu ngân sách IP chung (và có
+       thể phải chờ tới hết hàng đợi) rồi mới trả 503. */
+    if (!candidateKeys.length) {
+      const retrySec = Math.max(1, Math.ceil((candidateResult.retryAfterMs ?? 60_000) / 1000));
+      return jsonError(
+        requestId,
+        503,
+        'NO_API_KEY_CONFIGURED',
+        'Toàn bộ API Key đang trong thời gian nghỉ / chờ xử lý. Vui lòng thử lại sau ít phút.',
+        undefined,
+        { 'Retry-After': String(retrySec) },
+      );
+    }
+
     /* Gateway free dùng chung (crax/Kilgore): ngân sách theo IP server là
        CHUNG cho toàn bộ user — xếp hàng để tổng luôn trong ngưỡng công bố. */
     const queueBase =
@@ -1343,17 +1358,6 @@ export async function POST(req: Request) {
           { 'Retry-After': String(slot.retryAfterSec) },
         );
       }
-    }
-    if (!candidateKeys.length) {
-      const retrySec = Math.max(1, Math.ceil((candidateResult.retryAfterMs ?? 60_000) / 1000));
-      return jsonError(
-        requestId,
-        503,
-        'NO_API_KEY_CONFIGURED',
-        'Toàn bộ API Key đang trong thời gian nghỉ / chờ xử lý. Vui lòng thử lại sau ít phút.',
-        undefined,
-        { 'Retry-After': String(retrySec) },
-      );
     }
 
     const upstreamHost =
@@ -2434,7 +2438,10 @@ export async function POST(req: Request) {
                   allowAgentTools = false;
                   retriedWithoutTools = true;
                   retryAsEmulated = true;
-                  if (upstreamBase) markToolsUnsupported(upstreamBase, selectedModelId);
+                  // Ghi nhớ theo ĐÚNG model vừa chê tools (targetModel), không phải
+                  // selectedModelId — modelChain đã được reorder nên hai giá trị này
+                  // thường khác nhau, ghi nhầm sẽ tắt tools oan cho model đang chọn.
+                  if (upstreamBase) markToolsUnsupported(upstreamBase, targetModel);
                   console.warn(
                     `[req:${requestId}] Gateway/model chê tools -> thử lại bằng đường GIẢ LẬP (${targetModel}).`,
                   );

@@ -168,16 +168,30 @@ describe('RED TEAM buildPickerSections - perf 200 model x 1000 lần', () => {
       providerId: 'p1',
       ts: i,
     }));
-    const t0 = performance.now();
-    for (let i = 0; i < 1000; i++) {
-      buildPickerSections(models, {
-        favorites,
-        recents,
-        currentId: 'lab/m-0',
-        providerId: 'p1',
-      });
+
+    const runBatch = (iterations: number): number => {
+      const t0 = performance.now();
+      for (let i = 0; i < iterations; i++) {
+        buildPickerSections(models, {
+          favorites,
+          recents,
+          currentId: 'lab/m-0',
+          providerId: 'p1',
+        });
+      }
+      return performance.now() - t0;
+    };
+
+    // Warm-up: để JIT ổn định trước khi đo.
+    runBatch(100);
+
+    // Lấy MIN của nhiều lượt: khi full-suite chạy song song, một lượt có thể bị
+    // scheduler/preemption làm phồng lên; min phản ánh chi phí thật của thuật toán
+    // nên vẫn bắt được hồi quy bậc hai mà không giòn theo tải CPU.
+    let best = Infinity;
+    for (let round = 0; round < 3; round++) {
+      best = Math.min(best, runBatch(1000));
     }
-    const elapsed = performance.now() - t0;
-    expect(elapsed).toBeLessThan(500);
+    expect(best).toBeLessThan(500);
   });
 });

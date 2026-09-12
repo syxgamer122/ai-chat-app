@@ -231,8 +231,12 @@ export function normalizeGoalAnswer(text: string): string {
 export type GoalVerdict = 'continue' | 'complete' | 'exhausted' | 'stalled';
 
 export interface GoalTurnResult {
-  /** Trạng thái SAU khi đánh giá — caller lưu lại qua store (đã tự cập nhật). */
-  state: GoalLoopState;
+  /**
+   * Trạng thái SAU khi đánh giá — caller lưu lại qua store (đã tự cập nhật).
+   * `null` khi conversation KHÔNG có goal loop nào (decision='complete' chỉ nghĩa
+   * "không còn gì để chạy tiếp", KHÔNG phải "mục tiêu đã hoàn tất").
+   */
+  state: GoalLoopState | null;
   /** Quyết định cho caller. */
   decision: GoalVerdict;
   /** Steering message khi decision === 'continue' (undefined nếu không). */
@@ -253,7 +257,9 @@ export function evaluateGoalTurn(
 ): GoalTurnResult {
   const state = getGoalLoop(conversationId);
   if (!state) {
-    return { state: null as unknown as GoalLoopState, decision: 'complete' };
+    // Không có goal → không có gì để chạy tiếp. Trả state null tường minh (trước đây
+    // ép kiểu `null as unknown as GoalLoopState`, giấu lỗi khỏi compiler).
+    return { state: null, decision: 'complete' };
   }
   if (state.status !== 'active') {
     const decision: GoalVerdict =

@@ -179,6 +179,30 @@ describe('Teamwork Completion Summary Generator', () => {
       expect(summary).toContain('`npx tsc --noEmit` -> PASS (exit 0)');
     });
 
+    it('hiển thị preview output của lệnh verify — rút 1 dòng, trắng gộp, tối đa ~120 ký tự', () => {
+      const summary = generateCompletionSummary({
+        status: 'COMPLETED',
+        testResults: [
+          {
+            command: 'npx vitest run tests/x.test.ts',
+            exitCode: 1,
+            verdict: 'FAIL',
+            output: 'Test Files  1 failed\n     Tests  2 failed | 40 passed\n' + 'x'.repeat(300),
+          },
+          // Không có output → không thêm dấu "|".
+          { command: 'npx tsc --noEmit', exitCode: 0, verdict: 'PASS' },
+        ],
+      });
+
+      // Trắng gộp còn 1 dòng + có preview sau dấu "|".
+      expect(summary).toContain('`npx vitest run tests/x.test.ts` -> FAIL (exit 1) | Test Files 1 failed Tests 2 failed | 40 passed');
+      expect(summary).toContain('`npx tsc --noEmit` -> PASS (exit 0)\n');
+      // Preview bị cắt ở 120 ký tự (kèm phần 'x' lặp nhưng không trọn 300).
+      const previewLine = summary.split('\n').find((l) => l.includes('vitest run tests/x'));
+      expect(previewLine!.length).toBeLessThan(200);
+      expect(previewLine!.includes('x'.repeat(300))).toBe(false);
+    });
+
     it('formats custom progressFilePath when provided', () => {
       const summary = generateCompletionSummary({
         status: 'COMPLETED',

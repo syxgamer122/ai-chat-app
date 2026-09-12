@@ -96,6 +96,24 @@ describe('serialize / parse', () => {
     expect(parsed['new.ts']).toMatchObject({ original: null, content: 'brand new' });
   });
 
+  it('parse re-key theo path CHUẨN HOÁ — overlay restore nhìn thấy được', () => {
+    // Payload serialise có thể giữ path raw ("./SRC/A.ts"); nếu re-key theo
+    // raw, fs_read/fs_edit (tra bằng normalized key) không thấy overlay và
+    // stageFile sau đó tạo record BẢN SA cho cùng một file.
+    const payload = JSON.stringify([
+      { path: './SRC/A.ts', original: 'v1', content: 'v2', stagedAt: 1 },
+      { path: 'src/b.ts', original: null, content: 'z', stagedAt: 2 },
+    ]);
+    const parsed = parseStaging(payload);
+    expect(Object.keys(parsed).sort()).toEqual(['src/a.ts', 'src/b.ts']);
+    expect(parsed['src/a.ts'].content).toBe('v2');
+
+    // Stage tiếp bằng key normalized → cập nhật record cũ, KHÔNG sinh bản sao.
+    const store = stageFile(parsed, 'src/a.ts', 'v1', 'v3');
+    expect(stagingCount(store)).toBe(2);
+    expect(store['src/a.ts'].content).toBe('v3');
+  });
+
   it('input rác → store rỗng, không ném', () => {
     expect(parseStaging(undefined)).toEqual({});
     expect(parseStaging(42)).toEqual({});
