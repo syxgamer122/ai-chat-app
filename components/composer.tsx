@@ -21,6 +21,7 @@ import {
   FolderOpen,
   Globe,
   ImagePlus,
+  ListChecks,
   Loader2,
   Mic,
   MoreHorizontal,
@@ -51,8 +52,10 @@ export interface SlashPrompt {
   /**
    * 'recipe': mục là workflow (panel Recipes) — chọn sẽ MỞ panel thay vì chèn
    * text; composer hiển thị nhãn 🍳 để phân biệt với prompt chèn thường.
+   * 'command': lệnh built-in (vd /plan) — chọn chỉ chèn tiền tố lệnh, Enter
+   * gửi thẳng cho ChatInterface xử lý.
    */
-  kind?: 'prompt' | 'recipe';
+  kind?: 'prompt' | 'recipe' | 'command';
 }
 
 export interface MediaAction {
@@ -828,10 +831,17 @@ export const Composer = memo(function Composer({
                   {p.kind === 'recipe' ? (
                     <ChefHat size={11} aria-hidden="true" className="flex-none text-[#6a9fcc]" />
                   ) : null}
+                  {p.kind === 'command' ? (
+                    <ListChecks size={11} aria-hidden="true" className="flex-none text-[#6a9fcc]" />
+                  ) : null}
                   /{p.title}
                 </span>
                 <span className="line-clamp-1 w-full text-[11px] text-[#9fa4ab]">
-                  {p.kind === 'recipe' ? 'workflow · mở panel để chạy' : p.content.replace(/\n+/g, ' ').trim()}
+                  {p.kind === 'recipe'
+                    ? 'workflow · mở panel để chạy'
+                    : p.kind === 'command'
+                      ? 'lệnh · lập kế hoạch bằng planner model (PLAN mode)'
+                      : p.content.replace(/\n+/g, ' ').trim()}
                 </span>
               </button>
             ))}

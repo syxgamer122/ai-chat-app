@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useChat, type Message } from 'ai/react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { useAppStore, isApiModelId } from '@/lib/store';
+import { useAppStore, isApiModelId, SERVER_PROVIDER_ID } from '@/lib/store';
+import {
+  computeRoutingSnapshot,
+  normalizeModelRoutingConfig,
+  DEFAULT_MODEL_ROUTING,
+  type RoutingMessageLike,
+  type RoutingRole,
+} from '@/lib/model-routing';
 import { syncActiveProviderSnapshot } from '@/lib/providers';
 import {
   db,
@@ -348,6 +355,8 @@ export default function ChatInterface() {
   const toolPermissions = useAppStore((s) => s.settings.toolPermissions);
   /** Staging sandbox: fs_edit/fs_write ghi vào bộ đệm thay vì đĩa. */
   const stagingEnabled = useAppStore((s) => s.settings.stagingSandbox ?? true);
+  /** Lead/Worker routing (P1-5): override model mỗi lượt theo state machine. */
+  const modelRouting = useAppStore((s) => s.settings.modelRouting ?? DEFAULT_MODEL_ROUTING);
   /** Capability suy luận của model đang chọn (metadata kiểu OpenRouter). */
   const modelReasoningCap = activeProvider?.models?.find((m) => m.id === model)?.reasoning ?? null;
   const throttleMs = useAppStore((s) => s.settings.perf.throttleMs);
@@ -405,6 +414,16 @@ export default function ChatInterface() {
   );
   const insertPrompts = useMemo(() => {
     const prompts: SlashPrompt[] = (promptTemplates ?? []).filter((p) => p.mode !== 'skill');
+    /* Lệnh built-in đứng đầu danh sách (P1-5): chọn chỉ chèn tiền tố "/plan "
+       — Enter với text đầy đủ "/plan <mục tiêu>" bị onSubmit intercept. */
+    const commands: SlashPrompt[] = [
+      {
+        id: 'cmd:plan',
+        title: 'plan',
+        content: '/plan ',
+        kind: 'command',
+      },
+    ];
     for (const r of recipeRecords ?? []) {
       const parsed = readRecipeRecord(r);
       prompts.push({
@@ -414,7 +433,7 @@ export default function ChatInterface() {
         kind: 'recipe',
       });
     }
-    return prompts;
+    return [...commands, ...prompts];
   }, [promptTemplates, recipeRecords]);
 
   /**
@@ -782,6 +801,50 @@ export default function ChatInterface() {
   /** Auto-retry emulated khi gateway strip tools im lặng (xem onFinish). */
   const emulatedRetryCountRef = useRef(0);
   const switchLockRef = useRef(false);
+
+  /* ------------------------------------------------------------------ */
+  /* Lead/Worker routing (port Goose P1-5)                               */
+  /* ------------------------------------------------------------------ */
+  /** Role của lượt ĐANG chạy — onFinish gắn vào usage annotation làm badge. */
+  const routingRoleRef = useRef<RoutingRole | null>(null);
+  /** Planner model dùng đúng MỘT lượt kế tiếp sau lệnh /plan. */
+  const plannerKickoffRef = useRef<string | null>(null);
+
+  /** Model do routing chọn có gửi được lên route không: provider tự khai
+   *  nhận mọi id gateway trả về; Máy chủ mặc định chỉ nhận model built-in
+   *  (route 400 MODEL_NOT_ALLOWED với id lạ) — cùng điều kiện recipe dùng. */
+  const isRoutableModel = useCallback(
+    (id: string): boolean => {
+      if (!isApiModelId(id)) return false;
+      if (activeProviderId === SERVER_PROVIDER_ID) return MODELS.some((m) => m.id === id);
+      return true;
+    },
+    [activeProviderId, MODELS],
+  );
+
+  /**
+   * Body override cho MỘT lượt gửi: fold lại toàn bộ history → role → model.
+   * Trả {} khi routing tắt hoặc model của role chưa cấu hình — lượt chạy bằng
+   * model người dùng chọn như thường. `msgs` truyền tường minh từ closure của
+   * từng call site (đúng history tại thời điểm đó) thay vì ref — onFinish
+   * drain steering cần fold KỂ CẢ lượt vừa kết thúc.
+   */
+  const routingBodyFor = useCallback(
+    (msgs: readonly Message[], text: string): Record<string, unknown> => {
+      const snap = computeRoutingSnapshot(
+        msgs as unknown as readonly RoutingMessageLike[],
+        modelRouting,
+        text,
+      );
+      if (snap.modelId && isRoutableModel(snap.modelId)) {
+        routingRoleRef.current = snap.role;
+        return { model: snap.modelId };
+      }
+      routingRoleRef.current = null;
+      return {};
+    },
+    [modelRouting, isRoutableModel],
+  );
 
   const [isSwitchingBranch, setIsSwitchingBranch] = useState(false);
   const [isTouchDevice, setIsTouchDevice] = useState(false);
@@ -2285,6 +2348,9 @@ export default function ChatInterface() {
           {
             usage: { promptTokens, completionTokens },
             model: lastModel ?? model,
+            /* Badge lead/worker của lượt này (P1-5) — client là nơi quyết định
+               routing nên không chờ server phát annotation. */
+            ...(routingRoleRef.current ? { routingRole: routingRoleRef.current } : {}),
             ...(durationMs ? { durationMs } : {}),
             ...(estimated ? { est: true } : {}),
           },
@@ -2336,7 +2402,8 @@ export default function ChatInterface() {
         if (steerDrained.taken.length > 0) {
           steeringRef.current = steerDrained.rest;
           setSteeringCount(steerDrained.rest.length);
-          void append({ role: 'user', content: steerDrained.taken.join('\n\n') });
+          const steerText = steerDrained.taken.join('\n\n');
+          void append({ role: 'user', content: steerText }, { body: routingBodyFor(messages, steerText) });
           return;
         }
 
@@ -2350,7 +2417,10 @@ export default function ChatInterface() {
           const verdict = evaluateGoalTurn(useAppStore.getState().currentChatId, message.content);
           setGoalLoop(verdict.state);
           if (verdict.decision === 'continue' && verdict.steering) {
-            void append({ role: 'user', content: verdict.steering });
+            void append(
+              { role: 'user', content: verdict.steering },
+              { body: routingBodyFor(messages, verdict.steering) },
+            );
             return;
           } else if (verdict.state) {
             showNotice(describeGoalStop(verdict.state), 6000);
@@ -2361,7 +2431,8 @@ export default function ChatInterface() {
         if (followDrained.taken.length > 0) {
           followUpRef.current = followDrained.rest;
           setFollowUpCount(followDrained.rest.length);
-          void append({ role: 'user', content: followDrained.taken.join('\n\n') });
+          const followText = followDrained.taken.join('\n\n');
+          void append({ role: 'user', content: followText }, { body: routingBodyFor(messages, followText) });
         }
       }
     },
@@ -2609,6 +2680,11 @@ export default function ChatInterface() {
   // (đổi nhánh sang nơi chưa từng nén → marker cũ tự vô hiệu).
   const activeCompaction = useMemo(
     () => findActiveCompaction(compaction, messages),
+    /* Compiler từ chối preserve memo này vì `messages` được truyền vào các
+       routing callback (P1-5) — false positive: callback chỉ ĐỌC, không đổi.
+       Memo thủ công vẫn đúng và CẦN THIẾT: bỏ memo thì object mới mỗi render
+       khiến effect setRequestCompaction bên dưới chạy vô hạn. */
+    // eslint-disable-next-line react-hooks/preserve-manual-memoization
     [compaction, messages],
   );
 
@@ -2917,14 +2993,33 @@ export default function ChatInterface() {
       const started = startGoalLoop(chatId, { instruction: goal });
       setGoalLoop(started);
       composerApiRef.current?.clear();
-      void append({ role: 'user', content: buildGoalKickoff(started) });
+      const goalKickoff = buildGoalKickoff(started);
+      void append({ role: 'user', content: goalKickoff }, { body: routingBodyFor(messages, goalKickoff) });
     },
-    [goalLoop, append, composerApiRef],
+    [goalLoop, append, composerApiRef, messages, routingBodyFor],
   );
 
   const continueGenerating = useCallback(() => {
-    void append({ role: 'user', content: CONTINUE_PROMPT });
-  }, [append]);
+    void append(
+      { role: 'user', content: CONTINUE_PROMPT },
+      { body: routingBodyFor(messages, CONTINUE_PROMPT) },
+    );
+  }, [append, messages, routingBodyFor]);
+
+  /**
+   * Duyệt kế hoạch (P1-5): chuyển ACT + gửi lượt kick-off thực thi. Plan đã
+   * được agent lưu qua plan_create từ lúc lập; lượt kick-off đi qua routing
+   * như mọi lượt user nên có thể rơi vào worker model đúng pha thực thi.
+   */
+  const handleApprovePlan = useCallback(() => {
+    updateSettings({ agentMode: 'act' });
+    showNotice('Đã duyệt kế hoạch — chuyển sang ACT mode, agent bắt đầu thực thi.', 5000);
+    if (!isLoading) {
+      const kick =
+        'Người dùng đã duyệt kế hoạch. Hãy bắt đầu thực hiện theo đúng thứ tự subtask, dùng plan_update để đánh dấu tiến độ (in_progress → done/failed).';
+      void append({ role: 'user', content: kick }, { body: routingBodyFor(messages, kick) });
+    }
+  }, [updateSettings, isLoading, append, messages, routingBodyFor]);
 
   const { isAtBottom, isAtBottomRef, onScroll, pin, scrollToBottom } = useStickToBottom(scrollRef, {
     streaming: isLoading,
@@ -4666,6 +4761,20 @@ export default function ChatInterface() {
         }
       }
 
+      /* Lead/Worker routing (P1-5): recipe không chạy thì override model của
+         lượt này theo state machine. /plan đã cắm planner model vào ref —
+         planner thắng routing thường (lập kế hoạch luôn cần model mạnh). */
+      if (!modelOverride && userText) {
+        const plannerModel = plannerKickoffRef.current;
+        plannerKickoffRef.current = null;
+        if (plannerModel && isRoutableModel(plannerModel)) {
+          routingRoleRef.current = 'planner';
+          options.body = { ...options.body, model: plannerModel };
+        } else {
+          options.body = { ...options.body, ...routingBodyFor(messages, userText) };
+        }
+      }
+
       /* Chat với PDF: attachment PDF được trích text qua /api/pdf rồi gửi kèm
          body. Không trích được (scan/lỗi) vẫn gửi như cũ. */
       if (attachments.length > 0) {
@@ -4719,7 +4828,7 @@ export default function ChatInterface() {
     }
     /* beginRun/currentRun/setRepairable là hàm ổn định (useCallback rỗng bên
        trong hook), nên thêm vào đây không làm submitTurn bị tạo lại. */
-  }, [attachments, isLoading, mediaBusy, currentChatId, draftId, setCurrentChatId, append, pin, generateTitle, messages.length, webSearchEnabled, promptTemplates, agentToolsEnabled, forceEmulatedTools, agentMode, stagingEnabled, beginRun, currentRun, setRepairable, MODELS]);
+  }, [attachments, isLoading, mediaBusy, currentChat, currentChatId, draftId, setCurrentChatId, append, pin, generateTitle, messages, webSearchEnabled, promptTemplates, agentToolsEnabled, forceEmulatedTools, agentMode, stagingEnabled, beginRun, currentRun, setRepairable, MODELS, isRoutableModel, routingBodyFor]);
 
   /* ---------------------------------------------------------------- */
   /* Recipe runner (port Goose): attempt → checks → retry/pass/stop.   */
@@ -4974,19 +5083,58 @@ export default function ChatInterface() {
   }, []);
 
   /**
+   * /plan <mục tiêu> (P1-5): lập kế hoạch bằng planner model ở chế độ chỉ-đọc.
+   * PLAN mode phía server đã ép explore-only + hướng dẫn plan_create; planner
+   * model (nếu cấu hình) áp cho ĐÚNG lượt kế tiếp qua ref rồi tự nhả — các
+   * lượt sau quay lại routing thường.
+   */
+  const handlePlanCommand = useCallback(
+    async (target: string): Promise<boolean> => {
+      const cfg = normalizeModelRoutingConfig(modelRouting);
+      if (cfg.plannerModel && isRoutableModel(cfg.plannerModel)) {
+        plannerKickoffRef.current = cfg.plannerModel;
+      }
+      if (agentMode !== 'plan') {
+        updateSettings({ agentMode: 'plan' });
+        showNotice(
+          'Đã bật PLAN mode — agent chỉ khảo sát, chưa ghi file. Kế hoạch sẽ hiện trong panel.',
+          6000,
+        );
+      }
+      return submitTurn(
+        `Hãy lập kế hoạch chi tiết cho yêu cầu sau (gọi plan_create để lưu kế hoạch):\n\n${target}`,
+      );
+    },
+    [modelRouting, isRoutableModel, agentMode, updateSettings, submitTurn],
+  );
+
+  /**
    * Router gửi tin (P3.1): idle → submitTurn như cũ; đang chạy → hàng đợi.
    * Enter không opts → mặc định STEERING (Pi: inject ngay khi turn xong);
    * Alt+Enter truyền queueAs:'follow-up' (chỉ bắn khi agent rảnh).
    */
   const onSubmit = useCallback(
     async (draft: string, opts?: { queueAs?: 'steer' | 'follow-up' }): Promise<boolean> => {
+      /* Lệnh /plan: intercept TRƯỚC queue — khi agent đang chạy thì để queue
+         như tin thường (lập kế hoạch đè lên agent đang chạy là hỏng việc). */
+      if (!isLoading) {
+        const planMatch = /^\/plan(?![\w-])([\s\S]*)$/.exec(draft.trim());
+        if (planMatch) {
+          const target = planMatch[1].trim();
+          if (!target) {
+            showNotice('Gõ theo mẫu: /plan <mục tiêu cần lập kế hoạch>', 5000);
+            return false;
+          }
+          return handlePlanCommand(target);
+        }
+      }
       if (isLoading) {
         const kind = opts?.queueAs ?? 'steer';
         return queueWhileBusy(draft, kind) !== 'dropped';
       }
       return submitTurn(draft);
     },
-    [isLoading, submitTurn, queueWhileBusy],
+    [isLoading, submitTurn, queueWhileBusy, handlePlanCommand],
   );
 
   /**
@@ -5511,7 +5659,12 @@ export default function ChatInterface() {
       {/* Checklist tiến độ của plan hiện tại — promise [PLANNING] trong
           system prompt giờ có UI thật. */}
       {plan && !planHidden && (
-        <PlanPanel plan={plan} onHide={() => setPlanHidden(true)} />
+        <PlanPanel
+          plan={plan}
+          onHide={() => setPlanHidden(true)}
+          canApprove={agentMode === 'plan' && !isLoading}
+          onApprove={handleApprovePlan}
+        />
       )}
 
       {/* P0-3: chip "hints loaded" — bấm để xem nguyên văn ngữ cảnh dự án

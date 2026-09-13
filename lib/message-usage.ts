@@ -9,12 +9,15 @@
  * trong lib/pricing, mọi trường hợp khác là null chứ không bịa số.
  */
 import { estimateCallCostUsd } from '@/lib/pricing';
+import type { RoutingRole } from '@/lib/model-routing';
 
 interface UsageAnnotation {
   usage?: { promptTokens?: unknown; completionTokens?: unknown };
   model?: unknown;
   durationMs?: unknown;
   est?: unknown;
+  /** Lead/Worker routing (P1-5): vai trò model của lượt — badge cạnh usage. */
+  routingRole?: unknown;
 }
 
 export interface MessageUsageStats {
@@ -27,6 +30,8 @@ export interface MessageUsageStats {
   durationMs: number | null;
   /** USD ước lượng theo bảng giá công khai; null = không dám tính. */
   costUsd: number | null;
+  /** 'lead' | 'worker' | 'planner' khi lượt chạy qua Lead/Worker routing; null = thường. */
+  routingRole: RoutingRole | null;
 }
 
 /**
@@ -56,8 +61,12 @@ export function extractMessageUsage(annotations: unknown): MessageUsageStats | n
   const estimated = found?.est === true;
   const costUsd =
     estimated || !model ? null : estimateCallCostUsd(model, prompt, completion);
+  const routingRole =
+    found?.routingRole === 'lead' || found?.routingRole === 'worker' || found?.routingRole === 'planner'
+      ? found.routingRole
+      : null;
 
-  return { promptTokens: prompt, completionTokens: completion, estimated, model, durationMs, costUsd };
+  return { promptTokens: prompt, completionTokens: completion, estimated, model, durationMs, costUsd, routingRole };
 }
 
 /** Ghép dòng hiển thị: ↑1024 ↓512 · 4.5s · $0.0012. Phần 0 bị bỏ hẳn. */

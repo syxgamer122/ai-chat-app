@@ -26,6 +26,11 @@ import {
   DEFAULT_CHAINS,
 } from '@/lib/routing/categories';
 import type { ToolcallRule } from '@/lib/toolcall-rules';
+import {
+  DEFAULT_MODEL_ROUTING,
+  normalizeModelRoutingConfig,
+  type ModelRoutingConfig,
+} from '@/lib/model-routing';
 
 /** id provider "dùng cấu hình env của server" — định nghĩa ở store để tránh vòng import. */
 export const SERVER_PROVIDER_ID = '__server__';
@@ -180,6 +185,13 @@ export interface Settings {
   recentModels: RecentModel[];
   /** Disk skills (P0-3) bị tắt theo name — lọc khỏi chỉ mục gửi lên model. */
   disabledSkills: string[];
+  /**
+   * Lead/Worker routing (port Goose P1-5): model mạnh cho N lượt đầu + khi
+   * fallback, model rẻ cho thực thi. Tắt mặc định — bật trong Settings →
+   * Routing. State KHÔNG lưu: tính lại từ message history mỗi lượt
+   * (lib/model-routing.ts).
+   */
+  modelRouting: ModelRoutingConfig;
   apiKey?: string;
   accessCode?: string;
   /** Mixture-of-models chains theo Category (Oh My Hermes port) */
@@ -241,6 +253,7 @@ const DEFAULT_SETTINGS: Settings = {
   modelFavorites: [],
   recentModels: [],
   disabledSkills: [],
+  modelRouting: { ...DEFAULT_MODEL_ROUTING },
   apiKey: '',
   accessCode: '',
   modelChains: DEFAULT_CHAINS,
@@ -320,6 +333,7 @@ export const useAppStore = create<AppState>()(
           modelFavorites: s.settings.modelFavorites,
           recentModels: s.settings.recentModels,
           disabledSkills: s.settings.disabledSkills,
+          modelRouting: s.settings.modelRouting,
           modelChains: s.settings.modelChains,
           toolcallRules: s.settings.toolcallRules,
         },
@@ -383,6 +397,7 @@ export const useAppStore = create<AppState>()(
             disabledSkills: Array.isArray(p.settings?.disabledSkills)
               ? p.settings.disabledSkills.filter((n: unknown): n is string => typeof n === 'string' && n.length > 0 && n.length <= 60)
               : [],
+            modelRouting: normalizeModelRoutingConfig(p.settings?.modelRouting),
             apiKey: '',
             accessCode: '',
           },

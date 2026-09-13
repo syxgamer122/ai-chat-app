@@ -157,9 +157,10 @@ export async function deletePrompt(id: string): Promise<void> {
   await db.prompts.delete(id);
 }
 
-/** Item slash menu sau khi lọc — giữ field kind ('recipe' mở panel thay vì chèn). */
+/** Item slash menu sau khi lọc — giữ field kind ('recipe' mở panel thay vì chèn,
+ *  'command' là lệnh built-in như /plan — Enter gửi thẳng, không chèn text). */
 export type FilterablePrompt = Pick<PromptTemplate, 'id' | 'title' | 'content'> & {
-  kind?: 'prompt' | 'recipe';
+  kind?: 'prompt' | 'recipe' | 'command';
 };
 
 /** Filter prompt theo từ khoá sau "/". Fold dấu tiếng Việt — "tom tat" ra "Tóm tắt". */

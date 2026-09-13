@@ -61,6 +61,17 @@ describe('extractMessageUsage', () => {
       extractMessageUsage([{ usage: { promptTokens: 0, completionTokens: 0 }, model: 'gpt-4o' }]),
     ).toBeNull();
   });
+
+  it('routingRole (P1-5): lấy từ annotation usage cuối, giá trị lạ → null', () => {
+    const s = extractMessageUsage([
+      { usage: { promptTokens: 10, completionTokens: 5 }, model: 'gpt-4o', routingRole: 'lead' },
+      { usage: { promptTokens: 20, completionTokens: 6 }, model: 'gpt-4o', routingRole: 'worker' },
+    ])!;
+    expect(s.routingRole).toBe('worker');
+    expect(extractMessageUsage([
+      { usage: { promptTokens: 10, completionTokens: 5 }, model: 'gpt-4o', routingRole: 'boss' as unknown },
+    ])!.routingRole).toBeNull();
+  });
 });
 
 describe('formatMessageUsage', () => {
@@ -72,6 +83,7 @@ describe('formatMessageUsage', () => {
       model: 'gpt-4o',
       durationMs: 4250,
       costUsd: 0.006,
+      routingRole: null,
     });
     expect(real).toBe('↑1200 · ↓300 · 4.3s · $0.0060');
 
@@ -82,6 +94,7 @@ describe('formatMessageUsage', () => {
       model: null,
       durationMs: 820,
       costUsd: null,
+      routingRole: null,
     });
     expect(est).toBe('≈↓480 · 0.8s');
   });
@@ -94,6 +107,7 @@ describe('formatMessageUsage', () => {
       model: 'gpt-4o',
       durationMs: null,
       costUsd: 0.0035,
+      routingRole: null,
     });
     expect(s).toBe('↑1000 · ↓100 · $0.0035');
   });
@@ -106,6 +120,7 @@ describe('formatMessageUsage', () => {
       model: 'gpt-4o',
       durationMs: 1000,
       costUsd: null,
+      routingRole: null,
     });
     expect(s.startsWith('↑')).toBe(false);
     expect(s).toBe('↓42 · 1.0s');

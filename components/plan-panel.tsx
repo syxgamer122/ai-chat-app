@@ -42,9 +42,13 @@ const STATUS_META: Record<
 interface PlanPanelProps {
   plan: Plan;
   onHide: () => void;
+  /** Đang ở PLAN mode và agent rảnh → hiện nút "Duyệt & thực hiện" (P1-5). */
+  canApprove?: boolean;
+  /** Chuyển ACT mode + gửi lượt kick-off thực thi kế hoạch. */
+  onApprove?: () => void;
 }
 
-export function PlanPanel({ plan, onHide }: PlanPanelProps) {
+export function PlanPanel({ plan, onHide, canApprove = false, onApprove }: PlanPanelProps) {
   const [expanded, setExpanded] = useState(true);
   const [showAllTasks, setShowAllTasks] = useState(false);
   const prog = planProgress(plan);
@@ -108,6 +112,16 @@ export function PlanPanel({ plan, onHide }: PlanPanelProps) {
               {prog.done}/{prog.total} · {prog.percentComplete}%
             </span>
           </button>
+          {canApprove && onApprove && (
+            <button
+              type="button"
+              onClick={onApprove}
+              className="rounded-none border border-[#5db87a]/60 px-2 py-1 text-[11px] font-semibold text-[#5db87a] transition-colors hover:bg-[#5db87a]/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[#6a9fcc]"
+              title="Chuyển sang ACT mode và bắt đầu thực thi kế hoạch này"
+            >
+              Duyệt &amp; thực hiện
+            </button>
+          )}
           <button
             type="button"
             onClick={onHide}

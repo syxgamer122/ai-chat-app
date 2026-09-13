@@ -20,6 +20,22 @@ export function MessageUsage({ annotations }: { annotations?: unknown }) {
           : 'Token thật do gateway báo'
       }
     >
+      {stats.routingRole && (
+        <span
+          className={`mr-1 ${
+            stats.routingRole === 'worker' ? 'text-[#9fa4ab]' : 'text-[#6a9fcc]'
+          }`}
+          title={
+            stats.routingRole === 'planner'
+              ? 'Lượt chạy bằng planner model (lệnh /plan)'
+              : stats.routingRole === 'lead'
+                ? 'Model mạnh (lead) — lập kế hoạch hoặc fallback sau thất bại'
+                : 'Model rẻ (worker) — pha thực thi'
+          }
+        >
+          {stats.routingRole}
+        </span>
+      )}
       {text}
     </p>
   );

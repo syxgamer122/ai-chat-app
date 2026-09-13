@@ -21,6 +21,7 @@
 - **Skills (SKILL.md, port Goose)**: kỹ năng dạng file trong `.vyen/skills/` của workspace và `~/.vyen/skills/` (desktop). Agent chỉ thấy bảng chỉ mục (tên + mô tả); nội dung nạp khi agent gọi `skill_load` — tiết kiệm token. Quản lý + tạo mới trong Settings → Skills.
 - **`.vyenhints`**: ngữ cảnh dự án nạp tự động vào system prompt (fallback `AGENTS.md` → `CLAUDE.md` → `.goosehints`, trần 8.000 ký tự), chip "hints loaded" trên UI bấm xem nguyên văn.
 - **Bộ nhớ có cấu trúc (port Goose)**: `remember_memory` / `retrieve_memories` / `remove_memory_category` / `remove_specific_memory` — fact dài hạn theo category + tags + scope local/global (tối đa 2.000 ký tự/entry). Chỉ inject chỉ mục vào prompt (trần 4.000 ký tự); mirror ra `.vyen/memory/<category>.md` + `~/.vyen/memory/` để đọc/sửa tay; quản lý trong Settings → Ghi nhớ.
+- **Lead/Worker routing (port Goose)**: model mạnh chạy vài lượt đầu (lập kế hoạch) rồi model rẻ thực thi; tool lỗi liên tiếp / build-test fail / bạn phàn nàn ("sai rồi", "làm lại"…) thì tự quay lại model mạnh `fallbackTurns` lượt. Lỗi 429/5xx của gateway và việc bạn TỪ CHỐI phê duyệt không tính là thất bại. Vai trò từng lượt hiện badge `lead`/`worker` dưới câu trả lời; cấu hình trong Settings → Routing. Lệnh `/plan <mục tiêu>` lập kế hoạch bằng planner model ở chế độ chỉ-đọc, duyệt xong bấm "Duyệt & thực hiện" để chuyển sang Act.
 - **Auto-backup**: nhắc định kỳ theo chu kỳ tuỳ chọn; desktop Chrome/Edge chọn được thư mục để app **tự ghi file .json ngầm** khi đến kỳ (File System Access API).
 - **PWA cài lên thiết bị**: Android/Chrome bấm "Cài đặt ứng dụng" hoặc nút trong Settings; iOS Safari → Chia sẻ → Thêm vào Màn hình chính. Có trang offline khi mất mạng.
 - **32 model chat** (GPT/Claude/DeepSeek/Gemini/MiniMax/Grok/Qwen/Kimi) qua gateway tương thích OpenAI, kèm 5 model sinh ảnh/video riêng.
@@ -68,6 +69,7 @@ Vyen đọc tự do nhưng ghi có kỷ luật: mọi thao tác ghi file / chạ
 ### Kiểm soát ngữ cảnh & model
 
 - **Compaction**: hội thoại dài tự nén qua `/api/compact` — phần cũ thay bằng summary, dữ kiện quan trọng (file đã chạm, yêu cầu đã nêu) sống sót qua nhiều lần nén.
+- **Lead/Worker routing**: state machine tính lại từ toàn bộ lịch sử mỗi lượt (không lưu state riêng — sống sót qua reload), client chỉ override field `model` của request như đường media/recipe; server không cần biết. `/plan` chạy planner model đúng một lượt rồi nhả về routing thường.
 - **Thanh trượt suy luận**: 4 mức low/medium/high/max; mức nào khả dụng đọc từ metadata `/v1/models` (chuẩn OpenRouter) nên model không hỗ trợ không nhận tham số rác.
 - **Ngân sách tool**: tối đa 32 lần gọi tool mỗi lượt (đếm theo hội thoại, không reset khi client resubmit), tự chặn gọi trùng tham số và phát hiện doom-loop để bảo model đổi hướng; kết quả tool bị cắt ở 24.000 ký tự.
 - **Sinh ảnh/video**: nút trong ô nhập gọi thẳng gateway để tạo ảnh hoặc video ngay trong khung chat, tự fallback qua server khi gateway chặn CORS. Trên bản desktop (launcher Edge/Chrome), tạo ảnh gọi gateway trực tiếp từ Web nên gateway chặn origin kiểu crax vẫn gọi được.
@@ -153,6 +155,7 @@ lib/             — logic agent thuần, test được trong node:
                   goal-loop, debug-loop, lessons, plan (subtask-plan),
                   mcp/ (tool-mapper, bridge, image-content), fs-vision,
                   context-compaction, reasoning-capability,
+                  model-routing (lead/worker state machine),
                   recipes/ (schema zod, template one-pass, retry state
                   machine, structured output, share link, sub-recipe tools),
                   skills/ (SKILL.md front-matter + chỉ mục + hints),
