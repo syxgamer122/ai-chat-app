@@ -22,6 +22,10 @@
  * Thuần function, không Dexie/React — test được trong node.
  */
 
+import type { VerificationReceipt } from '@/lib/verification';
+import type { EvidenceLevel } from '@/lib/evidence';
+import { evaluateCompletionIntegrity } from '@/lib/completion-gate';
+
 /* ------------------------------------------------------------------ */
 /* Trạng thái                                                          */
 /* ------------------------------------------------------------------ */
@@ -29,11 +33,11 @@
 export type GoalLoopStatus =
   /** Đang chạy — caller tiếp tục resubmit khi verdict là 'continue'. */
   | 'active'
-  /** Model phát marker hoàn thành. */
+  /** Model phát marker hoàn thành và thỏa mãn biên nhận kiểm chứng. */
   | 'succeeded'
   /** Người dùng chủ động dừng. */
   | 'stopped'
-  /** Hết lượt mà chưa thấy marker. */
+  /** Hết lượt mà chưa thấy marker hoặc thiếu bằng chứng kiểm chứng. */
   | 'exhausted'
   /** Trả lời y hệt nhau STALL_THRESHOLD lần liên tiếp — không tiến triển. */
   | 'stalled';
@@ -49,11 +53,17 @@ export interface GoalLoopState {
   iterations: number;
   status: GoalLoopStatus;
   /** Lý do kết thúc — chỉ có nghĩa khi status !== 'active'. */
-  stopReason?: 'goal_complete' | 'user_stop' | 'max_iterations' | 'no_progress';
+  stopReason?: 'goal_complete' | 'user_stop' | 'max_iterations' | 'no_progress' | 'lacks_verification';
   /** Hash chuẩn hóa của các câu trả lời cuối gần nhất (stall detection). */
   recentAnswerHashes: string[];
   startedAt: number;
   lastProgressAt: number;
+  /** Bậc thang bằng chứng hiện tại */
+  evidenceLevel?: EvidenceLevel;
+  /** Biên nhận kiểm chứng thực tế nếu có */
+  verificationReceipt?: VerificationReceipt;
+  /** Lệnh kiểm thử bắt buộc phải có receipt trước khi công nhận hoàn tất */
+  requiredCommand?: string;
 }
 
 /* ------------------------------------------------------------------ */
@@ -150,7 +160,7 @@ export function getGoalLoop(conversationId?: string | null): GoalLoopState | nul
  */
 export function startGoalLoop(
   conversationId: string | null | undefined,
-  opts: { instruction: string; maxIterations?: number },
+  opts: { instruction: string; maxIterations?: number; requiredCommand?: string },
   now: number = Date.now(),
 ): GoalLoopState {
   const instruction = (opts.instruction ?? '').trim();
@@ -167,6 +177,8 @@ export function startGoalLoop(
     recentAnswerHashes: [],
     startedAt: now,
     lastProgressAt: now,
+    requiredCommand: opts.requiredCommand,
+    evidenceLevel: 'prepared',
   };
   if (conversationId) {
     sweep(now);
@@ -250,15 +262,39 @@ export interface GoalTurnResult {
  * Chỉ có nghĩa khi goal đang 'active'; goal đã terminal thì trả nguyên trạng
  * thái với decision tương ứng, không đếm thêm lượt.
  */
+export interface EvaluateGoalTurnOptions {
+  now?: number;
+  receipt?: VerificationReceipt;
+  requiredCommand?: string;
+  diff?: string;
+}
+
+/**
+ * Đánh giá lượt assistant vừa kết thúc. GHI TRẠNG THÁI MỚI vào store (bucket
+ * theo conversationId) — trả về cả state mới để caller/test kiểm tra.
+ *
+ * Chỉ có nghĩa khi goal đang 'active'; goal đã terminal thì trả nguyên trạng
+ * thái với decision tương ứng, không đếm thêm lượt.
+ */
 export function evaluateGoalTurn(
   conversationId: string | null | undefined,
   assistantText: string,
-  now: number = Date.now(),
+  nowOrOpts: number | EvaluateGoalTurnOptions = Date.now(),
 ): GoalTurnResult {
+  let now: number;
+  let verificationContext: EvaluateGoalTurnOptions | undefined;
+  if (typeof nowOrOpts === 'number') {
+    now = nowOrOpts;
+  } else if (nowOrOpts && typeof nowOrOpts === 'object') {
+    now = nowOrOpts.now ?? Date.now();
+    verificationContext = nowOrOpts;
+  } else {
+    now = Date.now();
+  }
+
   const state = getGoalLoop(conversationId);
   if (!state) {
-    // Không có goal → không có gì để chạy tiếp. Trả state null tường minh (trước đây
-    // ép kiểu `null as unknown as GoalLoopState`, giấu lỗi khỏi compiler).
+    // Không có goal → không có gì để chạy tiếp. Trả state null tường minh.
     return { state: null, decision: 'complete' };
   }
   if (state.status !== 'active') {
@@ -268,14 +304,77 @@ export function evaluateGoalTurn(
   }
 
   const iterations = state.iterations + 1;
+  const requiredCmd = verificationContext?.requiredCommand || state.requiredCommand;
+  const receipt = verificationContext?.receipt;
+  const diff = verificationContext?.diff;
 
-  /* 1. Model tuyên bố hoàn thành → succeeded. */
+  /* 1. Model tuyên bố hoàn thành */
   if (hasGoalCompleteMarker(assistantText)) {
+    // Nếu có yêu cầu lệnh kiểm thử xác minh
+    if (requiredCmd) {
+      const commandMatches = receipt && receipt.command.includes(requiredCmd);
+      const isPass = receipt && receipt.exitCode === 0;
+      const integrityOk = !diff || evaluateCompletionIntegrity(diff).ok;
+
+      if (commandMatches && isPass && integrityOk) {
+        const next: GoalLoopState = {
+          ...state,
+          iterations,
+          status: 'succeeded',
+          stopReason: 'goal_complete',
+          evidenceLevel: 'verified',
+          verificationReceipt: receipt,
+          lastProgressAt: now,
+        };
+        if (conversationId) buckets.set(conversationId, { state: next, touchedAt: now });
+        return { state: next, decision: 'complete' };
+      }
+
+      // Chưa có receipt pass: không công nhận hoàn tất (không verified)
+      if (iterations < state.maxIterations) {
+        const reasonMissing = !receipt
+          ? `Thiếu VerificationReceipt cho lệnh kiểm thử "${requiredCmd}".`
+          : !commandMatches
+          ? `Biên nhận nhận được là cho lệnh "${receipt.command}", không khớp lệnh bắt buộc "${requiredCmd}".`
+          : receipt.exitCode !== 0
+          ? `Lệnh kiểm thử "${receipt.command}" thất bại (exit code ${receipt.exitCode}).`
+          : 'Completion Gate từ chối do phát hiện stub/test skip.';
+
+        const next: GoalLoopState = {
+          ...state,
+          iterations,
+          evidenceLevel: 'reported_done',
+          lastProgressAt: now,
+        };
+        if (conversationId) buckets.set(conversationId, { state: next, touchedAt: now });
+        return {
+          state: next,
+          decision: 'continue',
+          steering: `[CHƯA THỂ KẾT THÚC] ${reasonMissing} Hãy thực thi lệnh kiểm thử thật sự và đảm bảo pass trước khi kết luận.`,
+        };
+      }
+
+      // Hết lượt mà chưa có receipt
+      const next: GoalLoopState = {
+        ...state,
+        iterations,
+        status: 'exhausted',
+        stopReason: 'lacks_verification',
+        evidenceLevel: 'reported_done',
+        lastProgressAt: now,
+      };
+      if (conversationId) buckets.set(conversationId, { state: next, touchedAt: now });
+      return { state: next, decision: 'exhausted' };
+    }
+
+    // Không có requiredCommand bắt buộc (chế độ chat tự do / legacy)
     const next: GoalLoopState = {
       ...state,
       iterations,
       status: 'succeeded',
       stopReason: 'goal_complete',
+      evidenceLevel: receipt?.exitCode === 0 ? 'verified' : 'reported_done',
+      verificationReceipt: receipt,
       lastProgressAt: now,
     };
     if (conversationId) buckets.set(conversationId, { state: next, touchedAt: now });
@@ -320,6 +419,7 @@ export function evaluateGoalTurn(
     iterations,
     recentAnswerHashes: recent,
     lastProgressAt: now,
+    evidenceLevel: 'running',
   };
   if (conversationId) buckets.set(conversationId, { state: next, touchedAt: now });
   return { state: next, decision: 'continue', steering: buildGoalSteering(next) };
@@ -378,10 +478,15 @@ export function buildGoalSteering(state: GoalLoopState): string {
 export function describeGoalStop(state: GoalLoopState): string {
   switch (state.status) {
     case 'succeeded':
-      return `🎯 Mục tiêu hoàn tất sau ${state.iterations} lượt.`;
+      return state.evidenceLevel === 'verified'
+        ? `🎯 Mục tiêu hoàn tất và ĐÃ KIỂM CHỨNG sau ${state.iterations} lượt.`
+        : `🎯 Mục tiêu hoàn tất sau ${state.iterations} lượt.`;
     case 'stopped':
       return '🎯 Goal loop đã được dừng thủ công.';
     case 'exhausted':
+      if (state.stopReason === 'lacks_verification') {
+        return `🎯 Dừng ở trạng thái "reported done": Model tuyên bố xong nhưng chưa có bằng chứng kiểm thử đạt chuẩn.`;
+      }
       return `🎯 Hết ${state.maxIterations} lượt mà chưa xác nhận hoàn thành — đã dừng để bạn xem lại.`;
     case 'stalled':
       return `🎯 Agent trả lời lặp lại ${GOAL_STALL_THRESHOLD} lần không tiến triển — đã dừng.`;

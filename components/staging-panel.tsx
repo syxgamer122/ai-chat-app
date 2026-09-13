@@ -5,6 +5,7 @@ import { Check, X, Trash2, FileText } from 'lucide-react';
 import { lineDiff, renderUnifiedDiff } from '@/lib/naive-diff';
 import type { StagingStore, StagingStats } from '@/lib/staging';
 import { stagingStats as computeStats } from '@/lib/staging';
+import { EvidenceBadge } from '@/components/evidence-badge';
 
 export interface StagingPanelState {
   open: boolean;
@@ -82,6 +83,7 @@ export function StagingPanel({
               <span className="font-bold text-[#6a9fcc]">$</span>
               <span className="text-[#6a9fcc]">staged</span>
               <span>· {stats.files} file{stats.files !== 1 ? 's' : ''}</span>
+              <EvidenceBadge level="reported_done" className="ml-1" />
             </div>
             <div className="text-[11px] text-[#9fa4ab]">
               {stats.newFiles > 0 && `${stats.newFiles} new · `}

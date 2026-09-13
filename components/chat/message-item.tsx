@@ -13,6 +13,7 @@ import { useTts } from '@/lib/use-tts';
 import { ToolTrace } from '@/components/chat/tool-trace';
 import { MessageUsage } from '@/components/chat/message-usage';
 import { OrchestratorBadge, getOrchestratorAdoptedAnnotation } from '@/components/chat/orchestrator-badge';
+import { EvidenceBadge } from '@/components/evidence-badge';
 
 function ThinkingBlock({ reasoning, isStreaming }: { reasoning: string; isStreaming: boolean }) {
   const [open, setOpen] = useState(false);
@@ -344,7 +345,21 @@ export const MessageItem = memo(
             );
           })()}
 
-          {m.role === 'assistant' && <MessageUsage annotations={(m as { annotations?: unknown }).annotations} />}
+          {m.role === 'assistant' && (
+            <div className="flex flex-wrap items-center gap-2">
+              <MessageUsage annotations={(m as { annotations?: unknown }).annotations} />
+              {(() => {
+                const annotations = (m as any).annotations as Array<Record<string, unknown>> | undefined;
+                if (!annotations) return null;
+                const evidenceAnn = annotations.find(
+                  (a) => a && typeof a === 'object' && ('evidenceLevel' in a || 'routeReceipt' in a),
+                ) as { evidenceLevel?: string; routeReceipt?: unknown } | undefined;
+                if (!evidenceAnn) return null;
+                const level = evidenceAnn.evidenceLevel ?? (isStreaming ? 'running' : 'reported_done');
+                return <EvidenceBadge level={level} size="sm" />;
+              })()}
+            </div>
+          )}
 
           {m.role === 'assistant' && (m as any).status === 'aborted' && (
             <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-[#495059] pt-2 font-mono">

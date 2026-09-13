@@ -70,6 +70,7 @@ import {
   stripGoalCompleteTag,
   type GoalLoopState,
 } from '@/lib/goal-loop';
+import { useHudStore } from '@/lib/hud-store';
 import {
   CONTINUE_PROMPT,
   sanitizeContent,
@@ -211,6 +212,9 @@ import { matchActiveSkills } from '@/lib/skills';
 import { gatherPdfContexts } from '@/lib/use-pdf-context';
 import { gatherLiveContext } from '@/lib/live-tools';
 import { addMemory, listMemories } from '@/lib/db';
+import { proposeCandidate, queryRecallPack } from '@/lib/memory/store';
+import type { RecallPack, MemoryKind } from '@/lib/memory/types';
+import { X } from 'lucide-react';
 import { compressImageFiles } from '@/lib/image-compress';
 import { StatusLine } from './chat/status-line';
 import { MessageList } from './chat/message-list';
@@ -238,6 +242,10 @@ const PlanPanel = dynamic(
 );
 const ToolsPanel = dynamic(
   () => import('@/components/tools-panel').then((m) => m.ToolsPanel),
+  { ssr: false },
+);
+const AgentHud = dynamic(
+  () => import('@/components/hud/agent-hud').then((m) => m.AgentHud),
   { ssr: false },
 );
 
@@ -529,6 +537,8 @@ export default function ChatInterface() {
    * "Đưa vào ô nhập" chỉ đặt text vào composer để người dùng sửa rồi tự gửi.
    */
   const [orchestratorOpen, setOrchestratorOpen] = useState(false);
+  const [activeRecallPack, setActiveRecallPack] = useState<RecallPack | null>(null);
+  const [showRecalledDetail, setShowRecalledDetail] = useState(false);
   const orchestrator = useOrchestrator();
   /** Chặn ghép 2 lần cùng một kết quả (double-click trước khi panel kịp đóng). */
   const orchestratorAdoptLockRef = useRef(false);
@@ -1764,17 +1774,37 @@ export default function ChatInterface() {
             if (!['rule', 'pattern', 'gotcha'].includes(category)) {
               return JSON.stringify({ ok: false, error: 'Category phải là rule, pattern, hoặc gotcha.' });
             }
-            const serialized = serializeLesson({ category, text: validated });
-            // Lưu vào memories table (reuse existing infrastructure)
             try {
-              const record = await addMemory(serialized);
-              if (!record) {
-                return JSON.stringify({ ok: false, error: 'Bài học trùng lặp hoặc không lưu được.' });
-              }
-              showNotice(`Đã lưu bài học [${category}]: ${validated.slice(0, 60)}…`);
-              return JSON.stringify({ ok: true, id: record.id, category, text: validated });
+              const cand = await proposeCandidate({
+                text: validated,
+                kind: category,
+                scope: { kind: 'project', ref: currentChat?.id || 'default' },
+                provenance: { threadId: currentChat?.id || 'main' },
+              });
+              showNotice(`Đã đề xuất bài học [${category}]: ${validated.slice(0, 50)}… (Chờ duyệt)`);
+              return JSON.stringify({ ok: true, id: cand.id, category, text: validated, status: 'pending' });
             } catch (e) {
-              return JSON.stringify({ ok: false, error: `Lỗi lưu bài học: ${e instanceof Error ? e.message : String(e)}` });
+              return JSON.stringify({ ok: false, error: `Lỗi đề xuất bài học: ${e instanceof Error ? e.message : String(e)}` });
+            }
+          }
+
+          case 'memory_propose': {
+            const text = String(args.text ?? '').trim();
+            if (text.length < 5) {
+              return JSON.stringify({ ok: false, error: 'Ghi nhớ quá ngắn (tối thiểu 5 ký tự).' });
+            }
+            const kind = (args.kind as MemoryKind) || 'pattern';
+            try {
+              const cand = await proposeCandidate({
+                text,
+                kind,
+                scope: { kind: 'project', ref: currentChat?.id || 'default' },
+                provenance: { threadId: currentChat?.id || 'main' },
+              });
+              showNotice(`Đã đề xuất ghi nhớ [${kind}]: ${text.slice(0, 50)}… (Chờ duyệt)`);
+              return JSON.stringify({ ok: true, id: cand.id, kind, text, status: 'pending' });
+            } catch (e) {
+              return JSON.stringify({ ok: false, error: `Lỗi đề xuất ghi nhớ: ${e instanceof Error ? e.message : String(e)}` });
             }
           }
 
@@ -1948,6 +1978,27 @@ export default function ChatInterface() {
        * resubmit (khoảng lặng giữa hai request có thể dài).
        */
       touchRun();
+
+      // Cập nhật Agent HUD telemetry từ annotations và usage lượt này
+      if (usage) {
+        const annotations = (message as any).annotations as Array<Record<string, unknown>> | undefined;
+        const receiptAnn = annotations?.find((a) => a && typeof a === 'object' && 'routeReceipt' in a) as
+          | { routeReceipt?: { category?: any; selected?: { model?: string; effort?: any } } }
+          | undefined;
+        if (receiptAnn?.routeReceipt) {
+          const rr = receiptAnn.routeReceipt;
+          useHudStore.getState().upsertLane({
+            laneId: 'main',
+            kind: 'main',
+            category: rr.category ?? 'capable',
+            model: rr.selected?.model ?? 'gpt-5-6-sol',
+            effort: rr.selected?.effort ?? 'medium',
+            tokensIn: usage.promptTokens ?? 0,
+            tokensOut: usage.completionTokens ?? 0,
+            evidence: 'reported_done',
+          });
+        }
+      }
 
       // Đóng checkpoint turn — các snapshot của response này đã được lưu
       // (fire-and-forget); lượt agent kế tiếp mở capture mới.
@@ -2339,9 +2390,14 @@ export default function ChatInterface() {
       const dedupeKey = `${lastAssistant.id}:${text}`;
       if (processedMemoryProposalsRef.current.has(dedupeKey)) continue;
       processedMemoryProposalsRef.current.add(dedupeKey);
-      void addMemory(text).then((saved) => {
-        if (saved) {
-          showNotice(`Đã nhớ: ${text.slice(0, 60)}${text.length > 60 ? '…' : ''}`, 4000);
+      void proposeCandidate({
+        text,
+        kind: 'pattern',
+        scope: { kind: 'project', ref: currentChat?.id || 'default' },
+        provenance: { threadId: currentChat?.id || 'main', messageId: lastAssistant.id },
+      }).then((cand) => {
+        if (cand) {
+          showNotice(`Đề xuất ghi nhớ: ${text.slice(0, 50)}${text.length > 50 ? '…' : ''} (Chờ duyệt)`, 4000);
         }
       });
     }
@@ -4295,15 +4351,20 @@ export default function ChatInterface() {
         }
       }
 
-      /* Ghi nhớ dài hạn: đọc trực tiếp Dexie mỗi lượt gửi (≤40 fact, rẻ) để
-         luôn mới nhất kể cả khi vừa thêm trong settings. */
+      /* Ghi nhớ dài hạn: nạp Recall Pack theo ngân sách token từ ký ức đã duyệt (OMH P1-D) */
       try {
-        const mems = await listMemories();
-        if (mems.length) {
+        const recallPack = await queryRecallPack({
+          taskText: userText || '',
+          scope: { kind: 'thread', ref: currentChat?.id || 'default' },
+        });
+        if (recallPack.items.length) {
           options.body = {
             ...options.body,
-            memories: mems.map(({ id, text }) => ({ id, text })),
+            memories: recallPack.items.map(({ id, text }) => ({ id, text })),
           };
+          setActiveRecallPack(recallPack);
+        } else {
+          setActiveRecallPack(null);
         }
       } catch {
         /* bỏ qua */
@@ -4983,6 +5044,54 @@ export default function ChatInterface() {
         <PlanPanel plan={plan} onHide={() => setPlanHidden(true)} />
       )}
 
+      {/* OMH P1-D: 🧠 recalled N memories banner */}
+      {activeRecallPack && activeRecallPack.items.length > 0 && (
+        <div className="mx-auto mb-2 w-full max-w-thread px-4">
+          <div className="flex items-center justify-between gap-2 rounded-lg border border-sky-200/80 bg-sky-50/90 px-3 py-1.5 text-xs text-sky-800 shadow-sm dark:border-sky-900/60 dark:bg-sky-950/50 dark:text-sky-300">
+            <button
+              type="button"
+              onClick={() => setShowRecalledDetail((v) => !v)}
+              className="flex items-center gap-1.5 font-medium hover:underline text-[12px]"
+            >
+              <span>🧠 Đã nhớ {activeRecallPack.items.length} ghi chú</span>
+              <span className="text-[10px] text-sky-600 dark:text-sky-400">
+                ({showRecalledDetail ? 'thu gọn' : 'xem chi tiết'})
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveRecallPack(null)}
+              className="rounded p-0.5 text-sky-500 hover:text-sky-700 dark:hover:text-sky-300"
+              aria-label="Đóng thông báo ghi nhớ"
+            >
+              <X size={13} />
+            </button>
+          </div>
+
+          {showRecalledDetail && (
+            <div className="mt-1.5 rounded-lg border border-sky-200 bg-white p-2.5 text-xs shadow-sm dark:border-sky-900 dark:bg-zinc-900">
+              <div className="mb-1.5 text-[11px] font-semibold text-zinc-700 dark:text-zinc-300">
+                Ghi chú đã nạp vào ngữ cảnh ({activeRecallPack.budget.usedTokens}/{activeRecallPack.budget.limitTokens} tokens):
+              </div>
+              <ul className="space-y-1.5">
+                {activeRecallPack.items.map((item) => (
+                  <li key={item.id} className="flex items-start gap-1.5 text-[11px] text-zinc-700 dark:text-zinc-300">
+                    <span className="text-sky-500 font-bold">•</span>
+                    <span className="flex-1 leading-relaxed">{item.text}</span>
+                    <span className="shrink-0 text-[10px] text-zinc-400">[{item.why}]</span>
+                  </li>
+                ))}
+              </ul>
+              {activeRecallPack.budget.droppedIds.length > 0 && (
+                <div className="mt-1.5 border-t border-zinc-100 pt-1 text-[10px] text-zinc-400 italic dark:border-zinc-800">
+                  Đã cắt {activeRecallPack.budget.droppedIds.length} ghi chú do giới hạn ngân sách token.
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       <Composer
         onSubmit={onSubmit}
         isStreaming={isLoading || mediaBusy}
@@ -5022,6 +5131,9 @@ export default function ChatInterface() {
         composerApiRef={composerApiRef}
         onTakeBackQueued={takeBackQueued}
       />
+
+      {/* Agent Telemetry HUD (dock dưới composer) */}
+      <AgentHud className="mx-auto w-full max-w-thread" />
 
       {/* Thông báo lỗi/cảnh báo từ showNotice() — trước đây không hề được render. */}
       <DiffConfirm state={diffState} onClose={closeDiffModal} />

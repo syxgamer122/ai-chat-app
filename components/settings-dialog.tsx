@@ -6,11 +6,13 @@ import { db, addMemory, deleteMemory, MAX_MEMORIES, MAX_MEMORY_CHARS, type Promp
 import { useAppStore, SERVER_PROVIDER_ID, ALL_TOOL_CATEGORIES, TOOL_CATEGORY_LABELS, PERMISSION_OPTIONS, isApiModelId, isPermissionOverride, type PermissionOverride } from '@/lib/store';
 import { isQueueMode } from '@/lib/message-queue';
 import { exportJson, exportMarkdown, importBackup, type ImportMode } from '@/lib/backup';
-import { X, Download, Upload, Loader2, ShieldAlert, Pencil, Trash2 } from 'lucide-react';
+import { X, Download, Upload, Loader2, ShieldAlert, Pencil, Trash2, Check, Clock, Ban, AlertCircle, Sparkles } from 'lucide-react';
 import { VyenMark } from '@/components/vyen-logo';
 import { TOOL_CATEGORY_ICON_COMPONENTS } from '@/components/tool-category-icons';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { savePrompt, deletePrompt } from '@/lib/prompt-library';
+import { proposeCandidate, reviewCandidate, deleteReviewedRecord } from '@/lib/memory/store';
+import type { MemoryKind, MemoryRecord } from '@/lib/memory/types';
 import {
   backupNow,
   chooseBackupDirectory,
@@ -47,6 +49,10 @@ const McpSettingsPanel = dynamic(
   () => import('@/components/mcp/mcp-settings-panel').then((m) => m.McpSettingsPanel),
   { ssr: false, loading: SectionLoading },
 );
+const RoutingSettingsPanel = dynamic(
+  () => import('@/components/routing-settings-panel').then((m) => m.RoutingSettingsPanel),
+  { ssr: false, loading: SectionLoading },
+);
 
 /**
  * PWA: nút cài đặt lên thiết bị (Chrome/Edge/Android);
@@ -55,79 +61,306 @@ const McpSettingsPanel = dynamic(
 /* ------------------ Ghi nhớ dài hạn (memory) ------------------ */
 
 function MemoriesSection() {
-  const memories = useLiveQuery(() => db.memories.orderBy('createdAt').reverse().toArray(), [], []);
+  const candidates = useLiveQuery(
+    () => db.memoryCandidates?.where('status').equals('pending').reverse().sortBy('createdAt'),
+    [],
+    [],
+  );
+  const records = useLiveQuery(
+    () => db.memoryRecords?.reverse().sortBy('createdAt'),
+    [],
+    [],
+  );
 
   const [newText, setNewText] = useState('');
+  const [newKind, setNewKind] = useState<MemoryKind>('pattern');
+  const [refusePromptId, setRefusePromptId] = useState<string | null>(null);
+  const [refuseReason, setRefuseReason] = useState('');
   const [error, setError] = useState<string | null>(null);
 
-  const add = async () => {
+  const handlePropose = async () => {
     if (!newText.trim()) return;
     try {
-      const created = await addMemory(newText);
-      if (!created) {
-        setError('Ghi nhớ trùng nội dung đã có hoặc rỗng.');
-        return;
-      }
-      setError(null);
+      await proposeCandidate({
+        text: newText.trim(),
+        kind: newKind,
+        scope: { kind: 'project', ref: 'global' },
+        provenance: { threadId: 'settings' },
+      });
       setNewText('');
+      setError(null);
     } catch (e) {
-      console.error('[memory]', e);
-      setError('Không lưu được ghi nhớ.');
+      console.error('[memory propose]', e);
+      setError('Không thể tạo candidate ghi nhớ.');
     }
   };
 
-  return (
-    <div className="space-y-3">
-      <h3 className="text-sm font-semibold text-zinc-800">Ghi nhớ dài hạn</h3>
-      <p className="text-xs leading-relaxed text-zinc-600">
-        Các fact ngắn model tự tra qua công cụ <code className="claude-inline-code">memory_search</code> khi
-        liên quan (sở thích, thông tin cá nhân, quy ước...). Lưu trong máy bạn, tối đa{' '}
-        {MAX_MEMORIES} mục.
-      </p>
+  const handleReview = async (id: string, action: 'remember' | 'refuse' | 'defer', reason?: string) => {
+    try {
+      if (action === 'refuse' && !reason?.trim()) {
+        setError('Từ chối ghi nhớ bắt buộc phải có lý do cụ thể.');
+        return;
+      }
+      await reviewCandidate(id, action, { reason: reason?.trim() });
+      setRefusePromptId(null);
+      setRefuseReason('');
+      setError(null);
+    } catch (e) {
+      console.error('[memory review]', e);
+      setError(e instanceof Error ? e.message : 'Lỗi khi kiểm duyệt ghi nhớ.');
+    }
+  };
 
-      {(memories ?? []).length === 0 && (
-        <p className="rounded-lg bg-surface-muted/60 px-2.5 py-2 text-[11px] italic text-zinc-500">
-          Chưa có ghi nhớ nào.
+  const kindIcons: Record<MemoryKind, string> = {
+    rule: '📏',
+    pattern: '🔧',
+    gotcha: '⚠️',
+    decision: '💡',
+    term: '📖',
+  };
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <h3 className="text-sm font-semibold text-zinc-800 dark:text-zinc-200">
+          Bộ nhớ dài hạn & Reviewer Gate
+        </h3>
+        <p className="mt-1 text-xs leading-relaxed text-zinc-600 dark:text-zinc-400">
+          Không ghi nhớ im lặng: Agent chỉ đề xuất candidate. Bạn trực tiếp duyệt (Nhớ / Từ chối / Hoãn).
+          Chỉ ký ức đã duyệt mới vào Recall Pack theo ngân sách token.
         </p>
+      </div>
+
+      {error && (
+        <div className="flex items-center gap-1.5 rounded-lg bg-red-50 p-2 text-xs text-red-700 dark:bg-red-950/40 dark:text-red-300">
+          <AlertCircle size={14} className="shrink-0" />
+          <span>{error}</span>
+        </div>
       )}
 
-      {(memories ?? []).map((m) => (
-        <div
-          key={m.id}
-          className="group flex items-start justify-between gap-2 rounded-lg border border-zinc-200 bg-surface-muted/60 px-2.5 py-2"
-        >
-          <div className="min-w-0 flex-1 text-[12px] leading-relaxed text-zinc-700">{m.text}</div>
-          <button
-            type="button"
-            onClick={() => {
-              void deleteMemory(m.id);
-            }}
-            aria-label="Xóa ghi nhớ"
-            className="flex-shrink-0 rounded p-1 text-zinc-500 opacity-70 transition-colors hover:bg-red-50 hover:text-red-600 group-hover:opacity-100 dark:hover:bg-red-500/10 dark:hover:text-red-400"
-          >
-            <Trash2 size={12} />
-          </button>
+      {/* 1. Review Cards for Pending Candidates */}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <h4 className="flex items-center gap-1.5 text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+            <Clock size={13} className="text-amber-500" />
+            <span>Đang chờ duyệt</span>
+            <span className="rounded-full bg-amber-100 px-1.5 py-0.2 text-[10px] font-medium text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
+              {(candidates ?? []).length}
+            </span>
+          </h4>
         </div>
-      ))}
 
-      <div className="space-y-2 rounded-xl border border-dashed border-zinc-300 p-2.5">
+        {(candidates ?? []).length === 0 ? (
+          <p className="rounded-lg bg-surface-muted/60 px-3 py-2 text-[11px] italic text-zinc-500">
+            Không có ghi nhớ nào đang chờ duyệt.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {(candidates ?? []).map((cand) => (
+              <div
+                key={cand.id}
+                className="rounded-xl border border-amber-200/80 bg-amber-50/40 p-3 text-xs dark:border-amber-900/50 dark:bg-amber-950/20"
+              >
+                <div className="flex items-center justify-between gap-2 pb-1.5 border-b border-amber-200/40 dark:border-amber-900/30">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs">{kindIcons[cand.kind] || '📌'}</span>
+                    <span className="font-semibold uppercase tracking-wider text-[10px] text-zinc-700 dark:text-zinc-300">
+                      {cand.kind}
+                    </span>
+                    <span className="text-zinc-400">•</span>
+                    <span className="text-[10px] text-zinc-500">
+                      scope: {cand.scope.kind} ({cand.scope.ref})
+                    </span>
+                  </div>
+                  {cand.reviewDueAt && (
+                    <span className="text-[10px] text-amber-700 dark:text-amber-400">
+                      Hạn xét: {new Date(cand.reviewDueAt).toLocaleDateString()}
+                    </span>
+                  )}
+                </div>
+
+                <div className="my-2 leading-relaxed text-zinc-800 dark:text-zinc-200">
+                  {cand.text}
+                </div>
+
+                {refusePromptId === cand.id ? (
+                  <div className="mt-2 space-y-2 rounded-lg border border-red-200 bg-red-50/80 p-2 dark:border-red-900 dark:bg-red-950/40">
+                    <div className="text-[11px] font-medium text-red-800 dark:text-red-300">
+                      Nhập lý do từ chối (bắt buộc):
+                    </div>
+                    <input
+                      type="text"
+                      value={refuseReason}
+                      onChange={(e) => setRefuseReason(e.target.value)}
+                      placeholder="Ví dụ: Quy ước này không còn áp dụng / Vi phạm bảo mật"
+                      className="field-sm w-full text-xs"
+                      autoFocus
+                    />
+                    <div className="flex justify-end gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setRefusePromptId(null);
+                          setRefuseReason('');
+                        }}
+                        className="btn-ghost text-xs px-2 py-1"
+                      >
+                        Hủy
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void handleReview(cand.id, 'refuse', refuseReason)}
+                        className="rounded bg-red-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-red-700"
+                      >
+                        Xác nhận từ chối
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-end gap-1.5 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => void handleReview(cand.id, 'defer', 'Hoãn xem xét 7 ngày')}
+                      className="inline-flex items-center gap-1 rounded-md border border-zinc-300 bg-white px-2 py-1 text-[11px] font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
+                    >
+                      <Clock size={11} /> Hoãn
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setRefusePromptId(cand.id);
+                        setRefuseReason('');
+                      }}
+                      className="inline-flex items-center gap-1 rounded-md border border-red-200 bg-red-50 px-2 py-1 text-[11px] font-medium text-red-700 hover:bg-red-100 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300"
+                    >
+                      <Ban size={11} /> Từ chối
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleReview(cand.id, 'remember')}
+                      className="inline-flex items-center gap-1 rounded-md bg-emerald-600 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-emerald-700 dark:bg-emerald-700 dark:hover:bg-emerald-600"
+                    >
+                      <Check size={11} /> Nhớ
+                    </button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* 2. Active & Reviewed Memories */}
+      <div className="space-y-2">
+        <h4 className="flex items-center gap-1.5 text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+          <Sparkles size={13} className="text-blue-500" />
+          <span>Ký ức đã duyệt</span>
+          <span className="rounded-full bg-blue-100 px-1.5 py-0.2 text-[10px] font-medium text-blue-800 dark:bg-blue-900/40 dark:text-blue-300">
+            {(records ?? []).length}
+          </span>
+        </h4>
+
+        {(records ?? []).length === 0 ? (
+          <p className="rounded-lg bg-surface-muted/60 px-3 py-2 text-[11px] italic text-zinc-500">
+            Chưa có ký ức nào được kích hoạt.
+          </p>
+        ) : (
+          <div className="max-h-60 space-y-1.5 overflow-y-auto pr-1">
+            {(records ?? []).map((rec) => (
+              <div
+                key={rec.id}
+                className="group flex items-start justify-between gap-2 rounded-lg border border-zinc-200 bg-surface-muted/40 p-2.5 text-xs dark:border-zinc-800"
+              >
+                <div className="min-w-0 flex-1 space-y-1">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[11px]">{kindIcons[rec.kind] || '📌'}</span>
+                    <span
+                      className={`rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider ${
+                        rec.status === 'active'
+                          ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'
+                          : rec.status === 'reference'
+                            ? 'bg-sky-100 text-sky-800 dark:bg-sky-950/60 dark:text-sky-300'
+                            : rec.status === 'archive'
+                              ? 'bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-400'
+                              : 'bg-red-100 text-red-800 dark:bg-red-950/60 dark:text-red-300'
+                      }`}
+                    >
+                      {rec.status}
+                    </span>
+                    <span className="text-[10px] text-zinc-400">
+                      confirm: {rec.confirmCount}
+                    </span>
+                    {rec.reviewDueAt && (
+                      <span className="text-[10px] text-zinc-500">
+                        • hạn: {new Date(rec.reviewDueAt).toLocaleDateString()}
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-zinc-700 dark:text-zinc-300 leading-relaxed">{rec.text}</div>
+                  {rec.reason && (
+                    <div className="text-[10px] text-red-600 dark:text-red-400 italic">
+                      Lý do: {rec.reason}
+                    </div>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void deleteReviewedRecord(rec.id);
+                  }}
+                  aria-label="Xóa ký ức"
+                  className="rounded p-1 text-zinc-400 opacity-60 transition hover:bg-red-50 hover:text-red-600 group-hover:opacity-100 dark:hover:bg-red-950/40"
+                >
+                  <Trash2 size={12} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* 3. Propose New Memory Card */}
+      <div className="space-y-2 rounded-xl border border-dashed border-zinc-300 p-3 dark:border-zinc-700">
+        <div className="flex items-center justify-between">
+          <label className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+            Thêm đề xuất ghi nhớ mới
+          </label>
+          <select
+            value={newKind}
+            onChange={(e) => setNewKind(e.target.value as MemoryKind)}
+            className="field-sm text-xs py-0.5"
+          >
+            <option value="pattern">🔧 Pattern (cách làm tốt)</option>
+            <option value="rule">📏 Rule (quy tắc bắt buộc)</option>
+            <option value="gotcha">⚠️ Gotcha (cạm bẫy tránh)</option>
+            <option value="decision">💡 Decision (quyết định thiết kế)</option>
+            <option value="term">📖 Term (thuật ngữ dự án)</option>
+          </select>
+        </div>
+
         <textarea
           value={newText}
           onChange={(e) => setNewText(e.target.value)}
           rows={2}
           maxLength={MAX_MEMORY_CHARS}
-          className="field-sm resize-none text-xs"
-          placeholder='Ví dụ: "Tôi thích trả lời ngắn gọn, code dùng TypeScript"'
-          aria-label="Nội dung ghi nhớ mới"
+          className="field-sm resize-none text-xs w-full"
+          placeholder='Ví dụ: "Luôn chạy test vitest trước khi commit thay đổi"'
+          aria-label="Nội dung đề xuất ghi nhớ"
         />
-        {error && <p className="text-[11px] text-red-600">{error}</p>}
-        <button type="button" onClick={() => void add()} disabled={!newText.trim()} className="btn-secondary w-full justify-center">
-          Thêm ghi nhớ
+
+        <button
+          type="button"
+          onClick={() => void handlePropose()}
+          disabled={!newText.trim()}
+          className="btn-secondary w-full justify-center text-xs py-1.5"
+        >
+          Đề xuất ghi nhớ
         </button>
       </div>
     </div>
   );
 }
+
 
 /* ------------------ Model đọc ảnh (vision) ------------------ */
 
@@ -210,11 +443,12 @@ function VisionModelSection() {
   );
 }
 
-type SettingsTab = 'chung' | 'provider' | 'stats' | 'prompts' | 'memory' | 'data';
+type SettingsTab = 'chung' | 'provider' | 'routing' | 'stats' | 'prompts' | 'memory' | 'data';
 
 const SETTINGS_TABS: Array<{ id: SettingsTab; label: string }> = [
   { id: 'chung', label: 'Chung' },
   { id: 'provider', label: 'Nhà cung cấp' },
+  { id: 'routing', label: 'Routing' },
   { id: 'stats', label: 'Thống kê' },
   { id: 'prompts', label: 'Prompt' },
   { id: 'memory', label: 'Ghi nhớ' },
@@ -1141,6 +1375,12 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
               </div>
             </>
           </div>
+          )}
+
+          {visited.has('routing') && (
+            <div className={show('routing') ? 'contents' : 'hidden'}>
+              <RoutingSettingsPanel />
+            </div>
           )}
 
 {visited.has('stats') && (

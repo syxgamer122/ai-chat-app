@@ -53,6 +53,13 @@ import {
 } from '@/lib/agent-tools';
 import { extractLessons, formatLessonsBlock } from '@/lib/lessons';
 import { SERVER_MAX_STEPS, TOOL_RESULT_MAX_CHARS, truncateToolResult } from '@/lib/tool-limits';
+import { resolveRoute, DEFAULT_CHAINS, type CategoryId, type RouteReceipt, type ChainEntry } from '@/lib/routing/categories';
+import { scoreRequest } from '@/lib/routing/score-request';
+import { resolveContract, enforceContractEffort } from '@/lib/model-contracts';
+import { SHARED_PREAMBLE, UNIVERSAL_BLOCKS, calibrationFor } from '@/lib/prompt/protocol';
+import { projectCapabilities, DEFAULT_TOOL_CANDIDATES, type ToolCandidate, type Projection } from '@/lib/capability-projection';
+import { matchSkillsForRequest, generateSkillsPrompt } from '@/lib/skills/catalog';
+import { formatRecalledMemoriesBlock } from '@/lib/memory/recall';
 
 /**
  * Write tools bị vô hiệu hóa trong Plan mode — agent chỉ được explore (read/list/
@@ -687,6 +694,28 @@ const BodySchema = z.object({
      và lib/store.ts (120): schema chặn 64 sẽ từ chối model `vendor/repo/name`
      dài hợp lệ mà mọi tầng sau đó đều chấp nhận. */
   model: z.string().min(1).max(120).optional(),
+  category: z
+    .enum([
+      'ultrabrain',
+      'deep',
+      'architect',
+      'capable',
+      'quick',
+      'writing',
+      'visual-engineering',
+      'simple-work',
+    ])
+    .optional(),
+  customChains: z
+    .record(
+      z.array(
+        z.object({
+          model: z.string().min(1).max(120),
+          effort: z.enum(['low', 'medium', 'high', 'max']),
+        }),
+      ),
+    )
+    .optional(),
   temperature: z.number().min(0).max(2).optional(),
   thinkingLevel: z.enum(THINKING_LEVELS).optional(),
   /* Model vision do client chọn từ danh sách model của provider, dùng cho
@@ -979,8 +1008,30 @@ export async function POST(req: Request) {
       });
     }
 
-    const { model, temperature, system, thinkingLevel, visionModel, contextSummary, compactBoundaryId, webContext, liveContext, pdfContexts, agentTools, memories, skills, workspace: workspaceState, forceEmulatedTools, agentMode, staging, mcpTools: mcpToolList, mcpProxyTools: mcpProxyToolList, id: conversationId } =
-      parsed.data;
+    let {
+      model,
+      category: requestedCategory,
+      customChains,
+      temperature,
+      system,
+      thinkingLevel,
+      visionModel,
+      contextSummary,
+      compactBoundaryId,
+      webContext,
+      liveContext,
+      pdfContexts,
+      agentTools,
+      memories,
+      skills,
+      workspace: workspaceState,
+      forceEmulatedTools,
+      agentMode,
+      staging,
+      mcpTools: mcpToolList,
+      mcpProxyTools: mcpProxyToolList,
+      id: conversationId,
+    } = parsed.data;
     const messages = attachToolResultParts(parsed.data.messages);
 
     /* Chẩn đoán agent coding: xác nhận client có gửi trạng thái workspace.
@@ -1029,6 +1080,51 @@ export async function POST(req: Request) {
       );
     }
 
+    /* Trích xuất text tin nhắn người dùng cuối để scoring routing & capability projection */
+    let userQueryText = '';
+    if (lastUserText) {
+      if (typeof lastUserText.content === 'string') {
+        userQueryText = lastUserText.content;
+      } else if (Array.isArray(lastUserText.content)) {
+        userQueryText = (lastUserText.content as Array<{ type?: string; text?: unknown }>)
+          .map((p) => (p?.type === 'text' && typeof p.text === 'string' ? p.text : ''))
+          .join(' ');
+      }
+    }
+
+    /* Chấm điểm yêu cầu (Scoring request) theo tín hiệu tường minh */
+    const scoredRequest = scoreRequest({
+      text: userQueryText,
+      isPlanMode: agentMode === 'plan',
+    });
+
+    const activeCategory = requestedCategory ?? (model ? undefined : scoredRequest.category);
+
+    let routeReceipt: RouteReceipt;
+    let selectedModelId: string;
+
+    if (activeCategory) {
+      routeReceipt = resolveRoute(activeCategory, {
+        customChains,
+        signals: scoredRequest.signals,
+      });
+      selectedModelId = routeReceipt.selected.model;
+    } else {
+      selectedModelId = model ?? DEFAULT_MODEL_ID;
+      const contract = resolveContract(selectedModelId);
+      const enforced = enforceContractEffort(contract, 'medium');
+      routeReceipt = {
+        category: scoredRequest.category,
+        selected: {
+          model: selectedModelId,
+          effort: enforced.effectiveEffort,
+        },
+        chainPosition: 0,
+        signals: scoredRequest.signals,
+        ...(enforced.changed ? { effortChange: enforced.changed } : {}),
+      };
+    }
+
     /* Provenance cho agentic tools: URL được phép web_fetch = URL người dùng
        tự gắn trong tin nhắn + URL nằm trong webContext (kết quả search phía
        client). Model gọi web_search ở step sau sẽ tự mở rộng tập này — nhưng
@@ -1059,7 +1155,6 @@ export async function POST(req: Request) {
        báo thì bỏ tham số như hành vi cũ (nhiều gateway 400 nếu nhận mù). */
     const effortBase = providerBase ?? process.env.OPENAI_BASE_URL ?? null;
 
-    const selectedModelId = model ?? DEFAULT_MODEL_ID;
     // Provider override: model do gateway của user định nghĩa (/v1/models),
     // cho phép ngoài danh sách built-in.
     if (!ALLOWED_MODEL_IDS.has(selectedModelId) && !providerBase) {
@@ -1097,9 +1192,16 @@ export async function POST(req: Request) {
         }
       : baseConfig;
     const upstreamBase = providerBase ?? process.env.OPENAI_BASE_URL ?? null;
+
+    const defaultChainModels = activeCategory && !model
+      ? (customChains?.[activeCategory]?.map((e) => e.model) ?? DEFAULT_CHAINS[activeCategory]?.map((e) => e.model))
+      : undefined;
+
     let modelChain: readonly string[] = providerBase
       ? [selectedModelId]
-      : resolveProviderModelChain(baseConfig);
+      : (defaultChainModels && defaultChainModels.length > 0)
+        ? defaultChainModels
+        : resolveProviderModelChain(baseConfig);
     // Negative cache: bỏ qua tên model vừa bị gateway từ chối gần đây (404 /
     // 400 unknown-model / 403 body rỗng) để không lặp lại lượt thử chết trong
     // mọi tin nhắn. Lọc sạch thì giữ nguyên chain — vẫn thử và tự phục hồi.
@@ -1391,6 +1493,9 @@ export async function POST(req: Request) {
             formatDataStreamPart('message_annotations', [{ requestId, ...payload } as any]),
           );
         };
+
+        // Ghi lại biên nhận route (RouteReceipt) theo tiêu chuẩn Oh My Hermes để client và HUD hiển thị
+        writeAnnotation({ routeReceipt });
 
         /* Sửa A3: heartbeat 10s, chỉ chạy trong giai đoạn chưa có token nào.
            Tự tắt ngay khi byte text đầu tiên được gửi đi. */
@@ -1770,9 +1875,63 @@ export async function POST(req: Request) {
                   * để allowAgentTools=false một mình không được phép làm MCP
                   * biến mất im lặng.
                   */
-                 const mcpTools = allowAgentTools || forceEmulatedTools || emulatedToolPath
-                   ? mapMcpTools(mcpToolList ?? [], undefined, mcpProxyToolList ?? [])
-                   : mapMcpTools([], undefined, []);
+                  /* Capability projection (Oh My Hermes port): chiếu năng lực và lọc bớt MCP tool
+                   * theo ngân sách byte và tín hiệu request thay cho trần cứng 100 tool. */
+                  let projectedMcpList = mcpToolList;
+                  let projectedProxyList = mcpProxyToolList;
+
+                  if ((mcpToolList && mcpToolList.length > 0) || (mcpProxyToolList && mcpProxyToolList.length > 0)) {
+                    const mcpCandidates: ToolCandidate[] = [
+                      ...(mcpToolList ?? []).map((t) => ({
+                        id: t.name,
+                        group: 'mcp' as const,
+                        description: t.description || t.name,
+                        bytes: JSON.stringify(t).length,
+                      })),
+                      ...(mcpProxyToolList ?? []).map((t) => ({
+                        id: t.name,
+                        group: 'mcp' as const,
+                        description: t.description || t.name,
+                        bytes: JSON.stringify(t).length,
+                      })),
+                    ];
+
+                    const allCandidates = [...DEFAULT_TOOL_CANDIDATES, ...mcpCandidates];
+                    const authoritySet = new Set<string>([
+                      ...DEFAULT_TOOL_CANDIDATES.map((c) => c.id),
+                      ...mcpCandidates.map((c) => c.id),
+                    ]);
+
+                    const projection = projectCapabilities({
+                      text: userQueryText,
+                      taskId: conversationId ?? requestId,
+                      authority: authoritySet,
+                      budgetBytes: 16000,
+                      allCandidates,
+                    });
+
+                    const includedIds = new Set(projection.included.map((item) => item.id));
+                    if (mcpToolList) {
+                      mcpToolList = mcpToolList.filter((t) => includedIds.has(t.name));
+                    }
+                    if (mcpProxyToolList) {
+                      mcpProxyToolList = mcpProxyToolList.filter((t) => includedIds.has(t.name));
+                    }
+                    console.info(
+                      `[req:${requestId}][capability_projection] included=${projection.included.length} excluded=${projection.excluded.length} dropped=${projection.budget.droppedIds.length}`,
+                    );
+                    writeAnnotation({
+                      capabilityProjection: {
+                        includedCount: projection.included.length,
+                        excludedCount: projection.excluded.length,
+                        droppedCount: projection.budget.droppedIds.length,
+                      },
+                    });
+                  }
+
+                  const mcpTools = allowAgentTools || forceEmulatedTools || emulatedToolPath
+                    ? mapMcpTools(mcpToolList ?? [], undefined, mcpProxyToolList ?? [])
+                    : mapMcpTools([], undefined, []);
                  /**
                   * Tập tool client của request NÀY = tool client có sẵn + tool MCP
                   * đang sống. Dùng chung cho cả đường native (forward tool-call)
@@ -1819,13 +1978,21 @@ export async function POST(req: Request) {
                   .filter(Boolean)
                   .join(' ');
 
-                /* System prompt compose chung cho cả đường native lẫn emulated.
-                   Thứ tự: tóm tắt nén → dữ liệu web lượt này → dữ liệu realtime
-                   (thời tiết/tỷ giá) → nội dung PDF → persona. Dữ liệu sự kiện
-                   đứng trước để persona giữ vai cuối cùng; khối web đã tự kèm
-                   chỉ dẫn trích dẫn nguồn. */
+                /* Prompt-cache discipline (Oh My Hermes port):
+                   Phần đầu ổn định từng byte giữa các sibling units/turns để tối đa cache hit.
+                   Hiệu chuẩn theo họ model khi effort high/max.
+                   Đẩy toàn bộ nội dung volatile (workspace, contextSummary, webContext, lessons) xuống sau. */
+                const modelCalib = calibrationFor(routeReceipt, 'composer');
                 const composedSystem =
                   [
+                    SHARED_PREAMBLE,
+                    UNIVERSAL_BLOCKS.GOAL_ECHO_BACK,
+                    UNIVERSAL_BLOCKS.DONE_CRITERIA,
+                    UNIVERSAL_BLOCKS.BOUNDED_VERIFICATION,
+                    UNIVERSAL_BLOCKS.FAILURE_KIND,
+                    modelCalib ?? '',
+                    '[QUY TẮC AN TOÀN & RANH GIỚI] Khi gặp lỗi bị quy tắc (rule) hoặc sandbox từ chối, đây là ranh giới hợp lệ — báo cáo lại trung thực, tuyệt đối không tìm cách lách qua.',
+                    system,
                     contextSummary
                       ? `[Tóm tắt phần hội thoại đã nén trước đó]\n${contextSummary}`
                       : '',
@@ -1843,7 +2010,6 @@ export async function POST(req: Request) {
                           .join('\n\n') +
                           '\n[Cách dùng] Trả lời câu hỏi dựa trên nội dung file ở trên khi liên quan; trích dẫn kèm số trang nếu có.'
                       : '',
-                     system,
                      /* Skills: chỉ thị điều chỉnh cách trả lời → đứng SAU
                         persona để giữ lực (khác dữ liệu sự kiện đặt trước). */
                      skills?.length
@@ -1855,6 +2021,12 @@ export async function POST(req: Request) {
                            })),
                          )
                         : '',
+                        /* Curated Stack Skills (OMH P2): tự động nạp kỹ năng khớp domain */
+                        userQueryText
+                          ? generateSkillsPrompt(matchSkillsForRequest(userQueryText))
+                          : '',
+                        /* Ghi nhớ dài hạn đã duyệt (OMH P1-D): nạp facts/rules/decisions không phải lesson */
+                        formatRecalledMemoriesBlock(chatMemories),
                         /* Lessons: bài học từ các phiên trước, extract từ memories
                            có prefix [LESSON:*]. Inject vào system prompt để model
                            không lặp lại lỗi cũ. Port từ Claude Code /reflect. */

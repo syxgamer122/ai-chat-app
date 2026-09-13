@@ -15,6 +15,7 @@
 
 import type { ToolPermissions, PermissionOverride } from '@/lib/store';
 import { TOOL_CATEGORY_MAP } from '@/lib/store';
+import { evaluateToolcallRules, type ToolcallRule } from '@/lib/toolcall-rules';
 
 /* ------------------------------------------------------------------ */
 /* Types                                                                */
@@ -29,6 +30,8 @@ export interface AutoApproveContext {
   autoPilotEnabled: boolean;
   /** Per-tool permission overrides (optional for backward compat). */
   toolPermissions?: ToolPermissions;
+  /** User-defined toolcall rules (Oh My Hermes port). */
+  toolcallRules?: ToolcallRule[];
 }
 
 /* ------------------------------------------------------------------ */
@@ -163,6 +166,19 @@ export function isAlwaysBlocked(command: string): boolean {
  * | ON        | never    | ALWAYS_BLOCK  | ASK         |
  */
 export function shouldAutoApprove(ctx: AutoApproveContext): boolean {
+  // ── 0. Destructive safety check (always blocked) ──
+  if (ctx.toolName === 'shell_run') {
+    const command = String(ctx.args.command ?? '');
+    if (isAlwaysBlocked(command)) return false;
+  }
+
+  // ── 1. User Toolcall Rules (mức ưu tiên trước policy) ──
+  if (ctx.toolcallRules && ctx.toolcallRules.length > 0) {
+    const verdict = evaluateToolcallRules(ctx.toolName, ctx.args, ctx.toolcallRules);
+    if (verdict.decision === 'deny' || verdict.decision === 'ask') return false;
+    if (verdict.decision === 'allow') return true;
+  }
+
   // ── Per-tool override check (highest priority) ──
   if (ctx.toolPermissions) {
     const category = TOOL_CATEGORY_MAP[ctx.toolName];

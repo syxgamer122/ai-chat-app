@@ -20,6 +20,12 @@ import {
   TOOL_CATEGORY_MAP,
   type ToolCategory,
 } from '@/lib/tool-catalog';
+import {
+  type CategoryId,
+  type ChainEntry,
+  DEFAULT_CHAINS,
+} from '@/lib/routing/categories';
+import type { ToolcallRule } from '@/lib/toolcall-rules';
 
 /** id provider "dùng cấu hình env của server" — định nghĩa ở store để tránh vòng import. */
 export const SERVER_PROVIDER_ID = '__server__';
@@ -174,6 +180,10 @@ export interface Settings {
   recentModels: RecentModel[];
   apiKey?: string;
   accessCode?: string;
+  /** Mixture-of-models chains theo Category (Oh My Hermes port) */
+  modelChains?: Record<CategoryId, ChainEntry[]>;
+  /** Quy tắc can thiệp gọi tool do người dùng tự viết */
+  toolcallRules?: ToolcallRule[];
 }
 
 interface AppState {
@@ -230,6 +240,8 @@ const DEFAULT_SETTINGS: Settings = {
   recentModels: [],
   apiKey: '',
   accessCode: '',
+  modelChains: DEFAULT_CHAINS,
+  toolcallRules: [],
 };
 
 /** Validate persisted toolPermissions, falling back to current for invalid entries. */
@@ -304,6 +316,8 @@ export const useAppStore = create<AppState>()(
              thiếu khoá là F5 mất toàn bộ shortcut trong picker. */
           modelFavorites: s.settings.modelFavorites,
           recentModels: s.settings.recentModels,
+          modelChains: s.settings.modelChains,
+          toolcallRules: s.settings.toolcallRules,
         },
       }),
       merge: (persisted, current) => {

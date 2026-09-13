@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { ChevronDown, ChevronRight, CheckCircle2, XCircle, Loader2 } from "lucide-react";
+import { EvidenceBadge } from "@/components/evidence-badge";
 
 export interface SubagentAnnotation {
   subagent: {
@@ -17,6 +18,7 @@ export interface SubagentAnnotation {
     mode?: "scout" | "worker";
     taskIndex?: number;
     taskTotal?: number;
+    evidenceLevel?: "prepared" | "running" | "reported_done" | "verified" | "blocked" | "failed";
   };
 }
 
@@ -26,12 +28,20 @@ interface SubagentCardProps {
 
 export function SubagentCard({ annotation }: SubagentCardProps) {
   const [expanded, setExpanded] = useState(false);
-  const { phase, task, turn, maxTurns, toolCalls, result, error, runId, mode, taskIndex, taskTotal } =
+  const { phase, task, turn, maxTurns, toolCalls, result, error, runId, mode, taskIndex, taskTotal, evidenceLevel } =
     annotation.subagent;
 
   const isRunning = phase === "start" || phase === "progress";
   const isDone = phase === "done";
   const isError = phase === "error";
+
+  const subagentEvidence = evidenceLevel ?? (
+    isRunning
+      ? "running"
+      : isDone
+        ? (result?.toLowerCase().includes("verified") || result?.toLowerCase().includes("test pass") ? "verified" : "reported_done")
+        : "failed"
+  );
 
   const statusColor = isRunning
     ? "text-[#6a9fcc]"
@@ -39,8 +49,7 @@ export function SubagentCard({ annotation }: SubagentCardProps) {
       ? "text-[#5db87a]"
       : "text-[#e8704f]";
 
-  // Một icon duy nhất mang trạng thái thật (spin = đang chạy), thay vì
-  // icon trang trí + icon trạng thái trùng lặp
+  // Một icon duy nhất mang trạng thái thật (spin = đang chạy)
   const StatusIcon = isRunning ? Loader2 : isDone ? CheckCircle2 : XCircle;
 
   return (
@@ -64,6 +73,7 @@ export function SubagentCard({ annotation }: SubagentCardProps) {
         <span className={`font-semibold ${statusColor}`}>
           Subagent
         </span>
+        <EvidenceBadge level={subagentEvidence} className="ml-1" />
         {mode === "scout" && (
           <span className="text-[11px] text-[#9fa4ab]">· scout</span>
         )}

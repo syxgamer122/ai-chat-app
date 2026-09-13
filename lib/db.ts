@@ -1,5 +1,6 @@
 import Dexie, { type Table } from 'dexie';
 import { tokenize } from '@/lib/search-utils';
+import type { MemoryRecord, MemoryReviewEntry } from '@/lib/memory/types';
 
 /**
  * IndexedDB KHÔNG index được `null`. Message gốc phải mang sentinel này,
@@ -270,6 +271,9 @@ export class ChatAppDatabase extends Dexie {
   providers!: Table<ProviderPresetRecord, string>;
   memories!: Table<StoredMemory, string>;
   wsSnapshots!: Table<WorkspaceSnapshot, string>;
+  memoryCandidates!: Table<MemoryRecord, string>;
+  memoryRecords!: Table<MemoryRecord, string>;
+  memoryReviews!: Table<MemoryReviewEntry, string>;
 
   constructor() {
     super('ai_chat_app_db');
@@ -412,6 +416,50 @@ export class ChatAppDatabase extends Dexie {
         const rows = await legacy.toArray();
         if (rows.length) {
           await tx.table<WorkspaceSnapshot>('wsSnapshots').bulkPut(rows);
+        }
+      });
+
+    // v11: reviewer-gated long-term memory (OMH P1-D port)
+    // - memoryCandidates: pending candidates do agent đề xuất, chờ user review
+    // - memoryRecords: ký ức đã duyệt (active/reference/archive) kèm reviewDueAt + provenance
+    // - memoryReviews: nhật ký kiểm duyệt (remember/refuse/defer)
+    this.version(11)
+      .stores({
+        chats: 'id, createdAt, updatedAt, pinned, activeLeafId, *titleTokens',
+        messages:
+          'id, chatId, role, createdAt, seq, parentId, ' +
+          '[chatId+parentId], [chatId+createdAt], [chatId+seq], ' +
+          '[chatId+parentId+branchOrder], *tokens',
+        prompts: 'id, updatedAt',
+        kv: 'key',
+        providers: 'id, updatedAt',
+        memories: 'id, createdAt',
+        wsSnapshots: 'id, chatId, createdAt',
+        memoryCandidates: 'id, status, createdAt, digest, [scope.kind+scope.ref]',
+        memoryRecords: 'id, status, createdAt, reviewDueAt, digest, [scope.kind+scope.ref]',
+        memoryReviews: 'id, candidateId, action, reviewedAt',
+      })
+      .upgrade(async (tx) => {
+        try {
+          const legacyMemories = await tx.table<StoredMemory>('memories').toArray();
+          if (legacyMemories.length) {
+            const records: MemoryRecord[] = legacyMemories.map((m) => ({
+              id: m.id,
+              scope: { kind: 'user', ref: 'default' },
+              kind: m.text.startsWith('[LESSON:') ? 'rule' : 'pattern',
+              text: m.text.slice(0, 400),
+              provenance: { threadId: 'migrated' },
+              status: 'active',
+              confirmCount: 1,
+              createdAt: m.createdAt,
+              digest: `migrated-${m.id}`,
+              lastUsedAt: new Date(m.createdAt).toISOString(),
+              reviewDueAt: new Date(m.createdAt + 30 * 86400_000).toISOString(),
+            }));
+            await tx.table<MemoryRecord>('memoryRecords').bulkPut(records);
+          }
+        } catch {
+          /* Bỏ qua nếu bảng cũ không có */
         }
       });
 
