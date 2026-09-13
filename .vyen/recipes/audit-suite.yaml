@@ -1,0 +1,72 @@
+# Recipe demo sub-recipes (P0-2): recipe chính spawn 3 sub-recipe SONG SONG.
+# Mỗi sub-recipe thành 1 tool subrecipe__<name>; model gọi subrecipe__batch
+# để chạy cả 3 cùng lúc (cap 3 lane — card subagent hiển thị từng cái).
+# Chạy: vyen run --recipe audit-suite.yaml
+version: "1.0.0"
+title: "Audit suite song song"
+description: "Chạy 3 sub-recipe độc lập (lint, test, kiểm tra dependency) song song rồi gộp báo cáo."
+instructions: |
+  Bạn điều phối 3 sub-recipe ĐỘC LẬP: lint_one (eslint từng file), test_one
+  (vitest run), deps_one (npm outdated). Gọi subrecipe__batch MỘT LẦN với cả 3
+  để chạy song song. Đợi kết quả JSON của từng lane (status/result/turnsUsed),
+  rồi gộp thành một báo cáo ngắn: mục nào pass, mục nào có lỗi + số lỗi.
+  Nếu một lane failed/max-turns, tự chạy lại lane đó bằng tool đơn của nó.
+prompt: "Chạy audit suite song song cho workspace này rồi tổng hợp kết quả."
+parameters:
+  - key: scope
+    input_type: string
+    requirement: optional
+    default: "src lib"
+    description: "Thư mục phạm vi lint/kiểm tra (cách nhau bằng space)"
+sub_recipes:
+  - name: lint_one
+    inline:
+      version: "1.0.0"
+      title: "Lint scope"
+      description: "Chạy eslint trong phạm vi scope, đếm lỗi theo rule."
+      instructions: "Chạy lệnh lint cho các thư mục: {{ scope }}. Đếm số lỗi, nhóm theo rule, liệt kê 5 lỗi đáng chú ý nhất kèm file:dòng."
+      prompt: "Lint phạm vi {{ scope }} và báo lỗi."
+      tools:
+        deny: [fs_write, fs_edit]
+    mode: parallel
+    return_mode: summary
+  - name: test_one
+    inline:
+      version: "1.0.0"
+      title: "Chạy test"
+      description: "Chạy bộ test vitest, tóm tắt pass/fail."
+      instructions: "Chạy test (vitest run). Báo số suite pass/fail, test fail chính và nguyên nhân ngắn gọn."
+      prompt: "Chạy toàn bộ test và tóm tắt."
+      tools:
+        deny: [fs_write, fs_edit]
+    mode: parallel
+    return_mode: summary
+  - name: deps_one
+    inline:
+      version: "1.0.0"
+      title: "Kiểm tra dependency"
+      description: "npm outdated — gói nào đang cũ."
+      instructions: "Chạy npm outdated (hoặc npm ls --depth=0 nếu lỗi). Liệt kê gói cũ đáng cập nhật, khuyên nên cập nhật gói nào trước."
+      prompt: "Kiểm tra dependency cũ trong project."
+      tools:
+        deny: [fs_write, fs_edit]
+    mode: parallel
+    return_mode: summary
+response:
+  json_schema:
+    type: object
+    required: [lanes]
+    properties:
+      lanes:
+        type: array
+        items:
+          type: object
+          required: [name, status]
+          properties:
+            name:
+              type: string
+            status:
+              type: string
+              enum: [pass, fail]
+            summary:
+              type: string

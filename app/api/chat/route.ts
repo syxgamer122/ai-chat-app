@@ -52,6 +52,14 @@ import {
   NATIVE_EXCLUDED_CLIENT_TOOLS,
 } from '@/lib/agent-tools';
 import { extractLessons, formatLessonsBlock } from '@/lib/lessons';
+import { RecipeSchema } from '@/lib/recipes/schema';
+import {
+  buildSubRecipeSystemBlock,
+} from '@/lib/recipes/subrecipe';
+import {
+  buildSubRecipeServerTools,
+  toResolvedSubRecipes,
+} from '@/lib/recipes/subrecipe-exec';
 import { SERVER_MAX_STEPS, TOOL_RESULT_MAX_CHARS, truncateToolResult } from '@/lib/tool-limits';
 import { resolveRoute, DEFAULT_CHAINS, type CategoryId, type RouteReceipt, type ChainEntry } from '@/lib/routing/categories';
 import { scoreRequest } from '@/lib/routing/score-request';
@@ -869,6 +877,20 @@ const BodySchema = z.object({
       jsonSchema: z.record(z.unknown()).optional(),
       toolDeny: z.array(z.string().min(1).max(200)).max(50).optional(),
       toolAllow: z.array(z.string().min(1).max(200)).max(50).optional(),
+      /* Sub-recipes đã resolve ở CLIENT (inline parse / path đọc qua fs của
+         user): mỗi cái trở thành tool subrecipe__<name> + batch song song. */
+      subRecipes: z
+        .array(
+          z.object({
+            name: z.string().regex(/^[a-zA-Z_][a-zA-Z0-9_-]*$/).max(60),
+            mode: z.enum(['sequential', 'parallel']).optional(),
+            returnMode: z.enum(['full', 'summary']).optional(),
+            fixedValues: z.record(z.string()).optional(),
+            recipe: RecipeSchema,
+          }),
+        )
+        .max(8)
+        .optional(),
     })
     .optional(),
   data: z.unknown().optional(),
@@ -1878,6 +1900,15 @@ export async function POST(req: Request) {
                      })
                    : {};
                  /**
+                  * Sub-recipe tools (port Goose): mỗi sub-recipe của run thành
+                  * MỘT tool server (có execute — chạy subagent ngay trong route,
+                  * giống delegate ở đường native) + 1 tool batch song song.
+                  * Gộp vào serverTools nên CẢ HAI đường (native + emulated) đều
+                  * thấy; tool client của subagent bị lọc delegate/subrecipe__*
+                  * để chặn đệ quy (clientToolsFor bên trong exec).
+                  */
+                 const resolvedSubRecipes = toResolvedSubRecipes(recipeCtx?.subRecipes ?? []);
+                 /**
                   * Tool MCP do renderer gửi lên.
                   *
                   * Chỉ KHAI BÁO (không có execute): MCP sống trong Electron
@@ -2028,6 +2059,8 @@ export async function POST(req: Request) {
                     recipeCtx?.instructions
                       ? recipeCtx.instructions.trim()
                       : '',
+                    /* Sub-recipes: mô tả bộ tool subrecipe__* + hướng dẫn batch. */
+                    buildSubRecipeSystemBlock(resolvedSubRecipes),
                     contextSummary
                       ? `[Tóm tắt phần hội thoại đã nén trước đó]\n${contextSummary}`
                       : '',
@@ -2209,6 +2242,27 @@ export async function POST(req: Request) {
                     .join('\n\n') ||
                   'Bạn là một trợ lý AI thông minh, hữu ích và chính xác. Trả lời bằng tiếng Việt trừ khi được yêu cầu ngôn ngữ khác.';
 
+                /* Tool sub-recipe: dựng SAU composedSystem vì subagent cần
+                   systemBase (base + block sub-recipe) làm ngữ cảnh riêng. */
+                const subRecipeToolDefs = resolvedSubRecipes.length
+                  ? buildSubRecipeServerTools(resolvedSubRecipes, {
+                      model: openaiNonStreaming(targetModel),
+                      systemBase: composedSystem,
+                      serverTools: serverTools as ReturnType<typeof buildAgentTools>,
+                      clientToolNames: CLIENT_TOOL_NAMES,
+                      abortSignal: link.signal,
+                      ...(modelConfig.supportsTemperature === false
+                        ? {}
+                        : { temperature: temperature ?? 0.7 }),
+                      ...(modelConfig.maxOutputTokens ? { maxTokens: modelConfig.maxOutputTokens } : {}),
+                      resolveClientTool: relaySubagentTool,
+                      conversationId,
+                      onProgress: (phase, detail) => {
+                        writeAnnotation({ subagent: { phase, ...detail } });
+                      },
+                    })
+                  : {};
+
                 /* ---- EMULATED TOOL CALLING ---- */
                 if (emulatedMode || retryAsEmulated) {
                   const loopResult = await runEmulatedLoop({
@@ -2228,7 +2282,7 @@ export async function POST(req: Request) {
                               .join(''),
                     })),
                     system: composedSystem,
-                    tools: serverTools as ReturnType<typeof buildAgentTools>,
+                    tools: { ...serverTools, ...subRecipeToolDefs } as ReturnType<typeof buildAgentTools>,
                     clientTools: clientToolNames,
                     /* Schema của tool MCP đi vào protocol text: đường emulated
                        không có kênh tool-call native nên mô tả + chữ ký args
@@ -2379,6 +2433,7 @@ export async function POST(req: Request) {
                     ? {
                         tools: {
                           ...serverTools,
+                          ...subRecipeToolDefs,
                           /* Tool client khai báo cho model. Hai bộ lọc:
                              1. Plan mode: loại write tools — agent chỉ được
                                 explore. Client-side onToolCall cũng chặn nhưng

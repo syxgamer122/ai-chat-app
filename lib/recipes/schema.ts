@@ -85,6 +85,9 @@ const SubRecipeSchema = z.object({
   inline: z.record(z.unknown()).optional(),
   values: z.record(z.string()).optional(),
   mode: z.enum(['sequential', 'parallel']).optional(),
+  /** 'summary' (mặc định): subagent tự tóm tắt ≤ 2000 ký tự để không phình
+   *  context agent chính. 'full': trả nguyên văn output. */
+  return_mode: z.enum(['full', 'summary']).optional(),
 });
 
 export const RecipeSchema = z

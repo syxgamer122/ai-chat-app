@@ -26,6 +26,14 @@ export interface ActiveRecipeRun {
     jsonSchema?: Record<string, unknown>;
     toolDeny?: string[];
     toolAllow?: string[];
+    /** Sub-recipes đã resolve (inline parse / path đọc ở máy user). */
+    subRecipes?: Array<{
+      name: string;
+      mode: 'sequential' | 'parallel';
+      returnMode: 'full' | 'summary';
+      fixedValues: Record<string, string>;
+      recipe: Recipe;
+    }>;
   };
   /** User message mở đầu (attempt 1). */
   firstUserMessage: string;

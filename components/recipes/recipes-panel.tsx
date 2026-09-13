@@ -21,12 +21,13 @@ import {
   buildRecipeShareLink,
   resolveParameters,
   prepareRecipeRun,
+  resolveSubRecipesAtStart,
   type Recipe,
   type RecipeParamValues,
 } from '@/lib/recipes';
 import { useRecipeUiStore, type ActiveRecipeRun } from '@/lib/recipes/run-store';
 import { desktopFsList, desktopFsRead } from '@/lib/desktop-fs';
-import { requireWorkspace } from '@/lib/fs-access';
+import { requireWorkspace, fsRead } from '@/lib/fs-access';
 import { isVyenDesktop } from '@/lib/desktop-bridge';
 
 /* ---------------- pure helpers (test được) ---------------- */
@@ -65,6 +66,20 @@ export function defaultFormValues(recipe: Recipe): Record<string, string> {
     out[p.key] = p.default !== undefined ? String(p.default) : p.input_type === 'boolean' ? 'false' : '';
   }
   return out;
+}
+
+/** Đọc file text trong workspace (desktop bridge hoặc web FSA) — cho sub-recipe path. */
+export function makeWorkspaceTextReader(): (path: string) => Promise<string> {
+  if (isVyenDesktop()) {
+    return async (p) =>
+      String((await desktopFsRead(p) as unknown as { content?: string }).content ?? '');
+  }
+  return async (p) => {
+    const ws = await requireWorkspace();
+    if (!ws.ok) throw new Error(ws.error);
+    const r = await fsRead(ws.deps, p);
+    return String((r as unknown as { content?: string }).content ?? '');
+  };
 }
 
 /* ---------------- UI ---------------- */
@@ -228,7 +243,7 @@ export function RecipesPanel({
     setFormError(null);
   }, [selected]);
 
-  const handleRun = useCallback(() => {
+  const handleRun = useCallback(async () => {
     if (!selected) return;
     const recipe = selected.recipe;
     const values: RecipeParamValues = {};
@@ -253,6 +268,37 @@ export function RecipesPanel({
         ? { recipeDir: '.vyen/recipes' }
         : {}),
     });
+
+    /* Sub-recipes: resolve path/inline NGAY lúc Run (đọc file ở máy user) —
+       hỏng cái nào thì chặn cả Run để user sửa, không chạy dở. */
+    let subRecipes: ActiveRecipeRun['body']['subRecipes'];
+    if (recipe.sub_recipes?.length) {
+      try {
+        const readText = makeWorkspaceTextReader();
+        const result = await resolveSubRecipesAtStart(recipe.sub_recipes, readText, {
+          baseDir: '.vyen/recipes',
+        });
+        if (result.errors.length || result.resolved.length !== recipe.sub_recipes.length) {
+          setFormError(
+            `Sub-recipe hỏng: ${result.errors.map((e) => `${e.name}: ${e.error}`).join(' · ')}`,
+          );
+          return;
+        }
+        subRecipes = result.resolved.map((r) => ({
+          name: r.name,
+          mode: r.mode,
+          returnMode: r.returnMode,
+          fixedValues: r.fixedValues,
+          recipe: r.recipe,
+        }));
+      } catch (err) {
+        setFormError(
+          `Không đọc được sub-recipe từ workspace: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        return;
+      }
+    }
+
     const run: ActiveRecipeRun = {
       runId: `rrun-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       recipe,
@@ -262,6 +308,7 @@ export function RecipesPanel({
         ...(recipe.response?.json_schema ? { jsonSchema: recipe.response.json_schema } : {}),
         ...(prepared.toolPolicy.deny.length ? { toolDeny: prepared.toolPolicy.deny } : {}),
         ...(prepared.toolPolicy.allow.length ? { toolAllow: prepared.toolPolicy.allow } : {}),
+        ...(subRecipes ? { subRecipes } : {}),
       },
       firstUserMessage: prepared.firstUserMessage,
       values: resolved.values,
@@ -496,7 +543,7 @@ export function RecipesPanel({
             <div className="flex flex-wrap items-center gap-1.5 border-t border-[#495059] bg-[#161d27] px-3 py-2.5">
               <button
                 type="button"
-                onClick={handleRun}
+                onClick={() => void handleRun()}
                 className="flex items-center gap-1.5 bg-[#6a9fcc] px-3 py-2 text-[12px] font-semibold text-[#0d1116] transition-colors hover:bg-[#6a9fcc]/85 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[#0d1116]"
               >
                 <Play size={12} aria-hidden="true" /> Run

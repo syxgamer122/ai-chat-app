@@ -5,4 +5,5 @@ export * from './run';
 export * from './retry';
 export * from './structured';
 export * from './share';
+export * from './subrecipe';
 export * from './store';
