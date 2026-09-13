@@ -859,6 +859,18 @@ const BodySchema = z.object({
     )
     .max(40)
     .optional(),
+  /* Recipe (port Goose): client gửi khi đang chạy 1 recipe — instructions đã
+     render tham số ở client (server không biết giá trị), toolPolicy lọc
+     tool client của lượt này. Nhẹ tùy ý: recipe tắt thì field vắng mặt. */
+  recipe: z
+    .object({
+      title: z.string().min(1).max(120),
+      instructions: z.string().max(16_000),
+      jsonSchema: z.record(z.unknown()).optional(),
+      toolDeny: z.array(z.string().min(1).max(200)).max(50).optional(),
+      toolAllow: z.array(z.string().min(1).max(200)).max(50).optional(),
+    })
+    .optional(),
   data: z.unknown().optional(),
 });
 
@@ -1033,6 +1045,9 @@ export async function POST(req: Request) {
       id: conversationId,
     } = parsed.data;
     const messages = attachToolResultParts(parsed.data.messages);
+    /* Recipe: gắn khối instructions vào system (volatile tail — đứng cạnh
+       skills/lessons), áp tool policy lên tập tool client của lượt này. */
+    const recipeCtx = parsed.data.recipe;
 
     /* Chẩn đoán agent coding: xác nhận client có gửi trạng thái workspace.
        Grep vyen-shell.log / dev log theo "workspace connected". */
@@ -1943,6 +1958,20 @@ export async function POST(req: Request) {
                      : CLIENT_TOOL_NAMES),
                    ...mcpTools.keys,
                  ]);
+                 /* Tool policy của recipe: deny loại khỏi set (native forward +
+                    emulated đều mất), allow (khác rỗng) giữ MỌI tool nằm trong
+                    allow-list — áp trên BẢN SAO để không đụng mcpTools.keys gốc. */
+                 const recipeDeny = new Set(recipeCtx?.toolDeny ?? []);
+                 const recipeAllow =
+                   recipeCtx?.toolAllow && recipeCtx.toolAllow.length > 0
+                     ? new Set(recipeCtx.toolAllow)
+                     : null;
+                 if (recipeDeny.size > 0 || recipeAllow) {
+                   for (const name of [...clientToolNames]) {
+                     if (recipeDeny.has(name)) clientToolNames.delete(name);
+                     else if (recipeAllow && !recipeAllow.has(name)) clientToolNames.delete(name);
+                   }
+                 }
                  /**
                   * Đường native khai báo tool client KHÔNG kèm execute — trừ
                   * delegate: route tự chạy subagent server-side qua
@@ -1956,7 +1985,8 @@ export async function POST(req: Request) {
                  /* delegate khả dụng ở CẢ HAI đường: emulated qua onDelegateCall,
                     native qua server-tool execute. Plan mode đã loại nó khỏi
                     clientToolNames ngay từ đầu (chống subagent ghi file lậu). */
-                 const delegateAvailable = allowAgentTools && agentMode !== 'plan';
+                 const delegateAvailable =
+                   allowAgentTools && agentMode !== 'plan' && !recipeDeny.has('delegate');
                  const activeToolNames = allowAgentTools
                    ? [
                        ...Object.keys(serverTools),
@@ -1993,6 +2023,11 @@ export async function POST(req: Request) {
                     modelCalib ?? '',
                     '[QUY TẮC AN TOÀN & RANH GIỚI] Khi gặp lỗi bị quy tắc (rule) hoặc sandbox từ chối, đây là ranh giới hợp lệ — báo cáo lại trung thực, tuyệt đối không tìm cách lách qua.',
                     system,
+                    /* Recipe instructions (port Goose): workflow đang chạy — đứng
+                       sau persona để giữ lực chỉ thị, trước các khối dữ liệu. */
+                    recipeCtx?.instructions
+                      ? recipeCtx.instructions.trim()
+                      : '',
                     contextSummary
                       ? `[Tóm tắt phần hội thoại đã nén trước đó]\n${contextSummary}`
                       : '',
@@ -2356,7 +2391,9 @@ export async function POST(req: Request) {
                             Object.entries(CLIENT_TOOL_DEFS).filter(
                               ([name]) =>
                                 !NATIVE_EXCLUDED_CLIENT_TOOLS.has(name) &&
-                                (agentMode !== 'plan' || !PLAN_MODE_WRITE_TOOLS.has(name)),
+                                (agentMode !== 'plan' || !PLAN_MODE_WRITE_TOOLS.has(name)) &&
+                                !recipeDeny.has(name) &&
+                                (!recipeAllow || recipeAllow.has(name)),
                             ),
                           ),
                           ...nativeDelegateTool,

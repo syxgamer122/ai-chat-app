@@ -229,6 +229,40 @@ const runCli = async (argv: string[]): Promise<void> => {
   await startInteractiveCli(process.cwd(), promptArg || undefined);
 };
 
+/** `vyen recipe list|run` và `vyen run --recipe ...` (headless, port Goose). */
+const runRecipe = async (argv: string[]): Promise<void> => {
+  const [sub, ...rest] = argv;
+  if (sub === 'list' || sub === 'ls' || !sub) {
+    const { listWorkspaceRecipes } = await import('./recipe-list');
+    console.log(listWorkspaceRecipes(process.cwd()));
+    return;
+  }
+  if (sub === 'run') {
+    const { parseRecipeRunArgv, runRecipeHeadless } = await import('./recipe-runner');
+    const parsed = parseRecipeRunArgv(rest);
+    if (!parsed.ok) {
+      console.error(`[vyen recipe] ${parsed.error}`);
+      process.exitCode = 2;
+      return;
+    }
+    process.exitCode = await runRecipeHeadless(parsed.args);
+    return;
+  }
+  if (sub === '--help' || sub === '-h' || sub === 'help') {
+    console.log([
+      'Cách dùng:',
+      '  vyen recipe list                       — liệt kê .vyen/recipes/*.yaml',
+      '  vyen recipe run --recipe <file> [cờ]   — chạy headless (CI dùng được)',
+      '  vyen run --recipe <file> [cờ]          — lối tắt của dòng trên',
+      'Cờ: --params k=v (lặp được / phân cách bằng ",") · --output json|text',
+      '    --no-session · --model <id> · exit code: 0 pass, 1 checks fail, 2 lỗi cấu hình',
+    ].join('\n'));
+    return;
+  }
+  console.error(`[vyen recipe] Sub lệnh không nhận diện: "${sub}". Dùng: list | run.`);
+  process.exitCode = 2;
+};
+
 const runApp = async (argv: string[]): Promise<void> => {
   const launcherScript = path.join(APP_ROOT, 'scripts', 'launch-desktop.cjs');
   const child = spawn(process.execPath, [launcherScript, ...argv], {
@@ -352,6 +386,13 @@ export const COMMANDS: Readonly<Record<string, CommandEntry>> = {
     description: 'Khởi chạy Teamwork Multi-Agent Runtime Engine (Phase 1 & 2)',
     aliases: [],
     run: runTeamwork,
+  },
+  recipe: {
+    name: 'recipe',
+    group: 'agent',
+    description: 'Workflow đóng gói tái sử dụng: list/run headless theo schema (Goose)',
+    aliases: [],
+    run: runRecipe,
   },
   audit: {
     name: 'audit',
@@ -567,6 +608,16 @@ export function resolveDispatch(argv: string[]): DispatchResolution {
   const entry = resolveCommand(command);
   if (entry && entry.group !== 'session') {
     return { branch: 'command', command: entry };
+  }
+
+  /* `run` là alias của `cli` (session) — nhưng kèm --recipe thì là headless
+     recipe runner. Nhánh này phải đứng TRƯỚC nhánh session để cờ không rơi
+     vào REPL tương tác. */
+  if (command === 'run' && argv.slice(1).some((a) => a === '--recipe' || a.startsWith('--recipe='))) {
+    return {
+      branch: 'command',
+      command: { ...COMMANDS.recipe, run: (rest: string[]) => COMMANDS.recipe.run(['run', ...rest]) },
+    };
   }
 
   const teamworkFlags =

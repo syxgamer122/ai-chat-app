@@ -14,6 +14,7 @@ import {
   ArrowUp,
   BookmarkPlus,
   Check,
+  ChefHat,
   CornerDownLeft,
   FileText,
   Film,
@@ -47,6 +48,11 @@ export interface SlashPrompt {
   id: string;
   title: string;
   content: string;
+  /**
+   * 'recipe': mục là workflow (panel Recipes) — chọn sẽ MỞ panel thay vì chèn
+   * text; composer hiển thị nhãn 🍳 để phân biệt với prompt chèn thường.
+   */
+  kind?: 'prompt' | 'recipe';
 }
 
 export interface MediaAction {
@@ -291,6 +297,8 @@ interface ComposerProps {
   onAddFiles: (files: FileList | File[] | null) => void;
   onRemoveAttachment: (id: string) => void;
   slashPrompts?: SlashPrompt[];
+  /** Chọn mục slash: trả true = đã xử lý riêng (vd mở panel), bỏ qua insert. */
+  onApplySlashPrompt?: (prompt: SlashPrompt) => boolean;
   onSavePrompt?: (title: string, content: string) => void | Promise<void>;
   mediaActions?: MediaActions;
   onGenerateMedia?: (action: MediaAction, kind: 'image' | 'video', prompt: string) => void;
@@ -308,6 +316,8 @@ interface ComposerProps {
   onOpenStaging?: () => void;
   /** Mở panel "Công cụ & quyền" (catalog tool + quyền theo nhóm). */
   onOpenToolsPanel?: () => void;
+  /** Mở panel Recipes (workflow đóng gói tái sử dụng). */
+  onOpenRecipes?: () => void;
   /** Orchestrator: panel quét tham số đang mở? */
   orchestratorOpen?: boolean;
   onOpenOrchestrator?: () => void;
@@ -359,6 +369,8 @@ export const Composer = memo(function Composer({
   stagedFileCount,
   onOpenStaging,
   onOpenToolsPanel,
+  onOpenRecipes,
+  onApplySlashPrompt,
   orchestratorOpen,
   onOpenOrchestrator,
   webBusy,
@@ -432,6 +444,11 @@ export const Composer = memo(function Composer({
 
   const applyPrompt = useCallback(
     (prompt: SlashPrompt) => {
+      // Recipe: nhường cho ChatInterface mở panel — không chèn text.
+      if (prompt.kind === 'recipe' && onApplySlashPrompt?.(prompt)) {
+        setSlashDismissed(true);
+        return;
+      }
       setDraft(prompt.content);
       requestAnimationFrame(() => {
         const el = textareaRef.current;
@@ -442,7 +459,7 @@ export const Composer = memo(function Composer({
       });
       setSlashDismissed(true);
     },
-    [],
+    [onApplySlashPrompt],
   );
 
   const quickSavePrompt = useCallback(async () => {
@@ -731,6 +748,17 @@ export const Composer = memo(function Composer({
     });
   }
 
+  if (onOpenRecipes) {
+    advancedTasks.push({
+      key: 'recipes-panel',
+      icon: ChefHat,
+      label: 'Recipes…',
+      description: 'Workflow đóng gói chạy lại được: tham số, kiểm chứng, retry',
+      returnsFocusToTrigger: true,
+      onClick: onOpenRecipes,
+    });
+  }
+
   const taskGroups: TaskGroupSpec[] = [
     { key: 'mode', label: 'Chế độ', items: modeTasks },
     { key: 'lookup-media', label: 'Tra cứu & media', items: lookupTasks },
@@ -796,9 +824,14 @@ export const Composer = memo(function Composer({
                   i === slashIndex ? 'bg-[#252f3d] text-[#ebe7e4]' : 'text-[#ebe7e4] hover:bg-[#161d27]'
                 }`}
               >
-                <span className="text-[12.5px] font-medium text-[#ebe7e4]">/{p.title}</span>
+                <span className="flex items-center gap-1.5 text-[12.5px] font-medium text-[#ebe7e4]">
+                  {p.kind === 'recipe' ? (
+                    <ChefHat size={11} aria-hidden="true" className="flex-none text-[#6a9fcc]" />
+                  ) : null}
+                  /{p.title}
+                </span>
                 <span className="line-clamp-1 w-full text-[11px] text-[#9fa4ab]">
-                  {p.content.replace(/\n+/g, ' ').trim()}
+                  {p.kind === 'recipe' ? 'workflow · mở panel để chạy' : p.content.replace(/\n+/g, ' ').trim()}
                 </span>
               </button>
             ))}

@@ -157,16 +157,21 @@ export async function deletePrompt(id: string): Promise<void> {
   await db.prompts.delete(id);
 }
 
+/** Item slash menu sau khi lọc — giữ field kind ('recipe' mở panel thay vì chèn). */
+export type FilterablePrompt = Pick<PromptTemplate, 'id' | 'title' | 'content'> & {
+  kind?: 'prompt' | 'recipe';
+};
+
 /** Filter prompt theo từ khoá sau "/". Fold dấu tiếng Việt — "tom tat" ra "Tóm tắt". */
 export function filterPrompts(
-  prompts: Pick<PromptTemplate, 'id' | 'title' | 'content'>[],
+  prompts: FilterablePrompt[],
   query: string,
   limit = 8,
-): Pick<PromptTemplate, 'id' | 'title' | 'content'>[] {
+): FilterablePrompt[] {
   const q = foldText(query.trim());
   if (!q) return prompts.slice(0, limit);
 
-  const scored: Array<{ p: Pick<PromptTemplate, 'id' | 'title' | 'content'>; score: number }> = [];
+  const scored: Array<{ p: FilterablePrompt; score: number }> = [];
   for (const p of prompts) {
     const title = foldText(p.title);
     const content = foldText(p.content);

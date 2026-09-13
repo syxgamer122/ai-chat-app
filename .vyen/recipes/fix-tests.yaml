@@ -1,0 +1,51 @@
+# Recipe mẫu: sửa tới khi test pass trong thư mục chỉ định.
+# Chạy: vyen run --recipe fix-tests.yaml --params path=src
+version: "1.0.0"
+title: "Fix failing tests"
+description: "Phân tích test fail trong thư mục chỉ định, sửa code tới khi npm test pass."
+instructions: |
+  Bạn đang chạy workflow "Fix failing tests" trong thư mục {{ path }}.
+  Các bước:
+  1. Chạy test để lấy danh sách test đang fail (chỉ trong phạm vi {{ path }}).
+  2. Đọc test fail + code liên quan, tìm nguyên nhân gốc rễ.
+  3. Sửa code (KHÔNG sửa test trừ khi chính test viết sai spec — khi đó giải thích rõ).
+  4. Chạy lại test để xác nhận pass.
+  {{#if strict}}Chế độ ngặt: tuyệt đối không sửa file test, chỉ sửa source.{{/if}}
+  Giới hạn: chỉ đụng file trong {{ path }}.
+prompt: "Sửa toàn bộ failing tests trong {{ path }}. Làm tới khi `npm test` pass."
+activities:
+  - "Chạy test xem cái gì fail"
+  - "Sửa code theo nguyên nhân gốc rễ"
+  - "Chạy lại test xác nhận pass"
+parameters:
+  - key: path
+    input_type: string
+    requirement: required
+    description: "Thư mục phạm vi sửa (vd src, tests, lib)"
+  - key: strict
+    input_type: boolean
+    requirement: optional
+    default: false
+    description: "Bật để cấm sửa file test"
+tools:
+  deny:
+    - git_commit
+retry:
+  max_retries: 3
+  checks:
+    - type: shell
+      command: "npm test"
+  on_failure: "Lần trước chưa đạt — đọc kỹ output fail ở trên, tìm nguyên nhân gốc rễ rồi sửa."
+response:
+  json_schema:
+    type: object
+    required: [fixed, files_changed]
+    properties:
+      fixed:
+        type: boolean
+      files_changed:
+        type: array
+        items:
+          type: string
+      notes:
+        type: string

@@ -178,6 +178,21 @@ export interface StoredMemory {
   createdAt: number;
 }
 
+/**
+ * Recipe (port Goose): workflow đóng gói tái sử dụng. `content` là text
+ * yaml/json nguyên văn; parse qua lib/recipes/parse.ts khi cần dùng.
+ */
+export interface RecipeRecord {
+  id: string;
+  title: string;
+  /** 'yaml' | 'json' — cách đọc lại content. */
+  format: 'yaml' | 'json';
+  content: string;
+  source: 'local' | 'imported';
+  createdAt: number;
+  updatedAt: number;
+}
+
 function newAttachmentId(): string {
   try {
     return globalThis.crypto.randomUUID();
@@ -274,6 +289,7 @@ export class ChatAppDatabase extends Dexie {
   memoryCandidates!: Table<MemoryRecord, string>;
   memoryRecords!: Table<MemoryRecord, string>;
   memoryReviews!: Table<MemoryReviewEntry, string>;
+  recipes!: Table<RecipeRecord, string>;
 
   constructor() {
     super('ai_chat_app_db');
@@ -462,6 +478,27 @@ export class ChatAppDatabase extends Dexie {
           /* Bỏ qua nếu bảng cũ không có */
         }
       });
+
+    // v12: recipes — workflow đóng gói tái sử dụng (port Goose recipe).
+    // content giữ NGUYÊN VĂN yaml/json để export lại y hệt; parse/schema nằm ở
+    // lib/recipes. source phân biệt recipe người dùng tự tạo và recipe import
+    // từ link/file.
+    this.version(12).stores({
+      chats: 'id, createdAt, updatedAt, pinned, activeLeafId, *titleTokens',
+      messages:
+        'id, chatId, role, createdAt, seq, parentId, ' +
+        '[chatId+parentId], [chatId+createdAt], [chatId+seq], ' +
+        '[chatId+parentId+branchOrder], *tokens',
+      prompts: 'id, updatedAt',
+      kv: 'key',
+      providers: 'id, updatedAt',
+      memories: 'id, createdAt',
+      wsSnapshots: 'id, chatId, createdAt',
+      memoryCandidates: 'id, status, createdAt, digest, [scope.kind+scope.ref]',
+      memoryRecords: 'id, status, createdAt, reviewDueAt, digest, [scope.kind+scope.ref]',
+      memoryReviews: 'id, candidateId, action, reviewedAt',
+      recipes: 'id, title, updatedAt, source',
+    });
 
     this.messages.hook('creating', (_primKey, obj) => {
       obj.parentId = toParentKey(obj.parentId as string | null);

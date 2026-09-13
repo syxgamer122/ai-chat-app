@@ -9,6 +9,7 @@ import {
   fromParentKey,
   toParentKey,
   type StoredMessage,
+  type RecipeRecord,
 } from '@/lib/db';
 import { AVAILABLE_MODELS, MEDIA_MODELS } from '@/lib/models';
 import { deriveModelOption, toggleFavorite, upsertRecent } from '@/lib/model-meta';
@@ -33,7 +34,7 @@ import {
   reconcileOnBoot,
   serializeRunState,
 } from '@/lib/run-lifecycle';
-import { Composer, type MediaAction, type MediaActions } from '@/components/composer';
+import { Composer, type MediaAction, type MediaActions, type SlashPrompt } from '@/components/composer';
 import { ToastHost } from '@/components/toast';
 import type { ModelOption } from '@/components/model-selector';
 import { useTitleGenerator } from '@/lib/use-title-generator';
@@ -102,6 +103,15 @@ import {
   type FsDeps,
 } from '@/lib/fs-access';
 import { isVyenDesktop } from '@/lib/desktop-bridge';
+import { useRecipeUiStore, type ActiveRecipeRun } from '@/lib/recipes/run-store';
+import {
+  nextRetryAction,
+  renderTemplate,
+  processStructuredOutput,
+  formatStructuredLine,
+  readRecipeRecord,
+} from '@/lib/recipes';
+import type { RetryCheckOutcome } from '@/lib/recipes/retry';
 import {
   desktopFsList,
   desktopFsRead,
@@ -244,6 +254,10 @@ const ToolsPanel = dynamic(
   () => import('@/components/tools-panel').then((m) => m.ToolsPanel),
   { ssr: false },
 );
+const RecipesPanel = dynamic(
+  () => import('@/components/recipes/recipes-panel').then((m) => m.RecipesPanel),
+  { ssr: false },
+);
 const AgentHud = dynamic(
   () => import('@/components/hud/agent-hud').then((m) => m.AgentHud),
   { ssr: false },
@@ -358,11 +372,26 @@ export default function ChatInterface() {
     [],
   );
   /** Slash menu chỉ hiển thị prompt CHÈN — skill (mode='skill') tự kích hoạt
-      theo ngữ cảnh, không chọn tay qua "/". */
-  const insertPrompts = useMemo(
-    () => (promptTemplates ?? []).filter((p) => p.mode !== 'skill'),
-    [promptTemplates],
+      theo ngữ cảnh, không chọn tay qua "/". Recipe gộp vào menu "/" với nhãn
+      riêng (kind='recipe'): chọn recipe sẽ MỞ panel thay vì chèn text. */
+  const recipeRecords = useLiveQuery(
+    () => db.recipes.orderBy('updatedAt').reverse().toArray(),
+    [],
+    [] as RecipeRecord[],
   );
+  const insertPrompts = useMemo(() => {
+    const prompts: SlashPrompt[] = (promptTemplates ?? []).filter((p) => p.mode !== 'skill');
+    for (const r of recipeRecords ?? []) {
+      const parsed = readRecipeRecord(r);
+      prompts.push({
+        id: `recipe:${r.id}`,
+        title: r.title,
+        content: parsed?.description ?? 'workflow recipe',
+        kind: 'recipe',
+      });
+    }
+    return prompts;
+  }, [promptTemplates, recipeRecords]);
 
   /**
    * Model media khả dụng cho nhà cung cấp đang chọn.
@@ -545,6 +574,7 @@ export default function ChatInterface() {
 
   /** Panel "Công cụ & quyền": toàn bộ catalog tool + quyền auto-pilot theo nhóm. */
   const [toolsPanelOpen, setToolsPanelOpen] = useState(false);
+  const [recipesPanelOpen, setRecipesPanelOpen] = useState(false);
 
   /** Auto-debug loop state: track retry attempts per command. */
   const debugLoopRef = useRef<DebugStore>(emptyDebugStore());
@@ -1913,6 +1943,14 @@ export default function ChatInterface() {
     },
   });
 
+  /* Recipe checks (port Goose): onFinish ủy quyền sang callback được gán sau
+     (runRecipeChecks định nghĩa ở dưới submitTurn) qua ref để giữ thứ tự hook
+     ổn định. Trả true nghĩa là run recipe đã xử lý lượt này — queue drains
+     phía dưới bỏ qua. */
+  const runRecipeChecksRef = useRef<
+    ((finalText: string) => Promise<boolean>) | null
+  >(null);
+
   const {
     messages, setMessages,
     stop, reload, append, isLoading, error, data,
@@ -2126,6 +2164,17 @@ export default function ChatInterface() {
        */
       if (finishReason !== 'tool-calls' && finishRef.current !== 'error') {
         succeedRun();
+
+        /* Recipe active (port Goose): agent vừa xong một attempt → chạy shell
+           checks, quyết pass/retry/stop. Chiếu quyền flow (queue drains bỏ
+           qua) để vòng retry không đua với steering queued. */
+        {
+          const rr = useRecipeUiStore.getState().activeRun;
+          if (rr && (rr.status === 'running' || rr.status === 'retrying') && runRecipeChecksRef.current) {
+            void runRecipeChecksRef.current(clean);
+            return;
+          }
+        }
 
         /* P3.1 — Drain queue đúng thứ tự Pi: steering trước, rồi goal-continue,
            rồi follow-up. Mỗi drain chỉ append MỘT lượt (one-at-a-time mặc
@@ -4400,6 +4449,25 @@ export default function ChatInterface() {
         };
       }
 
+      /* Recipe đang chạy (port Goose): MỌI lượt của run — kể cả prompt retry —
+         đều mang body.recipe để server inject instructions + áp tool policy.
+         Model override của recipe chỉ áp khi model đó nằm trong danh sách
+         provider hiện tại (tránh gửi tên model gateway không có). */
+      const activeRecipeRun = useRecipeUiStore.getState().activeRun;
+      if (
+        activeRecipeRun &&
+        activeRecipeRun.status !== 'passed' &&
+        activeRecipeRun.status !== 'failed' &&
+        activeRecipeRun.status !== 'error' &&
+        activeRecipeRun.status !== 'stopped'
+      ) {
+        options.body = { ...options.body, recipe: activeRecipeRun.body };
+        const recipeModel = activeRecipeRun.recipe.settings?.model;
+        if (!modelOverride && recipeModel && MODELS.some((m) => m.id === recipeModel)) {
+          options.body = { ...options.body, model: recipeModel };
+        }
+      }
+
       /* Chat với PDF: attachment PDF được trích text qua /api/pdf rồi gửi kèm
          body. Không trích được (scan/lỗi) vẫn gửi như cũ. */
       if (attachments.length > 0) {
@@ -4437,7 +4505,14 @@ export default function ChatInterface() {
          (experimental_attachments + per-call body) như handleSubmit cũ. */
       void append({ role: 'user', content: userText }, options);
       if (isFirstMessage && userText) {
-        void generateTitle(chatId, userText);
+        /* Phiên sinh từ recipe: đặt tên ngay (icon 🍳 làm marker) thay vì đợi
+           generateTitle — run recipe cần nhận diện trong sidebar từ lượt đầu. */
+        const rr = useRecipeUiStore.getState().activeRun;
+        if (rr) {
+          void db.chats.update(chatId, { title: `🍳 ${rr.recipe.title}`.slice(0, 80) });
+        } else {
+          void generateTitle(chatId, userText);
+        }
       }
       return true;
     } catch (err) {
@@ -4446,7 +4521,204 @@ export default function ChatInterface() {
     }
     /* beginRun/currentRun/setRepairable là hàm ổn định (useCallback rỗng bên
        trong hook), nên thêm vào đây không làm submitTurn bị tạo lại. */
-  }, [attachments, isLoading, mediaBusy, currentChatId, draftId, setCurrentChatId, append, pin, generateTitle, messages.length, webSearchEnabled, promptTemplates, agentToolsEnabled, forceEmulatedTools, agentMode, stagingEnabled, beginRun, currentRun, setRepairable]);
+  }, [attachments, isLoading, mediaBusy, currentChatId, draftId, setCurrentChatId, append, pin, generateTitle, messages.length, webSearchEnabled, promptTemplates, agentToolsEnabled, forceEmulatedTools, agentMode, stagingEnabled, beginRun, currentRun, setRepairable, MODELS]);
+
+  /* ---------------------------------------------------------------- */
+  /* Recipe runner (port Goose): attempt → checks → retry/pass/stop.   */
+  /* ---------------------------------------------------------------- */
+  const recipeActiveRun = useRecipeUiStore((s) => s.activeRun);
+  const lastRecipeRunIdRef = useRef<string | null>(null);
+  /** Snapshot messages lúc bắt đầu run — reset context cho mỗi lần retry. */
+  const recipeSnapshotRef = useRef<readonly Message[] | null>(null);
+
+  /* Run mới xuất hiện trong store → chụp snapshot + gửi lượt mở đầu qua
+     submitTurn (hưởng đủ gate busy/web/media + body.recipe). */
+  useEffect(() => {
+    const run = recipeActiveRun;
+    if (!run || run.runId === lastRecipeRunIdRef.current) return;
+    lastRecipeRunIdRef.current = run.runId;
+    recipeSnapshotRef.current = [...messages];
+    void submitTurn(run.firstUserMessage).then((ok) => {
+      if (!ok) {
+        useRecipeUiStore.getState().patchActiveRun({ status: 'error' });
+        showNotice('Không bắt đầu được recipe — agent đang bận. Thử lại sau.', 5000);
+      }
+    });
+  }, [recipeActiveRun, submitTurn, messages]);
+
+  /**
+   * Chạy shell checks sau khi agent kết thúc một attempt. Mọi lệnh check vẫn
+   * đi qua autoApproveShell (recipe KHÔNG bypass phê duyệt); bị từ chối thì
+   * coi như checks-blocked → dừng, không tự retry mù.
+   */
+  const runRecipeChecks = useCallback(
+    async (finalText: string): Promise<boolean> => {
+      const run = useRecipeUiStore.getState().activeRun;
+      if (!run || (run.status !== 'running' && run.status !== 'retrying')) return false;
+      const patch = useRecipeUiStore.getState().patchActiveRun;
+      const appendLog = useRecipeUiStore.getState().appendLog;
+      patch({ status: 'checking' });
+
+      const annotateLast = (annotation: Record<string, unknown>) => {
+        setMessages((prev) => {
+          for (let i = prev.length - 1; i >= 0; i--) {
+            if (prev[i]!.role === 'assistant') {
+              return prev.map((m, idx) =>
+                idx === i
+                  ? {
+                      ...m,
+                      annotations: [
+                        ...((m.annotations ?? []) as Array<Record<string, unknown>>),
+                        annotation,
+                      ] as typeof m.annotations,
+                    }
+                  : m,
+              );
+            }
+          }
+          return prev;
+        });
+      };
+
+      const checks = run.recipe.retry?.checks ?? [];
+
+      /* Web thuần không có shell: recipe KHÔNG khai báo check thì vẫn pass
+         (agent đã trả lời xong); có check thì báo rõ thay vì fail mù. */
+      if (checks.length > 0 && !isVyenDesktop()) {
+        patch({ status: 'failed' });
+        showNotice('Recipe có kiểm chứng shell — cần bản desktop (npm run app) để chạy checks.', 7000);
+        return true;
+      }
+
+      const outcomes: RetryCheckOutcome[] = [];
+      let blocked = false;
+      for (const check of checks) {
+        const command = renderTemplate(check.command, run.values);
+        let approved = false;
+        try {
+          approved = await autoApproveShell({ command, cwd: undefined });
+        } catch {
+          approved = false;
+        }
+        if (!approved) {
+          blocked = true;
+          appendLog(`phê duyệt từ chối: ${command}`);
+          break;
+        }
+        try {
+          const bridge = (await import('@/lib/desktop-bridge')).vyenDesktop();
+          if (!bridge) throw new Error('bridge desktop không khả dụng');
+          const r = await bridge.shell.run({
+            command,
+            timeoutMs: (run.recipe.retry?.timeout_seconds ?? 120) * 1000,
+          });
+          const output = r.stderr?.trim()
+            ? `${r.stdout ?? ''}\n${r.stderr}`
+            : (r.stdout ?? '');
+          outcomes.push({ command, exitCode: r.code ?? null, ok: r.code === 0, tail: output.slice(-1_500) });
+          appendLog(`${command} → ${r.code === 0 ? 'PASS' : `exit ${r.code ?? '?'}`}`);
+        } catch (err) {
+          outcomes.push({
+            command,
+            exitCode: null,
+            ok: false,
+            tail: (err instanceof Error ? err.message : String(err)).slice(0, 300),
+          });
+        }
+      }
+
+      const action = nextRetryAction({
+        recipe: run.recipe,
+        state: { attempt: run.attempt, maxRetries: run.recipe.retry?.max_retries ?? 0 },
+        outcomes,
+        checksBlocked: blocked,
+      });
+
+      if (action.action === 'pass') {
+        const structured = processStructuredOutput(
+          finalText,
+          (run.body.jsonSchema ?? undefined) as Parameters<typeof processStructuredOutput>[1],
+        );
+        const line = structured.ok
+          ? formatStructuredLine({ recipe: run.recipe.title, ok: true, data: structured.value })
+          : formatStructuredLine({ recipe: run.recipe.title, ok: false, errors: structured.errors });
+        annotateLast({ recipeResult: { line, attempts: action.attemptsUsed } });
+        patch({ status: 'passed' });
+        showNotice(`Recipe "${run.recipe.title}" đạt sau ${action.attemptsUsed} lượt.`, 6000);
+        return true;
+      }
+
+      if (action.action === 'stop') {
+        annotateLast({
+          recipeResult: {
+            line: formatStructuredLine({
+              recipe: run.recipe.title,
+              ok: false,
+              errors: [
+                `stop:${action.reason}`,
+                ...outcomes.filter((o) => !o.ok).map((o) => `${o.command} exit=${o.exitCode ?? '?'}`),
+              ],
+            }),
+            attempts: action.attemptsUsed,
+          },
+        });
+        patch({ status: action.reason === 'destructive_check' ? 'stopped' : 'failed' });
+        showNotice(
+          action.reason === 'destructive_check'
+            ? 'Check destructive thất bại — recipe dừng, không tự chạy lại.'
+            : `Recipe dừng: ${action.reason === 'max_retries' ? 'hết lượt retry' : 'checks bị chặn phê duyệt'}.`,
+          7000,
+        );
+        return true;
+      }
+
+      /* retry: reset context về snapshot đầu (đúng spec) rồi gửi failurePrompt
+         như lượt user mới — submitTurn tự gắn lại body.recipe cho run này. */
+      patch({ status: 'retrying', attempt: action.nextAttempt });
+      showNotice(`Kiểm chứng chưa đạt — chạy lại lần ${action.nextAttempt}/${run.maxAttempts}.`, 5000);
+      if (recipeSnapshotRef.current) setMessages([...recipeSnapshotRef.current]);
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      void submitTurn(action.failurePrompt);
+      return true;
+    },
+    [submitTurn, setMessages, autoApproveShell],
+  );
+
+  useEffect(() => {
+    runRecipeChecksRef.current = runRecipeChecks;
+  }, [runRecipeChecks]);
+
+  /** Panel gọi khi user bấm Run: chỉ đặt store — effect trên tự kick. */
+  const startRecipeRun = useCallback((run: ActiveRecipeRun) => {
+    useRecipeUiStore.getState().setActiveRun(run);
+  }, []);
+
+  /**
+   * Slash menu: chọn mục kind='recipe' (badge 🍳) mở panel với recipe đó
+   * thay vì chèn text; trả true để composer bỏ qua insert mặc định.
+   */
+  const handleApplySlashPrompt = useCallback(
+    (p: SlashPrompt): boolean => {
+      if (p.kind !== 'recipe') return false;
+      const recordId = p.id.startsWith('recipe:') ? p.id.slice('recipe:'.length) : '';
+      const record = (recipeRecords ?? []).find((r) => r.id === recordId);
+      if (record) {
+        const recipe = readRecipeRecord(record);
+        if (recipe) {
+          useRecipeUiStore.getState().select({ recipe, origin: 'db', recordId });
+        } else {
+          useRecipeUiStore.getState().select(null);
+        }
+        useRecipeUiStore.getState().openPanel();
+        return true;
+      }
+      // Record vừa bị xoá giữa chừng — mở panel danh sách cho user chọn lại.
+      useRecipeUiStore.getState().select(null);
+      useRecipeUiStore.getState().openPanel();
+      return true;
+    },
+    [recipeRecords],
+  );
 
   /**
    * P3.1 — API hàng đợi cho composer (Enter → steer, Alt+Enter → follow-up).
@@ -5099,6 +5371,7 @@ export default function ChatInterface() {
         attachments={composerAttachments}
         onAddFiles={addFiles}
         slashPrompts={insertPrompts}
+        onApplySlashPrompt={handleApplySlashPrompt}
         onSavePrompt={handleSaveQuickPrompt}
         onRemoveAttachment={handleRemoveAttachmentById}
         mediaActions={mediaActions}
@@ -5113,6 +5386,7 @@ export default function ChatInterface() {
         stagedFileCount={stagingVersion >= 0 ? stagingCount(stagingRef.current) : 0}
         onOpenStaging={onOpenStaging}
         onOpenToolsPanel={onOpenToolsPanel}
+        onOpenRecipes={() => setRecipesPanelOpen(true)}
         orchestratorOpen={orchestratorOpen}
         onOpenOrchestrator={onOpenOrchestrator}
         webBusy={webBusy}
@@ -5168,6 +5442,11 @@ export default function ChatInterface() {
       {toolsPanelOpen && (
         <ToolsPanel open={toolsPanelOpen} onClose={() => setToolsPanelOpen(false)} />
       )}
+      <RecipesPanel
+        open={recipesPanelOpen}
+        onClose={() => setRecipesPanelOpen(false)}
+        onRun={startRecipeRun}
+      />
       <ToastHost />
     </div>
   );

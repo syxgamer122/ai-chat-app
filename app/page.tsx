@@ -95,6 +95,27 @@ export default function Home() {
     return () => { document.body.style.overflow = 'unset'; };
   }, [isSettingsOpen]);
 
+  /* Liên kết share recipe (?recipe=deflate-base64url): decode rồi mở panel
+     ở chế độ XEM TRƯỚC — không tự chạy; user phải bấm Run sau khi đọc. Param
+     bị xoá khỏi URL ngay để refresh không decode lại lần nữa. */
+  useEffect(() => {
+    if (!isMounted) return;
+    const param = new URLSearchParams(window.location.search).get('recipe');
+    if (!param) return;
+    window.history.replaceState({}, '', window.location.pathname);
+    void (async () => {
+      const { decodeRecipeParam } = await import('@/lib/recipes/share');
+      const decoded = decodeRecipeParam(param);
+      const { useRecipeUiStore } = await import('@/lib/recipes/run-store');
+      if (decoded.ok && decoded.recipe) {
+        useRecipeUiStore.getState().select({ recipe: decoded.recipe, origin: 'link' });
+      } else {
+        useRecipeUiStore.getState().select(null);
+      }
+      useRecipeUiStore.getState().openPanel();
+    })();
+  }, [isMounted]);
+
   if (!isMounted) {
     return (
       <div
