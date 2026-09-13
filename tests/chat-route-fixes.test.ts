@@ -54,7 +54,7 @@ describe('A3/A5 — đường emulated vẫn đủ server tools + MCP tools', ()
     // Đường emulated không có kênh tool-call native: không đưa tools vào
     // runEmulatedLoop là model không bao giờ biết tool tồn tại.
     expect(source).toMatch(
-      /tools: serverTools as ReturnType<typeof buildAgentTools>,/,
+      /tools: { ...serverTools, ...subRecipeToolDefs } as ReturnType<typeof buildAgentTools>,/,
     );
     expect(source).toMatch(/extraToolDocs: mcpTools\.defs,/);
     expect(source).toMatch(/clientTools: clientToolNames,/);

@@ -47,7 +47,7 @@ const EXPECTED_LABELS: Record<ToolCategory, { label: string; icon: string }> = {
 /** Tên riêng không dấu được giữ nguyên; ngoài danh sách này phải có dấu. */
 const ASCII_PROPER_NOUNS = new Set(['Git', 'Web', 'Subagent']);
 
-describe('buildPanelSections - panel gồm đủ 8 nhóm, đúng thứ tự, đếm đủ 24', () => {
+describe('buildPanelSections - panel gồm đủ 8 nhóm, đúng thứ tự, đếm đủ 29', () => {
   const sections = buildPanelSections();
 
   it('đủ 8 category theo đúng thứ tự ALL_TOOL_CATEGORIES', () => {
@@ -56,11 +56,11 @@ describe('buildPanelSections - panel gồm đủ 8 nhóm, đúng thứ tự, đ�
     expect(sections.map((s) => s.category)).toEqual([...ALL_TOOL_CATEGORIES]);
   });
 
-  it('tổng số tool của các section bằng đúng 24 entry của catalog', () => {
+  it('tổng số tool của các section bằng đúng 29 entry của catalog', () => {
     // Đột biến bị chặn: builder lọc thiếu/nhầm tool (ví dụ quên nhóm rỗng,
-    // hoặc gom theo group sai) → tổng khác 24 là đỏ.
+    // hoặc gom theo group sai) → tổng khác 29 là đỏ.
     const total = sections.reduce((acc, s) => acc + s.tools.length, 0);
-    expect(total).toBe(24);
+    expect(total).toBe(29);
     expect(total).toBe(TOOL_CATALOG.length);
   });
 
@@ -92,14 +92,14 @@ describe('buildPanelSections - panel gồm đủ 8 nhóm, đúng thứ tự, đ�
 describe('filterPanelSections - lọc theo tên, mô tả, shortLabel', () => {
   const sections = buildPanelSections();
 
-  it('query rỗng hoặc chỉ khoảng trắng trả nguyên 8 nhóm, đủ 24 tool', () => {
+  it('query rỗng hoặc chỉ khoảng trắng trả nguyên 8 nhóm, đủ 29 tool', () => {
     // Đột biến bị chặn: bỏ nhánh `if (!q) return sections` (để query rỗng
     // vẫn chạy includes('') - may mắn vẫn khớp hết) HOẶC điều kiện trim sai →
     // test '   ' (chỉ whitespace) trả thiếu nhóm là đỏ.
     for (const q of ['', '   ']) {
       const out = filterPanelSections(sections, q);
       expect(out).toHaveLength(ALL_TOOL_CATEGORIES.length);
-      expect(out.reduce((acc, s) => acc + s.tools.length, 0)).toBe(24);
+      expect(out.reduce((acc, s) => acc + s.tools.length, 0)).toBe(29);
     }
   });
 
