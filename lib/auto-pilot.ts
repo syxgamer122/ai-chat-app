@@ -15,6 +15,7 @@
 
 import type { ToolPermissions, PermissionOverride } from '@/lib/store';
 import { TOOL_CATEGORY_MAP } from '@/lib/store';
+import { getEffectiveToolPermission } from '@/lib/tool-permissions';
 import { evaluateToolcallRules, type ToolcallRule } from '@/lib/toolcall-rules';
 
 /* ------------------------------------------------------------------ */
@@ -189,13 +190,7 @@ export function shouldAutoApprove(ctx: AutoApproveContext): boolean {
 
   // ── Per-tool override check (highest priority) ──
   if (ctx.toolPermissions) {
-    const specificOverride = ctx.toolPermissions[ctx.toolName];
-    const category = TOOL_CATEGORY_MAP[ctx.toolName];
-    const categoryOverride = category ? ctx.toolPermissions[category] : undefined;
-    const override =
-      specificOverride !== undefined && specificOverride !== 'default'
-        ? specificOverride
-        : categoryOverride;
+    const override = getEffectiveToolPermission(ctx.toolName, ctx.toolPermissions);
 
     if (override === 'deny') return false;   // Blocked entirely
     if (override === 'ask') return false;     // Always ask, even in YOLO

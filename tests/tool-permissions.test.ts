@@ -342,5 +342,69 @@ describe('P1-6: Tool permissions & 4 modes', () => {
 
       expect(filtered).toHaveLength(2);
     });
+
+    it('handles whitelist items with surrounding whitespace cleanly', () => {
+      const serverConfig = {
+        id: 'filesystem',
+        name: 'File System',
+        transport: 'stdio' as const,
+        command: 'npx',
+        availableTools: [' read_file ', ' list_dir '],
+      };
+
+      const serverTools = [
+        { name: 'read_file', description: 'Read a file' },
+        { name: 'write_file', description: 'Write a file' },
+        { name: 'list_dir', description: 'List directory' },
+      ];
+
+      const rawWhitelist = serverConfig.availableTools;
+      const whitelist = rawWhitelist.map((s) => s.trim()).filter(Boolean);
+      const filtered = serverTools.filter((t) => whitelist.includes(t.name));
+
+      expect(filtered).toHaveLength(2);
+      expect(filtered.map((t) => t.name)).toEqual(['read_file', 'list_dir']);
+    });
+  });
+
+  describe('Additional MCP tools in getAllToolRows & shouldAutoApprove MCP fallback', () => {
+    it('getAllToolRows includes additional MCP tools when provided', () => {
+      const mcpTools = [
+        { name: 'mcp__github__create_issue', description: 'Create issue', serverName: 'GitHub' },
+      ];
+      const rows = getAllToolRows(mcpTools);
+      const mcpRow = rows.find((r) => r.name === 'mcp__github__create_issue');
+      expect(mcpRow).toBeDefined();
+      expect(mcpRow?.group).toBe('mcp');
+      expect(mcpRow?.shortLabel).toBe('MCP (GitHub)');
+    });
+
+    it('supports MCP category fallback in shouldAutoApprove', () => {
+      const permsAuto: ToolPermissions = {
+        mcp: 'auto',
+      };
+      expect(
+        shouldAutoApprove({
+          toolName: 'mcp__github__create_issue',
+          args: {},
+          policy: 'always',
+          autoPilotEnabled: true,
+          toolPermissions: permsAuto,
+        }),
+      ).toBe(true);
+
+      const permsAsk: ToolPermissions = {
+        mcp: 'ask',
+      };
+      expect(
+        shouldAutoApprove({
+          toolName: 'mcp__github__create_issue',
+          args: {},
+          policy: 'never',
+          autoPilotEnabled: true,
+          toolPermissions: permsAsk,
+        }),
+      ).toBe(false);
+    });
   });
 });

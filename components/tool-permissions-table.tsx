@@ -12,7 +12,7 @@
  * - Lưu đồng bộ: Zustand persist + Dexie v14 (toolPermissions)
  */
 
-import { useId, useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useState } from 'react';
 import {
   RotateCcw,
   Search,
@@ -30,12 +30,16 @@ import {
   ShieldQuestion,
 } from 'lucide-react';
 import { useAppStore, PERMISSION_OPTIONS, type PermissionOverride } from '@/lib/store';
+import { isMcpAvailable, listMcpTools } from '@/lib/mcp/bridge';
+import { mcpToolKey, type McpToolInfo } from '@/lib/mcp/tool-mapper';
 import {
   getAllToolRows,
   TOOL_PERMISSION_GROUPS,
   type ToolPermissionGroup,
   type ToolRowItem,
+  type AdditionalMcpToolItem,
   saveToolPermissionToDb,
+  loadToolPermissionsFromDb,
   resetToolPermissionsInDb,
 } from '@/lib/tool-permissions';
 
@@ -59,9 +63,30 @@ export function ToolPermissionsTable() {
   const [search, setSearch] = useState('');
   const [selectedGroup, setSelectedGroup] = useState<ToolPermissionGroup | 'all'>('all');
   const [resetConfirm, setResetConfirm] = useState(false);
+  const [mcpTools, setMcpTools] = useState<AdditionalMcpToolItem[]>([]);
 
-  // Danh sách toàn bộ tool
-  const allRows = useMemo(() => getAllToolRows(), []);
+  // Nạp MCP tools nếu đang chạy trên desktop
+  useEffect(() => {
+    if (!isMcpAvailable()) return;
+    let alive = true;
+    void listMcpTools()
+      .then((tools: McpToolInfo[]) => {
+        if (!alive) return;
+        const mapped: AdditionalMcpToolItem[] = tools.map((t: McpToolInfo) => ({
+          name: mcpToolKey(t.serverId, t.name),
+          description: t.description,
+          serverName: t.serverName || t.serverId,
+        }));
+        setMcpTools(mapped);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  // Danh sách toàn bộ tool (gộp cả MCP tools nếu có)
+  const allRows = useMemo(() => getAllToolRows(mcpTools), [mcpTools]);
 
   // Lọc theo search và nhóm
   const filteredRows = useMemo(() => {

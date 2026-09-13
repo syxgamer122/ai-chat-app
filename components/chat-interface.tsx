@@ -172,6 +172,7 @@ import {
 } from '@/lib/workspace-checkpoints';
 import { CLIENT_TOOL_NAMES } from '@/lib/agent-tools';
 import { shouldAutoApprove } from '@/lib/auto-pilot';
+import { loadToolPermissionsFromDb } from '@/lib/tool-permissions';
 import {
   isToolDenied,
   TOOL_CATEGORY_LABELS,
@@ -398,6 +399,14 @@ export default function ChatInterface() {
   useEffect(() => {
     void ensurePromptSeed();
     void ensureProviderSeed();
+    void loadToolPermissionsFromDb().then((dbPerms) => {
+      if (dbPerms && Object.keys(dbPerms).length > 0) {
+        const cur = useAppStore.getState().settings.toolPermissions ?? {};
+        useAppStore.getState().updateSettings({
+          toolPermissions: { ...cur, ...dbPerms },
+        });
+      }
+    });
   }, []);
   const promptTemplates = useLiveQuery(
     () => db.prompts.orderBy('updatedAt').reverse().toArray(),
@@ -5477,17 +5486,18 @@ export default function ChatInterface() {
   }, [updateSettings, agentMode]);
 
   const onCycleAutoPilot = useCallback(() => {
-    // Map: always (Manual) -> smart (Smart) -> never (Autonomous) -> chat_only (Chat Only)
-    if (!autoPilot || approvalPolicy === 'always') {
-      updateSettings({ autoPilot: true, approvalPolicy: 'smart' });
-    } else if (approvalPolicy === 'smart') {
-      updateSettings({ autoPilot: true, approvalPolicy: 'never' });
-    } else if (approvalPolicy === 'never') {
-      updateSettings({ autoPilot: false, approvalPolicy: 'chat_only' });
-    } else if (approvalPolicy === 'chat_only') {
-      updateSettings({ autoPilot: true, approvalPolicy: 'always' });
+    // Chu trình 4 chế độ: Manual (always) -> Smart (smart) -> Autonomous (never) -> Chat Only (chat_only) -> Manual (always)
+    const current = approvalPolicy ?? (autoPilot ? 'smart' : 'always');
+    if (current === 'always') {
+      updateSettings({ approvalPolicy: 'smart', autoPilot: true });
+    } else if (current === 'smart') {
+      updateSettings({ approvalPolicy: 'never', autoPilot: true });
+    } else if (current === 'never') {
+      updateSettings({ approvalPolicy: 'chat_only', autoPilot: false });
+    } else if (current === 'chat_only') {
+      updateSettings({ approvalPolicy: 'always', autoPilot: false });
     } else {
-      updateSettings({ autoPilot: true, approvalPolicy: 'smart' });
+      updateSettings({ approvalPolicy: 'smart', autoPilot: true });
     }
   }, [updateSettings, autoPilot, approvalPolicy]);
 

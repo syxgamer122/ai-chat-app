@@ -6,7 +6,7 @@ import { db, addMemory, deleteMemory, MAX_MEMORIES, MAX_MEMORY_CHARS, type Promp
 import { useAppStore, SERVER_PROVIDER_ID, ALL_TOOL_CATEGORIES, TOOL_CATEGORY_LABELS, PERMISSION_OPTIONS, isApiModelId, isPermissionOverride, type PermissionOverride } from '@/lib/store';
 import { isQueueMode } from '@/lib/message-queue';
 import { exportJson, exportMarkdown, importBackup, type ImportMode } from '@/lib/backup';
-import { X, Download, Upload, Loader2, ShieldAlert, Pencil, Trash2, Check, Clock, Ban, AlertCircle, Sparkles } from 'lucide-react';
+import { X, Download, Upload, Loader2, ShieldAlert, Pencil, Trash2, Check, Clock, Ban, AlertCircle, Sparkles, Zap } from 'lucide-react';
 import { VyenMark } from '@/components/vyen-logo';
 import { TOOL_CATEGORY_ICON_COMPONENTS } from '@/components/tool-category-icons';
 import { useLiveQuery } from 'dexie-react-hooks';
@@ -1110,52 +1110,40 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                   </label>
                 )}
 
-                {/* Auto-pilot Mode */}
+                {/* Chế độ hoạt động & phê duyệt chuẩn (P1-6 Port Goose) */}
                 {(settings.agentTools ?? true) && (
                   <>
-                    <label htmlFor="auto-pilot-toggle" className="flex items-start justify-between gap-3 border-l-2 border-zinc-200 pl-3">
-                      <span className="min-w-0">
-                        <span className="block text-sm font-medium text-zinc-700">
-                          Auto-pilot Mode
-                        </span>
-                        <span className="mt-0.5 block text-[11px] leading-relaxed text-zinc-600">
-                          Agent chạy nhiều bước liên tiếp không cần duyệt từng bước.
-                          Kết hợp với Staging Sandbox để an toàn hơn.
-                        </span>
-                      </span>
-                      <input
-                        id="auto-pilot-toggle"
-                        type="checkbox"
-                        checked={settings.autoPilot ?? false}
-                        onChange={(e) => updateSettings({ autoPilot: e.target.checked })}
-                        className="mt-0.5 h-4 w-4 flex-shrink-0 rounded accent-brand"
-                      />
-                    </label>
-
-                    {(settings.autoPilot ?? false) && (
-                      <div className="border-l-2 border-zinc-200 pl-3">
-                        <label htmlFor="approval-policy" className="block text-sm font-medium text-zinc-700 mb-1">
-                          Approval Policy / Chế độ hoạt động
+                    <div className="rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-900">
+                      <div className="flex items-center gap-2 mb-1.5">
+                        <Zap size={14} className="text-amber-600" />
+                        <label htmlFor="approval-policy" className="text-xs font-semibold text-zinc-800 dark:text-zinc-200">
+                          Chế độ hoạt động & phê duyệt (Approval Policy — 4 chế độ chuẩn)
                         </label>
-                        <select
-                          id="approval-policy"
-                          value={settings.approvalPolicy ?? 'smart'}
-                          onChange={(e) => updateSettings({ approvalPolicy: e.target.value as 'always' | 'smart' | 'never' | 'chat_only' })}
-                          className="field w-full max-w-xs"
-                        >
-                          <option value="smart">Smart (Thông minh) — tự duyệt read + safe commands, hỏi khi ghi/destructive</option>
-                          <option value="never">Autonomous (Tự chủ / YOLO) — tự duyệt tất cả trừ lệnh luôn-chặn</option>
-                          <option value="always">Manual (Thủ công) — luôn hỏi trước khi chạy bất kỳ tool nào</option>
-                          <option value="chat_only">Chat Only (Chỉ chat) — vô hiệu hoàn toàn công cụ (kể cả fs_read)</option>
-                        </select>
-                        <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">
-                          {(settings.approvalPolicy ?? 'smart') === 'smart' && '✅ Read-only tools và safe commands (npm test, git status...) tự động duyệt. Write/destructive vẫn hỏi.'}
-                          {(settings.approvalPolicy ?? 'smart') === 'never' && '⚡ Tất cả tool calls tự động duyệt TRỪ lệnh luôn-chặn (rm -rf /, mkfs, shutdown...). Dùng với Staging Sandbox.'}
-                          {(settings.approvalPolicy ?? 'smart') === 'always' && '🔒 Luôn hỏi trước khi chạy bất kỳ tool nào. Tương đương Manual mode.'}
-                          {(settings.approvalPolicy ?? 'smart') === 'chat_only' && '💬 Vô hiệu hoàn toàn tất cả công cụ (kể cả fs_read). Dùng cho phân tích và viết lách.'}
-                        </p>
                       </div>
-                    )}
+                      <select
+                        id="approval-policy"
+                        value={settings.approvalPolicy ?? (settings.autoPilot ? 'smart' : 'always')}
+                        onChange={(e) => {
+                          const policy = e.target.value as 'always' | 'smart' | 'never' | 'chat_only';
+                          updateSettings({
+                            approvalPolicy: policy,
+                            autoPilot: policy === 'smart' || policy === 'never',
+                          });
+                        }}
+                        className="field w-full text-xs"
+                      >
+                        <option value="smart">Smart (Thông minh — mặc định) — tự duyệt đọc & safe shell, hỏi ghi/destructive</option>
+                        <option value="never">Autonomous (Tự chủ / YOLO) — tự duyệt tất cả trừ lệnh luôn-chặn</option>
+                        <option value="always">Manual (Thủ công) — luôn hỏi phê duyệt trước khi chạy bất kỳ tool nào</option>
+                        <option value="chat_only">Chat Only (Chỉ chat) — vô hiệu hoàn toàn toàn bộ công cụ (kể cả fs_read)</option>
+                      </select>
+                      <p className="mt-1.5 text-[11px] leading-relaxed text-zinc-500">
+                        {(settings.approvalPolicy ?? 'smart') === 'smart' && '✅ Read-only tools và safe commands (npm test, git status...) tự động duyệt. Write/destructive vẫn hỏi.'}
+                        {(settings.approvalPolicy ?? 'smart') === 'never' && '⚡ Tất cả tool calls tự động duyệt TRỪ lệnh luôn-chặn (rm -rf /, mkfs, shutdown...). Dùng với Staging Sandbox.'}
+                        {(settings.approvalPolicy ?? 'smart') === 'always' && '🔒 Luôn hỏi trước khi chạy bất kỳ tool nào. Tương đương Manual mode.'}
+                        {(settings.approvalPolicy ?? 'smart') === 'chat_only' && '💬 Vô hiệu hoàn toàn tất cả công cụ (kể cả fs_read). Dành cho phân tích và viết lách thuần tuý.'}
+                      </p>
+                    </div>
                   </>
                 )}
               </div>

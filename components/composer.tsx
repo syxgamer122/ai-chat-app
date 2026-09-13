@@ -620,26 +620,35 @@ export const Composer = memo(function Composer({
   }
 
   if (onCycleAutoPilot) {
+    const currentPolicy = approvalPolicy ?? (autoPilot ? 'smart' : 'always');
     const policyLabel =
-      approvalPolicy === 'never' ? 'Autonomous'
-      : approvalPolicy === 'always' ? 'Manual'
-      : approvalPolicy === 'chat_only' ? 'Chat Only'
-      : 'Smart';
-    const isChatOnly = approvalPolicy === 'chat_only';
+      currentPolicy === 'never'
+        ? 'Autonomous'
+        : currentPolicy === 'always'
+          ? 'Manual'
+          : currentPolicy === 'chat_only'
+            ? 'Chat Only'
+            : 'Smart';
+    const isChatOnly = currentPolicy === 'chat_only';
+    const isManual = currentPolicy === 'always';
     modeTasks.push({
       key: 'auto-pilot',
       icon: Zap,
-      active: isChatOnly || (autoPilot ?? false),
+      active: currentPolicy === 'smart' || currentPolicy === 'never',
       disabled: isStreaming,
       label: isChatOnly
-        ? 'Chế độ: Chat Only (tắt tools) · bấm để đổi'
-        : autoPilot
-        ? `Auto-pilot: ${policyLabel} · bấm để đổi`
-        : 'Bật Auto-pilot',
-      shortLabel: isChatOnly ? 'Chat Only' : autoPilot ? policyLabel : 'Auto-pilot',
+        ? 'Chế độ: Chat Only (vô hiệu tools) · bấm để đổi'
+        : isManual
+          ? 'Chế độ: Manual (luôn hỏi duyệt) · bấm để đổi'
+          : `Chế độ: ${policyLabel} · bấm để đổi`,
+      shortLabel: policyLabel,
       description: isChatOnly
         ? 'Vô hiệu hoàn toàn tool, dùng cho phân tích & viết'
-        : 'Chạy nhiều bước liền, không phải duyệt từng bước',
+        : isManual
+          ? 'Luôn hỏi xác nhận trước khi chạy bất kỳ tool nào'
+          : currentPolicy === 'never'
+            ? 'Tự động duyệt mọi tool an toàn, trừ lệnh phá hoại'
+            : 'Tự duyệt đọc & safe shell, hỏi ghi/destructive',
       onClick: onCycleAutoPilot,
     });
   }

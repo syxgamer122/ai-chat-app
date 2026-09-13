@@ -110,7 +110,13 @@ export interface ToolRowItem {
   desktopOnly?: boolean;
 }
 
-export function getAllToolRows(additionalMcpTools: Array<{ name: string; description: string }> = []): ToolRowItem[] {
+export interface AdditionalMcpToolItem {
+  name: string;
+  description: string;
+  serverName?: string;
+}
+
+export function getAllToolRows(additionalMcpTools: AdditionalMcpToolItem[] = []): ToolRowItem[] {
   const rows: ToolRowItem[] = TOOL_CATALOG.map((entry) => ({
     name: entry.name,
     group: getToolGroup(entry.name),
@@ -126,7 +132,7 @@ export function getAllToolRows(additionalMcpTools: Array<{ name: string; descrip
       rows.push({
         name: mcp.name,
         group: 'mcp',
-        shortLabel: 'MCP Tool',
+        shortLabel: mcp.serverName ? `MCP (${mcp.serverName})` : 'MCP Tool',
         description: mcp.description || 'Tool từ MCP server',
         kind: 'client',
         desktopOnly: true,
