@@ -56,6 +56,7 @@ export const TOOL_CATEGORY_MAP: Record<string, ToolCategory> = {
   web_fetch: 'web',
   weather: 'web',
   exchange_rates: 'web',
+  chat_recall: 'memory',
   memory_search: 'memory',
   memory_save: 'memory',
   lesson_save: 'memory',
@@ -317,6 +318,15 @@ export const TOOL_CATALOG: readonly ToolCatalogEntry[] = [
     desktopOnly: false,
   },
   // memory
+  {
+    name: 'chat_recall',
+    kind: 'client',
+    category: 'memory',
+    shortLabel: 'tra cứu lịch sử',
+    description: 'Tìm kiếm toàn bộ lịch sử các phiên trò chuyện trước đây để tra cứu thông tin cũ (Goose port).',
+    aliases: ['chatRecall', 'recall'],
+    desktopOnly: false,
+  },
   {
     name: 'lesson_save',
     kind: 'client',

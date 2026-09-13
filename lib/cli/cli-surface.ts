@@ -223,7 +223,81 @@ const runTeamwork = async (argv: string[]): Promise<void> => {
   await runTeamworkEngine(argv);
 };
 
+export const runSession = async (argv: string[]): Promise<void> => {
+  const { listCliSessions, getLatestCliSession, loadCliSession } = await import('./session-manager');
+  const { startInteractiveCli } = await import('./interactive-agent');
+
+  const isResume = argv.includes('-r') || argv.includes('--resume');
+  const nameIndex = argv.findIndex((a) => a === '--name' || a === '-n');
+  const nameArg = nameIndex !== -1 && argv[nameIndex + 1] ? argv[nameIndex + 1] : undefined;
+
+  if (isResume) {
+    let session = null;
+    if (nameArg) {
+      session = loadCliSession(process.cwd(), nameArg);
+      if (!session) {
+        console.error(`[vyen session] Không tìm thấy phiên nào có tên khớp với: "${nameArg}".`);
+        console.error('Dùng "vyen session list" để xem danh sách các phiên có sẵn.');
+        process.exitCode = 1;
+        return;
+      }
+    } else {
+      session = getLatestCliSession(process.cwd());
+      if (!session) {
+        console.log('[vyen session] Chưa có phiên nào được lưu. Khởi tạo phiên mới...');
+      }
+    }
+
+    if (session) {
+      console.log(`[vyen session] Tiếp tục phiên: "${session.name}" (${session.id}) — ${session.history.length} tin nhắn.`);
+    }
+    await startInteractiveCli(process.cwd(), undefined, { resumeSession: session || undefined });
+    return;
+  }
+
+  const sub = argv[0];
+  if (sub === 'list' || sub === 'ls' || !sub) {
+    const sessions = listCliSessions(process.cwd());
+    if (sessions.length === 0) {
+      console.log('Chưa có phiên làm việc CLI nào được lưu trong workspace này.');
+      console.log('Chạy "vyen cli" để bắt đầu một phiên làm việc mới.');
+      return;
+    }
+    console.log(`\nDANH SÁCH PHIÊN LÀM VIỆC CLI (${sessions.length} phiên):`);
+    console.log('─'.repeat(70));
+    for (const s of sessions) {
+      const dateStr = new Date(s.updatedAt || s.createdAt).toLocaleString('vi-VN');
+      console.log(`• ID:      ${s.id}`);
+      console.log(`  Tên:     ${s.name}`);
+      console.log(`  Tin:     ${s.history.length} tin nhắn | Cập nhật: ${dateStr}`);
+      console.log('─'.repeat(70));
+    }
+    console.log('\nĐể tiếp tục một phiên:');
+    console.log('  vyen session -r               (phiên gần nhất)');
+    console.log('  vyen session -r --name <tên>   (tìm theo tên)');
+    return;
+  }
+
+  if (sub === '--help' || sub === '-h' || sub === 'help') {
+    console.log([
+      'Cách dùng: vyen session [tùy_chọn]',
+      '  vyen session list                  — Liệt kê các phiên đã lưu',
+      '  vyen session -r                    — Tiếp tục phiên gần nhất',
+      '  vyen session -r --name <tên>       — Tiếp tục phiên theo tên',
+      'Lối tắt: npm run cli -- session -r',
+    ].join('\n'));
+    return;
+  }
+
+  console.error(`[vyen session] Tùy chọn không nhận diện: "${sub}". Dùng --help để xem hướng dẫn.`);
+  process.exitCode = 1;
+};
+
 const runCli = async (argv: string[]): Promise<void> => {
+  if (argv[0] === 'session') {
+    await runSession(argv.slice(1));
+    return;
+  }
   const { startInteractiveCli } = await import('./interactive-agent');
   const promptArg = argv.join(' ').trim();
   await startInteractiveCli(process.cwd(), promptArg || undefined);
@@ -365,6 +439,13 @@ export const COMMANDS: Readonly<Record<string, CommandEntry>> = {
     description: 'Mở terminal coding agent tương tác (chuẩn Claude Code / Pi)',
     aliases: ['run'],
     run: runCli,
+  },
+  session: {
+    name: 'session',
+    group: 'session',
+    description: 'Quản lý phiên CLI: danh sách, resume (-r, -r --name <tên>)',
+    aliases: ['sessions'],
+    run: runSession,
   },
   app: {
     name: 'app',

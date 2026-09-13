@@ -659,6 +659,24 @@ export default function ChatInterface() {
       .catch(() => {});
   }, [currentChatId]);
 
+  /* Gắn session với workspace path (P2-8) */
+  const [sessionWorkspacePath, setSessionWorkspacePath] = useState<string | null>(null);
+  const [dismissedReconnect, setDismissedReconnect] = useState(false);
+
+  useEffect(() => {
+    setSessionWorkspacePath(null);
+    setDismissedReconnect(false);
+    if (!currentChatId) return;
+    void db.chats
+      .get(currentChatId)
+      .then((chat) => {
+        if (chat?.workspacePath) {
+          setSessionWorkspacePath(chat.workspacePath);
+        }
+      })
+      .catch(() => {});
+  }, [currentChatId]);
+
   /** Ghi overlay + persist + bump version. Gọi sau mọi stage/unstage/clear. */
   const updateStaging = useCallback((next: StagingStore) => {
     stagingRef.current = next;
@@ -905,6 +923,15 @@ export default function ChatInterface() {
 
   /* ---------------- Agent coding: workspace + client tools ---------------- */
   const [workspace, setWorkspace] = useState(getWorkspaceInfo());
+  const currentWsNameOrPath =
+    (workspace as unknown as { path?: string })?.path || workspace?.name || '';
+  const isWorkspaceMatched = Boolean(
+    workspace?.connected &&
+      sessionWorkspacePath &&
+      (currentWsNameOrPath === sessionWorkspacePath ||
+        currentWsNameOrPath.endsWith(sessionWorkspacePath) ||
+        sessionWorkspacePath.endsWith(currentWsNameOrPath)),
+  );
 
   /* Nhánh git cho status line (mượn ý @rokiy/pi-ui): đọc 1 LẦN khi workspace
      bật kết nối qua desktop bridge; web thuần không có bridge thì thôi, không
@@ -1162,7 +1189,14 @@ export default function ChatInterface() {
       } else {
         showNotice(`Đã kết nối thư mục: ${r.name}`, 3000);
       }
-      setWorkspace(await desktopGetWorkspaceInfo());
+      const info = isVyenDesktop() ? await desktopGetWorkspaceInfo() : getWorkspaceInfo();
+      setWorkspace(info);
+      const activeChatId = useAppStore.getState().currentChatId;
+      const pathOrName = (info as unknown as { path?: string }).path || info.name;
+      if (activeChatId && pathOrName) {
+        setSessionWorkspacePath(pathOrName);
+        void db.chats.update(activeChatId, { workspacePath: pathOrName });
+      }
       return;
     }
     const r = await pickWorkspaceRoot();
@@ -1171,7 +1205,14 @@ export default function ChatInterface() {
     } else {
       showNotice(`Đã kết nối thư mục: ${r.name}`, 3000);
     }
-    setWorkspace(getWorkspaceInfo());
+    const info = getWorkspaceInfo();
+    setWorkspace(info);
+    const activeChatId = useAppStore.getState().currentChatId;
+    const pathOrName = (info as unknown as { path?: string }).path || info.name;
+    if (activeChatId && pathOrName) {
+      setSessionWorkspacePath(pathOrName);
+      void db.chats.update(activeChatId, { workspacePath: pathOrName });
+    }
   }, []);
 
   /**
@@ -1436,6 +1477,33 @@ export default function ChatInterface() {
         const res = await bridge.code.run({ code });
         return JSON.stringify(res);
       }
+
+      /* chat_recall (Goose P2-8): tra cứu full-text toàn bộ lịch sử trò chuyện */
+      if (toolCall.toolName === 'chat_recall') {
+        if (isToolDenied('chat_recall', toolPermissions)) {
+          return JSON.stringify({ error: 'Tool "chat_recall" is denied by policy.', denied: true });
+        }
+        const rawArgs = (toolCall.args ?? {}) as Record<string, unknown>;
+        const query = String(rawArgs.query ?? '').trim();
+        const limit = typeof rawArgs.limit === 'number' ? rawArgs.limit : 5;
+        try {
+          const { recallChatSessions } = await import('@/lib/chat-recall');
+          const results = await recallChatSessions(query, limit);
+          return JSON.stringify({
+            query,
+            total: results.length,
+            results,
+            hint: results.length
+              ? 'Đã tìm thấy các phiên trò chuyện liên quan trong lịch sử. Bạn có thể sử dụng thông tin và ngữ cảnh này để trả lời người dùng.'
+              : 'Không tìm thấy phiên trò chuyện nào trong lịch sử phù hợp với từ khoá.',
+          });
+        } catch (err) {
+          return JSON.stringify({
+            error: `Lỗi tra cứu lịch sử: ${err instanceof Error ? err.message : String(err)}`,
+          });
+        }
+      }
+
       if (!CLIENT_TOOL_NAMES.has(toolCall.toolName)) {
         /* Tool lạ PHẢI trả result string thay vì undefined: ai@4 giữ invocation
            kẹt ở state `call` mãi mãi khi onToolCall không trả gì → stream treo
@@ -5778,6 +5846,35 @@ export default function ChatInterface() {
           onContinueGenerating={continueGenerating}
         />
       </div>
+
+      {/* Đề nghị kết nối lại workspace gắn với phiên (Goose P2-8) */}
+      {sessionWorkspacePath && !isWorkspaceMatched && !dismissedReconnect && (
+        <div className="mx-auto mb-2 w-full max-w-thread px-4">
+          <div className="flex items-center justify-between gap-2 rounded-none border border-[#495059] bg-[#161d27] px-3 py-2 font-mono text-xs text-[#ebe7e4]">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="text-[#6a9fcc] flex-none">📁</span>
+              <span className="text-[#9fa4ab] flex-none">Phiên này gắn với thư mục:</span>
+              <span className="truncate font-semibold text-[#6a9fcc]">{sessionWorkspacePath}</span>
+            </div>
+            <div className="flex items-center gap-2 flex-none">
+              <button
+                type="button"
+                onClick={pickFolder}
+                className="bg-[#212730] hover:bg-[#2e3744] text-[#6a9fcc] border border-[#495059] px-2.5 py-1 text-[11px] transition-colors cursor-pointer"
+              >
+                Kết nối lại
+              </button>
+              <button
+                type="button"
+                onClick={() => setDismissedReconnect(true)}
+                className="text-[#9fa4ab] hover:text-[#ebe7e4] px-1.5 py-1 text-[11px] transition-colors cursor-pointer"
+              >
+                Bỏ qua
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Undo agent coding: chỉ hiện khi chat này có snapshot restorable. */}
       <WorkspaceCheckpointBar

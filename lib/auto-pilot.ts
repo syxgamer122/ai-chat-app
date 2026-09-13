@@ -106,6 +106,7 @@ const READ_ONLY_TOOLS = new Set([
   'web_fetch',
   'memory_search',
   'retrieve_memories',
+  'chat_recall',
   'git_diff',
   'git_log',
   'git_status',

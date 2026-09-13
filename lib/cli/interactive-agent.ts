@@ -17,6 +17,7 @@ import { z } from 'zod';
 import { resolveWithin } from '../path-guard.cjs';
 import { runMonkeyCodeSast } from '../security-sast';
 import { renderToolsCommand } from './cli-surface';
+import { saveCliSession, type CliSessionData } from './session-manager';
 
 // Re-export để test khóa được việc REPL dùng đúng pure builder dùng chung.
 export { renderToolsCommand };
@@ -384,6 +385,7 @@ export interface AutonomousAgentOptions {
   mockMode?: boolean;
   skipEnvLoad?: boolean;
   harness?: CliCodingHarness;
+  resumeSession?: CliSessionData;
 }
 
 export function loadEnvFiles(workspaceRoot: string = process.cwd()) {
@@ -430,10 +432,24 @@ export class AutonomousCliAgent {
   private maxSteps: number = 20;
   private mockMode: boolean = false;
   private history: CoreMessage[] = [];
+  private sessionId: string;
+  private sessionName: string;
+  private createdAt: number;
 
   constructor(options?: AutonomousAgentOptions) {
     this.workspaceRoot = path.resolve(options?.workspaceRoot || process.cwd());
     this.harness = options?.harness || new CliCodingHarness(this.workspaceRoot);
+    if (options?.resumeSession) {
+      this.sessionId = options.resumeSession.id;
+      this.sessionName = options.resumeSession.name || 'Phiên đã lưu';
+      this.createdAt = options.resumeSession.createdAt || Date.now();
+      this.history = [...options.resumeSession.history];
+    } else {
+      this.sessionId = `cli-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      this.sessionName = 'Phiên mới';
+      this.createdAt = Date.now();
+      this.history = [];
+    }
     if (!options?.skipEnvLoad) {
       loadEnvFiles(this.workspaceRoot);
     }
@@ -516,6 +532,34 @@ export class AutonomousCliAgent {
 
   public getHistory(): CoreMessage[] {
     return [...this.history];
+  }
+
+  public getSessionId(): string {
+    return this.sessionId;
+  }
+
+  public getSessionName(): string {
+    return this.sessionName;
+  }
+
+  public setSessionName(name: string): void {
+    this.sessionName = name.trim();
+    this.saveSession();
+  }
+
+  public saveSession(): void {
+    try {
+      saveCliSession(this.workspaceRoot, {
+        id: this.sessionId,
+        name: this.sessionName,
+        workspace: this.workspaceRoot,
+        createdAt: this.createdAt,
+        updatedAt: Date.now(),
+        history: this.history,
+      });
+    } catch {
+      // Bỏ qua lỗi nếu không ghi được đĩa
+    }
   }
 
   public getHarness(): CliCodingHarness {
@@ -807,6 +851,11 @@ Guidelines:
         this.history.push({ role: 'assistant', content: accumulatedText });
       }
 
+      if (this.sessionName === 'Phiên mới' && userPrompt.trim()) {
+        this.sessionName = userPrompt.trim().slice(0, 50);
+      }
+      this.saveSession();
+
       if (!accumulatedText.endsWith('\n')) {
         if (callbacks?.onToken) callbacks.onToken('\n');
         else process.stdout.write('\n');
@@ -885,6 +934,11 @@ Guidelines:
     this.history.push({ role: 'user', content: userPrompt });
     this.history.push({ role: 'assistant', content: resultSummary });
 
+    if (this.sessionName === 'Phiên mới' && userPrompt.trim()) {
+      this.sessionName = userPrompt.trim().slice(0, 50);
+    }
+    this.saveSession();
+
     return { text: resultSummary, toolCallsCount };
   }
 }
@@ -916,8 +970,11 @@ export async function startInteractiveCli(
   console.log(`\n======================================================`);
   console.log(` Vyen Autonomous Coding Agent (Claude Code & Codex Harness)`);
   console.log(` Workspace: ${cfg.workspace}`);
+  console.log(` Phiên:     ${agent.getSessionName()} (${agent.getSessionId()})`);
   console.log(` Model:     ${cfg.model} | Key: ${cfg.hasKey ? 'Sẵn sàng ✔' : 'Chưa cấu hình (dùng /key để gán)'}`);
   console.log(` Các lệnh slash / colon khả dụng:`);
+  console.log(`   /session              - Xem thông tin phiên hiện tại`);
+  console.log(`   /rename <tên>         - Đổi tên phiên hiện tại`);
   console.log(`   /help, :help          - Hiển thị bảng trợ giúp này`);
   console.log(`   /key <api-key>        - Cập nhật API key trong phiên`);
   console.log(`   /model <name>         - Thay đổi model LLM`);
@@ -966,6 +1023,28 @@ export async function startInteractiveCli(
     if (lower === '/clear' || lower === ':clear' || lower === 'clear' || lower === 'cls') {
       console.clear();
       agent.clearHistory();
+      rl.prompt();
+      continue;
+    }
+
+    if (lower === '/session' || lower === ':session') {
+      const hist = agent.getHistory();
+      console.log(`[vyen cli] Phiên hiện tại: "${agent.getSessionName()}"`);
+      console.log(`           ID:       ${agent.getSessionId()}`);
+      console.log(`           Tin nhắn: ${hist.length} tin nhắn`);
+      console.log(`           Thư mục:  ${cfg.workspace}`);
+      rl.prompt();
+      continue;
+    }
+
+    if (trimmed.startsWith('/rename ') || trimmed.startsWith(':rename ')) {
+      const newName = trimmed.replace(/^[\/:](rename)\s+/, '').trim();
+      if (newName) {
+        agent.setSessionName(newName);
+        console.log(`[vyen cli] Đã đổi tên phiên thành: "${newName}".`);
+      } else {
+        console.log('[vyen cli] Vui lòng nhập tên mới: /rename <tên>');
+      }
       rl.prompt();
       continue;
     }

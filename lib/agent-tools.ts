@@ -1000,6 +1000,21 @@ export const CLIENT_TOOL_DEFS = {
       id: z.string().min(1).max(80).describe('Id của entry (field id trong kết quả retrieve)'),
     }),
   }),
+
+  /* ------------------------------------------------------------------ */
+  /* Chat Recall — tra cứu lịch sử hội thoại trước đây (Goose P2-8)     */
+  /* ------------------------------------------------------------------ */
+
+  chat_recall: tool({
+    description:
+      'TÌM KIẾM toàn bộ lịch sử các phiên trò chuyện trước đây để tra cứu thông tin, quyết định cũ, ' +
+      'hoặc ngữ cảnh đã thảo luận trong quá khứ. Hỗ trợ tiếng Việt có dấu và không dấu. Trả về danh sách ' +
+      'các phiên kèm trích đoạn nội dung khớp.',
+    parameters: z.object({
+      query: z.string().min(1).max(300).describe('Từ khóa hoặc cụm từ cần tìm trong lịch sử chat'),
+      limit: z.number().min(1).max(20).optional().describe('Số kết quả tối đa cần lấy (mặc định: 5)'),
+    }),
+  }),
 } as const;
 
 export type ClientToolSet = typeof CLIENT_TOOL_DEFS;

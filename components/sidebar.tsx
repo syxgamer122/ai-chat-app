@@ -18,7 +18,7 @@ import { VyenLogo } from '@/components/vyen-logo';
 import {
   Plus, Pin, Trash2, Search, Settings as SettingsIcon,
   X, MoreHorizontal, FileJson, FileText, Loader2, PanelLeftClose, PanelLeftOpen,
-  Sun, Moon, Monitor,
+  Sun, Moon, Monitor, Pencil, ExternalLink, Play,
 } from 'lucide-react';
 
 const EMPTY_CHATS: ChatSession[] = [];
@@ -47,16 +47,33 @@ interface ChatItemProps {
   onTogglePin: (id: string, currentPin: 0 | 1) => void;
   onDelete: (id: string) => void;
   onExport: (id: string, format: 'json' | 'md') => void;
+  onRename?: (id: string, newTitle: string) => void;
 }
 
 const ChatItem = memo(function ChatItem({
   chat, isActive, titleSegments, snippets, extraHits,
-  onSelect, onTogglePin, onDelete, onExport,
+  onSelect, onTogglePin, onDelete, onExport, onRename,
 }: ChatItemProps) {
   const [menuRect, setMenuRect] = useState<{ top: number; right: number } | null>(null);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editTitle, setEditTitle] = useState(chat.title);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const menuOpen = menuRect !== null;
+
+  useEffect(() => {
+    if (!isEditing) setEditTitle(chat.title);
+  }, [chat.title, isEditing]);
+
+  const handleSaveRename = useCallback(() => {
+    setIsEditing(false);
+    const trimmed = editTitle.trim();
+    if (trimmed && trimmed !== chat.title) {
+      onRename?.(chat.id, trimmed);
+    } else {
+      setEditTitle(chat.title);
+    }
+  }, [editTitle, chat.title, chat.id, onRename]);
 
   const openMenu = () => {
     const r = triggerRef.current?.getBoundingClientRect();
@@ -92,8 +109,33 @@ const ChatItem = memo(function ChatItem({
           ref={menuRef}
           role="menu"
           style={{ position: 'fixed', top: menuRect.top, right: menuRect.right }}
-          className="z-[100] w-48 animate-pop-in rounded-none border border-[#495059] bg-[#161d27] p-1 font-mono text-xs"
+          className="z-[100] w-52 animate-pop-in rounded-none border border-[#495059] bg-[#161d27] p-1 font-mono text-xs"
         >
+          <button
+            type="button" role="menuitem"
+            onClick={() => { onSelect(chat.id); closeMenu(); }}
+            className="flex w-full items-center gap-2 rounded-none px-2.5 py-1.5 text-[12px] text-[#ebe7e4] transition-colors hover:bg-[#212730]"
+          >
+            <Play size={13} className="text-[#6a9fcc]" />
+            Tiếp tục (Resume)
+          </button>
+          <button
+            type="button" role="menuitem"
+            onClick={() => { setIsEditing(true); closeMenu(); }}
+            className="flex w-full items-center gap-2 rounded-none px-2.5 py-1.5 text-[12px] text-[#ebe7e4] transition-colors hover:bg-[#212730]"
+          >
+            <Pencil size={13} className="text-[#6a9fcc]" />
+            Đổi tên phiên
+          </button>
+          <button
+            type="button" role="menuitem"
+            onClick={() => { window.open(`/?chatId=${chat.id}`, '_blank'); closeMenu(); }}
+            className="flex w-full items-center gap-2 rounded-none px-2.5 py-1.5 text-[12px] text-[#ebe7e4] transition-colors hover:bg-[#212730]"
+          >
+            <ExternalLink size={13} className="text-[#6a9fcc]" />
+            Mở cửa sổ mới
+          </button>
+          <div className="my-1 h-px bg-[#495059]" />
           <button
             type="button" role="menuitem"
             onClick={() => { onTogglePin(chat.id, (chat.pinned ?? 0) as 0 | 1); closeMenu(); }}
@@ -138,16 +180,38 @@ const ChatItem = memo(function ChatItem({
       }`}
     >
       <div className="flex w-full items-center justify-between gap-1 px-2.5 py-1">
-        <button
-          type="button"
-          onClick={() => onSelect(chat.id)}
-          aria-current={isActive ? 'true' : undefined}
-          className="flex min-w-0 flex-1 items-center gap-2 rounded-none text-left outline-none"
-        >
-          <span className={`truncate text-[12.5px] ${isActive ? 'font-medium text-[#ebe7e4]' : 'text-[#9fa4ab]'}`}>
-            {titleSegments ? <Highlight segments={titleSegments} /> : chat.title}
-          </span>
-        </button>
+        {isEditing ? (
+          <input
+            autoFocus
+            type="text"
+            value={editTitle}
+            onChange={(e) => setEditTitle(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                handleSaveRename();
+              } else if (e.key === 'Escape') {
+                e.preventDefault();
+                setIsEditing(false);
+                setEditTitle(chat.title);
+              }
+            }}
+            onBlur={handleSaveRename}
+            className="w-full bg-[#1b2430] text-[#ebe7e4] text-[12px] px-1 py-0.5 border border-[#6a9fcc] outline-none font-mono"
+          />
+        ) : (
+          <button
+            type="button"
+            onClick={() => onSelect(chat.id)}
+            onDoubleClick={() => setIsEditing(true)}
+            aria-current={isActive ? 'true' : undefined}
+            className="flex min-w-0 flex-1 items-center gap-2 rounded-none text-left outline-none"
+          >
+            <span className={`truncate text-[12.5px] ${isActive ? 'font-medium text-[#ebe7e4]' : 'text-[#9fa4ab]'}`}>
+              {titleSegments ? <Highlight segments={titleSegments} /> : chat.title}
+            </span>
+          </button>
+        )}
 
         <div className="flex items-center gap-0.5">
           {chat.pinned && <Pin size={10} className="rotate-45 text-[#e8993a]" />}
@@ -305,6 +369,17 @@ export function Sidebar() {
     else await exportMarkdown(id);
   }, []);
 
+  const handleRename = useCallback(async (id: string, newTitle: string) => {
+    const trimmed = newTitle.trim();
+    if (!trimmed) return;
+    const { tokenize } = await import('@/lib/search-utils');
+    await db.chats.update(id, {
+      title: trimmed,
+      titleTokens: tokenize(trimmed),
+      updatedAt: Date.now(),
+    });
+  }, []);
+
   const groups = useMemo(
     () => (showingSearch ? [] : groupChatsByDate(chats)),
     [chats, showingSearch],
@@ -427,6 +502,7 @@ export function Sidebar() {
                       onTogglePin={handleTogglePin}
                       onDelete={handleDelete}
                       onExport={handleExport}
+                      onRename={handleRename}
                     />
                   ))
                 )}
@@ -447,6 +523,7 @@ export function Sidebar() {
                         onTogglePin={handleTogglePin}
                         onDelete={handleDelete}
                         onExport={handleExport}
+                        onRename={handleRename}
                       />
                     ))}
                   </div>

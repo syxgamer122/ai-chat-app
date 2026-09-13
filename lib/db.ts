@@ -33,6 +33,8 @@ export interface ChatSession {
   branchSelection?: Record<string, string>;
   revision?: number;
   lastWriterId?: string;
+  /** Thư mục làm việc gắn liền với phiên (P2-8) */
+  workspacePath?: string;
   /**
    * Marker nén hội thoại (compaction): mọi tin nhắn TRƯỚC/TRÊN `upToId`
    * dọc nhánh hiện tại đã được thay thế bằng `summary` khi gửi lên model.
@@ -534,6 +536,26 @@ export class ChatAppDatabase extends Dexie {
     // v14: toolPermissions — quyền per-tool / per-category (P1-6): auto | ask | deny.
     this.version(14).stores({
       chats: 'id, createdAt, updatedAt, pinned, activeLeafId, *titleTokens',
+      messages:
+        'id, chatId, role, createdAt, seq, parentId, ' +
+        '[chatId+parentId], [chatId+createdAt], [chatId+seq], ' +
+        '[chatId+parentId+branchOrder], *tokens',
+      prompts: 'id, updatedAt',
+      kv: 'key',
+      providers: 'id, updatedAt',
+      memories: 'id, createdAt',
+      wsSnapshots: 'id, chatId, createdAt',
+      memoryCandidates: 'id, status, createdAt, digest, [scope.kind+scope.ref]',
+      memoryRecords: 'id, status, createdAt, reviewDueAt, digest, [scope.kind+scope.ref]',
+      memoryReviews: 'id, candidateId, action, reviewedAt',
+      recipes: 'id, title, updatedAt, source',
+      agentMemories: 'id, category, scope, workspaceKey, createdAt, *tags',
+      toolPermissions: 'toolName, permission, updatedAt',
+    });
+
+    // v15: gắn workspacePath vào chats (P2-8), index workspacePath để truy vấn/lọc theo thư mục
+    this.version(15).stores({
+      chats: 'id, createdAt, updatedAt, pinned, activeLeafId, workspacePath, *titleTokens',
       messages:
         'id, chatId, role, createdAt, seq, parentId, ' +
         '[chatId+parentId], [chatId+createdAt], [chatId+seq], ' +

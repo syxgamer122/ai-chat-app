@@ -34,6 +34,7 @@ const EXPECTED_NAMES = [
   'web_search', 'web_fetch', 'weather', 'exchange_rates',
   'memory_search', 'memory_save', 'lesson_save',
   'remember_memory', 'retrieve_memories', 'remove_memory_category', 'remove_specific_memory',
+  'chat_recall',
   'plan_create', 'plan_update',
   'delegate',
 ].sort();
@@ -46,9 +47,9 @@ const EXPECTED_DESKTOP_ONLY = [
 
 const EMOJI_RE = /\p{Extended_Pictographic}/u;
 
-describe('TOOL_CATALOG - đủ 29 tool, không thừa không thiếu', () => {
-  it('tập tên khớp đúng 29 tên mong đợi', () => {
-    expect(TOOL_CATALOG).toHaveLength(29);
+describe('TOOL_CATALOG - đủ 30 tool, không thừa không thiếu', () => {
+  it('tập tên khớp đúng 30 tên mong đợi', () => {
+    expect(TOOL_CATALOG).toHaveLength(30);
     expect(TOOL_CATALOG.map((t) => t.name).sort()).toEqual(EXPECTED_NAMES);
   });
 
@@ -66,13 +67,13 @@ describe('TOOL_CATALOG - đủ 29 tool, không thừa không thiếu', () => {
     expect(TOOL_CATALOG.map((t) => t.name)).toEqual(expected.map((t) => t.name));
   });
 
-  it('kind: đúng 6 server + 23 client', () => {
+  it('kind: đúng 6 server + 24 client', () => {
     const server = TOOL_CATALOG.filter((t) => t.kind === 'server');
     const client = TOOL_CATALOG.filter((t) => t.kind === 'client');
     expect(server.map((t) => t.name).sort()).toEqual(
       ['exchange_rates', 'memory_save', 'memory_search', 'weather', 'web_fetch', 'web_search'],
     );
-    expect(client).toHaveLength(23);
+    expect(client).toHaveLength(24);
   });
 
   it('desktopOnly: đúng 9 tool cần desktop bridge, phần còn lại chạy được trên web', () => {

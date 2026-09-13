@@ -116,6 +116,16 @@ export default function Home() {
     })();
   }, [isMounted]);
 
+  /* Mở session theo param URL (?chatId=... hoặc ?session=...) — phục vụ "Mở cửa sổ mới" (P2-8) */
+  useEffect(() => {
+    if (!isMounted) return;
+    const urlParams = new URLSearchParams(window.location.search);
+    const targetChatId = urlParams.get('chatId') || urlParams.get('session');
+    if (targetChatId) {
+      setCurrentChatId(targetChatId);
+    }
+  }, [isMounted, setCurrentChatId]);
+
   if (!isMounted) {
     return (
       <div

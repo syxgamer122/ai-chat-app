@@ -77,6 +77,15 @@ Vyen đọc tự do nhưng ghi có kỷ luật: mọi thao tác ghi file / chạ
   - `Chat Only` (`chat_only`): Vô hiệu hóa hoàn toàn toàn bộ công cụ (kể cả `fs_read`), dùng cho viết lách, giải thích và phân tích thuần túy.
 - **Bảng phân quyền chi tiết per-tool**: Bảng trong Cài đặt cho phép gán quyền `auto` (Tự duyệt), `ask` (Luôn hỏi), `deny` (Chặn), hoặc `default` (theo policy) cho từng công cụ độc lập thuộc 8 nhóm (`fs`, `shell`, `git`, `mcp`, `web`, `plan`, `delegate`, `memory`), hỗ trợ tìm kiếm và nút Đặt lại mặc định. Lưu trữ đồng bộ Zustand persist + Dexie v14 (`toolPermissions`). Tool bị đặt `deny` lập tức trả lỗi `denied by policy`, không mở modal duyệt.
 
+### Session Management & ChatRecall (Port Goose P2-8)
+
+- **Gắn phiên với thư mục làm việc**: Tự động liên kết `workspacePath` vào metadata phiên chat (`db.chats`). Khi mở lại phiên cũ từ Sidebar hoặc URL (`/?chatId=...`), giao diện hiển thị banner thông minh đề nghị kết nối lại đúng thư mục dự án tương ứng.
+- **Đổi tên linh hoạt (Rename)**: Đổi tên phiên trực tiếp trên Sidebar (hỗ trợ double-click để sửa inline hoặc chọn qua menu hành động), và trong giao diện CLI qua lệnh slash `/rename <tên mới>`.
+- **Tiếp tục phiên làm việc (Resume)**:
+  - **UI**: Mỗi phiên trong Sidebar có nút "Tiếp tục (Resume)" và menu "Mở cửa sổ mới" tạo luồng làm việc độc lập.
+  - **CLI**: Tiếp tục phiên gần nhất qua `npm run cli -- session -r` hoặc theo tên/ID qua `npm run cli -- session -r --name <tên>`. Tự động lưu tiến trình sau mỗi lượt hội thoại vào `.vyen/sessions/` (hoặc `~/.vyen/sessions/`).
+- **Tìm kiếm toàn cục `chat_recall(query, limit)`**: Công cụ client cho phép mô hình AI tra cứu toàn bộ lịch sử các phiên thảo luận trong Dexie. Sử dụng bộ phân tích từ khóa tiếng Việt không dấu/có dấu (foldText) để trích xuất ngữ cảnh liên quan và trả về đoạn snippet phù hợp nhất (ví dụ: "tìm hội thoại tuần trước về React hooks").
+
 ### Làm việc quy mô lớn
 
 - **Subagent delegate**: agent chính giao task độc lập cho subagent chạy với context riêng (không thấy lịch sử chat), không thể đệ quy (subagent không có `delegate`), giới hạn mặc định 10 turns (tối đa 25). Subagent vẫn dùng được tool trên máy bạn (fs/shell/git/MCP) nhờ relay: server phát annotation xuống renderer, renderer thực thi rồi POST kết quả về `/api/chat/subagent-relay`. Hoạt động cả đường native function-calling lẫn emulated.
@@ -101,7 +110,7 @@ Vyen đọc tự do nhưng ghi có kỷ luật: mọi thao tác ghi file / chạ
 | Framework | Next.js 16 (App Router, Turbopack) |
 | UI | React 19, Tailwind CSS, lucide-react |
 | Trạng thái | Zustand (persist localStorage) |
-| Lưu trữ | Dexie (IndexedDB) — schema 14 phiên bản có migration |
+| Lưu trữ | Dexie (IndexedDB) — schema 15 phiên bản có migration |
 | AI | AI SDK (`ai` + `@ai-sdk/openai`), stream qua API routes Node.js |
 | Virtualization | @tanstack/react-virtual |
 | Desktop | Launcher Edge/Chrome `--app` vào Next.js local (cửa sổ riêng, ~35MB RAM) |
