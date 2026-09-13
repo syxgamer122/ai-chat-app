@@ -16,7 +16,11 @@
 - **Voice input**: bấm nút mic trong ô nhập, nói tiếng Việt — chữ hiện realtime, chạy 100% client (Web Speech API).
 - **Agent coding trong trình duyệt**: bấm 📁 kết nối thư mục làm việc (File System Access API — Chrome/Edge), agent liệt kê/đọc/tìm/sửa file trực tiếp trên máy bạn; **ghi file luôn qua modal diff phê duyệt** (duyệt mới ghi đĩa). fs_* tools chạy client-side (`onToolCall` + auto-resubmit), server không bao giờ chạm vào file.
 - **Tìm kiếm web**: bật nút 🌐 trong composer — lượt gửi kế tiếp tự tra cứu DuckDuckGo/SearXNG (top nguồn + đọc nguyên văn tối đa 2 trang), chèn vào ngữ cảnh kèm yêu cầu trích dẫn link. Dán URL trực tiếp trong tin nhắn sẽ được ưu tiên đọc nguyên trang. Proxy qua `/api/web` có chắn SSRF từng hop redirect.
-- **Thư viện prompt "/"**: gõ `/` trong ô nhập để chèn prompt mẫu (có sẵn 5 mẫu tiếng Việt, thêm/sửa/xoá trong Settings; filter không phân biệt dấu — gõ "tom tat" ra "Tóm tắt").
+- **Thư viện prompt "/"**: gõ `/` trong ô nhập để chèn prompt mẫu (có sẵn 5 mẫu tiếng Việt, thêm/sửa/xoá trong Settings; filter không phân biệt dấu — gõ "tom tat" ra "Tóm tắt"). Menu "/" còn liệt kê cả **recipe** (icon chef-hat) — chọn sẽ mở panel Recipes thay vì chèn text.
+- **Recipes (port Goose)**: workflow đóng gói tái sử dụng — tham số, tool policy, model settings, kiểm chứng shell + retry, structured output JSON, sub-recipe. Lưu trong Dexie hoặc file `.vyen/recipes/*.yaml` trong workspace; chia sẻ qua liên kết `?recipe=` (chỉ mở preview, không tự chạy). Chạy headless: `npx tsx bin/vyen.ts run --recipe fix-tests.yaml --params path=src --output json` — exit code ≠ 0 khi checks còn fail (dùng CI được).
+- **Skills (SKILL.md, port Goose)**: kỹ năng dạng file trong `.vyen/skills/` của workspace và `~/.vyen/skills/` (desktop). Agent chỉ thấy bảng chỉ mục (tên + mô tả); nội dung nạp khi agent gọi `skill_load` — tiết kiệm token. Quản lý + tạo mới trong Settings → Skills.
+- **`.vyenhints`**: ngữ cảnh dự án nạp tự động vào system prompt (fallback `AGENTS.md` → `CLAUDE.md` → `.goosehints`, trần 8.000 ký tự), chip "hints loaded" trên UI bấm xem nguyên văn.
+- **Bộ nhớ có cấu trúc (port Goose)**: `remember_memory` / `retrieve_memories` / `remove_memory_category` / `remove_specific_memory` — fact dài hạn theo category + tags + scope local/global (tối đa 2.000 ký tự/entry). Chỉ inject chỉ mục vào prompt (trần 4.000 ký tự); mirror ra `.vyen/memory/<category>.md` + `~/.vyen/memory/` để đọc/sửa tay; quản lý trong Settings → Ghi nhớ.
 - **Auto-backup**: nhắc định kỳ theo chu kỳ tuỳ chọn; desktop Chrome/Edge chọn được thư mục để app **tự ghi file .json ngầm** khi đến kỳ (File System Access API).
 - **PWA cài lên thiết bị**: Android/Chrome bấm "Cài đặt ứng dụng" hoặc nút trong Settings; iOS Safari → Chia sẻ → Thêm vào Màn hình chính. Có trang offline khi mất mạng.
 - **32 model chat** (GPT/Claude/DeepSeek/Gemini/MiniMax/Grok/Qwen/Kimi) qua gateway tương thích OpenAI, kèm 5 model sinh ảnh/video riêng.
@@ -56,6 +60,7 @@ Vyen đọc tự do nhưng ghi có kỷ luật: mọi thao tác ghi file / chạ
 ### Làm việc quy mô lớn
 
 - **Subagent delegate**: agent chính giao task độc lập cho subagent chạy với context riêng (không thấy lịch sử chat), không thể đệ quy (subagent không có `delegate`), giới hạn mặc định 10 turns (tối đa 25). Subagent vẫn dùng được tool trên máy bạn (fs/shell/git/MCP) nhờ relay: server phát annotation xuống renderer, renderer thực thi rồi POST kết quả về `/api/chat/subagent-relay`. Hoạt động cả đường native function-calling lẫn emulated.
+- **Sub-recipes (port Goose)**: session chạy recipe có `sub_recipes` thì mỗi sub-recipe trở thành một tool `subrecipe__<name>` (schema sinh từ parameters, giá trị gắn cứng không đè được) + tool `subrecipe__batch` chạy nhiều cái **song song cap 3** (kết quả JSON từng lane hiển thị card subagent, Stop hủy được cả lô). `return_mode`: `summary` (mặc định, ≤ 2.000 ký tự) hoặc `full`. Sub-recipe là leaf worker — không delegate, không lồng sub-recipe (chống đệ quy).
 - **Orchestrator sweep**: mở panel orchestrator, nhập mục tiêu — hệ thống tự phân rã thành lưới N cấu hình chạy song song (bấm Dừng là thật sự ngưng tiêu token), chấm điểm xếp hạng từng bản, vẽ heatmap theo trục và tổng hợp một đáp án cuối. Bấm **"Thêm vào hội thoại"** để ghi đáp án vào hội thoại như một message assistant (có gắn nhãn nguồn orchestrator).
 - **Plan & checklist**: task lớn được phân rã bằng `plan_create`/`plan_update`; UI hiện checklist tiến độ (Chờ/Đang làm/Xong/Lỗi/Bỏ qua) kèm progress bar. **Plan Mode** khoá agent ở chế độ khảo sát — chỉ đọc/liệt kê/tìm và hỏi làm rõ, tool ghi bị vô hiệu cho tới khi bạn chuyển sang Act.
 - **Self-improvement lessons**: agent tự lưu bài học sau khi sửa bug khó / phát hiện pattern hay bằng `lesson_save` (3 loại: rule / pattern / gotcha, tối đa 400 ký tự); các bài học được inject vào system prompt của các phiên sau.
@@ -147,7 +152,11 @@ lib/             — logic agent thuần, test được trong node:
                   metrics, scheduler), auto-pilot (phê duyệt), staging,
                   goal-loop, debug-loop, lessons, plan (subtask-plan),
                   mcp/ (tool-mapper, bridge, image-content), fs-vision,
-                  context-compaction, reasoning-capability
+                  context-compaction, reasoning-capability,
+                  recipes/ (schema zod, template one-pass, retry state
+                  machine, structured output, share link, sub-recipe tools),
+                  skills/ (SKILL.md front-matter + chỉ mục + hints),
+                  memory/ (goose: bộ nhớ cấu trúc + mirror markdown)
 
 lib/db.ts                   — Dexie schema + hooks (tokenize, sanitize) +
                               appendMessage (allocator nguyên tử seq/branchOrder)
@@ -169,8 +178,15 @@ components/chat/message-item    — hàng tin nhắn (edit, branch, attachments)
 components/chat/chat-header     — tiêu đề, xuất/nhập, xoá
 components/{diff-confirm,shell-confirm,plan-panel,staging-panel,
              subagent-card,workspace-checkpoints} — UI phê duyệt + tiến độ agent
-components/orchestrator/        — panel sweep: thẻ từng cell + heatmap
-components/mcp/                 — settings MCP + hộp thoại phê duyệt 4 cấp
+components/recipes/            — panel Recipes (list, form tham số, Run,
+                                 Import/Export, share link preview)
+components/orchestrator/       — panel sweep: thẻ từng cell + heatmap
+components/mcp/                — settings MCP + hộp thoại phê duyệt 4 cấp
+
+.vyen/                          — cấu hình per-workspace do agent/people dùng
+                                  đọc/ghi: recipes/ (*.yaml), skills/
+                                  (<name>/SKILL.md), memory/ (<category>.md),
+                                  hints (.vyenhints ở root workspace)
 ```
 
 ### Mô hình cây
