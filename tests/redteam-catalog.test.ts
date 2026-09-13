@@ -27,8 +27,8 @@ import {
 } from '@/lib/agent-tools';
 
 describe('RED TEAM catalog — getToolEntry / resolveToolEntry trên mọi tên và alias', () => {
-  it('getToolEntry trả đúng entry cho đủ 29 tên chính', () => {
-    expect(TOOL_CATALOG).toHaveLength(29);
+  it('getToolEntry trả đúng entry cho đủ 30 tên chính', () => {
+    expect(TOOL_CATALOG).toHaveLength(30);
     for (const entry of TOOL_CATALOG) {
       expect(getToolEntry(entry.name), `${entry.name}: tra không ra`).toBeDefined();
       expect(getToolEntry(entry.name)!.name).toBe(entry.name);
@@ -79,10 +79,10 @@ describe('RED TEAM catalog — TOOL_CATEGORY_MAP phủ một-một mọi tên', 
     }
   });
 
-  it('toolsByCategory phân hoạch đúng: đủ 29, mỗi entry đúng 1 nhóm', () => {
+  it('toolsByCategory phân hoạch đúng: đủ 30, mỗi entry đúng 1 nhóm', () => {
     const byCategory = toolsByCategory();
     const total = ALL_TOOL_CATEGORIES.reduce((acc, cat) => acc + byCategory[cat].length, 0);
-    expect(total).toBe(29);
+    expect(total).toBe(30);
     for (const cat of ALL_TOOL_CATEGORIES) {
       for (const entry of byCategory[cat]) {
         expect(entry.category, `${entry.name} đứng nhầm nhóm ${cat}`).toBe(cat);
@@ -121,8 +121,8 @@ describe('RED TEAM — bản export suy sinh của agent-tools không drift kh�
     expect([...ALL_TOOL_PROTOCOL_NAMES]).toEqual(TOOL_CATALOG.map((t) => t.name));
   });
 
-  it('TOOL_SHORT_LABELS có đủ 29 key, nhãn khớp catalog từng entry', () => {
-    expect(Object.keys(TOOL_SHORT_LABELS)).toHaveLength(29);
+  it('TOOL_SHORT_LABELS có đủ 30 key, nhãn khớp catalog từng entry', () => {
+    expect(Object.keys(TOOL_SHORT_LABELS)).toHaveLength(30);
     for (const entry of TOOL_CATALOG) {
       expect(TOOL_SHORT_LABELS[entry.name], `${entry.name}: thiếu nhãn`).toBe(entry.shortLabel);
     }

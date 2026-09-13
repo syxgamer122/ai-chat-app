@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
-import { db, addMemory, deleteMemory, MAX_MEMORIES, MAX_MEMORY_CHARS, type PromptTemplate } from '@/lib/db';
+import { db, addMemory, deleteMemory, MAX_MEMORIES, MAX_MEMORY_CHARS, type PromptTemplate, type RecipeRecord } from '@/lib/db';
 import { useAppStore, SERVER_PROVIDER_ID, ALL_TOOL_CATEGORIES, TOOL_CATEGORY_LABELS, PERMISSION_OPTIONS, isApiModelId, isPermissionOverride, type PermissionOverride } from '@/lib/store';
 import { isQueueMode } from '@/lib/message-queue';
 import { exportJson, exportMarkdown, importBackup, type ImportMode } from '@/lib/backup';
@@ -11,6 +11,7 @@ import { VyenMark } from '@/components/vyen-logo';
 import { TOOL_CATEGORY_ICON_COMPONENTS } from '@/components/tool-category-icons';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { savePrompt, deletePrompt } from '@/lib/prompt-library';
+import { BUILTIN_SLASH_COMMANDS } from '@/lib/slash-commands';
 import { DiskSkillsSection } from '@/components/settings-skills';
 import { AgentMemorySection } from '@/components/settings-agent-memory';
 import { proposeCandidate, reviewCandidate, deleteReviewedRecord } from '@/lib/memory/store';
@@ -694,6 +695,175 @@ function PromptLibrarySection() {
   );
 }
 
+/* ------------------ Slash Commands tùy biến ------------------ */
+
+function CustomSlashCommandsSection() {
+  const customSlashCommands = useAppStore((s) => s.settings.customSlashCommands ?? {});
+  const setCustomSlashCommand = useAppStore((s) => s.setCustomSlashCommand);
+  const removeCustomSlashCommand = useAppStore((s) => s.removeCustomSlashCommand);
+
+  const recipes = useLiveQuery(
+    () => db.recipes.orderBy('updatedAt').reverse().toArray(),
+    [],
+    [] as RecipeRecord[],
+  );
+
+  const [cmdName, setCmdName] = useState('');
+  const [selectedRecipeId, setSelectedRecipeId] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  const handleAdd = () => {
+    const cleaned = cmdName.trim().replace(/^\//, '').toLowerCase();
+    if (!cleaned) {
+      setError('Vui lòng nhập tên lệnh slash (ví dụ: lint hoặc fix).');
+      return;
+    }
+    if (!/^[a-zA-Z0-9_-]+$/.test(cleaned)) {
+      setError('Tên lệnh chỉ được chứa chữ cái, số, gạch dưới (_) hoặc gạch ngang (-).');
+      return;
+    }
+    if (BUILTIN_SLASH_COMMANDS.some((b) => b.name === cleaned || b.aliases?.includes(cleaned))) {
+      setError(`Tên lệnh "/${cleaned}" đã trùng với lệnh mặc định của hệ thống.`);
+      return;
+    }
+    if (!selectedRecipeId) {
+      setError('Vui lòng chọn một recipe để liên kết.');
+      return;
+    }
+    setCustomSlashCommand(cleaned, selectedRecipeId);
+    setCmdName('');
+    setSelectedRecipeId('');
+    setError(null);
+  };
+
+  const commandEntries = Object.entries(customSlashCommands);
+
+  return (
+    <div className="space-y-4 pt-4">
+      <div>
+        <h3 className="text-sm font-semibold text-zinc-800 dark:text-zinc-200">
+          Lệnh gõ nhanh (Slash Commands)
+        </h3>
+        <p className="text-xs leading-relaxed text-zinc-600 dark:text-zinc-400">
+          Gõ <code className="claude-inline-code">/</code> trong khung chat để điều khiển nhanh hoặc kích hoạt workflow.
+        </p>
+      </div>
+
+      {/* Danh sách lệnh built-in chuẩn */}
+      <div className="rounded-xl border border-zinc-200 bg-zinc-50/50 p-3 dark:border-zinc-800 dark:bg-zinc-900/30">
+        <h4 className="mb-2 text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+          Lệnh hệ thống mặc định (Goose Standard)
+        </h4>
+        <div className="grid grid-cols-1 gap-2 text-xs sm:grid-cols-2">
+          {BUILTIN_SLASH_COMMANDS.map((cmd) => (
+            <div
+              key={cmd.name}
+              className="flex flex-col gap-0.5 rounded-lg border border-zinc-200/80 bg-white p-2 dark:border-zinc-800 dark:bg-zinc-900"
+            >
+              <div className="flex items-center gap-1.5 font-mono font-medium text-brand">
+                <span>/{cmd.name}</span>
+                {cmd.aliases && cmd.aliases.length > 0 && (
+                  <span className="text-[10px] font-normal text-zinc-400">
+                    ({cmd.aliases.map((a) => `/${a}`).join(', ')})
+                  </span>
+                )}
+              </div>
+              <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                {cmd.description}
+              </p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Danh sách custom slash commands */}
+      <div className="space-y-2">
+        <h4 className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+          Lệnh tùy biến liên kết Recipe (Custom /&lt;tên&gt; → Recipe)
+        </h4>
+
+        {commandEntries.length === 0 ? (
+          <p className="text-xs italic text-zinc-500">
+            Chưa có lệnh tùy biến nào. Thêm lệnh bên dưới để mở nhanh workflow yêu thích bằng phím tắt <code className="claude-inline-code">/</code>.
+          </p>
+        ) : (
+          <div className="space-y-1.5">
+            {commandEntries.map(([name, recipeId]) => {
+              const rec = (recipes ?? []).find((r) => r.id === recipeId);
+              return (
+                <div
+                  key={name}
+                  className="flex items-center justify-between rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs dark:border-zinc-800 dark:bg-zinc-900"
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono font-semibold text-brand">/{name}</span>
+                    <span className="text-zinc-400">→</span>
+                    <span className="font-medium text-zinc-800 dark:text-zinc-200">
+                      {rec?.title ?? recipeId}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => removeCustomSlashCommand(name)}
+                    className="rounded p-1 text-zinc-400 transition hover:bg-zinc-100 hover:text-red-600 dark:hover:bg-zinc-800"
+                    title={`Xóa lệnh /${name}`}
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Form thêm custom command */}
+        <div className="space-y-2 rounded-xl border border-dashed border-zinc-300 p-2.5 dark:border-zinc-700">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <div>
+              <input
+                value={cmdName}
+                onChange={(e) => {
+                  setCmdName(e.target.value);
+                  if (error) setError(null);
+                }}
+                className="field-sm w-full"
+                placeholder="Tên lệnh (vd: lint hoặc test)"
+                aria-label="Tên lệnh slash"
+              />
+            </div>
+            <div>
+              <select
+                value={selectedRecipeId}
+                onChange={(e) => {
+                  setSelectedRecipeId(e.target.value);
+                  if (error) setError(null);
+                }}
+                className="field-sm w-full"
+                aria-label="Chọn Recipe"
+              >
+                <option value="">-- Chọn Recipe liên kết --</option>
+                {(recipes ?? []).map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.title}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={handleAdd}
+            className="w-full rounded-lg bg-zinc-100 py-1.5 text-xs font-medium text-zinc-700 transition hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
+          >
+            + Gán lệnh slash vào Recipe
+          </button>
+          {error && <p className="notice-error">{error}</p>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ------------------ Tự động sao lưu ------------------ */
 
 function AutoBackupSection() {
@@ -824,10 +994,17 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const updateSettings = useAppStore((s) => s.updateSettings);
   const updatePerf = useAppStore((s) => s.updatePerf);
   const activeProviderId = useAppStore((s) => s.activeProviderId);
-  const [tab, setTab] = useState<SettingsTab>('chung');
+  const settingsInitialTab = useAppStore((s) => s.settingsInitialTab);
+  const initialResolvedTab: SettingsTab =
+    settingsInitialTab && SETTINGS_TABS.some((t) => t.id === settingsInitialTab)
+      ? (settingsInitialTab as SettingsTab)
+      : 'chung';
+  const [tab, setTab] = useState<SettingsTab>(initialResolvedTab);
   /* Tab ĐÃ ghé được giữ mount (ẩn bằng hidden) — draft ở tab Prompt/Ghi nhớ
      không bốc hơi khi người dùng sang tab khác xem rồi quay lại. */
-  const [visited, setVisited] = useState<Set<SettingsTab>>(() => new Set<SettingsTab>(['chung']));
+  const [visited, setVisited] = useState<Set<SettingsTab>>(
+    () => new Set<SettingsTab>(['chung', initialResolvedTab]),
+  );
   const show = (t: SettingsTab) => tab === t;
   const switchTab = useCallback((t: SettingsTab) => {
     setTab(t);
@@ -1393,6 +1570,8 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
 {visited.has('prompts') && (
           <div className={show('prompts') ? 'contents' : 'hidden'}>
             <PromptLibrarySection />
+            <div className="my-6 border-t border-zinc-200 dark:border-zinc-800" />
+            <CustomSlashCommandsSection />
           </div>
           )}
 

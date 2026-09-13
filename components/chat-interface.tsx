@@ -118,6 +118,7 @@ import {
   formatStructuredLine,
   readRecipeRecord,
 } from '@/lib/recipes';
+import { BUILTIN_SLASH_COMMANDS, parseSlashCommand } from '@/lib/slash-commands';
 import type { RetryCheckOutcome } from '@/lib/recipes/retry';
 import {
   scanDiskSkills,
@@ -368,6 +369,7 @@ export default function ChatInterface() {
   /** Capability suy luận của model đang chọn (metadata kiểu OpenRouter). */
   const modelReasoningCap = activeProvider?.models?.find((m) => m.id === model)?.reasoning ?? null;
   const throttleMs = useAppStore((s) => s.settings.perf.throttleMs);
+  const customSlashCommands = useAppStore((s) => s.settings.customSlashCommands ?? {});
 
   /** Nạp snapshot provider đang active từ IndexedDB vào store. */
   useEffect(() => {
@@ -430,16 +432,22 @@ export default function ChatInterface() {
   );
   const insertPrompts = useMemo(() => {
     const prompts: SlashPrompt[] = (promptTemplates ?? []).filter((p) => p.mode !== 'skill');
-    /* Lệnh built-in đứng đầu danh sách (P1-5): chọn chỉ chèn tiền tố "/plan "
-       — Enter với text đầy đủ "/plan <mục tiêu>" bị onSubmit intercept. */
-    const commands: SlashPrompt[] = [
-      {
-        id: 'cmd:plan',
-        title: 'plan',
-        content: '/plan ',
-        kind: 'command',
-      },
-    ];
+    /* Lệnh built-in chuẩn hóa theo Goose (P2-10): /plan, /mode, /summarize, /recipe, /skills, /memory, /tools, /cost */
+    const builtinCommands: SlashPrompt[] = BUILTIN_SLASH_COMMANDS.map((cmd) => ({
+      id: `cmd:${cmd.name}`,
+      title: cmd.name,
+      content: `/${cmd.name} `,
+      kind: 'command',
+    }));
+
+    /* Lệnh tùy biến người dùng cấu hình: /<tên> -> recipe */
+    const customCommands: SlashPrompt[] = Object.entries(customSlashCommands).map(([name]) => ({
+      id: `cmd:custom:${name}`,
+      title: name,
+      content: `/${name} `,
+      kind: 'command',
+    }));
+
     for (const r of recipeRecords ?? []) {
       const parsed = readRecipeRecord(r);
       prompts.push({
@@ -449,8 +457,8 @@ export default function ChatInterface() {
         kind: 'recipe',
       });
     }
-    return [...commands, ...prompts];
-  }, [promptTemplates, recipeRecords]);
+    return [...builtinCommands, ...customCommands, ...prompts];
+  }, [promptTemplates, recipeRecords, customSlashCommands]);
 
   /**
    * Model media khả dụng cho nhà cung cấp đang chọn.
@@ -5304,26 +5312,122 @@ export default function ChatInterface() {
    */
   const onSubmit = useCallback(
     async (draft: string, opts?: { queueAs?: 'steer' | 'follow-up' }): Promise<boolean> => {
-      /* Lệnh /plan: intercept TRƯỚC queue — khi agent đang chạy thì để queue
-         như tin thường (lập kế hoạch đè lên agent đang chạy là hỏng việc). */
-      if (!isLoading) {
-        const planMatch = /^\/plan(?![\w-])([\s\S]*)$/.exec(draft.trim());
-        if (planMatch) {
-          const target = planMatch[1].trim();
-          if (!target) {
-            showNotice('Gõ theo mẫu: /plan <mục tiêu cần lập kế hoạch>', 5000);
+      /* Intercept Slash Commands chuẩn hoá (Goose P2-10) khi agent rảnh */
+      const trimmed = draft.trim();
+      if (!isLoading && trimmed.startsWith('/')) {
+        const slash = parseSlashCommand(trimmed, customSlashCommands);
+        if (slash) {
+          if (slash.kind === 'plan') {
+            if (!slash.target) {
+              showNotice('Gõ theo mẫu: /plan <mục tiêu cần lập kế hoạch>', 5000);
+              return false;
+            }
+            return handlePlanCommand(slash.target);
+          }
+
+          if (slash.kind === 'mode') {
+            const policyLabels = {
+              always: 'Luôn hỏi (Manual)',
+              smart: 'Thông minh (Smart)',
+              never: 'Tự động (Autonomous / YOLO)',
+              chat_only: 'Chỉ chat (Chat Only)',
+            };
+            useAppStore.getState().updateSettings({ approvalPolicy: slash.mode });
+            showNotice(`Đã chuyển chế độ phê duyệt công cụ sang: ${policyLabels[slash.mode]}`, 4000);
+            return true;
+          }
+
+          if (slash.kind === 'summarize') {
+            void performCompaction('manual');
+            showNotice('Đang thực hiện nén ngữ cảnh hội thoại...', 3000);
+            return true;
+          }
+
+          if (slash.kind === 'recipe') {
+            const name = slash.recipeName.trim().toLowerCase();
+            if (!name) {
+              useRecipeUiStore.getState().select(null);
+              useRecipeUiStore.getState().openPanel();
+              return true;
+            }
+            const found = (recipeRecords ?? []).find(
+              (r) =>
+                r.id.toLowerCase() === name ||
+                r.title.toLowerCase() === name ||
+                r.title.toLowerCase().includes(name),
+            );
+            if (found) {
+              const recipe = readRecipeRecord(found);
+              if (recipe) {
+                useRecipeUiStore.getState().select({ recipe, origin: 'db', recordId: found.id });
+              }
+              useRecipeUiStore.getState().openPanel();
+              return true;
+            } else {
+              showNotice(`Không tìm thấy recipe nào khớp với: "${slash.recipeName}".`, 4000);
+              return false;
+            }
+          }
+
+          if (slash.kind === 'skills') {
+            useAppStore.getState().openSettings('skills');
+            return true;
+          }
+
+          if (slash.kind === 'memory') {
+            useAppStore.getState().openSettings('memory');
+            return true;
+          }
+
+          if (slash.kind === 'tools') {
+            useAppStore.getState().openSettings('chung');
+            if (slash.query) {
+              showNotice(`Đã mở cài đặt công cụ (tìm kiếm: ${slash.query}).`, 3000);
+            }
+            return true;
+          }
+
+          if (slash.kind === 'cost') {
+            useAppStore.getState().openSettings('stats');
+            return true;
+          }
+
+          if (slash.kind === 'custom_recipe') {
+            const found = (recipeRecords ?? []).find((r) => r.id === slash.recipeId);
+            if (found) {
+              const recipe = readRecipeRecord(found);
+              if (recipe) {
+                useRecipeUiStore.getState().select({ recipe, origin: 'db', recordId: found.id });
+                useRecipeUiStore.getState().openPanel();
+                return true;
+              }
+            }
+            showNotice(`Không tìm thấy workflow recipe được liên kết (${slash.recipeId}).`, 4000);
             return false;
           }
-          return handlePlanCommand(target);
+
+          if (slash.kind === 'unknown') {
+            showNotice(`Lệnh slash không nhận diện: "${slash.raw}". Gõ / để xem danh sách lệnh có sẵn.`, 4000);
+            return false;
+          }
         }
       }
+
       if (isLoading) {
         const kind = opts?.queueAs ?? 'steer';
         return queueWhileBusy(draft, kind) !== 'dropped';
       }
       return submitTurn(draft);
     },
-    [isLoading, submitTurn, queueWhileBusy, handlePlanCommand],
+    [
+      isLoading,
+      submitTurn,
+      queueWhileBusy,
+      handlePlanCommand,
+      customSlashCommands,
+      recipeRecords,
+      performCompaction,
+    ],
   );
 
   /**

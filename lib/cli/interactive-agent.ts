@@ -18,6 +18,7 @@ import { resolveWithin } from '../path-guard.cjs';
 import { runMonkeyCodeSast } from '../security-sast';
 import { renderToolsCommand } from './cli-surface';
 import { saveCliSession, type CliSessionData } from './session-manager';
+import { normalizeModeParam } from '../slash-commands';
 
 // Re-export để test khóa được việc REPL dùng đúng pure builder dùng chung.
 export { renderToolsCommand };
@@ -435,6 +436,7 @@ export class AutonomousCliAgent {
   private sessionId: string;
   private sessionName: string;
   private createdAt: number;
+  private approvalPolicy: 'always' | 'smart' | 'never' | 'chat_only' = 'never';
 
   constructor(options?: AutonomousAgentOptions) {
     this.workspaceRoot = path.resolve(options?.workspaceRoot || process.cwd());
@@ -545,6 +547,14 @@ export class AutonomousCliAgent {
   public setSessionName(name: string): void {
     this.sessionName = name.trim();
     this.saveSession();
+  }
+
+  public getApprovalPolicy(): 'always' | 'smart' | 'never' | 'chat_only' {
+    return this.approvalPolicy;
+  }
+
+  public setApprovalPolicy(policy: 'always' | 'smart' | 'never' | 'chat_only'): void {
+    this.approvalPolicy = policy;
   }
 
   public saveSession(): void {
@@ -972,7 +982,15 @@ export async function startInteractiveCli(
   console.log(` Workspace: ${cfg.workspace}`);
   console.log(` Phiên:     ${agent.getSessionName()} (${agent.getSessionId()})`);
   console.log(` Model:     ${cfg.model} | Key: ${cfg.hasKey ? 'Sẵn sàng ✔' : 'Chưa cấu hình (dùng /key để gán)'}`);
-  console.log(` Các lệnh slash / colon khả dụng:`);
+  console.log(` Các lệnh slash / colon khả dụng (Goose Standard P2-10):`);
+  console.log(`   /plan <mục tiêu>      - Khảo sát và lập kế hoạch thực hiện`);
+  console.log(`   /mode <policy>        - Chuyển chế độ phê duyệt (auto|smart|approve|chat)`);
+  console.log(`   /summarize, :compact  - Nén và dọn dẹp bộ nhớ ngữ cảnh`);
+  console.log(`   /recipe [tên]         - Tra cứu hoặc chạy workflow recipe`);
+  console.log(`   /skills               - Xem danh sách kỹ năng SKILL.md`);
+  console.log(`   /memory               - Xem bộ nhớ dự án (.vyen/memory)`);
+  console.log(`   /tools [tên]          - Xem catalog tool hoặc chi tiết một tool`);
+  console.log(`   /cost                 - Thống kê token và chi phí phiên`);
   console.log(`   /session              - Xem thông tin phiên hiện tại`);
   console.log(`   /rename <tên>         - Đổi tên phiên hiện tại`);
   console.log(`   /help, :help          - Hiển thị bảng trợ giúp này`);
@@ -980,7 +998,6 @@ export async function startInteractiveCli(
   console.log(`   /model <name>         - Thay đổi model LLM`);
   console.log(`   /provider <url>       - Thay đổi provider URL`);
   console.log(`   /history              - Xem lịch sử hội thoại`);
-  console.log(`   /tools [tên]          - Xem catalog tool hoặc chi tiết một tool`);
   console.log(`   /read, :read <path>   - Đọc nội dung file với đánh số dòng`);
   console.log(`   /write, :write <path> - Ghi nội dung vào file`);
   console.log(`   /edit, :edit <path>   - Sửa file (SEARCH / REPLACE)`);
@@ -992,7 +1009,6 @@ export async function startInteractiveCli(
   console.log(`   /doctor, :doctor      - Kiểm tra chẩn đoán hệ thống`);
   console.log(`   /audit, :audit        - Kiểm tra an ninh mã nguồn (MonkeyCode)`);
   console.log(`   /init, :init          - Khởi tạo context dự án (Claude Code)`);
-  console.log(`   /compact, :compact    - Kiểm tra dọn dẹp bộ nhớ context`);
   console.log(`   /teamwork <goal>      - Chạy Teamwork Multi-Agent Engine`);
   console.log(`   /clear, :clear        - Xóa màn hình terminal & reset lịch sử`);
   console.log(`   /exit, :exit          - Thoát CLI`);
@@ -1082,7 +1098,15 @@ export async function startInteractiveCli(
 
     if (lower === '/help' || lower === ':help' || lower === 'help' || lower === '/?') {
       console.log(`
-Các lệnh khả dụng:
+Các lệnh khả dụng (Goose Standard P2-10):
+  /plan <mục tiêu>                  Khảo sát và lập kế hoạch thực hiện
+  /mode <auto|smart|approve|chat>   Đổi chính sách phê duyệt công cụ
+  /summarize, /compact              Nén và dọn dẹp bộ nhớ context
+  /recipe [tên]                     Liệt kê hoặc hướng dẫn chạy recipe
+  /skills                           Xem danh sách kỹ năng SKILL.md
+  /memory                           Xem các danh mục bộ nhớ workspace
+  /cost                             Thống kê token và chi phí phiên
+  /tools [tên]                      Xem catalog tool hoặc chi tiết một tool
   /key <api-key>                    Thiết lập API key trong phiên
   /model <model-name>               Đổi model AI (gpt-4o, claude-3-5-sonnet, ...)
   /provider <url>                   Đổi provider base URL
@@ -1098,13 +1122,123 @@ Các lệnh khả dụng:
   /doctor                           Kiểm tra sức khỏe hệ thống
   /audit [path]                     Kiểm toán an ninh mã nguồn MonkeyCode
   /init                             Khởi tạo ngữ cảnh dự án
-  /compact                          Kiểm tra bộ nhớ context
   /teamwork <goal>                  Khởi chạy Teamwork 2-phase Multi-Agent
-  /tools [tên]                      Xem catalog tool hoặc chi tiết một tool
   /clear                            Xóa màn hình & reset ngữ cảnh
   /exit                             Thoát
   <bất kỳ câu hỏi / yêu cầu nào>    Kích hoạt LLM reasoning & tool-calling loop!
 `);
+      rl.prompt();
+      continue;
+    }
+
+    if (trimmed.startsWith('/plan') || trimmed.startsWith(':plan')) {
+      const target = trimmed.replace(/^[\/:](plan)\s*/i, '').trim();
+      if (!target) {
+        console.log('[vyen cli] Vui lòng nhập mục tiêu cần lập kế hoạch: /plan <mục tiêu>');
+      } else {
+        console.log(`\n[vyen cli] Khởi tạo chế độ lập kế hoạch cho: "${target}"...`);
+        await agent.streamTurn(
+          `[Chế độ Lập Kế Hoạch - Plan Mode] Hãy nghiên cứu codebase hiện tại bằng các công cụ đọc (fs_read, find, grep) và lập bản kế hoạch chi tiết từng bước để thực hiện: "${target}". KHÔNG sửa hay ghi file trong lượt này.`,
+        );
+      }
+      rl.prompt();
+      continue;
+    }
+
+    if (lower.startsWith('/mode') || lower.startsWith(':mode') || lower.startsWith('/policy') || lower.startsWith(':policy')) {
+      const modeArg = trimmed.replace(/^[\/:](mode|policy)\s*/i, '').trim();
+      const norm = normalizeModeParam(modeArg);
+      if (norm) {
+        agent.setApprovalPolicy(norm);
+        console.log(`[vyen cli] Đã đổi chính sách phê duyệt sang: "${norm}".`);
+      } else {
+        console.log(`[vyen cli] Chính sách hiện tại: "${agent.getApprovalPolicy()}".`);
+        console.log('           Các lựa chọn: /mode auto | smart | approve | chat');
+      }
+      rl.prompt();
+      continue;
+    }
+
+    if (lower.startsWith('/recipe') || lower.startsWith(':recipe')) {
+      const recipeArg = trimmed.replace(/^[\/:](recipe)\s*/i, '').trim();
+      const { listWorkspaceRecipes } = await import('./recipe-list');
+      const list = listWorkspaceRecipes(workspace);
+      console.log(list);
+      if (recipeArg) {
+        console.log(`\nĐể chạy recipe này headless: vyen run --recipe .vyen/recipes/${recipeArg}.yaml --output json`);
+      }
+      rl.prompt();
+      continue;
+    }
+
+    if (lower === '/skills' || lower === ':skills' || lower === '/skill' || lower === ':skill') {
+      const { scanDiskSkills } = await import('../skills/disk');
+      const fsPromises = await import('node:fs/promises');
+      const wsSkillsDir = path.join(workspace, '.vyen', 'skills');
+      const scan = await scanDiskSkills({
+        listWorkspaceSkillDirs: async () => {
+          try {
+            const ents = await fsPromises.readdir(wsSkillsDir, { withFileTypes: true });
+            return ents.filter((e) => e.isDirectory()).map((e) => e.name);
+          } catch {
+            return [];
+          }
+        },
+        readWorkspaceSkill: async (dirName: string) => {
+          return fsPromises.readFile(path.join(wsSkillsDir, dirName, 'SKILL.md'), 'utf8');
+        },
+      });
+      const skills = scan.entries;
+      if (skills.length === 0) {
+        console.log('[vyen cli] Không tìm thấy skill nào trong .vyen/skills/ hoặc ~/.vyen/skills/.');
+      } else {
+        console.log(`\nDANH SÁCH SKILLS (${skills.length}):`);
+        for (const s of skills) {
+          console.log(`• ${s.name} (${s.source}): ${s.description}`);
+        }
+      }
+      rl.prompt();
+      continue;
+    }
+
+    if (lower === '/memory' || lower === ':memory' || lower === '/memories' || lower === ':memories') {
+      const memDir = path.join(workspace, '.vyen', 'memory');
+      try {
+        const fs = await import('node:fs');
+        if (fs.existsSync(memDir)) {
+          const files = fs.readdirSync(memDir).filter((f) => f.endsWith('.md'));
+          if (files.length === 0) {
+            console.log('[vyen cli] Thư mục .vyen/memory/ trống.');
+          } else {
+            console.log(`\nBỘ NHỚ WORKSPACE (${files.length} categories):`);
+            for (const f of files) {
+              console.log(`• ${f.replace(/\.md$/, '')}`);
+            }
+          }
+        } else {
+          console.log('[vyen cli] Chưa có bộ nhớ workspace (.vyen/memory/).');
+        }
+      } catch {
+        console.log('[vyen cli] Không đọc được thư mục bộ nhớ.');
+      }
+      rl.prompt();
+      continue;
+    }
+
+    if (lower === '/cost' || lower === ':cost' || lower === '/usage' || lower === ':usage' || lower === '/tokens') {
+      const hist = agent.getHistory();
+      const turns = hist.length;
+      const totalChars = hist.reduce(
+        (acc, m) => acc + (typeof m.content === 'string' ? m.content.length : 0),
+        0,
+      );
+      const approxTokens = Math.round(totalChars / 4);
+      console.log(`\nTHỐNG KÊ TOKEN & CHI PHÍ ƯỚC TÍNH:`);
+      console.log(`• Lượt tin nhắn:   ${turns} tin`);
+      console.log(`• Model hiện tại:  ${cfg.model}`);
+      console.log(`• Ký tự ngữ cảnh:  ${totalChars.toLocaleString()} ký tự`);
+      console.log(`• Token ước tính:  ~${approxTokens.toLocaleString()} tokens`);
+      console.log(`• Chế độ duyệt:    ${agent.getApprovalPolicy()}`);
       rl.prompt();
       continue;
     }
@@ -1141,7 +1275,7 @@ Các lệnh khả dụng:
       continue;
     }
 
-    if (lower === '/compact' || lower === ':compact' || lower === 'compact') {
+    if (lower === '/compact' || lower === ':compact' || lower === 'compact' || lower === '/summarize' || lower === ':summarize') {
       const r = harness.compact();
       console.log(r.output);
       rl.prompt();

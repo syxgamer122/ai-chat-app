@@ -204,6 +204,8 @@ export interface Settings {
   modelChains?: Record<CategoryId, ChainEntry[]>;
   /** Quy tắc can thiệp gọi tool do người dùng tự viết */
   toolcallRules?: ToolcallRule[];
+  /** Ánh xạ slash command tùy biến /<tên> -> recipeId (Goose P2-10). */
+  customSlashCommands: Record<string, string>;
 }
 
 interface AppState {
@@ -212,6 +214,7 @@ interface AppState {
   /** Desktop: sidebar thu gọn thành thanh icon (rail). Mobile: bỏ qua. */
   isSidebarCollapsed: boolean;
   isSettingsOpen: boolean;
+  settingsInitialTab?: string;
   settings: Settings;
   /** Giao diện sáng/tối — 'system' theo prefers-color-scheme của OS. */
   theme: ThemePreference;
@@ -223,6 +226,9 @@ interface AppState {
   setSidebarOpen: (open: boolean) => void;
   setSidebarCollapsed: (collapsed: boolean) => void;
   setSettingsOpen: (open: boolean) => void;
+  openSettings: (tab?: string) => void;
+  setCustomSlashCommand: (name: string, recipeId: string) => void;
+  removeCustomSlashCommand: (name: string) => void;
   setTheme: (theme: ThemePreference) => void;
   updateSettings: (s: Partial<Omit<Settings, 'perf'>>) => void;
   updatePerf: (p: Partial<PerfSettings>) => void;
@@ -265,6 +271,7 @@ const DEFAULT_SETTINGS: Settings = {
   accessCode: '',
   modelChains: DEFAULT_CHAINS,
   toolcallRules: [],
+  customSlashCommands: {},
 };
 
 /** Validate persisted toolPermissions, falling back to current for invalid entries. */
@@ -290,6 +297,7 @@ export const useAppStore = create<AppState>()(
       isSidebarOpen: false,
       isSidebarCollapsed: false,
       isSettingsOpen: false,
+      settingsInitialTab: undefined,
       settings: DEFAULT_SETTINGS,
       theme: 'system',
       activeProviderId: SERVER_PROVIDER_ID,
@@ -297,7 +305,34 @@ export const useAppStore = create<AppState>()(
       setCurrentChatId: (id) => set({ currentChatId: id, isSidebarOpen: false }),
       setSidebarOpen: (open) => set({ isSidebarOpen: open }),
       setSidebarCollapsed: (collapsed) => set({ isSidebarCollapsed: collapsed }),
-      setSettingsOpen: (open) => set({ isSettingsOpen: open }),
+      setSettingsOpen: (open) => set({ isSettingsOpen: open, settingsInitialTab: open ? undefined : undefined }),
+      openSettings: (tab) => set({ isSettingsOpen: true, settingsInitialTab: tab }),
+      setCustomSlashCommand: (name, recipeId) =>
+        set((s) => {
+          const cleaned = name.trim().replace(/^\//, '').toLowerCase();
+          if (!cleaned) return s;
+          return {
+            settings: {
+              ...s.settings,
+              customSlashCommands: {
+                ...s.settings.customSlashCommands,
+                [cleaned]: recipeId,
+              },
+            },
+          };
+        }),
+      removeCustomSlashCommand: (name) =>
+        set((s) => {
+          const cleaned = name.trim().replace(/^\//, '').toLowerCase();
+          const next = { ...s.settings.customSlashCommands };
+          delete next[cleaned];
+          return {
+            settings: {
+              ...s.settings,
+              customSlashCommands: next,
+            },
+          };
+        }),
       setTheme: (theme) => set({ theme }),
       updateSettings: (partial) =>
         set((s) => ({ settings: { ...s.settings, ...partial } })),
@@ -346,6 +381,7 @@ export const useAppStore = create<AppState>()(
           codeModeEnabled: s.settings.codeModeEnabled,
           modelChains: s.settings.modelChains,
           toolcallRules: s.settings.toolcallRules,
+          customSlashCommands: s.settings.customSlashCommands,
         },
       }),
       merge: (persisted, current) => {
@@ -415,6 +451,14 @@ export const useAppStore = create<AppState>()(
               ? p.settings.disabledSkills.filter((n: unknown): n is string => typeof n === 'string' && n.length > 0 && n.length <= 60)
               : [],
             modelRouting: normalizeModelRoutingConfig(p.settings?.modelRouting),
+            customSlashCommands:
+              p.settings?.customSlashCommands && typeof p.settings.customSlashCommands === 'object'
+                ? Object.fromEntries(
+                    Object.entries(p.settings.customSlashCommands).filter(
+                      ([k, v]) => typeof k === 'string' && typeof v === 'string' && k.length > 0 && v.length > 0,
+                    ),
+                  )
+                : current.settings.customSlashCommands,
             apiKey: '',
             accessCode: '',
           },

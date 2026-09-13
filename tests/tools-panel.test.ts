@@ -56,11 +56,11 @@ describe('buildPanelSections - panel gồm đủ 8 nhóm, đúng thứ tự, đ�
     expect(sections.map((s) => s.category)).toEqual([...ALL_TOOL_CATEGORIES]);
   });
 
-  it('tổng số tool của các section bằng đúng 29 entry của catalog', () => {
+  it('tổng số tool của các section bằng đúng 30 entry của catalog', () => {
     // Đột biến bị chặn: builder lọc thiếu/nhầm tool (ví dụ quên nhóm rỗng,
-    // hoặc gom theo group sai) → tổng khác 29 là đỏ.
+    // hoặc gom theo group sai) → tổng khác 30 là đỏ.
     const total = sections.reduce((acc, s) => acc + s.tools.length, 0);
-    expect(total).toBe(29);
+    expect(total).toBe(30);
     expect(total).toBe(TOOL_CATALOG.length);
   });
 
@@ -92,14 +92,14 @@ describe('buildPanelSections - panel gồm đủ 8 nhóm, đúng thứ tự, đ�
 describe('filterPanelSections - lọc theo tên, mô tả, shortLabel', () => {
   const sections = buildPanelSections();
 
-  it('query rỗng hoặc chỉ khoảng trắng trả nguyên 8 nhóm, đủ 29 tool', () => {
+  it('query rỗng hoặc chỉ khoảng trắng trả nguyên 8 nhóm, đủ 30 tool', () => {
     // Đột biến bị chặn: bỏ nhánh `if (!q) return sections` (để query rỗng
     // vẫn chạy includes('') - may mắn vẫn khớp hết) HOẶC điều kiện trim sai →
     // test '   ' (chỉ whitespace) trả thiếu nhóm là đỏ.
     for (const q of ['', '   ']) {
       const out = filterPanelSections(sections, q);
       expect(out).toHaveLength(ALL_TOOL_CATEGORIES.length);
-      expect(out.reduce((acc, s) => acc + s.tools.length, 0)).toBe(29);
+      expect(out.reduce((acc, s) => acc + s.tools.length, 0)).toBe(30);
     }
   });
 
