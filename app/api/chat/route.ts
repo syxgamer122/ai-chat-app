@@ -845,6 +845,9 @@ const BodySchema = z.object({
     .max(30)
     .optional(),
   hints: z.string().max(8_000).optional(),
+  /* Bộ nhớ có cấu trúc (P1-4): client dựng sẵn block index (category + count
+     + global ngắn, trần 4.000) — server chỉ chèn, không tin gì thêm. */
+  memoryIndex: z.string().max(5_000).optional(),
   mcpTools: z
     .array(
       z.object({
@@ -1079,6 +1082,7 @@ export async function POST(req: Request) {
       skills,
       skillIndex,
       hints,
+      memoryIndex,
       workspace: workspaceState,
       forceEmulatedTools,
       agentMode,
@@ -2010,23 +2014,11 @@ export async function POST(req: Request) {
                      : CLIENT_TOOL_NAMES),
                    ...mcpTools.keys,
                  ]);
-                 /* skill_load (P0-3): chỉ khai báo khi có disk skills — thực thi
-                    ở renderer (file nằm trong workspace / ~/.vyen của user). */
-                 const skillLoadDef: Record<string, ToolSet[string]> = skillIndex?.length
-                   ? {
-                       skill_load: tool({
-                         description:
-                           'Nạp NỘI DUNG đầy đủ của một kỹ năng dạng SKILL.md (xem bảng [SKILLS] ở trên). ' +
-                           'Gọi TRƯỚC khi làm việc thuộc phạm vi kỹ năng đó — trả về body SKILL.md + ' +
-                           'danh sách file phụ trong thư mục skill (tự fs_read khi cần). Chỉ gọi MỘT lần ' +
-                           'cho mỗi skill trong phiên.',
-                         parameters: z.object({
-                           name: z.string().max(60).describe('Tên skill trong bảng [SKILLS]'),
-                         }),
-                       }),
-                     }
-                   : {};
-                 if (skillIndex?.length) clientToolNames.add('skill_load');
+                 /* skill_load: tool CLIENT khai báo trong CLIENT_TOOL_DEFS, CHỈ
+                    có mặt ở lượt này khi client gửi skillIndex (không có skill
+                    thì model không thấy tool để gọi nhầm). */
+                 const hasSkillIndex = Boolean(skillIndex?.length);
+                 if (!hasSkillIndex) clientToolNames.delete('skill_load');
                  /* Tool policy của recipe: deny loại khỏi set (native forward +
                     emulated đều mất), allow (khác rỗng) giữ MỌI tool nằm trong
                     allow-list — áp trên BẢN SAO để không đụng mcpTools.keys gốc. */
@@ -2096,6 +2088,8 @@ export async function POST(req: Request) {
                        sẵn bằng buildHintsBlock) + chỉ mục disk skills (P0-3):
                        đứng trước recipe/lessons theo merge order tăng dần. */
                     hints ?? '',
+                    /* Bộ nhớ có cấu trúc (P1-4) — index-only theo ngân sách. */
+                    memoryIndex ?? '',
                     skillIndex?.length ? buildDiskSkillIndexBlock(skillIndex) : '',
                     /* Recipe instructions (port Goose): workflow đang chạy — đứng
                        sau persona để giữ lực chỉ thị, trước các khối dữ liệu. */
@@ -2330,7 +2324,7 @@ export async function POST(req: Request) {
                     /* Schema của tool MCP đi vào protocol text: đường emulated
                        không có kênh tool-call native nên mô tả + chữ ký args
                        phải nằm ngay trong prompt. */
-                    extraToolDocs: { ...mcpTools.defs, ...skillLoadDef },
+                    extraToolDocs: mcpTools.defs,
                     onClientToolCall: (call) => {
                       /* Forward part 'tool_call' — useChat populates
                          toolInvocations + onToolCall chạy trên máy user. */
@@ -2491,11 +2485,11 @@ export async function POST(req: Request) {
                                 !NATIVE_EXCLUDED_CLIENT_TOOLS.has(name) &&
                                 (agentMode !== 'plan' || !PLAN_MODE_WRITE_TOOLS.has(name)) &&
                                 !recipeDeny.has(name) &&
-                                (!recipeAllow || recipeAllow.has(name)),
+                                (!recipeAllow || recipeAllow.has(name)) &&
+                                (name !== 'skill_load' || hasSkillIndex),
                             ),
                           ),
                           ...nativeDelegateTool,
-                          ...skillLoadDef,
                           /* Tool MCP: khai báo để model gọi được. Không có
                              execute — thực thi ở renderer qua IPC. */
                           ...mcpTools.defs,

@@ -122,6 +122,20 @@ import {
   loadSkillContent,
 } from '@/lib/skills/client-adapters';
 import { useDiskSkillsStore } from '@/lib/skills/disk-store';
+import { foldText } from '@/lib/search-utils';
+import {
+  rememberAgentMemory,
+  resolveWorkspaceKey,
+  listAgentMemories,
+  removeMemoryCategory,
+  removeSpecificMemory,
+} from '@/lib/memory/goose-client';
+import {
+  retrieveMatchingMemories,
+  memoriesForWorkspace,
+  buildMemoryIndexBlock,
+  agentMemoriesAsLessons,
+} from '@/lib/memory/goose';
 import {
   desktopFsList,
   desktopFsRead,
@@ -1852,6 +1866,83 @@ export default function ChatInterface() {
               return JSON.stringify({ ok: true, id: cand.id, category, text: validated, status: 'pending' });
             } catch (e) {
               return JSON.stringify({ ok: false, error: `Lỗi đề xuất bài học: ${e instanceof Error ? e.message : String(e)}` });
+            }
+          }
+
+          /* ------------------------------------------------------------------ */
+          /* Structured memory (Goose port P1-4) — CRUD thẳng Dexie + mirror.    */
+          /* ------------------------------------------------------------------ */
+
+          case 'remember_memory': {
+            try {
+              const res = await rememberAgentMemory({
+                category: args.category,
+                data: args.data,
+                tags: args.tags,
+                is_global: args.is_global,
+              });
+              if (!res.ok || !res.record) {
+                return JSON.stringify({ ok: false, error: res.error });
+              }
+              return JSON.stringify({
+                ok: true,
+                id: res.record.id,
+                category: res.record.category,
+                scope: res.record.scope,
+                mirrored: res.mirrored === true,
+              });
+            } catch (e) {
+              return JSON.stringify({ ok: false, error: `Lỗi ghi memory: ${e instanceof Error ? e.message : String(e)}` });
+            }
+          }
+
+          case 'retrieve_memories': {
+            try {
+              const workspaceKey = await resolveWorkspaceKey();
+              const all = await listAgentMemories();
+              const matches = retrieveMatchingMemories(
+                all,
+                {
+                  query: typeof args.query === 'string' ? args.query : undefined,
+                  category: typeof args.category === 'string' ? args.category : undefined,
+                  tags: Array.isArray(args.tags) ? (args.tags.filter((t) => typeof t === 'string') as string[]) : undefined,
+                  workspaceKey,
+                },
+                foldText,
+              );
+              return JSON.stringify({
+                matches: matches.map((r) => ({
+                  id: r.id,
+                  category: r.category,
+                  data: r.data,
+                  tags: r.tags,
+                  scope: r.scope,
+                  createdAt: r.createdAt,
+                })),
+                total: memoriesForWorkspace(all, workspaceKey).length,
+                note: matches.length ? undefined : 'Không có memory nào khớp — thử từ khoá/category khác.',
+              });
+            } catch (e) {
+              return JSON.stringify({ error: `Lỗi tra memory: ${e instanceof Error ? e.message : String(e)}` });
+            }
+          }
+
+          case 'remove_memory_category': {
+            try {
+              const removed = await removeMemoryCategory(String(args.category ?? ''));
+              return JSON.stringify({ ok: true, removed });
+            } catch (e) {
+              return JSON.stringify({ ok: false, error: `Lỗi xoá category: ${e instanceof Error ? e.message : String(e)}` });
+            }
+          }
+
+          case 'remove_specific_memory': {
+            try {
+              const removed = await removeSpecificMemory(String(args.id ?? ''));
+              if (!removed) return JSON.stringify({ ok: false, error: `Không tìm thấy memory id "${String(args.id ?? '')}".` });
+              return JSON.stringify({ ok: true, removed: { id: removed.id, category: removed.category } });
+            } catch (e) {
+              return JSON.stringify({ ok: false, error: `Lỗi xoá memory: ${e instanceof Error ? e.message : String(e)}` });
             }
           }
 
@@ -4478,6 +4569,29 @@ export default function ChatInterface() {
         }
       } catch {
         /* bỏ qua */
+      }
+
+      /* Bộ nhớ có cấu trúc (P1-4): index scope-aware + lesson từ bảng mới
+         ghép vào mảng memories (giữ đường formatLessonsBlock cũ hoạt động). */
+      if (userText) {
+        try {
+          const workspaceKey = await resolveWorkspaceKey();
+          const all = await listAgentMemories();
+          if (all.length) {
+            const indexBlock = buildMemoryIndexBlock(memoriesForWorkspace(all, workspaceKey)).block;
+            if (indexBlock) options.body = { ...options.body, memoryIndex: indexBlock };
+            const asLessons = agentMemoriesAsLessons(all, workspaceKey);
+            if (asLessons.length) {
+              const prevMemories = (options.body?.memories ?? []) as Array<{ id: string; text: string }>;
+              options.body = {
+                ...options.body,
+                memories: [...prevMemories, ...asLessons],
+              };
+            }
+          }
+        } catch {
+          /* lỗi đọc memory — gửi không kèm */
+        }
       }
 
       /* Workspace agent coding: đọc TƯƠI lúc submit (web = cache module-level

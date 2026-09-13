@@ -711,6 +711,15 @@ export const CLIENT_TOOL_DEFS = {
       is_regex: z.boolean().optional().describe('Mặc định false — tìm chuỗi thường'),
     }),
   }),
+  skill_load: tool({
+    description:
+      'Nạp NỘI DUNG đầy đủ một kỹ năng dạng SKILL.md (xem bảng [SKILLS] trong system prompt) — ' +
+      'trả body SKILL.md + danh sách file phụ trong thư mục skill (tự fs_read nếu cần). ' +
+      'Gọi TRƯỚC khi làm việc thuộc phạm vi kỹ năng đó; mỗi skill chỉ cần gọi MỘT lần.',
+    parameters: z.object({
+      name: z.string().max(60).describe('Tên skill trong bảng [SKILLS]'),
+    }),
+  }),
   fs_edit: tool({
     description:
       'Sửa CỤC BỘ một file ĐÃ TỒN TẠI bằng khối SEARCH/REPLACE. Người dùng LUÔN xem diff và PHẢI phê duyệt. ' +
@@ -941,6 +950,54 @@ export const CLIENT_TOOL_DEFS = {
     description: 'DỪNG một lệnh nền đang chạy theo job_id.',
     parameters: z.object({
       job_id: z.string().min(1).max(80).describe('Id nhận từ bg_run'),
+    }),
+  }),
+
+  /* ------------------------------------------------------------------ */
+  /* Structured memory — port Goose remember/retrieve/remove (P1-4).     */
+  /* Client tool: Dexie nằm trong trình duyệt user nên mọi CRUD chạy ở  */
+  /* renderer; mirror file .vyen/memory/<category>.md ghi qua fs thường. */
+  /* ------------------------------------------------------------------ */
+
+  remember_memory: tool({
+    description:
+      'GHI một fact vào bộ nhớ có cấu trúc của người dùng (category + tags + scope). Dùng khi người ' +
+      'dùng nói "nhớ giúp", "lưu lại quy ước", hoặc khi phát hiện ràng buộc dự án đáng nhớ. Một lần ' +
+      'gọi = một fact độc lập ≤ 2.000 ký tự. is_global=true để dùng cho MỌI dự án (vd "dùng pnpm"); ' +
+      'mặc định false = chỉ workspace hiện tại. KHÔNG lưu secret.',
+    parameters: z.object({
+      category: z.string().min(1).max(60).describe('Nhóm, vd "workflow", "lesson", "preference"'),
+      data: z.string().min(4).max(2_000).describe('Nội dung fact — câu hoàn chỉnh, đứng độc lập'),
+      tags: z.array(z.string().max(40)).max(8).optional().describe('Thẻ gắn để lọc sau'),
+      is_global: z.boolean().optional().describe('true = mọi dự án; false = workspace hiện tại'),
+    }),
+  }),
+
+  retrieve_memories: tool({
+    description:
+      'TRA bộ nhớ có cấu trúc theo từ khoá / category / tags. Chỉ mục (category + số lượng) có sẵn ' +
+      'trong system prompt — dùng tool này khi cần NỘI DUNG cụ thể. Trả tối đa 8 entry khớp nhất.',
+    parameters: z.object({
+      query: z.string().max(300).optional().describe('Từ khoá tự do (fold dấu tiếng Việt)'),
+      category: z.string().max(60).optional().describe('Lọc theo đúng một category'),
+      tags: z.array(z.string().max(40)).max(8).optional().describe('Lọc theo tag (AND trong entry)'),
+    }),
+  }),
+
+  remove_memory_category: tool({
+    description:
+      'XOÁ TOÀN BỘ memory của một category (chỉ category, không đụng category khác). Chỉ gọi khi ' +
+      'người dùng yêu cầu xoá rõ ràng. Trả số entry đã xoá.',
+    parameters: z.object({
+      category: z.string().min(1).max(60).describe('Category cần xoá'),
+    }),
+  }),
+
+  remove_specific_memory: tool({
+    description:
+      'XOÁ MỘT entry memory theo id (nhận từ retrieve_memories). Chỉ gọi khi người dùng yêu cầu xoá rõ ràng.',
+    parameters: z.object({
+      id: z.string().min(1).max(80).describe('Id của entry (field id trong kết quả retrieve)'),
     }),
   }),
 } as const;

@@ -12,6 +12,7 @@ import { TOOL_CATEGORY_ICON_COMPONENTS } from '@/components/tool-category-icons'
 import { useLiveQuery } from 'dexie-react-hooks';
 import { savePrompt, deletePrompt } from '@/lib/prompt-library';
 import { DiskSkillsSection } from '@/components/settings-skills';
+import { AgentMemorySection } from '@/components/settings-agent-memory';
 import { proposeCandidate, reviewCandidate, deleteReviewedRecord } from '@/lib/memory/store';
 import type { MemoryKind, MemoryRecord } from '@/lib/memory/types';
 import {
@@ -1408,6 +1409,8 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
 
 {visited.has('memory') && (
           <div className={show('memory') ? 'contents' : 'hidden'}>
+            <AgentMemorySection />
+            <div className="my-4 border-t border-zinc-200 dark:border-zinc-800" />
             <MemoriesSection />
           </div>
           )}

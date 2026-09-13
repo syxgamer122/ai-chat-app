@@ -1,6 +1,7 @@
 import Dexie, { type Table } from 'dexie';
 import { tokenize } from '@/lib/search-utils';
 import type { MemoryRecord, MemoryReviewEntry } from '@/lib/memory/types';
+import type { AgentMemoryRecord } from '@/lib/memory/goose';
 
 /**
  * IndexedDB KHÔNG index được `null`. Message gốc phải mang sentinel này,
@@ -290,6 +291,7 @@ export class ChatAppDatabase extends Dexie {
   memoryRecords!: Table<MemoryRecord, string>;
   memoryReviews!: Table<MemoryReviewEntry, string>;
   recipes!: Table<RecipeRecord, string>;
+  agentMemories!: Table<AgentMemoryRecord, string>;
 
   constructor() {
     super('ai_chat_app_db');
@@ -498,6 +500,27 @@ export class ChatAppDatabase extends Dexie {
       memoryRecords: 'id, status, createdAt, reviewDueAt, digest, [scope.kind+scope.ref]',
       memoryReviews: 'id, candidateId, action, reviewedAt',
       recipes: 'id, title, updatedAt, source',
+    });
+
+    // v13: agentMemories — bộ nhớ có cấu trúc kiểu Goose (P1-4): category +
+    // tags + scope local/global; tách biệt hệ reviewer-gate (v11) — hệ này là
+    // kho ghi nhanh do tool remember_memory ghi, không qua duyệt.
+    this.version(13).stores({
+      chats: 'id, createdAt, updatedAt, pinned, activeLeafId, *titleTokens',
+      messages:
+        'id, chatId, role, createdAt, seq, parentId, ' +
+        '[chatId+parentId], [chatId+createdAt], [chatId+seq], ' +
+        '[chatId+parentId+branchOrder], *tokens',
+      prompts: 'id, updatedAt',
+      kv: 'key',
+      providers: 'id, updatedAt',
+      memories: 'id, createdAt',
+      wsSnapshots: 'id, chatId, createdAt',
+      memoryCandidates: 'id, status, createdAt, digest, [scope.kind+scope.ref]',
+      memoryRecords: 'id, status, createdAt, reviewDueAt, digest, [scope.kind+scope.ref]',
+      memoryReviews: 'id, candidateId, action, reviewedAt',
+      recipes: 'id, title, updatedAt, source',
+      agentMemories: 'id, category, scope, workspaceKey, createdAt, *tags',
     });
 
     this.messages.hook('creating', (_primKey, obj) => {

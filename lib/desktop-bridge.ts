@@ -307,6 +307,14 @@ export interface VyenBridge {
     listGlobal(): Promise<{ skills: Array<{ name: string; path: string }> }>;
     readGlobal(name: string): Promise<{ content: string; files: string[] }>;
   };
+  /**
+   * Mirror bộ nhớ toàn cục ~/.vyen/memory/<category>.md (P1-4). Optional
+   * như skills — bridge cũ không có.
+   */
+  memory?: {
+    writeGlobal(category: string, content: string): Promise<{ ok: true }>;
+    readGlobal(category: string): Promise<{ content: string }>;
+  };
   /** Kho mã hoá safeStorage cho API key provider — optional như `llm`. */
   secure?: VyenSecureStoreApi;
   /**
@@ -505,6 +513,12 @@ function createWebBridge(): VyenBridge {
         callWebBridge<{ skills: Array<{ name: string; path: string }> }>('vyen:home-skills-list'),
       readGlobal: (name: string) =>
         callWebBridge<{ content: string; files: string[] }>('vyen:home-skills-read', { name }),
+    },
+    memory: {
+      writeGlobal: (category: string, content: string) =>
+        callWebBridge<{ ok: true }>('vyen:home-memory-write', { category, content }),
+      readGlobal: (category: string) =>
+        callWebBridge<{ content: string }>('vyen:home-memory-read', { category }),
     },
     secure: {
       available: () => callWebBridge<{ available: boolean }>('vyen:secure-available'),
