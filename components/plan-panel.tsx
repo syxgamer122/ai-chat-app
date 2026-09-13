@@ -58,11 +58,10 @@ export function PlanPanel({ plan, onHide }: PlanPanelProps) {
       : 'prepared';
 
   // Phase-TODO discipline: tìm item in_progress ĐẦU TIÊN làm active item duy nhất
-  let foundActive = false;
-  const normalizedSubtasks = plan.subtasks.map((st) => {
+  const firstActiveIdx = plan.subtasks.findIndex((st) => st.status === 'in_progress');
+  const normalizedSubtasks = plan.subtasks.map((st, i) => {
     if (st.status === 'in_progress') {
-      if (!foundActive) {
-        foundActive = true;
+      if (i === firstActiveIdx) {
         return { ...st, isActive: true };
       }
       return { ...st, isActive: false, status: 'pending' as SubtaskStatus };
