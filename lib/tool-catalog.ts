@@ -69,19 +69,28 @@ export const TOOL_CATEGORY_MAP: Record<string, ToolCategory> = {
 };
 
 /**
- * Tool có thuộc nhóm đang bị đặt quyền 'deny' (Chặn) không. Nguồn cho cổng
- * chặn trong chat-interface: tool gọi tới trả lỗi ngay, không chạy và không
- * hiện modal duyệt. Tham số nhận Record<string, string> thay vì ToolPermissions
- * để file này giữ nguyên tính thuần (không import store).
- * Tool lạ (mcp__*, tên chưa có trong map) luôn false: không thuộc nhóm quyền
- * nào thì không bị chặn ở đây.
+ * Tool có thuộc nhóm hoặc tên đang bị đặt quyền 'deny' (Chặn) không. Nguồn cho
+ * cổng chặn trong chat-interface: tool gọi tới trả lỗi ngay ("denied by policy"),
+ * không chạy và không hiện modal duyệt. Tham số nhận Record<string, string>
+ * thay vì ToolPermissions để file này giữ nguyên tính thuần (không import store).
  */
 export function isToolDenied(
   toolName: string,
   permissions: Record<string, string>,
 ): boolean {
+  // 1. Per-tool specific permission
+  const specific = permissions[toolName];
+  if (specific === 'deny') return true;
+  if (specific === 'auto' || specific === 'ask') return false;
+
+  // 2. Category fallback
   const category = TOOL_CATEGORY_MAP[toolName];
-  return category !== undefined && permissions[category] === 'deny';
+  if (category !== undefined && permissions[category] === 'deny') return true;
+
+  // 3. MCP tools prefix fallback
+  if (toolName.startsWith('mcp__') && permissions['mcp'] === 'deny') return true;
+
+  return false;
 }
 
 function toolsOfCategory(category: ToolCategory): string {

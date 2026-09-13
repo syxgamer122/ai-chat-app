@@ -1219,10 +1219,24 @@ export default function ChatInterface() {
         }
       };
 
+      /* Mode chat_only (P1-6): vô hiệu hoàn toàn toàn bộ tool (kể cả fs_read) */
+      if (approvalPolicy === 'chat_only') {
+        return JSON.stringify({
+          error: `Tool "${toolCall.toolName}" is denied by policy (chat_only mode).`,
+          denied: true,
+        });
+      }
+
       /* Tool MCP đi TRƯỚC mọi kiểm tra khác: chúng không cần workspace
          (không đụng file của người dùng qua fs_*), và tên không nằm trong
          CLIENT_TOOL_NAMES nên sẽ bị chặn ở ngay dòng dưới nếu để lọt xuống. */
       if (isMcpToolKey(toolCall.toolName)) {
+        if (isToolDenied(toolCall.toolName, toolPermissions)) {
+          return JSON.stringify({
+            error: `Tool "${toolCall.toolName}" is denied by policy.`,
+            denied: true,
+          });
+        }
         /* Tool proxy: key mcp__search không có entry trong index — xử lý
            riêng, resolve key action call từ metadata server proxy. */
         if (toolCall.toolName === MCP_PROXY_TOOL_KEY) {
@@ -1250,11 +1264,9 @@ export default function ChatInterface() {
               });
             }
             return JSON.stringify({
-              key: rawArgs.key,
               name: t.name,
-              server: t.serverName || t.serverId,
               description: t.description,
-              inputSchema: t.inputSchema ?? {},
+              inputSchema: t.inputSchema,
             });
           }
           if (action === 'call') {
@@ -1301,7 +1313,8 @@ export default function ChatInterface() {
       if (toolCall.toolName === 'skill_load') {
         if (isToolDenied('skill_load', toolPermissions)) {
           return JSON.stringify({
-            error: 'Tool "skill_load" đang bị đặt quyền Chặn trong panel Công cụ & quyền.',
+            error: 'Tool "skill_load" is denied by policy.',
+            denied: true,
           });
         }
         const wantName = String(((toolCall.args ?? {}) as Record<string, unknown>).name ?? '').trim();
@@ -1326,17 +1339,16 @@ export default function ChatInterface() {
            vĩnh viễn. Nhánh default cuối switch đã làm đúng — đồng bộ hoá. */
         return JSON.stringify({ error: `Tool không tồn tại: ${toolCall.toolName}` });
       }
-      /* Quyền nhóm "Chặn": kiểm tra TRƯỚC mọi nhánh thực thi (desktop-only,
-         workspace, switch) để không đường nào chạy khi nhóm bị deny. Tool bị
-         chặn nhận về lỗi có tên nhóm; modal duyệt không xuất hiện. Tool MCP
-         và server tool không đi qua funnel này nên không bị ảnh hưởng. */
+      /* Quyền "Chặn" per-tool & category: kiểm tra TRƯỚC mọi nhánh thực thi
+         để không modal nào hiện lên khi bị deny. Trả về đúng "denied by policy" */
       if (isToolDenied(toolCall.toolName, toolPermissions)) {
         const category = TOOL_CATEGORY_MAP[toolCall.toolName];
         return JSON.stringify({
           error:
-            `Tool "${toolCall.toolName}" không chạy: nhóm ` +
-            `"${TOOL_CATEGORY_LABELS[category]?.label ?? String(category)}" đang bị đặt quyền ` +
-            'Chặn trong panel Công cụ & quyền. Hãy báo người dùng và chờ họ đổi quyền nếu cần dùng lại.',
+            `Tool "${toolCall.toolName}" is denied by policy: nhóm ` +
+            `"${category ? TOOL_CATEGORY_LABELS[category]?.label ?? String(category) : 'MCP'}" đang bị đặt quyền ` +
+            'Chặn. Hãy báo người dùng và chờ họ đổi quyền nếu cần dùng lại.',
+          denied: true,
         });
       }
       const isDesktop = isVyenDesktop();
@@ -2038,7 +2050,7 @@ export default function ChatInterface() {
       }
     },
     [
-
+      approvalPolicy,
       /* showDiffModal/showShellModal KHÔNG có ở đây: thân callback chỉ còn gọi
          autoApproveShell/autoApproveDiff (chúng tự phụ thuộc hai hàm đó). Khai
          báo thừa làm callback đổi danh tính vô cớ. */
@@ -2187,10 +2199,8 @@ export default function ChatInterface() {
          kèm bằng model này (cùng provider active) rồi thay vào tin nhắn. Không
          gửi khi rỗng — server hiểu là tính năng tắt và dùng placeholder text. */
       ...(visionModel ? { visionModel } : {}),
-      /* Cho phép tắt hẳn tool-calling. Server mặc định `?? true`, nên TRƯỚC
-         ĐÂY không gửi trường này đồng nghĩa tool luôn bật và người dùng
-         không có cách nào huỷ. */
-      agentTools: agentToolsEnabled,
+      /* Cho phép tắt hẳn tool-calling. Khi approvalPolicy === 'chat_only', tắt hẳn tool. */
+      agentTools: approvalPolicy === 'chat_only' ? false : agentToolsEnabled,
       /* Plan/Act mode: server lọc write tools + chèn chỉ thị vào system prompt. */
       ...(agentMode !== 'act' ? { agentMode } : {}),
       /* Staging sandbox: server chèn ghi chú vào system prompt. */
@@ -4733,8 +4743,8 @@ export default function ChatInterface() {
       if (!modelOverride) {
         options.body = {
           ...options.body,
-      agentTools: agentToolsEnabled,
-      /* Plan/Act mode: server lọc write tools + chèn chỉ thị vào system prompt. */
+          agentTools: approvalPolicy === 'chat_only' ? false : agentToolsEnabled,
+          /* Plan/Act mode: server lọc write tools + chèn chỉ thị vào system prompt. */
       ...(agentMode !== 'act' ? { agentMode } : {}),
       /* Staging sandbox: server chèn ghi chú vào system prompt. */
       ...(stagingEnabled ? { staging: true } : {}),
@@ -4828,7 +4838,7 @@ export default function ChatInterface() {
     }
     /* beginRun/currentRun/setRepairable là hàm ổn định (useCallback rỗng bên
        trong hook), nên thêm vào đây không làm submitTurn bị tạo lại. */
-  }, [attachments, isLoading, mediaBusy, currentChat, currentChatId, draftId, setCurrentChatId, append, pin, generateTitle, messages, webSearchEnabled, promptTemplates, agentToolsEnabled, forceEmulatedTools, agentMode, stagingEnabled, beginRun, currentRun, setRepairable, MODELS, isRoutableModel, routingBodyFor]);
+  }, [attachments, isLoading, mediaBusy, currentChat, currentChatId, draftId, setCurrentChatId, append, pin, generateTitle, messages, webSearchEnabled, promptTemplates, agentToolsEnabled, forceEmulatedTools, agentMode, stagingEnabled, beginRun, currentRun, setRepairable, MODELS, isRoutableModel, routingBodyFor, approvalPolicy]);
 
   /* ---------------------------------------------------------------- */
   /* Recipe runner (port Goose): attempt → checks → retry/pass/stop.   */
@@ -5467,10 +5477,18 @@ export default function ChatInterface() {
   }, [updateSettings, agentMode]);
 
   const onCycleAutoPilot = useCallback(() => {
-    if (!autoPilot) updateSettings({ autoPilot: true, approvalPolicy: 'smart' });
-    else if (approvalPolicy === 'smart') updateSettings({ approvalPolicy: 'never' });
-    else if (approvalPolicy === 'never') updateSettings({ autoPilot: false, approvalPolicy: 'smart' });
-    else updateSettings({ autoPilot: true, approvalPolicy: 'smart' });
+    // Map: always (Manual) -> smart (Smart) -> never (Autonomous) -> chat_only (Chat Only)
+    if (!autoPilot || approvalPolicy === 'always') {
+      updateSettings({ autoPilot: true, approvalPolicy: 'smart' });
+    } else if (approvalPolicy === 'smart') {
+      updateSettings({ autoPilot: true, approvalPolicy: 'never' });
+    } else if (approvalPolicy === 'never') {
+      updateSettings({ autoPilot: false, approvalPolicy: 'chat_only' });
+    } else if (approvalPolicy === 'chat_only') {
+      updateSettings({ autoPilot: true, approvalPolicy: 'always' });
+    } else {
+      updateSettings({ autoPilot: true, approvalPolicy: 'smart' });
+    }
   }, [updateSettings, autoPilot, approvalPolicy]);
 
   const onOpenStaging = useCallback(() => setStagingPanelOpen(true), []);

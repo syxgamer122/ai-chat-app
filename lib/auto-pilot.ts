@@ -21,7 +21,7 @@ import { evaluateToolcallRules, type ToolcallRule } from '@/lib/toolcall-rules';
 /* Types                                                                */
 /* ------------------------------------------------------------------ */
 
-export type ApprovalPolicy = 'always' | 'smart' | 'never';
+export type ApprovalPolicy = 'always' | 'smart' | 'never' | 'chat_only';
 
 export interface AutoApproveContext {
   toolName: string;
@@ -171,6 +171,9 @@ export function isAlwaysBlocked(command: string): boolean {
  * | ON        | never    | ALWAYS_BLOCK  | ASK         |
  */
 export function shouldAutoApprove(ctx: AutoApproveContext): boolean {
+  // ── Mode chat_only: vô hiệu hoàn toàn tool ──
+  if (ctx.policy === 'chat_only') return false;
+
   // ── 0. Destructive safety check (always blocked) ──
   if (ctx.toolName === 'shell_run') {
     const command = String(ctx.args.command ?? '');
@@ -186,21 +189,25 @@ export function shouldAutoApprove(ctx: AutoApproveContext): boolean {
 
   // ── Per-tool override check (highest priority) ──
   if (ctx.toolPermissions) {
+    const specificOverride = ctx.toolPermissions[ctx.toolName];
     const category = TOOL_CATEGORY_MAP[ctx.toolName];
-    if (category) {
-      const override = ctx.toolPermissions[category];
-      if (override === 'deny') return false;   // Blocked entirely
-      if (override === 'ask') return false;     // Always ask, even in YOLO
-      if (override === 'auto') {
-        // Auto-approve, but ALWAYS_BLOCK commands still blocked for safety
-        if (ctx.toolName === 'shell_run') {
-          const command = String(ctx.args.command ?? '');
-          if (isAlwaysBlocked(command)) return false;
-        }
-        return true;
+    const categoryOverride = category ? ctx.toolPermissions[category] : undefined;
+    const override =
+      specificOverride !== undefined && specificOverride !== 'default'
+        ? specificOverride
+        : categoryOverride;
+
+    if (override === 'deny') return false;   // Blocked entirely
+    if (override === 'ask') return false;     // Always ask, even in YOLO
+    if (override === 'auto') {
+      // Auto-approve, but ALWAYS_BLOCK commands still blocked for safety
+      if (ctx.toolName === 'shell_run') {
+        const command = String(ctx.args.command ?? '');
+        if (isAlwaysBlocked(command)) return false;
       }
-      // 'default' → fall through to policy-based logic below
+      return true;
     }
+    // 'default' → fall through to policy-based logic below
   }
 
   // Master switch off → always ask

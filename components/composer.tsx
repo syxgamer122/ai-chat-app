@@ -310,7 +310,7 @@ interface ComposerProps {
   agentMode?: 'plan' | 'act';
   onToggleAgentMode?: () => void;
   autoPilot?: boolean;
-  approvalPolicy?: 'always' | 'smart' | 'never';
+  approvalPolicy?: 'always' | 'smart' | 'never' | 'chat_only';
   onCycleAutoPilot?: () => void;
   goalLoopActive?: boolean;
   goalLoopInfo?: string;
@@ -620,19 +620,26 @@ export const Composer = memo(function Composer({
   }
 
   if (onCycleAutoPilot) {
-    const policyLabel = approvalPolicy === 'never' ? 'YOLO'
-      : approvalPolicy === 'always' ? 'Always ask'
+    const policyLabel =
+      approvalPolicy === 'never' ? 'Autonomous'
+      : approvalPolicy === 'always' ? 'Manual'
+      : approvalPolicy === 'chat_only' ? 'Chat Only'
       : 'Smart';
+    const isChatOnly = approvalPolicy === 'chat_only';
     modeTasks.push({
       key: 'auto-pilot',
       icon: Zap,
-      active: autoPilot ?? false,
+      active: isChatOnly || (autoPilot ?? false),
       disabled: isStreaming,
-      label: autoPilot
+      label: isChatOnly
+        ? 'Chế độ: Chat Only (tắt tools) · bấm để đổi'
+        : autoPilot
         ? `Auto-pilot: ${policyLabel} · bấm để đổi`
         : 'Bật Auto-pilot',
-      shortLabel: autoPilot ? `AP: ${policyLabel}` : 'Auto-pilot',
-      description: 'Chạy nhiều bước liền, không phải duyệt từng bước',
+      shortLabel: isChatOnly ? 'Chat Only' : autoPilot ? policyLabel : 'Auto-pilot',
+      description: isChatOnly
+        ? 'Vô hiệu hoàn toàn tool, dùng cho phân tích & viết'
+        : 'Chạy nhiều bước liền, không phải duyệt từng bước',
       onClick: onCycleAutoPilot,
     });
   }

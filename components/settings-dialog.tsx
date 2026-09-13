@@ -55,6 +55,10 @@ const RoutingSettingsPanel = dynamic(
   () => import('@/components/routing-settings-panel').then((m) => m.RoutingSettingsPanel),
   { ssr: false, loading: SectionLoading },
 );
+const ToolPermissionsTable = dynamic(
+  () => import('@/components/tool-permissions-table').then((m) => m.ToolPermissionsTable),
+  { ssr: false, loading: SectionLoading },
+);
 
 /**
  * PWA: nút cài đặt lên thiết bị (Chrome/Edge/Android);
@@ -1131,22 +1135,24 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                     {(settings.autoPilot ?? false) && (
                       <div className="border-l-2 border-zinc-200 pl-3">
                         <label htmlFor="approval-policy" className="block text-sm font-medium text-zinc-700 mb-1">
-                          Approval Policy
+                          Approval Policy / Chế độ hoạt động
                         </label>
                         <select
                           id="approval-policy"
                           value={settings.approvalPolicy ?? 'smart'}
-                          onChange={(e) => updateSettings({ approvalPolicy: e.target.value as 'always' | 'smart' | 'never' })}
+                          onChange={(e) => updateSettings({ approvalPolicy: e.target.value as 'always' | 'smart' | 'never' | 'chat_only' })}
                           className="field w-full max-w-xs"
                         >
-                          <option value="smart">Smart — tự duyệt read + safe commands, hỏi khi ghi/destructive</option>
-                          <option value="never">Never ask (YOLO) — tự duyệt tất cả trừ lệnh nguy hiểm</option>
-                          <option value="always">Always ask — luôn hỏi (như tắt auto-pilot)</option>
+                          <option value="smart">Smart (Thông minh) — tự duyệt read + safe commands, hỏi khi ghi/destructive</option>
+                          <option value="never">Autonomous (Tự chủ / YOLO) — tự duyệt tất cả trừ lệnh luôn-chặn</option>
+                          <option value="always">Manual (Thủ công) — luôn hỏi trước khi chạy bất kỳ tool nào</option>
+                          <option value="chat_only">Chat Only (Chỉ chat) — vô hiệu hoàn toàn công cụ (kể cả fs_read)</option>
                         </select>
                         <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">
                           {(settings.approvalPolicy ?? 'smart') === 'smart' && '✅ Read-only tools và safe commands (npm test, git status...) tự động duyệt. Write/destructive vẫn hỏi.'}
                           {(settings.approvalPolicy ?? 'smart') === 'never' && '⚡ Tất cả tool calls tự động duyệt TRỪ lệnh luôn-chặn (rm -rf /, mkfs, shutdown...). Dùng với Staging Sandbox.'}
-                          {(settings.approvalPolicy ?? 'smart') === 'always' && '🔒 Luôn hỏi trước khi chạy bất kỳ tool nào. Tương đương tắt auto-pilot.'}
+                          {(settings.approvalPolicy ?? 'smart') === 'always' && '🔒 Luôn hỏi trước khi chạy bất kỳ tool nào. Tương đương Manual mode.'}
+                          {(settings.approvalPolicy ?? 'smart') === 'chat_only' && '💬 Vô hiệu hoàn toàn tất cả công cụ (kể cả fs_read). Dùng cho phân tích và viết lách.'}
                         </p>
                       </div>
                     )}
@@ -1154,45 +1160,18 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                 )}
               </div>
 
-              {/* Per-Tool Permission Overrides */}
-              {(settings.agentTools ?? true) && (settings.autoPilot ?? false) && (
-                <div className="space-y-3 border-l-2 border-zinc-200 pl-3">
-                  <h3 className="text-sm font-semibold text-zinc-700">Per-Tool Permissions</h3>
-                  <p className="text-[11px] leading-relaxed text-zinc-500">
-                    Override auto-approve behavior per tool category. &quot;Default&quot; follows the approval policy above.
-                  </p>
-                  <div className="space-y-1.5">
-                    {ALL_TOOL_CATEGORIES.map((cat) => {
-                      const info = TOOL_CATEGORY_LABELS[cat];
-                      const CategoryIcon = TOOL_CATEGORY_ICON_COMPONENTS[info.icon];
-                      const current = settings.toolPermissions?.[cat] ?? 'default';
-                      return (
-                        <div key={cat} className="flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
-                          <span className="min-w-0 flex-1 text-xs text-zinc-700">
-                            {CategoryIcon && (
-                              <CategoryIcon size={12} aria-hidden="true" className="mr-1.5 inline-block flex-shrink-0 text-zinc-500" />
-                            )}
-                            <span className="font-medium">{info.label}</span>
-                            <span className="ml-1 text-[10px] text-zinc-400">({info.tools})</span>
-                          </span>
-                          <select
-                            value={current}
-                            onChange={(e) => {
-                              const val = e.target.value as PermissionOverride;
-                              updateSettings({ toolPermissions: { ...settings.toolPermissions, [cat]: val } });
-                            }}
-                            className="field-sm w-28 text-[11px]"
-                          >
-                            {PERMISSION_OPTIONS.map((o) => (
-                              <option key={o.value} value={o.value}>
-                                {o.label}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                      );
-                    })}
+              {/* Bảng phân quyền chi tiết per-tool (P1-6) */}
+              {(settings.agentTools ?? true) && (
+                <div className="space-y-3">
+                  <div>
+                    <h3 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
+                      Bảng phân quyền chi tiết từng công cụ (Per-Tool Permissions)
+                    </h3>
+                    <p className="text-[11px] leading-relaxed text-zinc-500">
+                      Cấu hình quyền Tự duyệt (auto), Luôn hỏi (ask) hoặc Chặn (deny) cho từng tool độc lập. &quot;Mặc định&quot; sẽ tuân theo Approval Policy ở trên.
+                    </p>
                   </div>
+                  <ToolPermissionsTable />
                 </div>
               )}
 

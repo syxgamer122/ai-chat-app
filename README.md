@@ -56,7 +56,16 @@ Vyen đọc tự do nhưng ghi có kỷ luật: mọi thao tác ghi file / chạ
 
 ### MCP
 
-- Trong bản desktop, thêm MCP server (stdio/SSE/streamable-http) tại Settings; tool của server hiện diện trong model dạng `mcp__<server>__<tool>` (trần 100 tool mỗi request). Mỗi lần gọi đi qua hộp thoại phê duyệt **4 cấp**: Cho phép lần này / Luôn cho phép (nhớ cho phiên làm việc) / Từ chối lần này / Luôn từ chối. Ảnh do MCP trả về cũng được mô tả qua pipeline vision (tối đa 4 ảnh mỗi kết quả).
+- Trong bản desktop, thêm MCP server (stdio/SSE/streamable-http) tại Settings; tool của server hiện diện trong model dạng `mcp__<server>__<tool>` (trần 100 tool mỗi request). Mỗi lần gọi đi qua hộp thoại phê duyệt **4 cấp**: Cho phép lần này / Luôn cho phép (nhớ cho phiên làm việc) / Từ chối lần này / Luôn từ chối. Hỗ trợ **whitelist `available_tools`** cho từng server (port Goose) để giảm bớt token ngữ cảnh và khoanh vùng công cụ cho phép. Ảnh do MCP trả về cũng được mô tả qua pipeline vision (tối đa 4 ảnh mỗi kết quả).
+
+### Phân quyền công cụ & 4 chế độ chuẩn (Port Goose P1-6)
+
+- **4 chế độ hoạt động**:
+  - `Manual` (`always`): Luôn hỏi trước khi chạy bất kỳ tool nào (an toàn tối đa).
+  - `Smart` (`smart`): Tự động duyệt các tool chỉ đọc và lệnh shell an toàn (`npm test`, `git status`...), yêu cầu xác nhận khi ghi/sửa hoặc chạy lệnh destructive.
+  - `Autonomous` (`never`): Tự động duyệt tất cả các tool, ngoại trừ các lệnh luôn-chặn (hard safety backstop: `rm -rf /`, `format C:`, `mkfs`...).
+  - `Chat Only` (`chat_only`): Vô hiệu hóa hoàn toàn toàn bộ công cụ (kể cả `fs_read`), dùng cho viết lách, giải thích và phân tích thuần túy.
+- **Bảng phân quyền chi tiết per-tool**: Bảng trong Cài đặt cho phép gán quyền `auto` (Tự duyệt), `ask` (Luôn hỏi), `deny` (Chặn), hoặc `default` (theo policy) cho từng công cụ độc lập thuộc 8 nhóm (`fs`, `shell`, `git`, `mcp`, `web`, `plan`, `delegate`, `memory`), hỗ trợ tìm kiếm và nút Đặt lại mặc định. Lưu trữ đồng bộ Zustand persist + Dexie v14 (`toolPermissions`). Tool bị đặt `deny` lập tức trả lỗi `denied by policy`, không mở modal duyệt.
 
 ### Làm việc quy mô lớn
 
@@ -82,7 +91,7 @@ Vyen đọc tự do nhưng ghi có kỷ luật: mọi thao tác ghi file / chạ
 | Framework | Next.js 16 (App Router, Turbopack) |
 | UI | React 19, Tailwind CSS, lucide-react |
 | Trạng thái | Zustand (persist localStorage) |
-| Lưu trữ | Dexie (IndexedDB) — schema 5 phiên bản có migration |
+| Lưu trữ | Dexie (IndexedDB) — schema 14 phiên bản có migration |
 | AI | AI SDK (`ai` + `@ai-sdk/openai`), stream qua API routes Node.js |
 | Virtualization | @tanstack/react-virtual |
 | Desktop | Launcher Edge/Chrome `--app` vào Next.js local (cửa sổ riêng, ~35MB RAM) |

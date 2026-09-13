@@ -86,8 +86,8 @@ export type PermissionOverride = 'default' | 'auto' | 'ask' | 'deny';
 export { ALL_TOOL_CATEGORIES, TOOL_CATEGORY_LABELS, TOOL_CATEGORY_MAP };
 export type { ToolCategory };
 
-/** Per-category permission overrides. All default to 'default'. */
-export type ToolPermissions = Record<ToolCategory, PermissionOverride>;
+/** Per-tool and per-category permission overrides. All default to 'default'. */
+export type ToolPermissions = Record<string, PermissionOverride>;
 
 export function isPermissionOverride(v: unknown): v is PermissionOverride {
   return v === 'default' || v === 'auto' || v === 'ask' || v === 'deny';
@@ -171,13 +171,14 @@ export interface Settings {
    */
   autoPilot: boolean;
   /**
-   * Approval policy when autoPilot is ON:
-   * - 'always': ask for everything (same as autoPilot OFF)
-   * - 'smart': auto-approve reads + safe commands, ask for writes/destructive
-   * - 'never': auto-approve everything except always-blocked commands (YOLO)
+   * Approval policy:
+   * - 'always': ask for everything (Manual)
+   * - 'smart': auto-approve reads + safe commands, ask for writes/destructive (Smart)
+   * - 'never': auto-approve everything except always-blocked commands (Autonomous / YOLO)
+   * - 'chat_only': completely disable all tools, chat only (Chat Only)
    */
-  approvalPolicy: 'always' | 'smart' | 'never';
-  /** Per-tool permission overrides by category. */
+  approvalPolicy: 'always' | 'smart' | 'never' | 'chat_only';
+  /** Per-tool and per-category permission overrides. */
   toolPermissions: ToolPermissions;
   /** Model yêu thích của picker: set (id, providerId), cap 30, không cần migrate. */
   modelFavorites: ModelFavorite[];
@@ -267,9 +268,11 @@ function validateToolPermissions(
 ): ToolPermissions {
   if (!persisted || typeof persisted !== 'object') return { ...fallback };
   const p = persisted as Record<string, unknown>;
-  const result = { ...fallback };
-  for (const cat of ALL_TOOL_CATEGORIES) {
-    if (isPermissionOverride(p[cat])) result[cat] = p[cat];
+  const result: ToolPermissions = { ...fallback };
+  for (const [k, v] of Object.entries(p)) {
+    if (typeof k === 'string' && isPermissionOverride(v)) {
+      result[k] = v;
+    }
   }
   return result;
 }
@@ -380,7 +383,10 @@ export const useAppStore = create<AppState>()(
                 ? p.settings.autoPilot
                 : current.settings.autoPilot,
             approvalPolicy:
-              p.settings?.approvalPolicy === 'always' || p.settings?.approvalPolicy === 'smart' || p.settings?.approvalPolicy === 'never'
+              p.settings?.approvalPolicy === 'always' ||
+              p.settings?.approvalPolicy === 'smart' ||
+              p.settings?.approvalPolicy === 'never' ||
+              p.settings?.approvalPolicy === 'chat_only'
                 ? p.settings.approvalPolicy
                 : current.settings.approvalPolicy,
             steeringMode: isQueueMode(p.settings?.steeringMode)

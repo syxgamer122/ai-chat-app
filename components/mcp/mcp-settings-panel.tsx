@@ -80,6 +80,7 @@ export function McpSettingsPanel() {
   const [headers, setHeaders] = useState('');
   const [timeoutSecs, setTimeoutSecs] = useState('');
   const [autoApprove, setAutoApprove] = useState('');
+  const [availableTools, setAvailableTools] = useState('');
   const [adding, setAdding] = useState(false);
 
   const refresh = useCallback(async () => {
@@ -148,6 +149,12 @@ export function McpSettingsPanel() {
       .filter(Boolean)
       .slice(0, 20);
 
+    const whitelist = availableTools
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .slice(0, 50);
+
     /* Timeout tuỳ chọn. Để trống → manager dùng mặc định 60s.
        Sai định dạng là lỗi NHÌN THẤY ĐƯỢC, không được phép âm thầm bỏ qua. */
     let timeout: number | undefined;
@@ -178,6 +185,7 @@ export function McpSettingsPanel() {
         command: command.trim(),
         args: args.split(/\s+/).map((s) => s.trim()).filter(Boolean).slice(0, 50),
         autoApprove: approve,
+        ...(whitelist.length > 0 ? { availableTools: whitelist } : {}),
         ...(cwd.trim() ? { cwd: cwd.trim() } : {}),
         ...(Object.keys(envRecord).length > 0 ? { env: envRecord } : {}),
         ...(timeout !== undefined ? { timeoutSecs: timeout } : {}),
@@ -206,6 +214,7 @@ export function McpSettingsPanel() {
       transport,
       url: url.trim(),
       autoApprove: approve,
+      ...(whitelist.length > 0 ? { availableTools: whitelist } : {}),
       ...(Object.keys(headerRecord).length > 0 ? { headers: headerRecord } : {}),
       ...(timeout !== undefined ? { timeoutSecs: timeout } : {}),
     };
@@ -533,6 +542,21 @@ export function McpSettingsPanel() {
             placeholder="read_*, list_*"
             className={inputClass}
           />
+        </label>
+
+        <label className="block">
+          <span className="mb-1 block text-[11px] font-medium text-zinc-600">
+            Danh sách tool cho phép (available_tools whitelist, tuỳ chọn)
+          </span>
+          <input
+            value={availableTools}
+            onChange={(e) => setAvailableTools(e.target.value)}
+            placeholder="read_file, list_dir (để trống = cho phép tất cả tool)"
+            className={inputClass}
+          />
+          <span className="mt-1 block text-[10px] text-zinc-500">
+            Port Goose available_tools: chỉ nạp các tool trong danh sách này để giảm bớt token và giới hạn phạm vi.
+          </span>
         </label>
 
         {error && (

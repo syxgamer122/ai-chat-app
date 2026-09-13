@@ -194,6 +194,13 @@ export interface RecipeRecord {
   updatedAt: number;
 }
 
+/** Quyền per-tool hoặc per-category lưu Dexie v14 (P1-6). */
+export interface StoredToolPermissionRecord {
+  toolName: string;
+  permission: 'default' | 'auto' | 'ask' | 'deny';
+  updatedAt: number;
+}
+
 function newAttachmentId(): string {
   try {
     return globalThis.crypto.randomUUID();
@@ -292,6 +299,7 @@ export class ChatAppDatabase extends Dexie {
   memoryReviews!: Table<MemoryReviewEntry, string>;
   recipes!: Table<RecipeRecord, string>;
   agentMemories!: Table<AgentMemoryRecord, string>;
+  toolPermissions!: Table<StoredToolPermissionRecord, string>;
 
   constructor() {
     super('ai_chat_app_db');
@@ -521,6 +529,26 @@ export class ChatAppDatabase extends Dexie {
       memoryReviews: 'id, candidateId, action, reviewedAt',
       recipes: 'id, title, updatedAt, source',
       agentMemories: 'id, category, scope, workspaceKey, createdAt, *tags',
+    });
+
+    // v14: toolPermissions — quyền per-tool / per-category (P1-6): auto | ask | deny.
+    this.version(14).stores({
+      chats: 'id, createdAt, updatedAt, pinned, activeLeafId, *titleTokens',
+      messages:
+        'id, chatId, role, createdAt, seq, parentId, ' +
+        '[chatId+parentId], [chatId+createdAt], [chatId+seq], ' +
+        '[chatId+parentId+branchOrder], *tokens',
+      prompts: 'id, updatedAt',
+      kv: 'key',
+      providers: 'id, updatedAt',
+      memories: 'id, createdAt',
+      wsSnapshots: 'id, chatId, createdAt',
+      memoryCandidates: 'id, status, createdAt, digest, [scope.kind+scope.ref]',
+      memoryRecords: 'id, status, createdAt, reviewDueAt, digest, [scope.kind+scope.ref]',
+      memoryReviews: 'id, candidateId, action, reviewedAt',
+      recipes: 'id, title, updatedAt, source',
+      agentMemories: 'id, category, scope, workspaceKey, createdAt, *tags',
+      toolPermissions: 'toolName, permission, updatedAt',
     });
 
     this.messages.hook('creating', (_primKey, obj) => {

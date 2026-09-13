@@ -106,6 +106,8 @@ export type VyenMcpServerConfig =
       env?: Record<string, string>;
       cwd?: string;
       autoApprove?: string[];
+      availableTools?: string[];
+      available_tools?: string[];
       timeoutSecs?: number;
       exposeMode?: VyenMcpExposeMode;
     }
@@ -116,6 +118,8 @@ export type VyenMcpServerConfig =
       url: string;
       headers?: Record<string, string>;
       autoApprove?: string[];
+      availableTools?: string[];
+      available_tools?: string[];
       timeoutSecs?: number;
       exposeMode?: VyenMcpExposeMode;
     };
