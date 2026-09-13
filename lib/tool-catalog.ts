@@ -87,8 +87,11 @@ export function isToolDenied(
   const category = TOOL_CATEGORY_MAP[toolName];
   if (category !== undefined && permissions[category] === 'deny') return true;
 
-  // 3. MCP tools prefix fallback
-  if (toolName.startsWith('mcp__') && permissions['mcp'] === 'deny') return true;
+  // 3. MCP tools prefix & meta-tools fallback
+  if ((toolName.startsWith('mcp__') || toolName === 'tools_search' || toolName === 'tools_load') && permissions['mcp'] === 'deny') return true;
+
+  // 4. Code Mode fallback
+  if (toolName === 'run_code' && (permissions['shell'] === 'deny' || permissions['fs_write'] === 'deny')) return true;
 
   return false;
 }

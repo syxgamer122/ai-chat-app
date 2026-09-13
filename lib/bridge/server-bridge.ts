@@ -205,6 +205,40 @@ export function initServerBridge(): BridgeDispatcher {
     };
   });
 
+  // 6. Code Mode runner (P1-7): thực thi JS sandbox gọi MCP tools on-demand
+  handlers.set('vyen:code-run', async (_event, payload) => {
+    const code =
+      payload && typeof payload === 'object' && 'code' in payload && typeof (payload as { code?: unknown }).code === 'string'
+        ? (payload as { code: string }).code
+        : '';
+    const timeoutMs =
+      payload && typeof payload === 'object' && 'timeoutMs' in payload && typeof (payload as { timeoutMs?: unknown }).timeoutMs === 'number'
+        ? (payload as { timeoutMs: number }).timeoutMs
+        : undefined;
+
+    const { executeCodeMode } = await import('@/lib/mcp/code-mode');
+    return await executeCodeMode(code, {
+      timeoutMs,
+      mcpCaller: async (serverId, toolName, args) => {
+        const mcpHandler = handlers.get('mcp:call-tool');
+        if (!mcpHandler) {
+          throw new Error('MCP server handler chưa được khởi tạo.');
+        }
+        const res = (await mcpHandler(null, {
+          serverId,
+          toolName,
+          arguments: args,
+        })) as { content?: Array<{ type: string; text?: string }>; isError?: boolean; denied?: boolean };
+
+        if (res?.isError) {
+          const errText = res.content?.[0]?.text || 'MCP tool reported an error';
+          throw new Error(errText);
+        }
+        return res?.content ?? res;
+      },
+    });
+  });
+
   dispatcherInstance = {
     handlers,
     initialized: true,

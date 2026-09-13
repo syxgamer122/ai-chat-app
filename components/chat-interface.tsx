@@ -170,7 +170,7 @@ import {
   type CaptureInput,
   type TurnCapture,
 } from '@/lib/workspace-checkpoints';
-import { CLIENT_TOOL_NAMES } from '@/lib/agent-tools';
+import { CLIENT_TOOL_NAMES, CLIENT_TOOL_DEFS } from '@/lib/agent-tools';
 import { shouldAutoApprove } from '@/lib/auto-pilot';
 import { loadToolPermissionsFromDb } from '@/lib/tool-permissions';
 import {
@@ -205,6 +205,11 @@ import {
   searchMcpProxyTools,
   type McpToolInfo,
 } from '@/lib/mcp/tool-mapper';
+import {
+  buildToolIndex,
+  searchTools,
+  type ToolIndexEntry,
+} from '@/lib/mcp/tool-router';
 import {
   stageFile,
   unstageFile,
@@ -358,6 +363,8 @@ export default function ChatInterface() {
   const stagingEnabled = useAppStore((s) => s.settings.stagingSandbox ?? true);
   /** Lead/Worker routing (P1-5): override model mỗi lượt theo state machine. */
   const modelRouting = useAppStore((s) => s.settings.modelRouting ?? DEFAULT_MODEL_ROUTING);
+  /** Code Mode (P1-7): chạy JS sandbox gọi MCP on-demand */
+  const codeModeEnabled = useAppStore((s) => s.settings.codeModeEnabled ?? false);
   /** Capability suy luận của model đang chọn (metadata kiểu OpenRouter). */
   const modelReasoningCap = activeProvider?.models?.find((m) => m.id === model)?.reasoning ?? null;
   const throttleMs = useAppStore((s) => s.settings.perf.throttleMs);
@@ -1019,12 +1026,17 @@ export default function ChatInterface() {
   const mcpProxyServerIdsRef = useRef<Set<string>>(new Set());
   /** Metadata tool proxy cho handler mcp__search — ref để closure không stale. */
   const mcpProxyToolsRef = useRef<McpToolInfo[]>([]);
+  /** Tool Router Index (P1-7): chỉ mục toàn bộ native + MCP tools phục vụ tools_search. */
+  const toolRouterIndexRef = useRef<ToolIndexEntry[]>(buildToolIndex(CLIENT_TOOL_DEFS, []));
+  /** Danh sách các tool đã nạp qua tools_load trong phiên hiện tại. */
+  const loadedToolNamesRef = useRef<Set<string>>(new Set());
 
   const refreshMcpTools = useCallback(async () => {
     if (!isMcpAvailable()) return;
     try {
       const tools = await listMcpTools();
       mcpIndexRef.current = mapMcpTools(tools).index;
+      toolRouterIndexRef.current = buildToolIndex(CLIENT_TOOL_DEFS, tools);
       setMcpTools(tools);
       try {
         const servers = await listMcpServers();
@@ -1081,6 +1093,24 @@ export default function ChatInterface() {
         return true;
       }
       return showShellModal(s);
+    },
+    [autoPilot, approvalPolicy, toolPermissions, showShellModal],
+  );
+
+  const autoApproveCode = useCallback(
+    async (s: { code: string }): Promise<boolean> => {
+      if (
+        shouldAutoApprove({
+          toolName: 'run_code',
+          args: { code: s.code },
+          policy: approvalPolicy,
+          autoPilotEnabled: autoPilot,
+          toolPermissions,
+        })
+      ) {
+        return true;
+      }
+      return showShellModal({ command: `[run_code]:\n${s.code}` });
     },
     [autoPilot, approvalPolicy, toolPermissions, showShellModal],
   );
@@ -1341,6 +1371,70 @@ export default function ChatInterface() {
             error: `Đọc skill "${wantName}" thất bại: ${err instanceof Error ? err.message : String(err)}`,
           });
         }
+      }
+
+      /* tools_search (P1-7 Tool Router): tìm kiếm tool trong chỉ mục */
+      if (toolCall.toolName === 'tools_search') {
+        if (isToolDenied('tools_search', toolPermissions)) {
+          return JSON.stringify({ error: 'Tool "tools_search" is denied by policy.', denied: true });
+        }
+        const rawArgs = (toolCall.args ?? {}) as Record<string, unknown>;
+        const query = String(rawArgs.query ?? '');
+        const limit = typeof rawArgs.limit === 'number' ? rawArgs.limit : 10;
+        const matches = searchTools(toolRouterIndexRef.current, query, limit, loadedToolNamesRef.current);
+        return JSON.stringify({
+          matches,
+          totalMatches: matches.length,
+          hint: matches.length
+            ? 'Gọi tools_load([name]) để nạp công cụ vào phiên nếu bạn muốn dùng ở bước tiếp theo.'
+            : 'Không tìm thấy công cụ nào khớp từ khoá — hãy thử từ khoá khác tổng quát hơn.',
+        });
+      }
+
+      /* tools_load (P1-7 Tool Router): nạp động tool vào phiên */
+      if (toolCall.toolName === 'tools_load') {
+        if (isToolDenied('tools_load', toolPermissions)) {
+          return JSON.stringify({ error: 'Tool "tools_load" is denied by policy.', denied: true });
+        }
+        const rawArgs = (toolCall.args ?? {}) as Record<string, unknown>;
+        const names = Array.isArray(rawArgs.names) ? rawArgs.names.map(String) : [];
+        const loaded: string[] = [];
+        const notFound: string[] = [];
+        for (const name of names) {
+          if (toolRouterIndexRef.current.some((t) => t.name === name)) {
+            loadedToolNamesRef.current.add(name);
+            loaded.push(name);
+          } else {
+            notFound.push(name);
+          }
+        }
+        return JSON.stringify({
+          loaded,
+          notFound,
+          totalActiveLoaded: loadedToolNamesRef.current.size,
+          note: loaded.length
+            ? `Đã nạp ${loaded.length} công cụ vào phiên. Bạn có thể gọi trực tiếp công cụ này trong lượt tiếp theo.`
+            : 'Không tìm thấy tên công cụ nào khớp trong chỉ mục để nạp.',
+        });
+      }
+
+      /* run_code (P1-7 Code Mode): thực thi JavaScript sandbox gọi MCP tools */
+      if (toolCall.toolName === 'run_code') {
+        if (isToolDenied('run_code', toolPermissions)) {
+          return JSON.stringify({ error: 'Tool "run_code" is denied by policy.', denied: true });
+        }
+        const rawArgs = (toolCall.args ?? {}) as Record<string, unknown>;
+        const code = String(rawArgs.code ?? '');
+        const approved = await autoApproveCode({ code });
+        if (!approved) {
+          return JSON.stringify({ approved: false, note: 'Người dùng TỪ CHỐI thực thi đoạn mã này.' });
+        }
+        const bridge = (await import('@/lib/desktop-bridge')).vyenDesktop();
+        if (!bridge?.code?.run) {
+          return JSON.stringify({ error: 'Code Mode đòi hỏi kết nối với Vyen desktop bridge.' });
+        }
+        const res = await bridge.code.run({ code });
+        return JSON.stringify(res);
       }
       if (!CLIENT_TOOL_NAMES.has(toolCall.toolName)) {
         /* Tool lạ PHẢI trả result string thay vì undefined: ai@4 giữ invocation
@@ -2064,6 +2158,7 @@ export default function ChatInterface() {
          autoApproveShell/autoApproveDiff (chúng tự phụ thuộc hai hàm đó). Khai
          báo thừa làm callback đổi danh tính vô cớ. */
       autoApproveShell,
+      autoApproveCode,
       autoApproveDiff,
       readCaptureForPath,
       /* Cổng deny ở đầu funnel đọc toolPermissions trực tiếp: người dùng chặn
@@ -2236,6 +2331,12 @@ export default function ChatInterface() {
       /* Tool của server proxy: chỉ là metadata cho mcp__search — KHÔNG được
          khai báo schema lên model, đây là mục đích của cả chế độ. */
       ...(mcpProxyTools.length > 0 ? { mcpProxyTools } : {}),
+      /* Tool Router (P1-7): các tool đã nạp động qua tools_load */
+      ...(loadedToolNamesRef.current.size > 0
+        ? { loadedTools: Array.from(loadedToolNamesRef.current) }
+        : {}),
+      /* Code Mode (P1-7): bật tool run_code */
+      ...(codeModeEnabled ? { codeModeEnabled: true } : {}),
     },
     experimental_throttle: throttleMs,
     /* Client-executed tools (fs_*): onToolCall chạy trên máy user, trả kết quả
@@ -3127,6 +3228,7 @@ export default function ChatInterface() {
   const currentChatIdRef = useRef(currentChatId);
   useEffect(() => {
     currentChatIdRef.current = currentChatId;
+    loadedToolNamesRef.current.clear();
   }, [currentChatId]);
 
   useEffect(() => {

@@ -36,6 +36,14 @@ import { runEmulatedLoop } from '@/lib/emulated-agent';
 import { executeDelegate } from '@/lib/subagent';
 import { registerSubagentRelay, cancelSubagentRelays } from '@/lib/subagent-relay';
 import { mapMcpTools } from '@/lib/mcp/tool-mapper';
+import {
+  buildToolIndex,
+  selectActiveTools,
+  ROUTER_META_TOOL_DEFS,
+  ROUTER_ACTIVATION_THRESHOLD,
+  ROUTER_DEFAULT_TOP_K,
+} from '@/lib/mcp/tool-router';
+import { RUN_CODE_DEF } from '@/lib/mcp/code-mode';
 import { formatSkillsBlock } from '@/lib/skills';
 import { formatWebContextBlock, type WebContextPayload } from '@/lib/web-context';
 import { filterSupportedModels, markModelUnsupported } from '@/lib/model-negative-cache';
@@ -858,7 +866,7 @@ const BodySchema = z.object({
         serverName: z.string().max(200).default(''),
       }),
     )
-    .max(100)
+    .max(500)
     .optional()
     .catch(undefined),
   /**
@@ -876,9 +884,13 @@ const BodySchema = z.object({
         serverName: z.string().max(200).default(''),
       }),
     )
-    .max(100)
+    .max(500)
     .optional()
     .catch(undefined),
+  /** Danh sách các tool đã nạp qua tools_load (P1-7 Tool Router). */
+  loadedTools: z.array(z.string().min(1).max(200)).max(100).optional().catch(undefined),
+  /** Cờ bật Code Mode (P1-7 Code Mode) — cung cấp run_code thay vì toàn bộ tool. */
+  codeModeEnabled: z.boolean().optional().catch(undefined),
   /* Ghi nhớ dài hạn client gửi kèm (Dexie) — memory_search tool đọc từ đây. */
   memories: z
     .array(
@@ -1089,6 +1101,8 @@ export async function POST(req: Request) {
       staging,
       mcpTools: mcpToolList,
       mcpProxyTools: mcpProxyToolList,
+      loadedTools,
+      codeModeEnabled,
       id: conversationId,
     } = parsed.data;
     const messages = attachToolResultParts(parsed.data.messages);
@@ -2000,6 +2014,36 @@ export async function POST(req: Request) {
                     });
                   }
 
+                  /* Tool Router (P1-7): khi tổng số tool lớn (>30), index toàn bộ và lọc top-30
+                     theo BM25 relevance với câu hỏi của user, kèm tools_search và tools_load. */
+                  const totalCandidateCount = CLIENT_TOOL_NAMES.size + (mcpToolList?.length ?? 0);
+                  const shouldRouteTools = totalCandidateCount > ROUTER_ACTIVATION_THRESHOLD;
+
+                  let routerMetaTools: Record<string, ToolSet[string]> = {};
+                  let isToolRouterActive = false;
+
+                  if (shouldRouteTools && (allowAgentTools || forceEmulatedTools || emulatedToolPath)) {
+                    const fullIndex = buildToolIndex(CLIENT_TOOL_DEFS, mcpToolList ?? []);
+                    const selection = selectActiveTools(fullIndex, userQueryText, {
+                      topK: ROUTER_DEFAULT_TOP_K,
+                      loadedNames: loadedTools,
+                    });
+                    const activeSet = new Set(selection.activeToolNames);
+
+                    // Lọc MCP tools theo router selection
+                    if (mcpToolList) {
+                      mcpToolList = mcpToolList.filter((t) => activeSet.has(`mcp__${t.serverId}__${t.name}`) || activeSet.has(t.name));
+                    }
+                    if (selection.hasMetaTools) {
+                      routerMetaTools = ROUTER_META_TOOL_DEFS as unknown as Record<string, ToolSet[string]>;
+                      isToolRouterActive = true;
+                    }
+                  }
+
+                  const codeModeTool: Record<string, ToolSet[string]> = codeModeEnabled && (allowAgentTools || forceEmulatedTools || emulatedToolPath)
+                    ? { run_code: RUN_CODE_DEF as unknown as ToolSet[string] }
+                    : {};
+
                   const mcpTools = allowAgentTools || forceEmulatedTools || emulatedToolPath
                     ? mapMcpTools(mcpToolList ?? [], undefined, mcpProxyToolList ?? [])
                     : mapMcpTools([], undefined, []);
@@ -2013,6 +2057,8 @@ export async function POST(req: Request) {
                      ? [...CLIENT_TOOL_NAMES].filter((n) => !PLAN_MODE_WRITE_TOOLS.has(n))
                      : CLIENT_TOOL_NAMES),
                    ...mcpTools.keys,
+                   ...(isToolRouterActive ? ['tools_search', 'tools_load'] : []),
+                   ...(codeModeEnabled ? ['run_code'] : []),
                  ]);
                  /* skill_load: tool CLIENT khai báo trong CLIENT_TOOL_DEFS, CHỈ
                     có mặt ở lượt này khi client gửi skillIndex (không có skill
@@ -2238,6 +2284,17 @@ export async function POST(req: Request) {
                           ? '[MCP proxy] Một số server của người dùng đang ở chế độ proxy: tool của ' +
                             'chúng KHÔNG nằm trong danh sách trên. Dùng tool "mcp__search" ' +
                             '(action search → describe → call) để tìm và thực thi.'
+                          : '',
+                        /* Tool Router (P1-7): thông báo khi đang giới hạn top-30 công cụ */
+                        isToolRouterActive
+                          ? '[TOOL ROUTER] Danh sách công cụ đang được xếp hạng và lọc theo ngữ cảnh câu hỏi (top 30). ' +
+                            'Bạn có 2 meta-tools: "tools_search(query)" để tìm kiếm công cụ khác trong hệ thống ' +
+                            'và "tools_load(names)" để nạp công cụ vào phiên làm việc.'
+                          : '',
+                        /* Code Mode (P1-7): chạy JS trong sandbox Node gọi MCP on-demand */
+                        codeModeEnabled
+                          ? '[CODE MODE] Bạn có công cụ "run_code(code)" để viết mã JavaScript thực thi trong môi trường Node.js. ' +
+                            'Sử dụng `await mcp.call(serverId, toolName, args)` để gọi công cụ MCP theo kịch bản và xử lý kết quả trực tiếp.'
                           : '',
                         /* Sub-task planning: khi nhận task phức tạp, phân rã thành
                            subtask để theo dõi tiến độ. Port từ Plandex + Cline. */
@@ -2490,6 +2547,8 @@ export async function POST(req: Request) {
                             ),
                           ),
                           ...nativeDelegateTool,
+                          ...routerMetaTools,
+                          ...codeModeTool,
                           /* Tool MCP: khai báo để model gọi được. Không có
                              execute — thực thi ở renderer qua IPC. */
                           ...mcpTools.defs,

@@ -54,9 +54,19 @@ Vyen đọc tự do nhưng ghi có kỷ luật: mọi thao tác ghi file / chạ
 - **LLM fetch qua Web/bridge**: bản desktop (launcher Edge/Chrome `--app`) gọi gateway trực tiếp từ Web (không gắn header Origin lạ) nên các gateway chặn origin của trình duyệt thường không còn là rào cản (đang dùng cho tạo ảnh; response buffer, trần 10MB/300s, header qua allowlist).
 - **Kho key mã hoá opt-in**: bật "Lưu API key mã hoá" trong Cài đặt → Nhà cung cấp để key nằm trong Credential Manager của hệ điều hành (safeStorage — DPAPI/Keychain/libsecret); IndexedDB chỉ giữ con trỏ `@secure:`, key thật không bao giờ ghi plaintext. Vault lỗi/thiếu → từ chối lưu mã hoá rõ ràng, không lặng lẽ hạ cấp.
 
-### MCP
+### MCP & Tool Router (Port Goose P1-7)
 
-- Trong bản desktop, thêm MCP server (stdio/SSE/streamable-http) tại Settings; tool của server hiện diện trong model dạng `mcp__<server>__<tool>` (trần 100 tool mỗi request). Mỗi lần gọi đi qua hộp thoại phê duyệt **4 cấp**: Cho phép lần này / Luôn cho phép (nhớ cho phiên làm việc) / Từ chối lần này / Luôn từ chối. Hỗ trợ **whitelist `available_tools`** cho từng server (port Goose) để giảm bớt token ngữ cảnh và khoanh vùng công cụ cho phép. Ảnh do MCP trả về cũng được mô tả qua pipeline vision (tối đa 4 ảnh mỗi kết quả).
+- Trong bản desktop, thêm MCP server (stdio/SSE/streamable-http) tại Settings; tool của server hiện diện trong model dạng `mcp__<server>__<tool>`. Mỗi lần gọi đi qua hộp thoại phê duyệt **4 cấp**: Cho phép lần này / Luôn cho phép (nhớ cho phiên làm việc) / Từ chối lần này / Luôn từ chối. Hỗ trợ **whitelist `available_tools`** cho từng server (port Goose) để giảm bớt token ngữ cảnh và khoanh vùng công cụ cho phép. Ảnh do MCP trả về cũng được mô tả qua pipeline vision (tối đa 4 ảnh mỗi kết quả).
+- **Tool Router**: Giải quyết triệt để vấn đề trần cứng 100 tool khi kết nối nhiều server MCP (~200+ tools):
+  - Lập chỉ mục `name + description + parameters` của toàn bộ công cụ (cả native và MCP).
+  - Thuật toán xếp hạng cục bộ **BM25** (tách từ identifier camelCase/snake_case + fold dấu tiếng Việt) tự động chọn **top-30** công cụ liên quan nhất tới câu hỏi của người dùng vào ngữ cảnh.
+  - Cung cấp 2 meta-tools:
+    - `tools_search(query, limit)`: Tìm kiếm công cụ trong danh mục đầy đủ.
+    - `tools_load(names)`: Nạp động các công cụ được chỉ định vào bộ công cụ hoạt động của phiên làm việc.
+- **Code Mode (Thực thi JS gọi MCP on-demand)**:
+  - Cung cấp công cụ `run_code(code)` cho phép LLM viết mã JavaScript thực thi trực tiếp trong môi trường sandbox Node.js của bridge.
+  - Tự động inject `mcp.call(serverId, toolName, args)` để model điều phối kịch bản gọi nhiều tool MCP và xử lý dữ liệu phức tạp mà không cần nhiều lượt LLM round-trip.
+  - Output cắt ngắn tối đa 24.000 ký tự (quy chuẩn Vyen / Goose), tuân thủ kiểm duyệt an toàn, tắt mặc định (bật trong Cài đặt → Công cụ).
 
 ### Phân quyền công cụ & 4 chế độ chuẩn (Port Goose P1-6)
 

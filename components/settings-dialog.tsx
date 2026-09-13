@@ -1163,6 +1163,29 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                 </div>
               )}
 
+              {/* Code Mode (P1-7) */}
+              {(settings.agentTools ?? true) && (
+                <div className="rounded-xl border border-zinc-200/80 bg-zinc-50/50 p-3.5 dark:border-zinc-800 dark:bg-zinc-900/30">
+                  <label htmlFor="code-mode-toggle" className="flex items-start justify-between gap-3 cursor-pointer">
+                    <span className="min-w-0">
+                      <span className="block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                        Code Mode (Thực thi JS gọi MCP on-demand)
+                      </span>
+                      <span className="mt-0.5 block text-xs text-zinc-500">
+                        Cung cấp công cụ <code className="rounded bg-zinc-200/80 px-1 py-0.5 text-[11px] dark:bg-zinc-800 font-mono">run_code</code> cho phép model viết script JavaScript thực thi trong Node bridge để gọi các công cụ MCP và xử lý dữ liệu phức tạp mà không cần nạp từng tool riêng lẻ vào ngữ cảnh.
+                      </span>
+                    </span>
+                    <input
+                      id="code-mode-toggle"
+                      type="checkbox"
+                      className="mt-0.5 h-4 w-4 rounded border-zinc-300 text-teal-600 focus:ring-teal-500 dark:border-zinc-700"
+                      checked={settings.codeModeEnabled ?? false}
+                      onChange={(e) => updateSettings({ codeModeEnabled: e.target.checked })}
+                    />
+                  </label>
+                </div>
+              )}
+
               <McpSettingsPanel />
 
               <div className="space-y-3">

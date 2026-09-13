@@ -193,6 +193,11 @@ export interface Settings {
    * (lib/model-routing.ts).
    */
   modelRouting: ModelRoutingConfig;
+  /**
+   * Code Mode (port Goose P1-7): tool `run_code` cho phép model viết JS chạy trong
+   * Node sandbox gọi MCP tools on-demand. Tắt mặc định — bật trong Cài đặt → Công cụ.
+   */
+  codeModeEnabled: boolean;
   apiKey?: string;
   accessCode?: string;
   /** Mixture-of-models chains theo Category (Oh My Hermes port) */
@@ -255,6 +260,7 @@ const DEFAULT_SETTINGS: Settings = {
   recentModels: [],
   disabledSkills: [],
   modelRouting: { ...DEFAULT_MODEL_ROUTING },
+  codeModeEnabled: false,
   apiKey: '',
   accessCode: '',
   modelChains: DEFAULT_CHAINS,
@@ -337,6 +343,7 @@ export const useAppStore = create<AppState>()(
           recentModels: s.settings.recentModels,
           disabledSkills: s.settings.disabledSkills,
           modelRouting: s.settings.modelRouting,
+          codeModeEnabled: s.settings.codeModeEnabled,
           modelChains: s.settings.modelChains,
           toolcallRules: s.settings.toolcallRules,
         },
@@ -360,6 +367,10 @@ export const useAppStore = create<AppState>()(
           settings: {
             ...current.settings,
             ...(p.settings ?? {}),
+            codeModeEnabled:
+              typeof p.settings?.codeModeEnabled === 'boolean'
+                ? p.settings.codeModeEnabled
+                : current.settings.codeModeEnabled,
             model: validModel,
             /* Model vision không qua normalizeModelId: nó là id của gateway do
                người dùng khai, không thuộc catalog built-in. Chỉ chặn giá trị

@@ -111,6 +111,8 @@ const READ_ONLY_TOOLS = new Set([
   'git_status',
   'git_add',
   'bg_status',
+  'tools_search',
+  'tools_load',
 ]);
 
 /**
@@ -131,6 +133,7 @@ const WRITE_TOOLS = new Set([
   'plan_update',
   'bg_run',
   'bg_stop',
+  'run_code',
 ]);
 
 /* ------------------------------------------------------------------ */

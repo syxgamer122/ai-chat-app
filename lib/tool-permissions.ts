@@ -86,7 +86,8 @@ export const TOOL_PERMISSION_GROUPS: readonly ToolGroupMeta[] = [
 
 /** Map tool name sang 8 nhóm phân quyền chuẩn P1-6. */
 export function getToolGroup(toolName: string): ToolPermissionGroup {
-  if (toolName.startsWith('mcp__') || toolName === 'mcp') return 'mcp';
+  if (toolName.startsWith('mcp__') || toolName === 'mcp' || toolName === 'tools_search' || toolName === 'tools_load') return 'mcp';
+  if (toolName === 'run_code') return 'shell';
   const category = TOOL_CATEGORY_MAP[toolName];
   if (category === 'fs_read' || category === 'fs_write') return 'fs';
   if (category === 'shell') return 'shell';
@@ -162,8 +163,12 @@ export function getEffectiveToolPermission(
     return permissions[category]!;
   }
 
-  if (toolName.startsWith('mcp__') && permissions['mcp'] && permissions['mcp'] !== 'default') {
+  if ((toolName.startsWith('mcp__') || toolName === 'tools_search' || toolName === 'tools_load') && permissions['mcp'] && permissions['mcp'] !== 'default') {
     return permissions['mcp']!;
+  }
+
+  if (toolName === 'run_code' && permissions['shell'] && permissions['shell'] !== 'default') {
+    return permissions['shell']!;
   }
 
   return 'default';

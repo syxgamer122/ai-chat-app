@@ -11,6 +11,7 @@
  */
 
 import type { McpToolInfo } from '@/lib/mcp/tool-mapper';
+import type { CodeModeResult } from '@/lib/mcp/code-mode';
 
 /* ------------------------------------------------------------------ */
 /* Kiểu dữ liệu — mirror payload của lib/ipc.cjs                  */
@@ -319,6 +320,10 @@ export interface VyenBridge {
     writeGlobal(category: string, content: string): Promise<{ ok: true }>;
     readGlobal(category: string): Promise<{ content: string }>;
   };
+  /** Code Mode (P1-7): thực thi JS sandbox trong Node bridge với mcp.call. */
+  code?: {
+    run(opts: { code: string; timeoutMs?: number }): Promise<CodeModeResult>;
+  };
   /** Kho mã hoá safeStorage cho API key provider — optional như `llm`. */
   secure?: VyenSecureStoreApi;
   /**
@@ -523,6 +528,10 @@ function createWebBridge(): VyenBridge {
         callWebBridge<{ ok: true }>('vyen:home-memory-write', { category, content }),
       readGlobal: (category: string) =>
         callWebBridge<{ content: string }>('vyen:home-memory-read', { category }),
+    },
+    code: {
+      run: (opts: { code: string; timeoutMs?: number }) =>
+        callWebBridge<CodeModeResult>('vyen:code-run', opts),
     },
     secure: {
       available: () => callWebBridge<{ available: boolean }>('vyen:secure-available'),
