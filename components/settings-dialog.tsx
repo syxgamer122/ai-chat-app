@@ -11,6 +11,7 @@ import { VyenMark } from '@/components/vyen-logo';
 import { TOOL_CATEGORY_ICON_COMPONENTS } from '@/components/tool-category-icons';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { savePrompt, deletePrompt } from '@/lib/prompt-library';
+import { DiskSkillsSection } from '@/components/settings-skills';
 import { proposeCandidate, reviewCandidate, deleteReviewedRecord } from '@/lib/memory/store';
 import type { MemoryKind, MemoryRecord } from '@/lib/memory/types';
 import {
@@ -443,7 +444,7 @@ function VisionModelSection() {
   );
 }
 
-type SettingsTab = 'chung' | 'provider' | 'routing' | 'stats' | 'prompts' | 'memory' | 'data';
+type SettingsTab = 'chung' | 'provider' | 'routing' | 'stats' | 'prompts' | 'skills' | 'memory' | 'data';
 
 const SETTINGS_TABS: Array<{ id: SettingsTab; label: string }> = [
   { id: 'chung', label: 'Chung' },
@@ -451,6 +452,7 @@ const SETTINGS_TABS: Array<{ id: SettingsTab; label: string }> = [
   { id: 'routing', label: 'Routing' },
   { id: 'stats', label: 'Thống kê' },
   { id: 'prompts', label: 'Prompt' },
+  { id: 'skills', label: 'Skills' },
   { id: 'memory', label: 'Ghi nhớ' },
   { id: 'data', label: 'Dữ liệu' },
 ];
@@ -1395,6 +1397,12 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
 {visited.has('prompts') && (
           <div className={show('prompts') ? 'contents' : 'hidden'}>
             <PromptLibrarySection />
+          </div>
+          )}
+
+{visited.has('skills') && (
+          <div className={show('skills') ? 'contents' : 'hidden'}>
+            <DiskSkillsSection />
           </div>
           )}
 

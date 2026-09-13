@@ -178,6 +178,8 @@ export interface Settings {
   modelFavorites: ModelFavorite[];
   /** Model dùng gần đây: mới nhất đứng đầu, cap 6, scoped theo provider. */
   recentModels: RecentModel[];
+  /** Disk skills (P0-3) bị tắt theo name — lọc khỏi chỉ mục gửi lên model. */
+  disabledSkills: string[];
   apiKey?: string;
   accessCode?: string;
   /** Mixture-of-models chains theo Category (Oh My Hermes port) */
@@ -238,6 +240,7 @@ const DEFAULT_SETTINGS: Settings = {
   toolPermissions: { fs_read: 'default', fs_write: 'default', shell: 'default', git: 'default', web: 'default', memory: 'default', plan: 'default', delegate: 'default' },
   modelFavorites: [],
   recentModels: [],
+  disabledSkills: [],
   apiKey: '',
   accessCode: '',
   modelChains: DEFAULT_CHAINS,
@@ -316,6 +319,7 @@ export const useAppStore = create<AppState>()(
              thiếu khoá là F5 mất toàn bộ shortcut trong picker. */
           modelFavorites: s.settings.modelFavorites,
           recentModels: s.settings.recentModels,
+          disabledSkills: s.settings.disabledSkills,
           modelChains: s.settings.modelChains,
           toolcallRules: s.settings.toolcallRules,
         },
@@ -376,6 +380,9 @@ export const useAppStore = create<AppState>()(
                ở rehydrate, throw là trắng màn hình. */
             modelFavorites: sanitizeModelFavorites(p.settings?.modelFavorites),
             recentModels: sanitizeRecentModels(p.settings?.recentModels),
+            disabledSkills: Array.isArray(p.settings?.disabledSkills)
+              ? p.settings.disabledSkills.filter((n: unknown): n is string => typeof n === 'string' && n.length > 0 && n.length <= 60)
+              : [],
             apiKey: '',
             accessCode: '',
           },

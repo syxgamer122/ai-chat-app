@@ -100,6 +100,7 @@ const READ_ONLY_TOOLS = new Set([
   'fs_read',
   'fs_list',
   'fs_search',
+  'skill_load',
   'web_search',
   'web_fetch',
   'memory_search',

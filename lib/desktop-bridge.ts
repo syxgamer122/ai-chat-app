@@ -299,6 +299,14 @@ export interface VyenBridge {
   llm?: {
     fetch(opts: VyenLlmFetchOptions): Promise<VyenLlmFetchResult>;
   };
+  /**
+   * Skills toàn cục ~/.vyen/skills (port Goose). Optional như llm — bridge
+   * cũ không có lệnh home-skills-*.
+   */
+  skills?: {
+    listGlobal(): Promise<{ skills: Array<{ name: string; path: string }> }>;
+    readGlobal(name: string): Promise<{ content: string; files: string[] }>;
+  };
   /** Kho mã hoá safeStorage cho API key provider — optional như `llm`. */
   secure?: VyenSecureStoreApi;
   /**
@@ -491,6 +499,12 @@ function createWebBridge(): VyenBridge {
     },
     llm: {
       fetch: (opts) => callWebBridge<VyenLlmFetchResult>('vyen:llm-fetch', opts),
+    },
+    skills: {
+      listGlobal: () =>
+        callWebBridge<{ skills: Array<{ name: string; path: string }> }>('vyen:home-skills-list'),
+      readGlobal: (name: string) =>
+        callWebBridge<{ content: string; files: string[] }>('vyen:home-skills-read', { name }),
     },
     secure: {
       available: () => callWebBridge<{ available: boolean }>('vyen:secure-available'),

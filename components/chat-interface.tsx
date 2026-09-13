@@ -113,6 +113,16 @@ import {
 } from '@/lib/recipes';
 import type { RetryCheckOutcome } from '@/lib/recipes/retry';
 import {
+  scanDiskSkills,
+  buildHintsBlock,
+} from '@/lib/skills/disk';
+import {
+  buildDiskSkillAdapters,
+  readHintsFromWorkspace,
+  loadSkillContent,
+} from '@/lib/skills/client-adapters';
+import { useDiskSkillsStore } from '@/lib/skills/disk-store';
+import {
   desktopFsList,
   desktopFsRead,
   desktopFsReadImage,
@@ -1206,6 +1216,33 @@ export default function ChatInterface() {
           (toolCall.args ?? {}) as Record<string, unknown>,
         );
       }
+      /* skill_load (P0-3): khai báo ĐỘNG ở route nên không thuộc
+         CLIENT_TOOL_NAMES. Đọc SKILL.md ở máy user — skill workspace cần
+         workspace, skill toàn cục (~/.vyen) thì không. Xử lý trước cổng
+         "tool lạ"/workspace để không chặn oan; vẫn tôn trọng nhóm quyền
+         (skill_load xếp nhóm fs_read). */
+      if (toolCall.toolName === 'skill_load') {
+        if (isToolDenied('skill_load', toolPermissions)) {
+          return JSON.stringify({
+            error: 'Tool "skill_load" đang bị đặt quyền Chặn trong panel Công cụ & quyền.',
+          });
+        }
+        const wantName = String(((toolCall.args ?? {}) as Record<string, unknown>).name ?? '').trim();
+        const entry = useDiskSkillsStore.getState().entries.find((e) => e.name === wantName);
+        if (!entry) {
+          const available = useDiskSkillsStore.getState().entries.map((e) => e.name).join(', ');
+          return JSON.stringify({
+            error: `Không có skill "${wantName}" trong chỉ mục. Có: ${available || '(chưa quét được skill nào)'}`,
+          });
+        }
+        try {
+          return JSON.stringify(await loadSkillContent(entry));
+        } catch (err) {
+          return JSON.stringify({
+            error: `Đọc skill "${wantName}" thất bại: ${err instanceof Error ? err.message : String(err)}`,
+          });
+        }
+      }
       if (!CLIENT_TOOL_NAMES.has(toolCall.toolName)) {
         /* Tool lạ PHẢI trả result string thay vì undefined: ai@4 giữ invocation
            kẹt ở state `call` mãi mãi khi onToolCall không trả gì → stream treo
@@ -1950,6 +1987,30 @@ export default function ChatInterface() {
   const runRecipeChecksRef = useRef<
     ((finalText: string) => Promise<boolean>) | null
   >(null);
+
+  /* Disk skills + hints (P0-3): entries quét theo workspace nằm ở
+     useDiskSkillsStore (đọc qua getState trong callback — không stale
+     closure); hintsChip/showHints là state UI cho chip "hints loaded". */
+  const [hintsChip, setHintsChip] = useState<{ file: string; content: string } | null>(null);
+  const [showHints, setShowHints] = useState(false);
+  useEffect(() => {
+    if (!workspace?.connected || !workspace.name) {
+      useDiskSkillsStore.getState().setEntries([]);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const scan = await scanDiskSkills(buildDiskSkillAdapters());
+        if (!cancelled) useDiskSkillsStore.getState().setEntries(scan.entries);
+      } catch {
+        /* quét lỗi — giữ danh sách cũ */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [workspace?.connected, workspace?.name]);
 
   const {
     messages, setMessages,
@@ -4435,6 +4496,29 @@ export default function ChatInterface() {
         }
       }
 
+      /* Disk skills + .vyenhints (P0-3): index đọc từ scan đã chạy trong
+         effect (theo workspace); hints đọc fresh mỗi lượt vì file nhỏ.
+         Index lọc theo disabledSkills của người dùng. */
+      if (userText) {
+        try {
+          const disabled = useAppStore.getState().settings.disabledSkills ?? [];
+          const index = useDiskSkillsStore
+            .getState()
+            .entries.filter((e) => !disabled.includes(e.name))
+            .map(({ name, description, source, dir }) => ({ name, description, source, dir }));
+          if (index.length > 0) options.body = { ...options.body, skillIndex: index };
+          if (isVyenDesktop() ? (await desktopGetWorkspaceInfo()).connected : getWorkspaceInfo().connected) {
+            const hints = await readHintsFromWorkspace();
+            setHintsChip(hints);
+            if (hints) options.body = { ...options.body, hints: buildHintsBlock(hints) };
+          } else {
+            setHintsChip(null);
+          }
+        } catch {
+          /* quét skills/hints lỗi — gửi không kèm, chat vẫn chạy */
+        }
+      }
+
       /* Per-call body cho 2 cờ tool: gửi TƯƠI mỗi lượt (hook body bị chốt ở
          mount — toggle trong settings sẽ không có tác dụng nếu đi đường đó). */
       if (!modelOverride) {
@@ -5314,6 +5398,32 @@ export default function ChatInterface() {
           system prompt giờ có UI thật. */}
       {plan && !planHidden && (
         <PlanPanel plan={plan} onHide={() => setPlanHidden(true)} />
+      )}
+
+      {/* P0-3: chip "hints loaded" — bấm để xem nguyên văn ngữ cảnh dự án
+          (.vyenhints/AGENTS.md/CLAUDE.md) đã nạp vào system prompt. */}
+      {hintsChip && (
+        <div className="mx-auto mb-2 w-full max-w-thread px-4">
+          <div className="rounded-none border border-[#495059] bg-[#1b2430] font-mono text-[11.5px] text-[#9fa4ab]">
+            <button
+              type="button"
+              onClick={() => setShowHints((v) => !v)}
+              aria-expanded={showHints}
+              className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left transition-colors hover:bg-[#161d27] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[#6a9fcc]"
+            >
+              <span className="text-[#6a9fcc]">hints loaded</span>
+              <span className="truncate">{hintsChip.file}</span>
+              <span className="ml-auto flex-none text-[10.5px] text-[#5c6470]">
+                {showHints ? 'thu gọn' : 'xem nội dung'}
+              </span>
+            </button>
+            {showHints && (
+              <pre className="max-h-64 overflow-auto whitespace-pre-wrap border-t border-[#495059] bg-[#12181f] px-3 py-2 text-[11px] leading-relaxed">
+                {hintsChip.content}
+              </pre>
+            )}
+          </div>
+        </div>
       )}
 
       {/* OMH P1-D: 🧠 recalled N memories banner */}

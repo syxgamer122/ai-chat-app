@@ -57,6 +57,9 @@ import {
   buildSubRecipeSystemBlock,
 } from '@/lib/recipes/subrecipe';
 import {
+  buildDiskSkillIndexBlock,
+} from '@/lib/skills/disk';
+import {
   buildSubRecipeServerTools,
   toResolvedSubRecipes,
 } from '@/lib/recipes/subrecipe-exec';
@@ -826,6 +829,22 @@ const BodySchema = z.object({
    * `.catch(undefined)`: danh sách lỗi (server MCP lạ, bản renderer cũ) không
    * được phép làm hỏng cả cuộc trò chuyện — MCP là phần cộng thêm, hỏng thì tắt.
    */
+  /* Disk Skills + hints (port Goose P0-3): client quét `.vyen/skills/<name>/SKILL.md`
+     + ~/.vyen/skills (bridge) và .vyenhints/AGENTS.md/... rồi gửi CHỈ MỤC
+     metadata — progressive disclosure: nội dung chỉ vào context khi model
+     gọi skill_load (client tool, đọc file ở máy user). */
+  skillIndex: z
+    .array(
+      z.object({
+        name: z.string().regex(/^[a-zA-Z0-9][\w.-]*$/).max(60),
+        description: z.string().min(1).max(400),
+        source: z.enum(['workspace', 'global']),
+        dir: z.string().max(200),
+      }),
+    )
+    .max(30)
+    .optional(),
+  hints: z.string().max(8_000).optional(),
   mcpTools: z
     .array(
       z.object({
@@ -1058,6 +1077,8 @@ export async function POST(req: Request) {
       agentTools,
       memories,
       skills,
+      skillIndex,
+      hints,
       workspace: workspaceState,
       forceEmulatedTools,
       agentMode,
@@ -1989,6 +2010,23 @@ export async function POST(req: Request) {
                      : CLIENT_TOOL_NAMES),
                    ...mcpTools.keys,
                  ]);
+                 /* skill_load (P0-3): chỉ khai báo khi có disk skills — thực thi
+                    ở renderer (file nằm trong workspace / ~/.vyen của user). */
+                 const skillLoadDef: Record<string, ToolSet[string]> = skillIndex?.length
+                   ? {
+                       skill_load: tool({
+                         description:
+                           'Nạp NỘI DUNG đầy đủ của một kỹ năng dạng SKILL.md (xem bảng [SKILLS] ở trên). ' +
+                           'Gọi TRƯỚC khi làm việc thuộc phạm vi kỹ năng đó — trả về body SKILL.md + ' +
+                           'danh sách file phụ trong thư mục skill (tự fs_read khi cần). Chỉ gọi MỘT lần ' +
+                           'cho mỗi skill trong phiên.',
+                         parameters: z.object({
+                           name: z.string().max(60).describe('Tên skill trong bảng [SKILLS]'),
+                         }),
+                       }),
+                     }
+                   : {};
+                 if (skillIndex?.length) clientToolNames.add('skill_load');
                  /* Tool policy của recipe: deny loại khỏi set (native forward +
                     emulated đều mất), allow (khác rỗng) giữ MỌI tool nằm trong
                     allow-list — áp trên BẢN SAO để không đụng mcpTools.keys gốc. */
@@ -2054,6 +2092,11 @@ export async function POST(req: Request) {
                     modelCalib ?? '',
                     '[QUY TẮC AN TOÀN & RANH GIỚI] Khi gặp lỗi bị quy tắc (rule) hoặc sandbox từ chối, đây là ranh giới hợp lệ — báo cáo lại trung thực, tuyệt đối không tìm cách lách qua.',
                     system,
+                    /* Hints dự án (block .vyenhints/AGENTS.md/... — client dựng
+                       sẵn bằng buildHintsBlock) + chỉ mục disk skills (P0-3):
+                       đứng trước recipe/lessons theo merge order tăng dần. */
+                    hints ?? '',
+                    skillIndex?.length ? buildDiskSkillIndexBlock(skillIndex) : '',
                     /* Recipe instructions (port Goose): workflow đang chạy — đứng
                        sau persona để giữ lực chỉ thị, trước các khối dữ liệu. */
                     recipeCtx?.instructions
@@ -2287,7 +2330,7 @@ export async function POST(req: Request) {
                     /* Schema của tool MCP đi vào protocol text: đường emulated
                        không có kênh tool-call native nên mô tả + chữ ký args
                        phải nằm ngay trong prompt. */
-                    extraToolDocs: mcpTools.defs,
+                    extraToolDocs: { ...mcpTools.defs, ...skillLoadDef },
                     onClientToolCall: (call) => {
                       /* Forward part 'tool_call' — useChat populates
                          toolInvocations + onToolCall chạy trên máy user. */
@@ -2452,6 +2495,7 @@ export async function POST(req: Request) {
                             ),
                           ),
                           ...nativeDelegateTool,
+                          ...skillLoadDef,
                           /* Tool MCP: khai báo để model gọi được. Không có
                              execute — thực thi ở renderer qua IPC. */
                           ...mcpTools.defs,
