@@ -12,6 +12,7 @@
 
 import type { McpToolInfo } from '@/lib/mcp/tool-mapper';
 import type { CodeModeResult } from '@/lib/mcp/code-mode';
+import type { ScheduleRecord } from '@/lib/db';
 
 /* ------------------------------------------------------------------ */
 /* Kiểu dữ liệu — mirror payload của lib/ipc.cjs                  */
@@ -324,6 +325,15 @@ export interface VyenBridge {
   code?: {
     run(opts: { code: string; timeoutMs?: number }): Promise<CodeModeResult>;
   };
+  /** Quản lý lịch chạy recipe tự động theo cron (Goose P2-9). */
+  scheduler?: {
+    list(): Promise<ScheduleRecord[]>;
+    save(schedule: ScheduleRecord): Promise<{ ok: boolean; error?: string }>;
+    delete(id: string): Promise<{ ok: boolean }>;
+    toggle(id: string, enabled?: boolean): Promise<{ ok: boolean; schedule?: ScheduleRecord }>;
+    runNow(id: string): Promise<{ ok: boolean; sessionId?: string; error?: string }>;
+    status(): Promise<{ running: boolean; workspaceRoot: string; lastTickAt: number }>;
+  };
   /** Kho mã hoá safeStorage cho API key provider — optional như `llm`. */
   secure?: VyenSecureStoreApi;
   /**
@@ -561,6 +571,17 @@ function createWebBridge(): VyenBridge {
     doctor: () => callWebBridge<VyenDoctorReport>('vyen:doctor'),
     teamworkArtifacts: () => callWebBridge<VyenTeamworkArtifacts>('vyen:teamwork-artifacts'),
     securityAudit: () => callWebBridge<VyenSecurityAuditReport>('vyen:security-audit'),
+    scheduler: {
+      list: () => callWebBridge<ScheduleRecord[]>('vyen:scheduler-list'),
+      save: (schedule: ScheduleRecord) => callWebBridge<{ ok: boolean; error?: string }>('vyen:scheduler-save', schedule),
+      delete: (id: string) => callWebBridge<{ ok: boolean }>('vyen:scheduler-delete', { id }),
+      toggle: (id: string, enabled?: boolean) =>
+        callWebBridge<{ ok: boolean; schedule?: ScheduleRecord }>('vyen:scheduler-toggle', { id, enabled }),
+      runNow: (id: string) =>
+        callWebBridge<{ ok: boolean; sessionId?: string; error?: string }>('vyen:scheduler-run-now', { id }),
+      status: () =>
+        callWebBridge<{ running: boolean; workspaceRoot: string; lastTickAt: number }>('vyen:scheduler-status'),
+    },
   };
 }
 

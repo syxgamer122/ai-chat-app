@@ -239,6 +239,68 @@ export function initServerBridge(): BridgeDispatcher {
     });
   });
 
+  // 7. Scheduler runner (Goose P2-9): quản lý và thực thi lịch chạy recipe
+  handlers.set('vyen:scheduler-list', async () => {
+    const currentWs = (await handlers.get('vyen:workspace-get')?.(null)) as { path: string | null } | undefined;
+    const wsRoot = currentWs?.path || defaultWorkspace;
+    const { loadSchedulesFromFile } = await import('@/lib/scheduler/runner');
+    return loadSchedulesFromFile(wsRoot);
+  });
+
+  handlers.set('vyen:scheduler-save', async (_event, payload) => {
+    const currentWs = (await handlers.get('vyen:workspace-get')?.(null)) as { path: string | null } | undefined;
+    const wsRoot = currentWs?.path || defaultWorkspace;
+    const { upsertSchedule } = await import('@/lib/scheduler/runner');
+    if (payload && typeof payload === 'object') {
+      upsertSchedule(wsRoot, payload as any);
+      return { ok: true };
+    }
+    return { ok: false, error: 'Dữ liệu schedule không hợp lệ.' };
+  });
+
+  handlers.set('vyen:scheduler-delete', async (_event, payload) => {
+    const currentWs = (await handlers.get('vyen:workspace-get')?.(null)) as { path: string | null } | undefined;
+    const wsRoot = currentWs?.path || defaultWorkspace;
+    const { removeSchedule } = await import('@/lib/scheduler/runner');
+    const id = payload && typeof payload === 'object' && 'id' in payload ? String((payload as any).id) : '';
+    const ok = removeSchedule(wsRoot, id);
+    return { ok };
+  });
+
+  handlers.set('vyen:scheduler-toggle', async (_event, payload) => {
+    const currentWs = (await handlers.get('vyen:workspace-get')?.(null)) as { path: string | null } | undefined;
+    const wsRoot = currentWs?.path || defaultWorkspace;
+    const { toggleSchedule } = await import('@/lib/scheduler/runner');
+    const id = payload && typeof payload === 'object' && 'id' in payload ? String((payload as any).id) : '';
+    const enabled = payload && typeof payload === 'object' && 'enabled' in payload ? Boolean((payload as any).enabled) : undefined;
+    const updated = toggleSchedule(wsRoot, id, enabled);
+    return { ok: !!updated, schedule: updated };
+  });
+
+  handlers.set('vyen:scheduler-run-now', async (_event, payload) => {
+    const currentWs = (await handlers.get('vyen:workspace-get')?.(null)) as { path: string | null } | undefined;
+    const wsRoot = currentWs?.path || defaultWorkspace;
+    const { loadSchedulesFromFile, executeScheduledRun } = await import('@/lib/scheduler/runner');
+    const id = payload && typeof payload === 'object' && 'id' in payload ? String((payload as any).id) : '';
+    const list = loadSchedulesFromFile(wsRoot);
+    const schedule = list.find((s) => s.id === id);
+    if (!schedule) {
+      return { ok: false, error: 'Không tìm thấy lịch trình.' };
+    }
+    const result = await executeScheduledRun(wsRoot, schedule);
+    return result;
+  });
+
+  handlers.set('vyen:scheduler-status', async () => {
+    const { getSchedulerDaemonStatus } = await import('@/lib/scheduler/runner');
+    return getSchedulerDaemonStatus();
+  });
+
+  // Tự động khởi chạy scheduler daemon ngầm nếu chưa chạy
+  void import('@/lib/scheduler/runner').then(({ startSchedulerDaemon }) => {
+    startSchedulerDaemon(defaultWorkspace, 30_000);
+  });
+
   dispatcherInstance = {
     handlers,
     initialized: true,

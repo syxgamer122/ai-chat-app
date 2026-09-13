@@ -292,4 +292,14 @@ describe('resolveDispatch: thứ tự ưu tiên điều phối của main()', ()
     expect(res.branch).toBe('command');
     expect(res.command).toBe(COMMANDS.status);
   });
+
+  it('lệnh schedule và alias cron resolve được command schedule', () => {
+    const res1 = resolveDispatch(['schedule', 'list']);
+    expect(res1.branch).toBe('command');
+    expect(res1.command?.name).toBe('schedule');
+
+    const res2 = resolveDispatch(['cron', 'list']);
+    expect(res2.branch).toBe('command');
+    expect(res2.command?.name).toBe('schedule');
+  });
 });

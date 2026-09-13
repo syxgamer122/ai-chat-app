@@ -337,6 +337,92 @@ const runRecipe = async (argv: string[]): Promise<void> => {
   process.exitCode = 2;
 };
 
+export const runSchedule = async (argv: string[]): Promise<void> => {
+  const {
+    loadSchedulesFromFile,
+    executeScheduledRun,
+    startSchedulerDaemon,
+  } = await import('../scheduler/runner');
+  const { describeCron, getNextCronRun } = await import('../scheduler/cron');
+
+  const sub = argv[0];
+
+  if (sub === 'list' || sub === 'ls' || !sub) {
+    const list = loadSchedulesFromFile(process.cwd());
+    if (list.length === 0) {
+      console.log('Chưa có lịch trình nào được lưu. Tạo lịch trình trong giao diện hoặc qua .vyen/schedules.json.');
+      return;
+    }
+    console.log(`\nDanh sách lịch trình (${list.length}):\n`);
+    for (const s of list) {
+      const statusIcon =
+        s.lastStatus === 'success'
+          ? '✅'
+          : s.lastStatus === 'failure'
+            ? '❌'
+            : s.lastStatus === 'running'
+              ? '⏳'
+              : '⚪';
+      const enableText = s.enabled ? 'Đang bật' : 'Đang tạm dừng';
+      const nextRun = getNextCronRun(s.cron);
+      const nextRunStr = nextRun ? nextRun.toLocaleString('vi-VN') : 'Không có';
+      console.log(`- [${s.id}] ${s.recipeName || s.recipeId} (${enableText})`);
+      console.log(`  Cron: ${s.cron} (${describeCron(s.cron)})`);
+      console.log(
+        `  Lần chạy cuối: ${s.lastRunAt ? new Date(s.lastRunAt).toLocaleString('vi-VN') : 'Chưa chạy'} ${statusIcon}`,
+      );
+      console.log(`  Lần chạy kế: ${nextRunStr}`);
+      console.log(`  Số session: ${s.sessions?.length || 0}\n`);
+    }
+    return;
+  }
+
+  if (sub === 'run') {
+    const id = argv[1];
+    if (!id) {
+      console.error('[vyen schedule] Cần ID lịch trình cần chạy: vyen schedule run <id>');
+      process.exitCode = 1;
+      return;
+    }
+    const list = loadSchedulesFromFile(process.cwd());
+    const item = list.find((s) => s.id === id);
+    if (!item) {
+      console.error(`[vyen schedule] Không tìm thấy lịch trình với ID: "${id}".`);
+      process.exitCode = 1;
+      return;
+    }
+    console.log(`[vyen schedule] Bắt đầu thực thi: "${item.recipeName || item.recipeId}"...`);
+    const res = await executeScheduledRun(process.cwd(), item);
+    if (res.ok) {
+      console.log(`[vyen schedule] ✅ Thành công! Đã tạo phiên: ${res.sessionId}`);
+    } else {
+      console.error(`[vyen schedule] ❌ Thất bại: ${res.error}`);
+      process.exitCode = 1;
+    }
+    return;
+  }
+
+  if (sub === 'daemon') {
+    console.log('[vyen schedule] Khởi động scheduler daemon (tick mỗi 30s)... Nhấn Ctrl+C để dừng.');
+    startSchedulerDaemon(process.cwd(), 30_000);
+    await new Promise(() => {});
+    return;
+  }
+
+  if (sub === '--help' || sub === '-h' || sub === 'help') {
+    console.log([
+      'Cách dùng: vyen schedule [lệnh]',
+      '  vyen schedule list         — Liệt kê các lịch trình',
+      '  vyen schedule run <id>     — Chạy ngay một lịch trình',
+      '  vyen schedule daemon       — Chạy tiến trình scheduler daemon (30s tick)',
+    ].join('\n'));
+    return;
+  }
+
+  console.error(`[vyen schedule] Lệnh không hợp lệ: "${sub}". Dùng --help để xem hướng dẫn.`);
+  process.exitCode = 1;
+};
+
 const runApp = async (argv: string[]): Promise<void> => {
   const launcherScript = path.join(APP_ROOT, 'scripts', 'launch-desktop.cjs');
   const child = spawn(process.execPath, [launcherScript, ...argv], {
@@ -474,6 +560,13 @@ export const COMMANDS: Readonly<Record<string, CommandEntry>> = {
     description: 'Workflow đóng gói tái sử dụng: list/run headless theo schema (Goose)',
     aliases: [],
     run: runRecipe,
+  },
+  schedule: {
+    name: 'schedule',
+    group: 'agent',
+    description: 'Quản lý lịch chạy recipe tự động theo cron (Goose P2-9)',
+    aliases: ['cron', 'scheduler'],
+    run: runSchedule,
   },
   audit: {
     name: 'audit',

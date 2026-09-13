@@ -86,6 +86,17 @@ Vyen đọc tự do nhưng ghi có kỷ luật: mọi thao tác ghi file / chạ
   - **CLI**: Tiếp tục phiên gần nhất qua `npm run cli -- session -r` hoặc theo tên/ID qua `npm run cli -- session -r --name <tên>`. Tự động lưu tiến trình sau mỗi lượt hội thoại vào `.vyen/sessions/` (hoặc `~/.vyen/sessions/`).
 - **Tìm kiếm toàn cục `chat_recall(query, limit)`**: Công cụ client cho phép mô hình AI tra cứu toàn bộ lịch sử các phiên thảo luận trong Dexie. Sử dụng bộ phân tích từ khóa tiếng Việt không dấu/có dấu (foldText) để trích xuất ngữ cảnh liên quan và trả về đoạn snippet phù hợp nhất (ví dụ: "tìm hội thoại tuần trước về React hooks").
 
+### Scheduler: Chạy Recipe Theo Lịch Cron (Port Goose P2-9)
+
+- **Biểu thức Cron tiêu chuẩn**: Hỗ trợ 5 trường cron (`phút giờ ngày tháng thứ`), bước nhảy `*/n`, khoảng, danh sách và alias (`@hourly`, `@daily`, `@weekly`). Tự động giải nghĩa bằng câu tiếng Việt và hiển thị mốc chạy tiếp theo.
+- **Thực thi ngầm qua Node bridge & CLI**: Bộ timer tick mỗi 30 giây chạy headless, tự động tạo chat session mới chứa kết quả thực thi và liên kết danh sách `sessions[]` vào lịch trình.
+- **Bảng Dexie `schedules` (v16)**: Lưu trữ `id, recipeId, cron, enabled, lastRunAt, lastStatus, sessions[]`, hỗ trợ đồng bộ hai chiều giữa Web UI và bridge daemon (`.vyen/schedules.json`).
+- **Giao diện Scheduler trực quan**: Tab riêng trong Cài đặt và panel quản trị — hỗ trợ Tạo / Sửa / Tạm dừng (Pause) / Kích hoạt (Resume) / Chạy ngay (Run now), xem lịch sử các session do lịch trình sinh ra và click để mở trực tiếp xem kết quả.
+- **Lệnh CLI `vyen schedule`**:
+  - `vyen schedule list`: Liệt kê các lịch trình và trạng thái lần chạy gần nhất.
+  - `vyen schedule run <id>`: Chạy ngay lập tức một lịch trình.
+  - `vyen schedule daemon`: Chạy tiến trình scheduler daemon (tick mỗi 30s) trong terminal.
+
 ### Làm việc quy mô lớn
 
 - **Subagent delegate**: agent chính giao task độc lập cho subagent chạy với context riêng (không thấy lịch sử chat), không thể đệ quy (subagent không có `delegate`), giới hạn mặc định 10 turns (tối đa 25). Subagent vẫn dùng được tool trên máy bạn (fs/shell/git/MCP) nhờ relay: server phát annotation xuống renderer, renderer thực thi rồi POST kết quả về `/api/chat/subagent-relay`. Hoạt động cả đường native function-calling lẫn emulated.
@@ -110,7 +121,7 @@ Vyen đọc tự do nhưng ghi có kỷ luật: mọi thao tác ghi file / chạ
 | Framework | Next.js 16 (App Router, Turbopack) |
 | UI | React 19, Tailwind CSS, lucide-react |
 | Trạng thái | Zustand (persist localStorage) |
-| Lưu trữ | Dexie (IndexedDB) — schema 15 phiên bản có migration |
+| Lưu trữ | Dexie (IndexedDB) — schema 16 phiên bản có migration |
 | AI | AI SDK (`ai` + `@ai-sdk/openai`), stream qua API routes Node.js |
 | Virtualization | @tanstack/react-virtual |
 | Desktop | Launcher Edge/Chrome `--app` vào Next.js local (cửa sổ riêng, ~35MB RAM) |

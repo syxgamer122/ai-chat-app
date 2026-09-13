@@ -203,6 +203,24 @@ export interface StoredToolPermissionRecord {
   updatedAt: number;
 }
 
+export type ScheduleStatus = 'idle' | 'running' | 'success' | 'failure';
+
+/** Bản ghi lịch chạy recipe tự động theo cron (Goose P2-9). */
+export interface ScheduleRecord {
+  id: string;
+  recipeId: string;
+  recipeName?: string;
+  cron: string;
+  enabled: boolean;
+  lastRunAt?: number;
+  lastStatus?: ScheduleStatus;
+  lastError?: string;
+  sessions: string[];
+  workspacePath?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
 function newAttachmentId(): string {
   try {
     return globalThis.crypto.randomUUID();
@@ -302,6 +320,7 @@ export class ChatAppDatabase extends Dexie {
   recipes!: Table<RecipeRecord, string>;
   agentMemories!: Table<AgentMemoryRecord, string>;
   toolPermissions!: Table<StoredToolPermissionRecord, string>;
+  schedules!: Table<ScheduleRecord, string>;
 
   constructor() {
     super('ai_chat_app_db');
@@ -571,6 +590,27 @@ export class ChatAppDatabase extends Dexie {
       recipes: 'id, title, updatedAt, source',
       agentMemories: 'id, category, scope, workspaceKey, createdAt, *tags',
       toolPermissions: 'toolName, permission, updatedAt',
+    });
+
+    // v16: schedules (Goose P2-9) — chạy recipe theo lịch cron (desktop/CLI runner)
+    this.version(16).stores({
+      chats: 'id, createdAt, updatedAt, pinned, activeLeafId, workspacePath, *titleTokens',
+      messages:
+        'id, chatId, role, createdAt, seq, parentId, ' +
+        '[chatId+parentId], [chatId+createdAt], [chatId+seq], ' +
+        '[chatId+parentId+branchOrder], *tokens',
+      prompts: 'id, updatedAt',
+      kv: 'key',
+      providers: 'id, updatedAt',
+      memories: 'id, createdAt',
+      wsSnapshots: 'id, chatId, createdAt',
+      memoryCandidates: 'id, status, createdAt, digest, [scope.kind+scope.ref]',
+      memoryRecords: 'id, status, createdAt, reviewDueAt, digest, [scope.kind+scope.ref]',
+      memoryReviews: 'id, candidateId, action, reviewedAt',
+      recipes: 'id, title, updatedAt, source',
+      agentMemories: 'id, category, scope, workspaceKey, createdAt, *tags',
+      toolPermissions: 'toolName, permission, updatedAt',
+      schedules: 'id, recipeId, cron, enabled, lastRunAt, lastStatus, createdAt, updatedAt',
     });
 
     this.messages.hook('creating', (_primKey, obj) => {

@@ -59,6 +59,10 @@ const ToolPermissionsTable = dynamic(
   () => import('@/components/tool-permissions-table').then((m) => m.ToolPermissionsTable),
   { ssr: false, loading: SectionLoading },
 );
+const SchedulerPanel = dynamic(
+  () => import('@/components/scheduler/scheduler-panel').then((m) => m.SchedulerPanel),
+  { ssr: false, loading: SectionLoading },
+);
 
 /**
  * PWA: nút cài đặt lên thiết bị (Chrome/Edge/Android);
@@ -449,7 +453,7 @@ function VisionModelSection() {
   );
 }
 
-type SettingsTab = 'chung' | 'provider' | 'routing' | 'stats' | 'prompts' | 'skills' | 'memory' | 'data';
+type SettingsTab = 'chung' | 'provider' | 'routing' | 'stats' | 'prompts' | 'skills' | 'memory' | 'schedules' | 'data';
 
 const SETTINGS_TABS: Array<{ id: SettingsTab; label: string }> = [
   { id: 'chung', label: 'Chung' },
@@ -459,6 +463,7 @@ const SETTINGS_TABS: Array<{ id: SettingsTab; label: string }> = [
   { id: 'prompts', label: 'Prompt' },
   { id: 'skills', label: 'Skills' },
   { id: 'memory', label: 'Ghi nhớ' },
+  { id: 'schedules', label: 'Scheduler' },
   { id: 'data', label: 'Dữ liệu' },
 ];
 
@@ -1402,6 +1407,12 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
             <AgentMemorySection />
             <div className="my-4 border-t border-zinc-200 dark:border-zinc-800" />
             <MemoriesSection />
+          </div>
+          )}
+
+{visited.has('schedules') && (
+          <div className={show('schedules') ? 'contents' : 'hidden'}>
+            <SchedulerPanel />
           </div>
           )}
 
