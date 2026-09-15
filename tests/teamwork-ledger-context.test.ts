@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   AppendOnlyLedger,
@@ -438,6 +438,58 @@ describe('Append-Only Bitemporal Ledger (Audit Trail & Merkle Chains)', () => {
 
     // Ledger integrity is maintained
     expect(ledger.verifyIntegrity().valid).toBe(true);
+  });
+
+  /* Regression: khoảng transaction time là half-open [from, to) và bị đóng bằng
+     chính `txFrom` của bản ghi kế tiếp (supersede/compensate). Khi `txFrom` chỉ
+     là `Date.now()`, hai lần ghi trong CÙNG một mili-giây tạo khoảng rỗng [T, T)
+     — bản ghi không còn active ở bất kỳ Tt nào nên replay trả null (đây là
+     nguyên nhân test e2e ledger ĐỎ ngẫu nhiên tuỳ timing máy chạy). */
+  it('txFrom tăng đơn điệu: ghi trong cùng 1ms vẫn replay được điểm giữa', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(1_700_000_000_000);
+    try {
+      const m1 = await ledger.appendRecord({
+        entityId: 'app.config',
+        eventType: 'entity_state',
+        action: 'INSERT',
+        milestoneId: 'M1',
+        workerId: 'worker-1',
+        payload: { port: 3000, authStrategy: 'jwt' },
+        validFrom: 1000,
+      });
+      const m2 = await ledger.appendRecord({
+        entityId: 'app.config',
+        eventType: 'entity_state',
+        action: 'UPDATE',
+        milestoneId: 'M2',
+        workerId: 'worker-2',
+        parentRecordId: m1.id,
+        payload: { port: 8080, authStrategy: 'none' },
+        validFrom: 2000,
+      });
+      const comp = await ledger.compensate({
+        targetRecordId: m2.id,
+        milestoneId: 'M3',
+        author: 'security_auditor',
+        reason: 'Revert unauthenticated authStrategy',
+      });
+
+      // Cùng mili-giây nhưng tx PHẢI đơn điệu tăng ⇒ khoảng Tt không bao giờ rỗng.
+      expect(m1.txFrom).toBeLessThan(m2.txFrom);
+      expect(m2.txFrom).toBeLessThan(comp.txFrom);
+      expect(m2.txTo).toBe(comp.txFrom);
+      expect(m2.txTo as number).toBeGreaterThan(m2.txFrom);
+
+      const replayer = new PointInTimeReplayEngine(ledger.getAllRecords());
+      const before = replayer.replayEntityState('app.config', { validTime: 1500, txTime: m1.txFrom });
+      expect((before?.state as any)?.authStrategy).toBe('jwt');
+      const during = replayer.replayEntityState('app.config', { validTime: 2500, txTime: m2.txFrom });
+      expect((during?.state as any)?.authStrategy).toBe('none');
+      expect(ledger.verifyIntegrity().valid).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('filters records by milestoneId, eventType, and action', async () => {

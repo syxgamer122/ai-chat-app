@@ -197,7 +197,7 @@ const ChatItem = memo(function ChatItem({
               }
             }}
             onBlur={handleSaveRename}
-            className="w-full bg-[#1b2430] text-[#ebe7e4] text-[12px] px-1 py-0.5 border border-[#6a9fcc] outline-none font-mono"
+            className="w-full bg-[#161d27] text-[#ebe7e4] text-[12px] px-1 py-0.5 border border-[#6a9fcc] outline-none font-mono"
           />
         ) : (
           <button

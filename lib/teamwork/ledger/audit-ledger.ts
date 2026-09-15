@@ -25,6 +25,8 @@ export class AppendOnlyLedger {
   private readonly records: BitemporalRecord<any>[] = [];
   private sequenceCounter = 0;
   private lastHash = GENESIS_PREV_HASH;
+  /** Mốc transaction time lớn nhất đã ghi — xem chú thích trong appendRecord(). */
+  private lastTxFrom = 0;
   private appendQueue: Promise<any> = Promise.resolve();
   private lastVerification: IntegrityVerificationResult | null = null;
 
@@ -52,12 +54,14 @@ export class AppendOnlyLedger {
     this.records.length = 0;
     this.sequenceCounter = 0;
     this.lastHash = GENESIS_PREV_HASH;
+    this.lastTxFrom = 0;
 
     for (const line of lines) {
       const record = JSON.parse(line) as BitemporalRecord<any>;
       this.records.push(record);
       this.sequenceCounter = Math.max(this.sequenceCounter, record.sequence);
       this.lastHash = record.recordHash;
+      this.lastTxFrom = Math.max(this.lastTxFrom, record.txFrom);
 
       // If this record superseded or compensated an earlier record, update in-memory txTo
       if (record.parentRecordId) {
@@ -125,7 +129,15 @@ export class AppendOnlyLedger {
           const sequence = ++this.sequenceCounter;
           const validFrom = input.validFrom ?? Date.now();
           const validTo = input.validTo ?? null;
-          const txFrom = Date.now();
+          /* Transaction time phải ĐƠN ĐIỆU TĂNG. Khoảng Tt là half-open [from, to)
+             và khi một bản ghi bị supersede/compensate, `txTo` của nó bị đóng
+             bằng chính `txFrom` của bản ghi mới — nếu hai lần ghi rơi vào cùng
+             một mili-giây thì khoảng co thành rỗng [T, T): bản ghi không còn
+             active ở BẤT KỲ Tt nào nên replay trả null (test ledger e2e ĐỎ ngẫu
+             nhiên tuỳ timing). Chỉ nhích +1ms khi Date.now() không tăng, nên thứ
+             tự tx luôn khớp thứ tự ghi mà vẫn giữ nguyên giá trị thật khi có thể. */
+          const txFrom = Math.max(Date.now(), this.lastTxFrom + 1);
+          this.lastTxFrom = txFrom;
           const txTo = null;
           const action = input.action ?? 'INSERT';
           const eventType = input.eventType ?? 'entity_state';

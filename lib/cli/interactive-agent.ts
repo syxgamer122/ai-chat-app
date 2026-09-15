@@ -346,9 +346,17 @@ export class CliCodingHarness {
         fs.mkdirSync(opencodePath, { recursive: true });
       }
 
+      /* Liệt kê từng mục ở CẢ HAI nhánh: nhánh "đã khởi tạo" từng in PROJECT.md
+         còn nhánh vừa tạo thì không, nên output phụ thuộc thứ tự chạy (test
+         nào chạm trước tạo .opencode/ là test sau thấy nhánh khác). */
+      const created = [
+        hasProjectMd ? '  - PROJECT.md: Sẵn sàng' : '  - PROJECT.md: Đã tạo',
+        hasOpencode ? '  - .opencode/: Sẵn sàng' : '  - .opencode/: Đã tạo',
+      ];
+
       return {
         ok: true,
-        output: `[vyen init] Đã khởi tạo thành công cấu hình workspace Vyen & Claude Code context.`,
+        output: `[vyen init] Đã khởi tạo thành công cấu hình workspace Vyen & Claude Code context.\n${created.join('\n')}`,
       };
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) };
