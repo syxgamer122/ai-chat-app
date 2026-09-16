@@ -19,6 +19,9 @@ import { runMonkeyCodeSast } from '../security-sast';
 import { renderToolsCommand } from './cli-surface';
 import { saveCliSession, type CliSessionData } from './session-manager';
 import { normalizeModeParam } from '../slash-commands';
+/* P0 #4: SecretRegistry là module thuần (dùng được cả bundle lẫn Node) nên CLI
+   import trực tiếp; lib/cli khác (recipe-runner) cũng dùng alias '@/' như vậy. */
+import { getDefaultSecretRegistry, redactSecretText, redactSecretsDeep } from '@/lib/secret-registry';
 
 // Re-export để test khóa được việc REPL dùng đúng pure builder dùng chung.
 export { renderToolsCommand };
@@ -397,6 +400,29 @@ export interface AutonomousAgentOptions {
   resumeSession?: CliSessionData;
 }
 
+/**
+ * P0 #4 — bọc MỌI tool của CLI để kết quả trả về model đi qua SecretRegistry.
+ *
+ * VÌ SAO PHẢI BỌC `execute`: `streamText({ tools, maxSteps })` để AI SDK tự chạy
+ * tool rồi tự nhét kết quả THÔ vào context của các step sau, và `runMockTurn`
+ * còn đẩy output vào `this.history` (history bị ghi xuống file session). Bọc
+ * `execute` là điểm chặn duy nhất phủ cả hai đường mà không phải sửa từng tool.
+ *
+ * Bất biến: registry không bao giờ ném và trả lại chính object đầu vào khi
+ * VYEN_DISABLE_SECRET_REDACTION=1 — nên hàm này không đổi hành vi khi tắt.
+ * Mutate tại chỗ và trả về CHÍNH object truyền vào để chỗ gọi không đổi kiểu.
+ */
+export function withSecretRedaction<T extends Record<string, unknown>>(tools: T): T {
+  for (const definition of Object.values(tools)) {
+    if (!definition || typeof definition !== 'object') continue;
+    const redactable = definition as { execute?: (...args: unknown[]) => unknown };
+    const execute = redactable.execute;
+    if (typeof execute !== 'function') continue;
+    redactable.execute = async (...args: unknown[]) => redactSecretsDeep(await execute(...args));
+  }
+  return tools;
+}
+
 export function loadEnvFiles(workspaceRoot: string = process.cwd()) {
   const candidates = [
     path.join(workspaceRoot, '.env.local'),
@@ -463,6 +489,10 @@ export class AutonomousCliAgent {
     if (!options?.skipEnvLoad) {
       loadEnvFiles(this.workspaceRoot);
     }
+    /* P0 #4: env vừa nạp từ .env.local phải được ĐĂNG KÝ vào registry. Singleton
+       đăng ký env một cách lazy ở lần chạm đầu tiên, nhưng gọi tường minh ở đây
+       để không phụ thuộc thứ tự import (registry có thể đã bị chạm trước đó). */
+    getDefaultSecretRegistry().registerFromEnv();
 
     if (options?.apiKey !== undefined) {
       this.apiKey = options.apiKey;
@@ -507,6 +537,11 @@ export class AutonomousCliAgent {
 
   public setApiKey(key: string): void {
     this.apiKey = key.trim();
+    /* P0 #4: key người dùng gõ `/key …` phải được ĐĂNG KÝ — nếu không, `bash cat
+       .env.local` hay `security_audit` in lại key thì key vào thẳng model. */
+    if (this.apiKey) {
+      getDefaultSecretRegistry().register(this.apiKey, 'cli-api-key');
+    }
     if (this.apiKey.startsWith('sk-or-')) {
       this.baseUrl = 'https://openrouter.ai/api/v1';
       if (this.model === 'gpt-4o' || this.model === 'gemini-2.0-flash') {
@@ -826,6 +861,12 @@ export class AutonomousCliAgent {
       }),
     };
 
+    /* P0 #4 — điểm chặn DUY NHẤT cho kết quả tool ở đường có model thật: AI SDK
+       tự chạy tool rồi tự nhét kết quả thô vào context các step sau (maxSteps),
+       nên phải che ngay tại `execute`; `this.history` (và file session ghi từ
+       history) nhận bản đã che theo. */
+    const safeTools = withSecretRedaction(tools);
+
     this.history.push({ role: 'user', content: userPrompt });
 
     try {
@@ -839,7 +880,7 @@ Guidelines:
 2. Execute tasks proactively and verify modifications with tests or build commands when relevant.
 3. Be concise and format code clearly in terminal.`,
         messages: this.history,
-        tools,
+        tools: safeTools,
         maxSteps: this.maxSteps,
         onStepFinish: async (step) => {
           if (step.toolCalls && step.toolCalls.length > 0) {
@@ -947,6 +988,12 @@ Guidelines:
       emit(`✔ [Vyen Tool Complete] bash\n`);
       resultSummary = `Yêu cầu "${userPrompt}" đã được xử lý thành công.`;
     }
+
+    /* P0 #4: summary chứa output tool và được đẩy vào history (history bị ghi
+       xuống file session rồi còn làm ngữ cảnh cho các turn sau) — che tại đây
+       là điểm duy nhất của đường simulated, callbacks hiển thị vẫn giữ bản thô
+       để lập trình viên tự đọc tại terminal. */
+    resultSummary = redactSecretText(resultSummary);
 
     emit(`\n${resultSummary}\n`);
     this.history.push({ role: 'user', content: userPrompt });

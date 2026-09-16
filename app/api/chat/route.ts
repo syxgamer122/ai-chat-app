@@ -72,6 +72,7 @@ import {
   toResolvedSubRecipes,
 } from '@/lib/recipes/subrecipe-exec';
 import { SERVER_MAX_STEPS, TOOL_RESULT_MAX_CHARS, truncateToolResult } from '@/lib/tool-limits';
+import { redactSecretText, redactSecretsDeep } from '@/lib/secret-registry';
 import { resolveRoute, DEFAULT_CHAINS, type CategoryId, type RouteReceipt, type ChainEntry } from '@/lib/routing/categories';
 import { scoreRequest } from '@/lib/routing/score-request';
 import { resolveContract, enforceContractEffort } from '@/lib/model-contracts';
@@ -254,10 +255,11 @@ const pumpSseData = pumpSseLines;
  */
 const HARD_ARTIFACT = /^(?:undefined|\[object Object\])$/;
 
-const SECRET_REGEX = /\b(sk|sk-proj|sk-ant|Bearer)\s*[:=]?\s*[A-Za-z0-9_\-]{4,}/gi;
-
+/* Che bí mật: dùng CHUNG registry (lib/secret-registry.ts — port OpenHands
+   SecretRegistry) thay cho bản regex copy-paste ở 5 file đã drift nhau. Bản cũ
+   thiếu cờ 'g' nên chỉ che vị trí ĐẦU TIÊN trong mỗi chuỗi. */
 function redact(text: string): string {
-  return text.replace(SECRET_REGEX, '[redacted]');
+  return redactSecretText(text);
 }
 
 function rawMessageOf(e: unknown): string {
@@ -986,7 +988,14 @@ function attachToolResultParts(
       ...m,
       parts: [
         ...(text ? [{ type: 'text', text }] : []),
-        ...done.map((inv) => ({ type: 'tool-invocation', toolInvocation: inv })),
+        /* Che bí mật trong KẾT QUẢ client tool (fs_read đọc .env, shell_run in
+           env…) trước khi nó thành tool-result trong ngữ cảnh model. KHÔNG che
+           args: args là hành động trước của model, che đi sẽ khiến nó ghi lại
+           đúng nội dung đã che vào file ở step sau. */
+        ...done.map((inv) => ({
+          type: 'tool-invocation',
+          toolInvocation: { ...inv, result: redactSecretsDeep(inv.result) },
+        })),
       ],
     } as z.infer<typeof MessageSchema>;
   });

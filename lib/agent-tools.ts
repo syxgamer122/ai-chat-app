@@ -27,6 +27,7 @@ import { WEB_LIMITS } from '@/lib/web-context';
 import { judgeInjection } from '@/lib/injection-guard';
 import { getToolCallBudget, checkDoomLoop } from '@/lib/tool-call-budget';
 import { MAX_TOOL_CALLS_PER_TURN, TOOL_RESULT_MAX_CHARS } from '@/lib/tool-limits';
+import { redactSecretsDeep } from '@/lib/secret-registry';
 import { isMcpToolKey } from '@/lib/mcp/tool-mapper';
 import { TOOL_CATALOG } from '@/lib/tool-catalog';
 
@@ -305,7 +306,12 @@ export function buildAgentTools(
       };
     }
     try {
-      return capToolResult(await run());
+      /* Che bí mật Ở ĐÂY vì đây là điểm duy nhất mọi kết quả tool SERVER đi qua:
+         đường native không serialize gì (SDK tự nhét kết quả vào ngữ cảnh) nên
+         không có hook nào khác chặn được. Chỉ áp lên KẾT QUẢ (observation) —
+         TUYỆT ĐỐI không áp lên args model sinh ra: args bị che sẽ khiến model
+         viết lại đúng nội dung đã che vào file ở step sau. */
+      return redactSecretsDeep(capToolResult(await run()));
     } catch {
       // Giữ hành vi cũ: lỗi network/upstream trả payload "trống + note" để
       // model tự chọn hướng đi thay vì văng exception làm đứt step.

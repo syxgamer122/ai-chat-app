@@ -56,6 +56,7 @@ import {
   workerUserPrompt,
   type SynthesisCandidate,
 } from '@/lib/orchestrator/prompts';
+import { redactSecretText } from '@/lib/secret-registry';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -90,10 +91,9 @@ const SSE_HEADERS = {
   'X-Accel-Buffering': 'no',
 } as const;
 
-const SECRET_REGEX = /\b(sk|sk-proj|sk-ant|Bearer)\s*[:=]?\s*[A-Za-z0-9_\-]{4,}/gi;
-
 function sanitize(e: unknown): string {
-  return (e instanceof Error ? e.message : String(e ?? '')).replace(SECRET_REGEX, '[redacted]').slice(0, 300);
+  // Dùng chung registry (lib/secret-registry.ts) thay bản SECRET_REGEX copy ở đây.
+  return redactSecretText(e instanceof Error ? e.message : String(e ?? '')).slice(0, 300);
 }
 
 function statusOf(e: unknown): number | undefined {

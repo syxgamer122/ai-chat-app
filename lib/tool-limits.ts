@@ -24,6 +24,8 @@
  * Bằng đúng MAX_READ_CHARS của fs_read để một lần đọc file đầy trần không bị
  * cắt thêm lần nữa.
  */
+import { redactSecretText } from '@/lib/secret-registry';
+
 export const TOOL_RESULT_MAX_CHARS = 24_000;
 
 /**
@@ -58,7 +60,11 @@ export function serializeToolResult(
   } catch {
     raw = '"[kết quả không serialize được]"';
   }
-  return truncateToolResult(raw, maxChars);
+  /* Redact TRƯỚC khi cắt: nếu cắt trước, một khoá nằm vắt qua ranh giới cắt sẽ
+     chỉ còn nửa chuỗi và không khớp rule nào nữa → lọt bí mật vào ngữ cảnh.
+     Đây là chốt chặn cuối của đường emulated (mọi kết quả tool đều đi qua đây)
+     — xem lib/secret-registry.ts (port OpenHands SecretRegistry). */
+  return truncateToolResult(redactSecretText(raw), maxChars);
 }
 
 /* ------------------------------------------------------------------ */

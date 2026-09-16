@@ -41,6 +41,7 @@ import {
   TOOL_RESULT_MAX_CHARS,
   serializeToolResult,
 } from '@/lib/tool-limits';
+import { redactSecretText } from '@/lib/secret-registry';
 
 export { EMU_MAX_ROUNDS, EMU_MAX_CALLS_PER_ROUND };
 /**
@@ -468,7 +469,12 @@ if (opts.clientTools?.has(call.name)) {
           opts.onAnnotation({
             tool: { id, name: call.name, phase: 'done', summary: resultText.slice(0, 200) },
           });
-          resultBlocks.push(`[TOOL_RESULT name=${call.name}]\n${resultText}\n[/TOOL_RESULT]`);
+          resultBlocks.push(
+            /* Relay mode KHÔNG đi qua serializeToolResult (renderer trả chuỗi
+               thẳng) nên phải tự che bí mật: fs_read đọc .env trên máy user là
+               đường rò thật. */
+            `[TOOL_RESULT name=${call.name}]\n${redactSecretText(resultText)}\n[/TOOL_RESULT]`,
+          );
           continue;
         }
         opts.onClientToolCall?.({

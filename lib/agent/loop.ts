@@ -29,6 +29,9 @@ import type {
   AgentToolResult,
   ToolCallDecision,
 } from './types';
+/* P0 #4: kết quả tool là đường vào ngữ cảnh model — che bí mật tại đây.
+   Registry là module thuần (không React/Next/DOM) nên loop vẫn framework-free. */
+import { redactSecretsDeep } from '@/lib/secret-registry';
 
 export * from './types';
 
@@ -342,10 +345,13 @@ async function runLoop(
                   isError: !outcome.ok,
                 })
               : undefined;
+            /* P0 #4: transcript/event/DB chỉ nhận bản ĐÃ CHE; `afterToolCall`
+               (policy của auto-pilot) vẫn thấy kết quả thô ở trên vì nó quyết
+               định bằng nội dung, không phải bằng thứ đưa cho model đọc. */
             const result: AgentToolResult = {
               toolCallId: item.id,
               name: item.name,
-              content: outcome.result,
+              content: redactSecretsDeep(outcome.result),
               isError: !outcome.ok,
               details: patch?.details,
             };

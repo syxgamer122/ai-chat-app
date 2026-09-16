@@ -16,6 +16,7 @@
 import { tool } from 'ai';
 import { z } from 'zod';
 import { truncateToolResult } from '@/lib/tool-limits';
+import { redactSecretText } from '@/lib/secret-registry';
 import { parseLooseJson } from '@/lib/json-repair';
 
 /* ------------------------------------------------------------------ */
@@ -375,7 +376,7 @@ export function formatMcpResultForModel(
   result: McpCallResult,
   toolName: string,
 ): string {
-  const text = mcpContentToText(result?.content ?? []);
+  const text = redactSecretText(mcpContentToText(result?.content ?? []));
 
   if (result?.denied) {
     return truncateToolResult(

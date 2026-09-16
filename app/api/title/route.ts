@@ -14,6 +14,7 @@ import {
   verifySameOrigin,
   verifyAccessAuth,
 } from '@/lib/security';
+import { redactSecretText } from '@/lib/secret-registry';
 
 export const runtime = 'nodejs';
 
@@ -26,8 +27,6 @@ const TitleSchema = z.object({
      tiêu đề heuristic của client vì một field phụ. */
   model: ACTIVE_MODEL_BODY_FIELD,
 });
-
-const SECRET_REGEX = /\b(sk|sk-proj|sk-ant|Bearer)\s*[:=]?\s*[A-Za-z0-9_\-]{4,}/gi;
 
 const TITLE_MODEL_CHAIN: readonly string[] = Object.freeze(
   /* Tên gửi THẲNG lên upstream, không qua catalog — phải khớp tên thật của
@@ -45,7 +44,9 @@ const NO_STORE = {
 
 function sanitizeErrorMessage(e: unknown): string {
   const raw = e instanceof Error ? e.message : String(e ?? '');
-  return raw.replace(SECRET_REGEX, '[redacted]').slice(0, 300);
+  // Dùng chung registry (lib/secret-registry.ts) — bản SECRET_REGEX copy ở đây
+  // thiếu cờ 'g' nên chỉ che bí mật ĐẦU TIÊN.
+  return redactSecretText(raw).slice(0, 300);
 }
 
 function getStatusCode(e: unknown): number | undefined {

@@ -15,6 +15,7 @@
  */
 
 import { db } from '@/lib/db';
+import { redactSecretText } from '@/lib/secret-registry';
 
 const KV_KEY = 'agent_workspace_root';
 /** Thư mục luôn bỏ qua khi quét — đủ cho spike, chưa cần parse .gitignore đầy đủ. */
@@ -163,7 +164,10 @@ export async function requireWorkspace(): Promise<{ ok: true; deps: FsDeps } | {
 
 function sanitizeFsError(e: unknown): string {
   const msg = e instanceof Error ? e.message : String(e ?? '');
-  return msg.replace(/\b(sk|key)[\w-]*\s*[:=]\s*\S+/gi, '[redacted]').slice(0, 200);
+  /* Dùng chung registry (lib/secret-registry.ts — port OpenHands SecretRegistry).
+     Bản regex ở đây từng là biến thể THỨ NĂM của cùng một quy tắc và đã drift
+     so với 4 route: nó có thêm nhánh `key` bắt cả `key=value` vô hại. */
+  return redactSecretText(msg).slice(0, 200);
 }
 
 /* ------------------------------------------------------------------ */

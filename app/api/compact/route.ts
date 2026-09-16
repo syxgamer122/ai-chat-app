@@ -12,6 +12,7 @@ import {
   rateLimitIdentity,
   verifyAccessAuth,
 } from '@/lib/security';
+import { redactSecretText } from '@/lib/secret-registry';
 
 /**
  * POST /api/compact — tóm tắt phần cũ của hội thoại dài (nền của compaction).
@@ -75,11 +76,11 @@ const COMPACT_MODEL_CHAIN: readonly string[] = Object.freeze(
     .filter(Boolean),
 );
 
-const SECRET_REGEX = /\b(sk|sk-proj|sk-ant|Bearer)\s*[:=]?\s*[A-Za-z0-9_\-]{4,}/gi;
-
 function sanitizeErrorMessage(e: unknown): string {
   const raw = e instanceof Error ? e.message : String(e ?? '');
-  return raw.replace(SECRET_REGEX, '[redacted]').slice(0, 300);
+  // Dùng chung registry (lib/secret-registry.ts) — bản SECRET_REGEX copy ở đây
+  // thiếu cờ 'g' nên chỉ che bí mật ĐẦU TIÊN trong thông điệp.
+  return redactSecretText(raw).slice(0, 300);
 }
 
 function getStatusCode(e: unknown): number | undefined {
