@@ -29,3 +29,8 @@ opencode.json
 
 # Profile trình duyệt sinh ra khi test launcher desktop
 temp-test-profile/
+
+# Session CLI sinh lúc chạy (lịch sử hội thoại máy này, ghi bởi saveCliSession).
+# Chỉ .vyen/recipes và .vyen/skills là tài nguyên được commit — neo "/" đầu dòng
+# để không vô tình bỏ qua cả thư mục .vyen ở nơi khác.
+/.vyen/sessions/
