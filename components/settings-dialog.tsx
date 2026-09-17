@@ -454,15 +454,14 @@ function VisionModelSection() {
   );
 }
 
-type SettingsTab = 'chung' | 'provider' | 'routing' | 'stats' | 'prompts' | 'skills' | 'memory' | 'schedules' | 'data';
+type SettingsTab = 'chung' | 'provider' | 'routing' | 'stats' | 'skills' | 'memory' | 'schedules' | 'data';
 
 const SETTINGS_TABS: Array<{ id: SettingsTab; label: string }> = [
   { id: 'chung', label: 'Chung' },
   { id: 'provider', label: 'Nhà cung cấp' },
   { id: 'routing', label: 'Routing' },
   { id: 'stats', label: 'Thống kê' },
-  { id: 'prompts', label: 'Prompt' },
-  { id: 'skills', label: 'Skills' },
+  { id: 'skills', label: 'Skills & lệnh' },
   { id: 'memory', label: 'Ghi nhớ' },
   { id: 'schedules', label: 'Scheduler' },
   { id: 'data', label: 'Dữ liệu' },
@@ -471,38 +470,37 @@ const SETTINGS_TABS: Array<{ id: SettingsTab; label: string }> = [
 const FOCUSABLE_SELECTOR =
   'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
-/* ------------------ Thư viện prompt ------------------ */
-
-function PromptLibrarySection() {
-  const prompts = useLiveQuery(() => db.prompts.orderBy('updatedAt').reverse().toArray(), [], []);
+function LegacySkillsSection() {
+  const skills = useLiveQuery(
+    () => db.prompts.orderBy('updatedAt').reverse().filter((p) => p.mode === 'skill').toArray(),
+    [],
+    [],
+  );
 
   const [newTitle, setNewTitle] = useState('');
   const [newContent, setNewContent] = useState('');
-  const [newMode, setNewMode] = useState<'insert' | 'skill'>('insert');
   const [newDescription, setNewDescription] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState('');
   const [editContent, setEditContent] = useState('');
-  const [editMode, setEditMode] = useState<'insert' | 'skill'>('insert');
   const [editDescription, setEditDescription] = useState('');
 
-  const addPrompt = async () => {
+  const addSkill = async () => {
     try {
       await savePrompt({
         title: newTitle,
         content: newContent,
-        mode: newMode,
+        mode: 'skill',
         description: newDescription,
       });
       setNewTitle('');
       setNewContent('');
       setNewDescription('');
-      setNewMode('insert');
       setError(null);
     } catch (err: any) {
-      setError(err?.message ?? 'Không lưu được prompt.');
+      setError(err?.message ?? 'Không lưu được skill.');
     }
   };
 
@@ -510,7 +508,6 @@ function PromptLibrarySection() {
     setEditingId(p.id);
     setEditTitle(p.title);
     setEditContent(p.content);
-    setEditMode(p.mode ?? 'insert');
     setEditDescription(p.description ?? '');
   };
 
@@ -521,86 +518,49 @@ function PromptLibrarySection() {
         id: editingId,
         title: editTitle,
         content: editContent,
-        mode: editMode,
+        mode: 'skill',
         description: editDescription,
       });
       setEditingId(null);
       setError(null);
     } catch (err: any) {
-      setError(err?.message ?? 'Không lưu được prompt.');
+      setError(err?.message ?? 'Không lưu được skill.');
     }
   };
 
-  /** Cặp field chung cho form thêm/sửa: mode + mô tả khi nào dùng. */
-  const modeFields = (
-    mode: 'insert' | 'skill',
-    setMode: (m: 'insert' | 'skill') => void,
-    desc: string,
-    setDesc: (v: string) => void,
-  ) => (
-    <>
-      <div className="flex gap-1" role="radiogroup" aria-label="Kiểu prompt">
-        {(
-          [
-            { v: 'insert', label: 'Chèn qua "/"' },
-            { v: 'skill', label: 'Skill tự kích hoạt' },
-          ] as const
-        ).map((opt) => (
-          <button
-            key={opt.v}
-            type="button"
-            role="radio"
-            aria-checked={mode === opt.v}
-            onClick={() => setMode(opt.v)}
-            className={`rounded-lg px-2.5 py-1 text-[11px] font-medium transition-colors ${
-              mode === opt.v
-                ? 'bg-brand text-[#0d1116]'
-                : 'border border-[#495059] text-[#9fa4ab] hover:text-[#ebe7e4]'
-            }`}
-          >
-            {opt.label}
-          </button>
-        ))}
-      </div>
-      {mode === 'skill' && (
-        <input
-          value={desc}
-          onChange={(e) => setDesc(e.target.value)}
-          className="field-sm"
-          placeholder='Khi nào dùng — vd: "soạn email công việc, viết đơn từ"'
-          aria-label="Mô tả khi nào dùng skill"
-        />
-      )}
-    </>
-  );
-
   return (
     <div className="space-y-3">
-      <h3 className="text-sm font-semibold text-zinc-800">Thư viện prompt</h3>
+      <h3 className="text-sm font-semibold text-zinc-800">Skills cũ (lưu trong trình duyệt)</h3>
       <p className="text-xs leading-relaxed text-zinc-600">
-        Gõ <code className="claude-inline-code">/</code> trong ô nhập để chèn nhanh.{' '}
-        <strong>Skill</strong> khác: không chèn — tự bật khi tin nhắn khớp mô tả.
+        Agent tự kích hoạt các skill này khi tin nhắn khớp mô tả; không chèn vào ô chat.
+        Skills trên đĩa được quản lý riêng ở trên.
       </p>
 
-      {(prompts ?? []).map((p) =>
+      {(skills ?? []).map((p) =>
         editingId === p.id ? (
           <div key={p.id} className="space-y-2 rounded-xl border border-zinc-300 bg-surface-muted p-2.5">
             <input
               value={editTitle}
               onChange={(e) => setEditTitle(e.target.value)}
               className="field-sm"
-              placeholder="Tên prompt"
-              aria-label="Tên prompt"
+              placeholder="Tên skill"
+              aria-label="Tên skill"
             />
             <textarea
               value={editContent}
               onChange={(e) => setEditContent(e.target.value)}
               rows={4}
               className="field-sm resize-y text-xs"
-              placeholder="Nội dung prompt"
-              aria-label="Nội dung prompt"
+              placeholder="Nội dung skill"
+              aria-label="Nội dung skill"
             />
-            {modeFields(editMode, setEditMode, editDescription, setEditDescription)}
+            <input
+              value={editDescription}
+              onChange={(e) => setEditDescription(e.target.value)}
+              className="field-sm"
+              placeholder="Khi nào agent nên dùng skill này"
+              aria-label="Mô tả khi nào dùng skill"
+            />
             <div className="flex gap-2">
               <button
                 type="button"
@@ -653,7 +613,7 @@ function PromptLibrarySection() {
               <button
                 type="button"
                 onClick={() => {
-                  if (window.confirm(`Xóa prompt "${p.title}"?`)) void deletePrompt(p.id);
+                  if (window.confirm(`Xóa skill "${p.title}"?`)) void deletePrompt(p.id);
                 }}
                 aria-label={`Xóa ${p.title}`}
                 className="rounded p-1 text-zinc-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10 dark:hover:text-red-400"
@@ -670,24 +630,30 @@ function PromptLibrarySection() {
           value={newTitle}
           onChange={(e) => setNewTitle(e.target.value)}
           className="field-sm"
-          placeholder="Tên prompt mới (vd: Viết email)"
-          aria-label="Tên prompt mới"
+          placeholder="Tên skill mới (vd: Viết email)"
+          aria-label="Tên skill mới"
         />
         <textarea
           value={newContent}
           onChange={(e) => setNewContent(e.target.value)}
           rows={3}
           className="field-sm resize-y text-xs"
-          placeholder="Nội dung prompt"
-          aria-label="Nội dung prompt mới"
+          placeholder="Nội dung skill"
+          aria-label="Nội dung skill mới"
         />
-        {modeFields(newMode, setNewMode, newDescription, setNewDescription)}
+        <input
+          value={newDescription}
+          onChange={(e) => setNewDescription(e.target.value)}
+          className="field-sm"
+          placeholder="Khi nào agent nên dùng skill này"
+          aria-label="Mô tả khi nào dùng skill mới"
+        />
         <button
           type="button"
-          onClick={addPrompt}
+          onClick={addSkill}
           className="w-full rounded-lg bg-zinc-100 py-1.5 text-xs font-medium text-zinc-700 transition hover:bg-zinc-200"
         >
-          + Thêm prompt
+          + Thêm skill
         </button>
         {error && <p className="notice-error">{error}</p>}
       </div>
@@ -996,12 +962,12 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const activeProviderId = useAppStore((s) => s.activeProviderId);
   const settingsInitialTab = useAppStore((s) => s.settingsInitialTab);
   const initialResolvedTab: SettingsTab =
-    settingsInitialTab && SETTINGS_TABS.some((t) => t.id === settingsInitialTab)
-      ? (settingsInitialTab as SettingsTab)
-      : 'chung';
+    settingsInitialTab === 'prompts'
+      ? 'skills'
+      : settingsInitialTab && SETTINGS_TABS.some((t) => t.id === settingsInitialTab)
+        ? (settingsInitialTab as SettingsTab)
+        : 'chung';
   const [tab, setTab] = useState<SettingsTab>(initialResolvedTab);
-  /* Tab ĐÃ ghé được giữ mount (ẩn bằng hidden) — draft ở tab Prompt/Ghi nhớ
-     không bốc hơi khi người dùng sang tab khác xem rồi quay lại. */
   const [visited, setVisited] = useState<Set<SettingsTab>>(
     () => new Set<SettingsTab>(['chung', initialResolvedTab]),
   );
@@ -1554,17 +1520,13 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
           </div>
           )}
 
-{visited.has('prompts') && (
-          <div className={show('prompts') ? 'contents' : 'hidden'}>
-            <PromptLibrarySection />
-            <div className="my-6 border-t border-zinc-200 dark:border-zinc-800" />
-            <CustomSlashCommandsSection />
-          </div>
-          )}
-
 {visited.has('skills') && (
           <div className={show('skills') ? 'contents' : 'hidden'}>
             <DiskSkillsSection />
+            <div className="my-6 border-t border-zinc-200 dark:border-zinc-800" />
+            <LegacySkillsSection />
+            <div className="my-6 border-t border-zinc-200 dark:border-zinc-800" />
+            <CustomSlashCommandsSection />
           </div>
           )}
 

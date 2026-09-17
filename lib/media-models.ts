@@ -23,64 +23,6 @@ export function detectMediaKind(...parts: Array<string | undefined>): MediaKind 
   return undefined;
 }
 
-export interface MediaModelChoice {
-  id: string;
-  label: string;
-}
-
-export interface MediaModelPick {
-  image?: MediaModelChoice;
-  video?: MediaModelChoice;
-}
-
-/**
- * Chọn 1 model ảnh + 1 model video từ danh sách của provider.
- * Ưu tiên model đứng đầu danh sách sau khi sắp xếp giảm dần theo id — id có số
- * phiên bản lớn hơn (qwen-image-3.0 > 2.0) được chọn làm mặc định.
- */
-export function pickMediaModels(models: readonly MediaModelChoice[]): MediaModelPick {
-  const image: MediaModelChoice[] = [];
-  const video: MediaModelChoice[] = [];
-
-  for (const m of models) {
-    const kind = detectMediaKind(m.id, m.label);
-    if (kind === 'video') video.push(m);
-    else if (kind === 'image') image.push(m);
-  }
-
-  const best = (list: MediaModelChoice[]): MediaModelChoice | undefined =>
-    [...list].sort((a, b) => b.id.localeCompare(a.id, 'en', { numeric: true }))[0];
-
-  return {
-    ...(image.length ? { image: best(image) } : {}),
-    ...(video.length ? { video: best(video) } : {}),
-  };
-}
-
-/**
- * "Họ" model = token chữ đầu tiên của id, bỏ số phiên bản.
- * qwen3.8-max -> qwen | qwen-image-3.0-pro -> qwen | gpt-5.6-sol -> gpt
- * Dùng để chỉ hiện nút tạo ảnh/video khi model đang chọn cùng họ với model
- * media của gateway .
- */
-export function modelFamily(modelId: string | null | undefined): string {
-  if (!modelId) return '';
-  // Bỏ tiền tố vendor kiểu OpenRouter ("qwen/qwen3-max" -> "qwen3-max").
-  const tail = modelId.split('/').pop() ?? modelId;
-  const token = tail.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean)[0] ?? '';
-  return token.replace(/[0-9.]+$/, '');
-}
-
-/** true khi model đang chọn cùng họ với model ảnh/video khả dụng. */
-export function isSameFamilyAsMedia(
-  modelId: string | null | undefined,
-  picked: MediaModelPick,
-): boolean {
-  const family = modelFamily(modelId);
-  if (!family) return false;
-  // Bản thân model đang chọn là model media -> luôn cho hiện nút.
-  if (detectMediaKind(modelId ?? undefined)) return true;
-  return [picked.image, picked.video].some(
-    (m) => m !== undefined && modelFamily(m.id) === family,
-  );
+export function isRetiredMediaOption(m: { id: string; label: string; media?: MediaKind }): boolean {
+  return Boolean(m.media ?? detectMediaKind(m.id, m.label));
 }

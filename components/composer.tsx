@@ -12,20 +12,15 @@ import React, {
 import TextareaAutosize from 'react-textarea-autosize';
 import {
   ArrowUp,
-  BookmarkPlus,
   Check,
   ChefHat,
   CornerDownLeft,
   FileText,
-  Film,
   FolderOpen,
   Globe,
-  ImagePlus,
   ListChecks,
   Loader2,
-  Mic,
   MoreHorizontal,
-  Network,
   Paperclip,
   Pencil,
   Square,
@@ -35,7 +30,6 @@ import {
   Zap,
 } from 'lucide-react';
 import { useHaptics } from '@/components/effects';
-import { useSpeechRecognition } from '@/lib/use-speech-recognition';
 import { filterPrompts } from '@/lib/prompt-library';
 import { TOOL_CATALOG } from '@/lib/tool-catalog';
 
@@ -56,17 +50,6 @@ export interface SlashPrompt {
    * gửi thẳng cho ChatInterface xử lý.
    */
   kind?: 'prompt' | 'recipe' | 'command';
-}
-
-export interface MediaAction {
-  modelId: string;
-  label: string;
-  direct: boolean;
-}
-
-export interface MediaActions {
-  image?: MediaAction;
-  video?: MediaAction;
 }
 
 export interface ComposerApi {
@@ -182,20 +165,12 @@ interface TaskSpec {
   onClick: () => void;
 }
 
-/** Nhóm mục trong menu "Tác vụ": Chế độ / Tra cứu & media / Nâng cao. */
 interface TaskGroupSpec {
   key: string;
   label: string;
   items: TaskSpec[];
 }
 
-/**
- * Menu "Tác vụ ⋯" — mọi công cụ phụ của agent (mode, web, autopilot, goal,
- * orchestrator, workspace, staging, media, mic) nằm ở đây để thanh nhập giữ
- * đúng ba nút chính: đính kèm, thư mục, gửi/dừng. Mục chia 3 nhóm có mô tả
- * một dòng; header nhóm chỉ là nhãn trình bày (aria-hidden) nên không phá
- * semantics menu: item vẫn là menuitem, Tab đi theo thứ tự trực quan.
- */
 function TaskMenu({ groups }: { groups: TaskGroupSpec[] }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -302,9 +277,6 @@ interface ComposerProps {
   slashPrompts?: SlashPrompt[];
   /** Chọn mục slash: trả true = đã xử lý riêng (vd mở panel), bỏ qua insert. */
   onApplySlashPrompt?: (prompt: SlashPrompt) => boolean;
-  onSavePrompt?: (title: string, content: string) => void | Promise<void>;
-  mediaActions?: MediaActions;
-  onGenerateMedia?: (action: MediaAction, kind: 'image' | 'video', prompt: string) => void;
   webSearch?: boolean;
   onToggleWebSearch?: () => void;
   agentMode?: 'plan' | 'act';
@@ -321,9 +293,6 @@ interface ComposerProps {
   onOpenToolsPanel?: () => void;
   /** Mở panel Recipes (workflow đóng gói tái sử dụng). */
   onOpenRecipes?: () => void;
-  /** Orchestrator: panel quét tham số đang mở? */
-  orchestratorOpen?: boolean;
-  onOpenOrchestrator?: () => void;
   webBusy?: boolean;
   workspace?: { connected: boolean; name: string | null };
   onPickWorkspace?: () => Promise<void>;
@@ -333,7 +302,6 @@ interface ComposerProps {
   canContinue?: boolean;
   onContinue?: () => void;
   maxFileBytes?: number;
-  /** API mệnh lệnh: suggestion/voice ngoài (adopt orchestrator…) ghi draft. */
   composerApiRef?: React.MutableRefObject<ComposerApi | null>;
   /** P3.1 (Alt+↑): lấy lại tin đã queue mới nhất vào ô nhập. false = queue rỗng. */
   onTakeBackQueued?: () => boolean;
@@ -356,9 +324,6 @@ export const Composer = memo(function Composer({
   onAddFiles,
   onRemoveAttachment,
   slashPrompts,
-  onSavePrompt,
-  mediaActions,
-  onGenerateMedia,
   webSearch,
   onToggleWebSearch,
   agentMode,
@@ -374,8 +339,6 @@ export const Composer = memo(function Composer({
   onOpenToolsPanel,
   onOpenRecipes,
   onApplySlashPrompt,
-  orchestratorOpen,
-  onOpenOrchestrator,
   webBusy,
   workspace,
   onPickWorkspace,
@@ -395,13 +358,6 @@ export const Composer = memo(function Composer({
   const [fileError, setFileError] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [pickPending, setPickPending] = useState(false);
-
-  const voice = useSpeechRecognition({
-    lang: 'vi-VN',
-    onFinalText: useCallback((text: string) => {
-      setDraft((d) => d + (d.length > 0 && !/\s$/.test(d) ? ' ' : '') + text);
-    }, []),
-  });
 
   useImperativeHandle(
     composerApiRef,
@@ -465,27 +421,11 @@ export const Composer = memo(function Composer({
     [onApplySlashPrompt],
   );
 
-  const quickSavePrompt = useCallback(async () => {
-    if (!onSavePrompt || draft.length <= 1) return;
-    const title = (slashQuery ?? '').trim() || `Prompt ${new Date().toLocaleDateString('vi-VN')}`;
-    await onSavePrompt(title.slice(0, 80), draft);
-    setSlashDismissed(true);
-  }, [draft, onSavePrompt, slashQuery]);
-
   const hasContent = draft.trim().length > 0 || attachments.length > 0;
   /* P3.1: KHÔNG chặn khi đang stream — Enter/Alt+Enter khi agent chạy là
      steering/follow-up queue (onSubmit ở ChatInterface tự route). SendButton
      vẫn hiện Stop khi streaming (type="button"), nên đổi này không phá nút dừng. */
   const canSubmit = hasContent;
-  const canGenerateMedia = Boolean(onGenerateMedia) && draft.trim().length > 0 && !isStreaming;
-
-  const startMedia = useCallback(
-    (action: MediaAction | undefined, kind: 'image' | 'video') => {
-      if (!action || !onGenerateMedia || !canGenerateMedia) return;
-      onGenerateMedia(action, kind, draft);
-    },
-    [canGenerateMedia, onGenerateMedia, draft],
-  );
 
   const acceptFiles = useCallback(
     (files: FileList | File[] | null) => {
@@ -597,11 +537,6 @@ export const Composer = memo(function Composer({
     }
   }, [onPickWorkspace, pickPending]);
 
-  /**
-   * Menu "Tác vụ": khai báo thành data, chia 3 nhóm (Chế độ / Tra cứu &
-   * media / Nâng cao). Nhãn và hành vi giữ nguyên bản cũ, mỗi mục thêm mô tả
-   * một dòng để người dùng biết mục đó làm gì trước khi bấm.
-   */
   const modeTasks: TaskSpec[] = [];
   const lookupTasks: TaskSpec[] = [];
   const advancedTasks: TaskSpec[] = [];
@@ -666,45 +601,6 @@ export const Composer = memo(function Composer({
     });
   }
 
-  if (mediaActions?.image) {
-    lookupTasks.push({
-      key: 'image',
-      icon: ImagePlus,
-      disabled: !canGenerateMedia,
-      label: `Tạo ảnh bằng ${mediaActions.image.label}`,
-      shortLabel: 'Tạo ảnh',
-      description: 'Dùng nội dung ô nhập làm prompt tạo ảnh',
-      onClick: () => startMedia(mediaActions.image, 'image'),
-    });
-  }
-
-  if (mediaActions?.video) {
-    lookupTasks.push({
-      key: 'video',
-      icon: Film,
-      disabled: !canGenerateMedia,
-      label: `Tạo video bằng ${mediaActions.video.label}`,
-      shortLabel: 'Tạo video',
-      description: 'Dùng nội dung ô nhập làm prompt tạo video',
-      onClick: () => startMedia(mediaActions.video, 'video'),
-    });
-  }
-
-  if (voice.supported) {
-    lookupTasks.push({
-      key: 'voice',
-      icon: voice.listening ? Square : Mic,
-      active: voice.listening,
-      label: voice.listening ? 'Dừng nhận diện giọng nói' : 'Nhập bằng giọng nói',
-      shortLabel: voice.listening ? 'Dừng ghi âm' : 'Giọng nói',
-      description: 'Nhập ô nhập bằng giọng nói tiếng Việt',
-      onClick: () => {
-        voice.clearError();
-        voice.toggle();
-      },
-    });
-  }
-
   if (onGoalLoopClick) {
     advancedTasks.push({
       key: 'goal-loop',
@@ -717,18 +613,6 @@ export const Composer = memo(function Composer({
       shortLabel: goalLoopActive ? `Goal ${goalLoopInfo ?? ''}`.trim() : 'Goal loop',
       description: 'Agent tự lặp từng lượt tới khi xong mục tiêu',
       onClick: () => onGoalLoopClick(draft),
-    });
-  }
-
-  if (onOpenOrchestrator) {
-    advancedTasks.push({
-      key: 'orchestrator',
-      icon: Network,
-      active: orchestratorOpen,
-      label: 'Orchestrator · chạy nhiều agent theo lưới tham số rồi tổng hợp',
-      shortLabel: 'Orchestrator',
-      description: 'Chạy nhiều agent theo lưới tham số rồi tổng hợp',
-      onClick: onOpenOrchestrator,
     });
   }
 
@@ -780,7 +664,7 @@ export const Composer = memo(function Composer({
 
   const taskGroups: TaskGroupSpec[] = [
     { key: 'mode', label: 'Chế độ', items: modeTasks },
-    { key: 'lookup-media', label: 'Tra cứu & media', items: lookupTasks },
+    { key: 'lookup', label: 'Tra cứu', items: lookupTasks },
     { key: 'advanced', label: 'Nâng cao', items: advancedTasks },
   ].filter((g) => g.items.length > 0);
 
@@ -861,16 +745,6 @@ export const Composer = memo(function Composer({
                 </span>
               </button>
             ))}
-            {onSavePrompt && draft.length > 1 && (
-              <button
-                type="button"
-                onClick={() => void quickSavePrompt()}
-                className="flex w-full items-center gap-1.5 border-t border-[#495059] px-3 py-2 text-left font-mono text-[11.5px] text-[#6a9fcc] transition-colors hover:text-[#ebe7e4] hover:bg-[#161d27] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[#6a9fcc]"
-              >
-                <BookmarkPlus size={13} />
-                Lưu nhanh &quot;/{slashQuery}&quot; làm mẫu
-              </button>
-            )}
           </div>
         )}
 
@@ -896,31 +770,12 @@ export const Composer = memo(function Composer({
           </div>
         )}
 
-        {(voice.listening || voice.error || webBusy) && (
+        {webBusy && (
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3.5 pt-3 font-mono text-[12px] leading-relaxed">
-            {webBusy && (
-              <span className="flex min-w-0 items-center gap-1.5 text-[#9fa4ab]">
-                {/* Con trỏ █ nhấp nháy — tín hiệu "đang chạy" đặc trưng terminal. */}
-                <span aria-hidden="true" className="terminal-cursor" />
-                <span className="truncate">Đang tra cứu web…</span>
-              </span>
-            )}
-            {voice.listening && (
-              <span className="flex min-w-0 items-center gap-2 text-[#9fa4ab]">
-                <span
-                  aria-hidden="true"
-                  className="h-2 w-2 flex-none bg-[#e8704f]"
-                />
-                <span className="truncate">
-                  {voice.interim || 'Đang nghe… nói tiếng Việt nhé'}
-                </span>
-              </span>
-            )}
-            {voice.error && (
-              <span role="alert" className="text-[#e8993a]">
-                {voice.error}
-              </span>
-            )}
+            <span className="flex min-w-0 items-center gap-1.5 text-[#9fa4ab]">
+              <span aria-hidden="true" className="terminal-cursor" />
+              <span className="truncate">Đang tra cứu web…</span>
+            </span>
           </div>
         )}
 

@@ -4,7 +4,7 @@ const nextConfig = {
      server dev quảng bá localhost — Next 16 mặc định chặn dev resource
      cross-origin ("Blocked cross-origin request to Next.js dev resource").
      Cho phép cả hai tên máy cục bộ để shell không mất chunk JS. */
-  allowedDevOrigins: ['127.0.0.1', 'localhost'],
+  allowedDevOrigins: ['127.0.0.1', 'localhost', '*.monkeycode-ai.live'],
 };
 
 module.exports = nextConfig;

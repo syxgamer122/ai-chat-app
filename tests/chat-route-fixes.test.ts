@@ -61,33 +61,11 @@ describe('A3/A5 — đường emulated vẫn đủ server tools + MCP tools', ()
   });
 });
 
-/**
- * Bug 3 (A4): nhánh fallback Pollinations (gateway chính không trả ảnh) kết
- * thúc bằng `writeFinish('stop'); return;` — bản cũ return không dọn, để lại
- * CẢ idleTimer lẫn budgetTimer (tới 290s với model video) chạy tiếp sau khi
- * stream đã khép.
- *
- * Đảo điều kiện (xoá một trong ba lệnh dọn khỏi khối `if (poll)`) → describe
- * này ĐỎ: prefix thiếu hoặc thứ tự sai.
- */
-describe('A4 — nhánh Pollinations dọn đủ timer trước writeFinish', () => {
-  const blockMatch = source.match(
-    /const poll = pollinationsMarkdown\(lastUser, targetModel\);\s*\n\s*if \(poll\) \{([\s\S]*?)\n\s*return;/,
-  );
-
-  it('tồn tại khối `if (poll)` với lối thoát return', () => {
-    expect(blockMatch).not.toBeNull();
-  });
-
-  it.skipIf(!blockMatch)('đủ clearIdle + clearTimeout(budgetTimer) TRƯỚC writeFinish', () => {
-    const block = blockMatch![1];
-    for (const token of ['clearIdle();', 'clearTimeout(budgetTimer);']) {
-      expect(block).toContain(token);
-    }
-    // Thứ tự: cả hai lệnh dọn phải chạy trước khi stream khép lại.
-    const finishAt = block.indexOf("writeFinish('stop')");
-    expect(finishAt).toBeGreaterThan(block.indexOf('clearIdle();'));
-    expect(finishAt).toBeGreaterThan(block.indexOf('clearTimeout(budgetTimer);'));
+describe('media generation retirement', () => {
+  it('removes generation endpoints, SSE parsing and Pollinations fallback', () => {
+    expect(source).not.toMatch(/pollinations|images\/generations|emitMedia|pumpSseData|coreToOpenAiMessages/i);
+    expect(source).not.toMatch(/VIDEO_BUDGET_MS|isVideoModel|isImageModel/);
+    expect(source).toContain('MEDIA_GENERATION_RETIRED');
   });
 });
 

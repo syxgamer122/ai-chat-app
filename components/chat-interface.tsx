@@ -41,14 +41,11 @@ import {
   reconcileOnBoot,
   serializeRunState,
 } from '@/lib/run-lifecycle';
-import { Composer, type MediaAction, type MediaActions, type SlashPrompt } from '@/components/composer';
+import { Composer, type SlashPrompt } from '@/components/composer';
 import { ToastHost } from '@/components/toast';
 import type { ModelOption } from '@/components/model-selector';
 import { useTitleGenerator } from '@/lib/use-title-generator';
-import { ensurePromptSeed, savePrompt } from '@/lib/prompt-library';
 import { ensureProviderSeed } from '@/lib/providers';
-import { isSameFamilyAsMedia, pickMediaModels } from '@/lib/media-models';
-import { MediaGenerationError, generateMedia } from '@/lib/media-generate';
 import { type ThinkingLevel } from '@/lib/provider-url';
 import { estimatePromptTokens, shouldCompact, evaluateUsageTrigger, splitForCompaction } from '@/lib/context-budget';
 import { drainQueue, enqueueMessage, isQueueMode, type QueueMode } from '@/lib/message-queue';
@@ -250,7 +247,6 @@ import { DiffConfirm, type DiffConfirmState } from '@/components/diff-confirm';
 import { ShellConfirm } from '@/components/shell-confirm';
 import type { StagingPanelState } from '@/components/staging-panel';
 import { McpToolApprovalDialog } from '@/components/mcp/tool-approval-dialog';
-import { useOrchestrator } from '@/lib/use-orchestrator';
 import { toSkills } from '@/lib/prompt-library';
 import { matchActiveSkills } from '@/lib/skills';
 import { gatherPdfContexts } from '@/lib/use-pdf-context';
@@ -266,18 +262,10 @@ import { WorkspaceCheckpointBar } from '@/components/workspace-checkpoints';
 import type { BranchInfo } from './chat/message-item';
 import type { ComposerApi } from '@/components/composer';
 
-/* Ba panel overlay lớn (staging/orchestrator/plan) chỉ mở theo yêu cầu —
-   import tĩnh kéo cả ba (kèm heatmap, diff view, subtask UI) vào chunk
-   trang chính dù 99% phiên không mở chúng. dynamic() tách chunk riêng,
-   tải lúc lần đầu mở. ssr:false vì đây đã là client tree (hooks). */
 import dynamic from 'next/dynamic';
 
 const StagingPanel = dynamic(
   () => import('@/components/staging-panel').then((m) => m.StagingPanel),
-  { ssr: false },
-);
-const OrchestratorPanel = dynamic(
-  () => import('@/components/orchestrator/orchestrator-panel').then((m) => m.OrchestratorPanel),
   { ssr: false },
 );
 const PlanPanel = dynamic(
@@ -377,10 +365,7 @@ export default function ChatInterface() {
     [currentChatId],
   );
 
-  /** Thư viện prompt cho slash menu "/" trong composer.
-   *  Seed mặc định chạy ngoài liveQuery (liveQuery cấm giao dịch ghi). */
   useEffect(() => {
-    void ensurePromptSeed();
     void ensureProviderSeed();
     void loadToolPermissionsFromDb().then((dbPerms) => {
       if (dbPerms && Object.keys(dbPerms).length > 0) {
@@ -396,16 +381,13 @@ export default function ChatInterface() {
     [],
     [],
   );
-  /** Slash menu chỉ hiển thị prompt CHÈN — skill (mode='skill') tự kích hoạt
-      theo ngữ cảnh, không chọn tay qua "/". Recipe gộp vào menu "/" với nhãn
-      riêng (kind='recipe'): chọn recipe sẽ MỞ panel thay vì chèn text. */
   const recipeRecords = useLiveQuery(
     () => db.recipes.orderBy('updatedAt').reverse().toArray(),
     [],
     [] as RecipeRecord[],
   );
   const insertPrompts = useMemo(() => {
-    const prompts: SlashPrompt[] = (promptTemplates ?? []).filter((p) => p.mode !== 'skill');
+    const prompts: SlashPrompt[] = [];
     /* Lệnh built-in chuẩn hóa (P2-10): /plan, /mode, /summarize, /recipe, /skills, /memory, /tools, /cost */
     const builtinCommands: SlashPrompt[] = BUILTIN_SLASH_COMMANDS.map((cmd) => ({
       id: `cmd:${cmd.name}`,
@@ -432,21 +414,7 @@ export default function ChatInterface() {
       });
     }
     return [...builtinCommands, ...customCommands, ...prompts];
-  }, [promptTemplates, recipeRecords, customSlashCommands]);
-
-  /**
-   * Model media khả dụng cho nhà cung cấp đang chọn — chỉ từ /v1/models mà
-   * provider khai báo (phát hiện qua tên model). Model media built-in đã gỡ
-   * cùng tầng gateway.
-   */
-  const mediaCatalog = useMemo(
-    () =>
-      (activeProvider?.models ?? []).map((m) => ({
-        id: m.id,
-        label: m.name || m.id,
-      })),
-    [activeProvider],
-  );
+  }, [recipeRecords, customSlashCommands]);
 
   const MODELS: ModelOption[] = useMemo(() => {
     if (activeProvider?.models?.length) {
@@ -454,33 +422,6 @@ export default function ChatInterface() {
     }
     return AVAILABLE_MODELS.map((m) => deriveModelOption(m));
   }, [activeProvider]);
-
-  /**
-   * Nút "Tạo ảnh" / "Tạo video" cạnh nút mic. Chỉ hiện khi model đang chọn
-   * cùng họ với model media của provider.
-   *
-   * `direct`: có key ở phía trình duyệt → gọi thẳng provider, không qua
-   * /api/chat, nên không bị giới hạn thời gian chạy của serverless function
-   * (video mất 2-5 phút, vượt xa hạn mức của Vercel Hobby).
-   */
-  const mediaActions: MediaActions | undefined = useMemo(() => {
-    if (!mediaCatalog.length) return undefined;
-    const picked = pickMediaModels(mediaCatalog);
-    if (!picked.image && !picked.video) return undefined;
-    if (!isSameFamilyAsMedia(model, picked)) return undefined;
-    // `direct` chỉ đúng khi CHÍNH provider đó có key trong IndexedDB. Điều kiện
-    // cũ `activeProvider.apiKey || apiKey` bật direct dựa trên key của máy chủ
-    // mặc định, dẫn tới handleGenerateMedia gửi key đó tới baseUrl của provider.
-    const direct = Boolean(activeProvider?.baseUrl && activeProvider.apiKey);
-    return {
-      ...(picked.image
-        ? { image: { modelId: picked.image.id, label: picked.image.label, direct } }
-        : {}),
-      ...(picked.video
-        ? { video: { modelId: picked.video.id, label: picked.video.label, direct } }
-        : {}),
-    };
-  }, [activeProvider, mediaCatalog, model]);
 
   /** Đổi provider → model hiện tại không còn trong danh sách thì lấy cái đầu. */
   useEffect(() => {
@@ -516,17 +457,8 @@ export default function ChatInterface() {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
 
-  /**
-   * Đang sinh ảnh/video trực tiếp từ trình duyệt (không đi qua /api/chat).
-   * Tách khỏi isLoading của useChat vì đây không phải stream của SDK.
-   */
-  const [mediaBusy, setMediaBusy] = useState(false);
-  const mediaAbortRef = useRef<AbortController | null>(null);
-
   /** API mệnh lệnh của composer (draft-local): adopt/voice/suggestion ghi draft. */
   const composerApiRef = useRef<ComposerApi | null>(null);
-  /** Mục tiêu seed cho orchestrator lúc mở panel (đọc draft 1 lần, không sync). */
-  const [orchestratorSeed, setOrchestratorSeed] = useState('');
 
   const [allStoredMessages, setAllStoredMessages] = useState<StoredMessage[]>([]);
   const [activeLeafId, setActiveLeafId] = useState<string | null>(null);
@@ -574,21 +506,8 @@ export default function ChatInterface() {
   const [stagingVersion, setStagingVersion] = useState(0);
   const [stagingPanelOpen, setStagingPanelOpen] = useState(false);
 
-  /**
-   * Orchestrator (port agent-orchestrator + vectorbt): chạy N agent theo lưới
-   * tham số, chấm điểm, tổng hợp.
-   *
-   * CỐ TÌNH là một mặt phẳng RIÊNG, không cắm vào luồng gửi tin nhắn: kết quả
-   * chỉ vào hội thoại khi người dùng chủ động bấm nút — "Thêm vào hội thoại"
-   * ghi message assistant xuống đúng nhánh đang xem (qua lớp persist sẵn có),
-   * "Đưa vào ô nhập" chỉ đặt text vào composer để người dùng sửa rồi tự gửi.
-   */
-  const [orchestratorOpen, setOrchestratorOpen] = useState(false);
   const [activeRecallPack, setActiveRecallPack] = useState<RecallPack | null>(null);
   const [showRecalledDetail, setShowRecalledDetail] = useState(false);
-  const orchestrator = useOrchestrator();
-  /** Chặn ghép 2 lần cùng một kết quả (double-click trước khi panel kịp đóng). */
-  const orchestratorAdoptLockRef = useRef(false);
 
   /** Panel "Công cụ & quyền": toàn bộ catalog tool + quyền auto-pilot theo nhóm. */
   const [toolsPanelOpen, setToolsPanelOpen] = useState(false);
@@ -1995,11 +1914,11 @@ export default function ChatInterface() {
                 files: Array.isArray(st.files) ? st.files.filter((f: unknown): f is string => typeof f === 'string') : undefined,
               });
             }
-            /* Plan là tài nguyên CỦA CHAT. currentChatId null (draft) mà ghi
-               `plan:null` thì vừa tạo khoá mồ côi không chat nào đọc được, vừa
-               bắt MỌI draft sau này dùng chung một khoá → plan phiên này đè
-               lên phiên khác. Materialize draft thành chat thật theo đúng
-               pattern submitTurn/handleGenerateMedia rồi mới ghi. */
+             /* Plan là tài nguyên CỦA CHAT. currentChatId null (draft) mà ghi
+                `plan:null` thì vừa tạo khoá mồ côi không chat nào đọc được, vừa
+                bắt MỌI draft sau này dùng chung một khoá → plan phiên này đè
+                lên phiên khác. Materialize draft thành chat thật theo đúng
+                pattern submitTurn rồi mới ghi. */
             let chatId = useAppStore.getState().currentChatId;
             if (!chatId) {
               chatId = draftId;
@@ -3348,8 +3267,6 @@ export default function ChatInterface() {
     stop();
     closeTurnCapture();
 
-    // Hủy luôn lượt tạo ảnh/video đang chạy trực tiếp từ trình duyệt.
-    mediaAbortRef.current?.abort();
     /**
      * P3.1 (Escape) — abort rồi TRẢ message đã queue về ô nhập: ưu tiên tin
      * steering mới nhất, hết steering mới tới follow-up.
@@ -4659,10 +4576,6 @@ export default function ChatInterface() {
   ]);
 
   /**
-   * Gửi lượt chat. `modelOverride` dùng cho 2 nút tạo ảnh / tạo video: chỉ
-   * lượt này đi bằng model media, model đang chọn trong ModelSelector giữ nguyên.
-   */
-  /**
    * draftText là SNAPSHOT từ composer (draft-local) — submit không đọc state
    * `input` của useChat nữa. Trả true = tin nhắn đã được đẩy vào pipeline
    * (append đã gọi), composer mới dám xoá draft; false = bail (đang bận,
@@ -4670,14 +4583,8 @@ export default function ChatInterface() {
    */
   const submitTurn = useCallback(async (draftText: string, modelOverride?: string): Promise<boolean> => {
     if ((!draftText.trim() && attachments.length === 0) || isLoading) return false;
-    /* B4: gate thêm 2 đường hở — webBusy (tra cứu tới ~15s, isLoading vẫn
-       false) và mediaBusy (Enter bypass nút Send đã disabled). */
     if (webBusyRef.current) {
       showNotice('Đang tra cứu web — chờ xíu rồi gửi tiếp nhé.');
-      return false;
-    }
-    if (mediaBusy) {
-      showNotice('Đang tạo media — đợi xong hoặc bấm Dừng đã nhé.');
       return false;
     }
 
@@ -4976,7 +4883,7 @@ export default function ChatInterface() {
     }
     /* beginRun/currentRun/setRepairable là hàm ổn định (useCallback rỗng bên
        trong hook), nên thêm vào đây không làm submitTurn bị tạo lại. */
-  }, [attachments, isLoading, mediaBusy, currentChat, currentChatId, draftId, setCurrentChatId, append, pin, generateTitle, messages, webSearchEnabled, promptTemplates, agentToolsEnabled, forceEmulatedTools, agentMode, stagingEnabled, beginRun, currentRun, setRepairable, MODELS, isRoutableModel, routingBodyFor, approvalPolicy]);
+  }, [attachments, isLoading, currentChat, currentChatId, draftId, setCurrentChatId, append, pin, generateTitle, messages, webSearchEnabled, promptTemplates, agentToolsEnabled, forceEmulatedTools, agentMode, stagingEnabled, beginRun, currentRun, setRepairable, MODELS, isRoutableModel, routingBodyFor, approvalPolicy]);
 
   /* ---------------------------------------------------------------- */
   /* Recipe runner : attempt → checks → retry/pass/stop.   */
@@ -5381,321 +5288,6 @@ export default function ChatInterface() {
     ],
   );
 
-  /**
-   * Tạo ảnh/video.
-   *
-   * Hai đường đi, chọn theo `action.direct`:
-   * - `direct` = gateway cho phép cross-origin VÀ có key phía client → fetch
-   *   thẳng từ tab, không đụng giới hạn thời gian của serverless.
-   * - ngược lại → qua /api/chat. Đây là đường an toàn cho gateway chặn origin (trả 403 cho mọi
-   *   request có `Origin`, và không dùng API key), và nó KỊP: video đo được
-   *   120-126s, dưới ngân sách 290s của route.
-   *
-   * Tin nhắn user + assistant được đẩy vào state ngay để lớp persistence
-   * hiện có ghi xuống IndexedDB như một lượt chat bình thường.
-   */
-  const handleGenerateMedia = useCallback(
-    async (action: MediaAction, kind: 'image' | 'video', draftPrompt: string) => {
-      const prompt = draftPrompt.trim();
-      if (!prompt || isLoading || mediaBusy) return;
-
-      // Không gọi thẳng được → đi đường server. Video mất vài phút nên nói
-      // trước để người dùng không đóng tab giữa lúc đang tạo.
-      if (!action.direct) {
-        if (kind === 'video') {
-          showNotice('Đang tạo video — thường mất 2–3 phút. Giữ tab này mở.', 6000);
-        }
-        void submitTurn(prompt, action.modelId);
-        return;
-      }
-
-      const baseUrl = activeProvider?.baseUrl;
-      // Key phải thuộc đúng gateway sẽ được gọi. settings.apiKey là key của
-      // "Máy chủ mặc định" (server env) — không được gửi tới baseUrl mà người
-      // dùng tự khai, vì đường này fetch trực tiếp từ trình duyệt.
-      const key = activeProvider?.apiKey;
-      if (!baseUrl || !key) {
-        showNotice('Nhà cung cấp chưa có API key trong trình duyệt.');
-        return;
-      }
-
-      let chatId = currentChatId;
-      if (!chatId) {
-        chatId = draftId;
-        hydratedFor.current = chatId;
-        await db.chats.put({
-          id: chatId,
-          title: 'New Chat',
-          pinned: 0,
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
-        });
-        setCurrentChatId(chatId);
-      }
-
-      const isFirstMessage = messages.length === 0;
-      const userId = crypto.randomUUID();
-      const assistantId = crypto.randomUUID();
-      const controller = new AbortController();
-
-      mediaAbortRef.current = controller;
-      setMediaBusy(true);
-      composerApiRef.current?.clear();
-      finishRef.current = 'stop';
-      pendingAssistantForkRef.current = null;
-      pin(1500);
-
-      setMessages((prev) => [
-        ...prev,
-        { id: userId, role: 'user', content: prompt },
-        {
-          id: assistantId,
-          role: 'assistant',
-          content: '',
-          reasoning: kind === 'image' ? 'Đang tạo ảnh…' : 'Đang gửi yêu cầu tạo video…',
-          annotations: [{ model: action.modelId }],
-        } as Message,
-      ]);
-
-      const setAssistant = (patch: Partial<Message>) => {
-        setMessages((prev) =>
-          prev.map((m) => (m.id === assistantId ? ({ ...m, ...patch } as Message) : m)),
-        );
-      };
-
-      try {
-        const result = await generateMedia({
-          kind,
-          baseUrl,
-          apiKey: key,
-          model: action.modelId,
-          prompt,
-          signal: controller.signal,
-          onProgress: (text) => setAssistant({ reasoning: text } as Partial<Message>),
-        });
-
-        setAssistant({ content: result.markdown, reasoning: undefined } as Partial<Message>);
-
-        if (isFirstMessage) void generateTitle(chatId, prompt);
-      } catch (err) {
-        if (controller.signal.aborted) {
-          setAssistant({ content: '_Đã hủy._', reasoning: undefined } as Partial<Message>);
-        } else if (err instanceof MediaGenerationError && err.originBlocked) {
-          /**
-           * Gateway chỉ allowlist origin của chính họ (vd 403 "Origin not
-           * allowed"), hoặc trình duyệt chặn CORS. Bỏ 2 tin nhắn vừa thêm rồi
-           * gửi lại qua /api/chat — server không gửi Origin nên không bị chặn.
-           *
-           * Dùng append() chứ không phải submitTurn(): input đã bị xoá nên
-           * handleSubmit() của useChat sẽ gửi chuỗi rỗng.
-           */
-          setMessages((prev) => prev.filter((m) => m.id !== userId && m.id !== assistantId));
-          if (kind === 'video') {
-            showNotice(
-              'Đang tạo video qua máy chủ — thường mất 2–3 phút. Giữ tab này mở.',
-              6000,
-            );
-          }
-          void append(
-            { role: 'user', content: prompt },
-            { body: { model: action.modelId } },
-          );
-          if (isFirstMessage) void generateTitle(chatId, prompt);
-        } else {
-          const message =
-            err instanceof MediaGenerationError ? err.message : 'Tạo media thất bại.';
-          finishRef.current = 'error';
-          showNotice(message, 6000);
-          setAssistant({ content: `_${message}_`, reasoning: undefined } as Partial<Message>);
-        }
-      } finally {
-        mediaAbortRef.current = null;
-        setMediaBusy(false);
-      }
-    },
-    [
-      activeProvider,
-      append,
-      composerApiRef,
-      currentChatId,
-      draftId,
-      generateTitle,
-      isLoading,
-      mediaBusy,
-      messages.length,
-      pin,
-      setCurrentChatId,
-      setMessages,
-      submitTurn,
-    ],
-  );
-
-  /** Chọn prompt trong slash menu giờ xử lý ngay trong composer (draft-local). */
-
-  const handleSaveQuickPrompt = useCallback(async (title: string, content: string) => {
-    try {
-      await savePrompt({ title, content });
-    } catch (err) {
-      console.error('[prompt] lưu nhanh thất bại:', err);
-    }
-  }, []);
-
-  /**
-   * Chạy orchestrator. Ngữ cảnh gửi kèm là 8 tin gần nhất — đủ để lưới hiểu
-   * "đang nói về cái gì" mà không phình payload (mỗi tin bị cắt 8k ký tự ở
-   * server, nhưng client cũng tự cắt để không gửi thừa).
-   */
-  const handleOrchestratorRun = useCallback(
-    (opts: { goal: string; maxRuns: number; judge: boolean }) => {
-      const context = messages
-        .slice(-8)
-        .map((m) => ({
-          role: (m.role === 'assistant' ? 'assistant' : m.role === 'system' ? 'system' : 'user') as
-            | 'user'
-            | 'assistant'
-            | 'system',
-          content: typeof m.content === 'string' ? m.content.slice(0, 2_000) : '',
-        }))
-        .filter((m) => m.content.trim().length > 0);
-
-      void orchestrator.start({
-        goal: opts.goal,
-        context,
-        maxRuns: opts.maxRuns,
-        judge: opts.judge,
-        model,
-        headers: buildApiHeaders(),
-      });
-    },
-    [messages, model, orchestrator, buildApiHeaders],
-  );
-
-  /** "Đưa vào ô nhập" (hành vi cũ của nút chính, giờ là nút phụ): người dùng sửa rồi tự gửi. */
-  const handleOrchestratorAdopt = useCallback(
-    (text: string) => {
-      if (!text.trim()) return;
-      composerApiRef.current?.setText(text.trim());
-    },
-    [composerApiRef],
-  );
-
-  /**
-   * "Thêm vào hội thoại": ghi đáp án tổng hợp của orchestrator vào hội thoại
-   * HIỆN TẠI như một message assistant (nguyên văn, không cắt), kèm annotation
-   * `orchestratorAdopted` làm provenance để UI sau này gắn huy hiệu cho đúng
-   * message kể cả sau reload.
-   *
-   * Persist đi qua đúng lớp đồng bộ sẵn có: setMessages → effect sync →
-   * reconcileActiveMessages → appendMessage (cấp seq/branchOrder nguyên tử
-   * trong transaction, parentId = message cuối nhánh đang xem). KHÔNG dùng
-   * append() của useChat — hook ai@4 trigger request /api/chat cho MỌI append,
-   * mà message "chép" này không được phép tốn token.
-   */
-  const handleOrchestratorAppendToChat = useCallback(
-    async (text: string): Promise<boolean> => {
-      const answer = text.trim();
-      /* Nút đã disable khi answer rỗng — guard này cho các đường gọi khác. */
-      if (!answer) return false;
-      /* Run đang sống (stream/media) → ghi giữa chừng phá projection persist. */
-      if (isLoading) {
-        showNotice('Đang trả lời — chờ hết lượt này rồi thêm kết quả nhé.');
-        return false;
-      }
-      if (mediaBusy) {
-        showNotice('Đang tạo media — đợi xong hoặc bấm Dừng đã nhé.');
-        return false;
-      }
-      if (orchestratorAdoptLockRef.current) return false;
-      orchestratorAdoptLockRef.current = true;
-
-      try {
-        /* Persist đọc finishRef làm finishReason cho assistant CUỐI projection —
-           reset để run lỗi/abort trước đó không dính status 'error' lên message mới. */
-        finishRef.current = 'stop';
-        /* Message này KHÔNG phải assistant fork của Edit/Regenerate. */
-        pendingAssistantForkRef.current = null;
-
-        /* Chưa có chat (mới là draftId): effect persist bỏ qua messages khi
-           currentChatId null, nên phải tạo chat trước — đúng pattern của
-           submitTurn / handleGenerateMedia. */
-        let chatId = currentChatId;
-        if (!chatId) {
-          chatId = draftId;
-          hydratedFor.current = chatId;
-          await db.chats.put({
-            id: chatId,
-            title: 'New Chat',
-            pinned: 0,
-            createdAt: Date.now(),
-            updatedAt: Date.now(),
-          });
-          setCurrentChatId(chatId);
-        }
-
-        /* Hành động thủ công của user = đổi hướng — dừng goal loop như
-           submitTurn, tránh message adopt lọt vào giữa các steering turn
-           thành ngữ cảnh lạ cho lượt kế. */
-        if (getGoalLoop(chatId)?.status === 'active') {
-          setGoalLoop(stopGoalLoop(chatId));
-        }
-
-        const isFirstMessage = messages.length === 0;
-        const st = orchestrator.state;
-        const adopted: Message = {
-          id: crypto.randomUUID(),
-          role: 'assistant',
-          content: answer,
-          createdAt: new Date(),
-          annotations: [
-            {
-              orchestratorAdopted: {
-                goal: st.plan?.goal ?? '',
-                runs: st.total,
-                ok: st.stats?.ok ?? null,
-                failed: st.stats?.failed ?? null,
-                model,
-                adoptedAt: Date.now(),
-              },
-            },
-          ] as Message['annotations'],
-        };
-
-        /* Không loading → effect persist flush NGAY (không đợi timer 250ms)
-           nhưng vẫn là eventual: ghi Dexie đi qua effect + promise chain,
-           KHÔNG await được — đóng tab ngay sau khi bấm có thể mất message. */
-        setMessages((prev) => [...prev, adopted]);
-        pin(1500);
-
-        /* Draft vừa thành chat: sinh title từ mục tiêu sweep (đầy đủ ý hơn
-           đáp án dài); plan hỏng thì fallback về chính đáp án. */
-        if (isFirstMessage) {
-          void generateTitle(chatId, st.plan?.goal || answer);
-        }
-        return true;
-      } catch (err) {
-        console.error('[orchestrator-adopt]', err);
-        showNotice('Không thêm được kết quả vào hội thoại. Thử lại giúp nhé.');
-        return false;
-      } finally {
-        orchestratorAdoptLockRef.current = false;
-      }
-    },
-    [
-      currentChatId,
-      draftId,
-      generateTitle,
-      isLoading,
-      mediaBusy,
-      messages.length,
-      model,
-      orchestrator,
-      pin,
-      setCurrentChatId,
-      setGoalLoop,
-      setMessages,
-
-    ],
-  );
 
   /** Suggestion chip (empty state) → đặt draft composer + focus. */
   const onSelectSuggestion = useCallback((text: string) => {
@@ -5729,11 +5321,6 @@ export default function ChatInterface() {
   const onOpenStaging = useCallback(() => setStagingPanelOpen(true), []);
 
   const onOpenToolsPanel = useCallback(() => setToolsPanelOpen(true), []);
-
-  const onOpenOrchestrator = useCallback(() => {
-    setOrchestratorSeed(composerApiRef.current?.getText() ?? '');
-    setOrchestratorOpen(true);
-  }, []);
 
   const onCompact = useCallback(() => {
     void performCompaction('manual');
@@ -5821,7 +5408,7 @@ export default function ChatInterface() {
         models={MODELS}
         model={model}
         onModelChange={handleModelChange}
-        modelSelectorDisabled={isLoading || mediaBusy}
+        modelSelectorDisabled={isLoading}
         modelProviderId={activeProviderId}
         modelCatalogBuiltin={!activeProvider?.models?.length}
         modelFavorites={modelFavorites}
@@ -5829,7 +5416,7 @@ export default function ChatInterface() {
         onToggleModelFavorite={handleToggleModelFavorite}
         agentMode={agentMode}
         onToggleAgentMode={onToggleAgentMode}
-        agentModeDisabled={isLoading || mediaBusy}
+        agentModeDisabled={isLoading}
         workspace={workspace ? { ...workspace, branch: gitBranch } : workspace}
         ctxUsed={contextUsage?.tokens}
         ctxMax={contextUsage?.max}
@@ -5838,9 +5425,9 @@ export default function ChatInterface() {
         }
         thinkingSupportedLevels={modelReasoningCap ? modelReasoningCap.efforts : null}
         onThinkingLevelChange={handleThinkingLevelChange}
-        thinkingDisabled={isLoading || mediaBusy}
+        thinkingDisabled={isLoading}
         thinkingMandatory={modelReasoningCap?.mandatory ?? false}
-        run={{ streaming: isLoading, mediaBusy, webBusy }}
+        run={{ streaming: isLoading, mediaBusy: false, webBusy }}
         hasMessages={hasMessages}
         canCompact={canCompactNow}
         compactBusy={compactBusy}
@@ -5871,7 +5458,7 @@ export default function ChatInterface() {
           messages={messages}
           compaction={activeCompaction}
           branchInfoByMessageId={branchInfoByMessageId}
-          isLoading={isLoading || mediaBusy}
+          isLoading={isLoading}
           lastMessageId={lastMessageId}
           editingId={editingId}
           copiedId={copiedId}
@@ -5931,7 +5518,7 @@ export default function ChatInterface() {
       {/* Undo agent coding: chỉ hiện khi chat này có snapshot restorable. */}
       <WorkspaceCheckpointBar
         chatId={currentChatId}
-        busy={isLoading || mediaBusy}
+        busy={isLoading}
         onNotice={showNotice}
       />
 
@@ -6022,16 +5609,13 @@ export default function ChatInterface() {
 
       <Composer
         onSubmit={onSubmit}
-        isStreaming={isLoading || mediaBusy}
+        isStreaming={isLoading}
         onStop={handleStop}
         attachments={composerAttachments}
         onAddFiles={addFiles}
         slashPrompts={insertPrompts}
         onApplySlashPrompt={handleApplySlashPrompt}
-        onSavePrompt={handleSaveQuickPrompt}
         onRemoveAttachment={handleRemoveAttachmentById}
-        mediaActions={mediaActions}
-        onGenerateMedia={handleGenerateMedia}
         webSearch={webSearchEnabled}
         onToggleWebSearch={onToggleWebSearch}
         agentMode={agentMode}
@@ -6043,8 +5627,6 @@ export default function ChatInterface() {
         onOpenStaging={onOpenStaging}
         onOpenToolsPanel={onOpenToolsPanel}
         onOpenRecipes={() => setRecipesPanelOpen(true)}
-        orchestratorOpen={orchestratorOpen}
-        onOpenOrchestrator={onOpenOrchestrator}
         webBusy={webBusy}
         workspace={workspace}
         onPickWorkspace={pickFolder}
@@ -6079,20 +5661,6 @@ export default function ChatInterface() {
           onApplyAll={applyAllStaged}
           onRejectFile={rejectStagedFile}
           onRejectAll={rejectAllStaged}
-        />
-      )}
-      {orchestratorOpen && (
-        <OrchestratorPanel
-          open={orchestratorOpen}
-          state={orchestrator.state}
-          busy={orchestrator.busy}
-          chatBusy={isLoading || mediaBusy}
-          initialGoal={orchestratorSeed}
-          onRun={handleOrchestratorRun}
-          onCancel={orchestrator.cancel}
-          onClose={() => setOrchestratorOpen(false)}
-          onAdopt={handleOrchestratorAdopt}
-          onAppendToChat={handleOrchestratorAppendToChat}
         />
       )}
       {toolsPanelOpen && (

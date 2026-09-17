@@ -1,15 +1,13 @@
-import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
+import React, { memo, useState } from 'react';
 import type { Message } from 'ai/react';
 import TextareaAutosize from 'react-textarea-autosize';
-import { RefreshCcw, Paperclip, Pencil, Copy, Check, ChevronDown, ChevronUp, Volume2, OctagonX } from 'lucide-react';
+import { RefreshCcw, Paperclip, Pencil, Copy, Check, ChevronDown, ChevronUp } from 'lucide-react';
 import { MarkdownRenderer } from '@/components/markdown-renderer';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { BranchSwitcher } from '@/components/branch-switcher';
 import { MessageStatusBadge } from '@/components/message-status-badge';
 import { sanitizeContent, getFinishInfo } from '@/lib/chat-tree-persistence';
 import { stripEmulatedToolMarkup } from '@/lib/text-tool-guard';
-import { stripMarkdownForSpeech } from '@/lib/speech-text';
-import { useTts } from '@/lib/use-tts';
 import { ToolTrace } from '@/components/chat/tool-trace';
 import { MessageUsage } from '@/components/chat/message-usage';
 import { OrchestratorBadge, getOrchestratorAdoptedAnnotation } from '@/components/chat/orchestrator-badge';
@@ -120,8 +118,6 @@ export const MessageItem = memo(
   }: MessageItemProps) {
     const [isExpanded, setIsExpanded] = useState(false);
     const isLongUserMsg = m.role === 'user' && m.content.length > 250;
-    const { speakingId, supported: ttsSupported, toggleSpeak } = useTts();
-    const isSpeakingThis = speakingId === m.id;
 
     if (m.role === 'user') {
       return (
@@ -386,14 +382,6 @@ export const MessageItem = memo(
                 label="Sao chép"
                 active={isCopied}
               />
-              {ttsSupported && m.content.trim() && (
-                <ActionButton
-                  icon={isSpeakingThis ? OctagonX : Volume2}
-                  onClick={() => toggleSpeak(m.id, stripMarkdownForSpeech(sanitizeContent(m.content)))}
-                  label={isSpeakingThis ? 'Dừng đọc' : 'Đọc to'}
-                  active={isSpeakingThis}
-                />
-              )}
               <ActionButton
                 icon={RefreshCcw}
                 onClick={() => onRegenerate(m.id)}

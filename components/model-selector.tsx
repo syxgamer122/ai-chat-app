@@ -6,15 +6,14 @@ import {
   Brain,
   Check,
   ChevronDown,
-  Clapperboard,
   Eye,
   FileText,
-  Image as ImageIcon,
   Search,
   Star,
 } from 'lucide-react';
 import { useAnchoredPanel } from '@/lib/hooks/use-anchored-panel';
 import { useMediaQuery } from '@/lib/hooks/use-media-query';
+import { isRetiredMediaOption } from '@/lib/media-models';
 import {
   buildPickerSections,
   buildRenderLayout,
@@ -83,6 +82,9 @@ export function ModelSelector({
   const listId = useId();
 
   const current = useMemo(() => models.find((m) => m.id === value), [models, value]);
+  const selectableModels = useMemo(() => models.filter((m) => !isRetiredMediaOption(m)), [models]);
+  const retiredSelection = Boolean(current && isRetiredMediaOption(current));
+  const selectionLabel = retiredSelection ? 'Chọn model lập trình/chat' : current?.label ?? 'Model';
 
   const favoriteIds = useMemo(
     () =>
@@ -94,7 +96,7 @@ export function ModelSelector({
 
   const sections = useMemo(
     () =>
-      buildPickerSections(models, {
+      buildPickerSections(selectableModels, {
         favorites,
         recents,
         currentId: value,
@@ -102,7 +104,7 @@ export function ModelSelector({
         isBuiltinCatalog: builtinCatalog,
         query,
       }),
-    [models, favorites, recents, value, providerId, builtinCatalog, query],
+    [selectableModels, favorites, recents, value, providerId, builtinCatalog, query],
   );
 
   const close = useCallback((returnFocus = true) => {
@@ -277,12 +279,6 @@ export function ModelSelector({
         }`}
       >
         <div className="flex min-w-0 items-center gap-1.5">
-          {m.media === 'image' && (
-            <ImageIcon size={13} aria-hidden="true" className="flex-none text-[#9fa4ab]" />
-          )}
-          {m.media === 'video' && (
-            <Clapperboard size={13} aria-hidden="true" className="flex-none text-[#9fa4ab]" />
-          )}
           <span className="min-w-0 truncate text-xs font-mono">{m.label}</span>
           <span className="flex flex-none items-center gap-1 text-[#9fa4ab]" aria-hidden="true">
             {m.caps?.includes('vision') && <Eye size={12} className="flex-none" />}
@@ -324,7 +320,9 @@ export function ModelSelector({
     );
   };
 
-  const triggerTitle = current
+  const triggerTitle = retiredSelection
+    ? 'Tính năng tạo ảnh/video đã ngừng hoạt động. Vui lòng chọn model lập trình/chat để tiếp tục.'
+    : current
     ? [
         current.id,
         current.ctx !== undefined && !current.media ? `${fmtCtx(current.ctx)} token` : undefined,
@@ -353,17 +351,11 @@ export function ModelSelector({
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={open ? listId : undefined}
-        aria-label={`Model: ${current?.label ?? 'chưa chọn'}`}
+        aria-label={`Model: ${selectionLabel}`}
         title={triggerTitle}
         className="relative flex h-8 max-w-full items-center gap-1.5 rounded-none border border-[#495059] bg-[#161d27] px-2.5 font-mono text-[12px] font-medium text-[#ebe7e4] transition-colors after:absolute after:-inset-[6px] after:content-[''] hover:border-[#757d89] hover:bg-[#212730] disabled:opacity-40"
       >
-        {current?.media === 'image' && (
-          <ImageIcon size={13} aria-hidden="true" className="flex-none text-[#9fa4ab]" />
-        )}
-        {current?.media === 'video' && (
-          <Clapperboard size={13} aria-hidden="true" className="flex-none text-[#9fa4ab]" />
-        )}
-        <span className="min-w-0 max-w-[30vw] truncate sm:max-w-[160px]">{current?.label ?? 'Model'}</span>
+        <span className="min-w-0 max-w-[30vw] truncate sm:max-w-[160px]">{selectionLabel}</span>
         <ChevronDown size={12} className="flex-none text-[#9fa4ab]" aria-hidden="true" />
       </button>
 
@@ -399,7 +391,7 @@ export function ModelSelector({
                 />
               </div>
               <span className="flex-none text-[10.5px] tabular-nums text-[#9fa4ab]">
-                {models.length} model
+                {selectableModels.length} model
               </span>
             </div>
 

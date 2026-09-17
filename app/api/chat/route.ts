@@ -20,8 +20,7 @@ import { ALLOWED_MODEL_IDS, DEFAULT_MODEL_ID, findModelConfig, getModelConfig, m
 import { validateProviderBaseUrl, providerNeedsApiKey, THINKING_LEVELS, supportsThinkingLevel, type ThinkingLevel } from '@/lib/provider-url';
 import { getReasoningCapability } from '@/lib/model-reasoning-cache';
 import { resolveNearestEffort } from '@/lib/reasoning-capability';
-import { pumpSseLines } from '@/lib/sse';
-import { parseLooseJson } from '@/lib/json-repair';
+import { detectMediaKind } from '@/lib/media-models';
 import { isContextOverflowError } from '@/lib/context-budget';
 import { buildSubagentParentBrief } from '@/lib/context-compaction';
 import { restateUpstreamStatus } from '@/lib/upstream-status-rules';
@@ -85,25 +84,11 @@ import { mergeSameRole, normalize } from '@/lib/message-normalize';
 import { nonStreamingFetch } from '@/lib/non-streaming-fetch';
 import { looksLikePseudoError, extractPseudoErrorMessage } from '@/lib/pseudo-error-response';
 import { resetToolCallBudget } from '@/lib/tool-call-budget';
-import { pollinationsMarkdown } from '@/lib/pollinations';
 import { judgeInjection } from '@/lib/injection-guard';
 import { bridgeImagesInMessages, downgradeImagesToPlaceholders, shouldBridgeImages, type BridgeableMessage } from '@/lib/vision-bridge';
 import { ACTIVE_MODEL_BODY_FIELD } from '@/lib/aux-llm-chain';
 import { checkRateLimit, getClientIp, checkSameOrigin, verifyAccessAuth } from '@/lib/security';
 
-/**
- * Route này chạy trên Node.js runtime (KHÔNG phải Edge Function) — mọi ghi chú
- * về "edge" dưới đây chỉ còn giá trị lịch sử. Ngân sách thời gian (STREAM_BUDGET_MS,
- * VIDEO_BUDGET_MS) vẫn đặt dưới trần 300s của Vercel function streaming.
- *
- * Tạo ảnh/video ĐI QUA route này với mọi gateway chặn cross-origin — trả
- * 403 cho bất kỳ request có header `Origin`, tức là mọi lời gọi từ trình duyệt,
- * nên đường "gọi thẳng từ client" (lib/media-generate.ts) không dùng được cho
- * và tự fallback về đây.
- *
- * Video vẫn kịp: đo thực tế `qwen-video-2.0-pro` xong trong 120-126s,
- * byte đầu < 1.7s — nằm trong trần 300s của Vercel.
- */
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
@@ -115,17 +100,6 @@ export const dynamic = 'force-dynamic';
  */
 const STREAM_BUDGET_MS = Number(process.env.CHAT_STREAM_BUDGET_MS ?? '') || 270_000;
 
-/**
- * Ngân sách riêng cho model sinh video. Vercel cắt cứng function ở 300s
- * (Hobby: default = max = 300s; edge stream cũng 300s), nên đặt 290s để CHÍNH
- * ta kết thúc trước nền tảng và trả được thông báo tử tế — thay vì bị giết giữa
- * stream, người dùng thấy treo không rõ lý do.
- *
- * Đo thực tế trên `qwen-video-2.0-pro`: 120s và 126s cho 2 lần chạy,
- * first byte < 1.7s, khoảng cách event lớn nhất ~19s. Video thường nằm gọn
- * trong ngân sách; chỉ video nặng bất thường mới chạm trần.
- */
-const VIDEO_BUDGET_MS = 290_000;
 const IDLE_TIMEOUT_MS = 90_000;
 const HEARTBEAT_MS = 10_000;
 const MAX_BODY_BYTES = 4.5 * 1024 * 1024;
@@ -184,55 +158,18 @@ function extractDelta(part: unknown): string {
   return '';
 }
 
-/* ------------------------------------------------------------------ */
-/* Model tạo ảnh (qwen-image v.v.)                            */
-/* ------------------------------------------------------------------ */
-
-/**
- * Gateway trả ảnh qua SSE đặc thù: event `{"type":"status"}` / `{"type":"image","url":...}`
- * không có `choices` — parser của AI SDK v4 reject (`Type validation failed`).
- * Với model ảnh, tự fetch và bóc tách tay rồi ghi URL ảnh vào stream dạng
- * markdown để client render inline.
- */
-const IMAGE_MODEL_RE = /image|seedream|t2i|dall-e|dalle|flux|stable-diffusion|imggen|imagen|sdxl/i;
-
-function isImageModel(modelId: string): boolean {
-  const declared = mediaKindOf(modelId);
-  if (declared) return declared === 'image';
-  return IMAGE_MODEL_RE.test(modelId);
+function retiredMediaModel(modelId: string | undefined): boolean {
+  return Boolean(mediaKindOf(modelId) ?? detectMediaKind(modelId, findModelConfig(modelId)?.name));
 }
 
-/** Model tạo video — lộ alias `qwen-video` qua chat SSE (event type:video). */
-const VIDEO_MODEL_RE = /video|kling|seedance|sora|veo|hailuo|vidu|jimeng/i;
-
-function isVideoModel(modelId: string): boolean {
-  const declared = mediaKindOf(modelId);
-  if (declared) return declared === 'video';
-  return VIDEO_MODEL_RE.test(modelId);
+function mediaGenerationRetired(requestId: string) {
+  return jsonError(
+    requestId,
+    410,
+    'MEDIA_GENERATION_RETIRED',
+    'Tính năng tạo ảnh/video đã ngừng hoạt động. Vui lòng chọn model lập trình/chat để tiếp tục.',
+  );
 }
-
-function coreToOpenAiMessages(core: CoreMessage[]): Array<{ role: string; content: string }> {
-  return core.map((m) => {
-    let text = '';
-    if (typeof m.content === 'string') text = m.content;
-    else if (Array.isArray(m.content)) {
-      text = m.content
-        .map((p) => (p && typeof p === 'object' && 'text' in p ? String((p as { text?: unknown }).text ?? '') : ''))
-        .join('');
-    }
-    return { role: m.role, content: text };
-  });
-}
-
-/**
- * Đọc từng payload `data:` từ một SSE stream.
- *
- * `onAlive` được gọi cho MỌI byte nhận được từ upstream, kể cả dòng comment
- * SSE (`: keepalive`) mà phát khi model còn đang xử lý. Idle-timer phải
- * reset theo tín hiệu này: tạo video có quãng chỉ toàn keepalive, nếu chỉ đếm
- * dòng `data:` thì stream đang sống vẫn bị coi là treo và bị abort oan.
- */
-const pumpSseData = pumpSseLines;
 
 /**
  * Sửa A7: chỉ coi `undefined` và `[object Object]` là artifact.
@@ -1099,6 +1036,9 @@ export async function POST(req: Request) {
       codeModeEnabled,
       id: conversationId,
     } = parsed.data;
+    if (retiredMediaModel(model) || retiredMediaModel(visionModel)) {
+      return mediaGenerationRetired(requestId);
+    }
     const messages = attachToolResultParts(parsed.data.messages);
     /* Recipe: gắn khối instructions vào system (volatile tail — đứng cạnh
        skills/lessons), áp tool policy lên tập tool client của lượt này. */
@@ -1225,6 +1165,10 @@ export async function POST(req: Request) {
        báo thì bỏ tham số như hành vi cũ (nhiều gateway 400 nếu nhận mù). */
     const effortBase = providerBase ?? null;
 
+    if (retiredMediaModel(selectedModelId)) {
+      return mediaGenerationRetired(requestId);
+    }
+
     // Provider override: model do gateway của user định nghĩa (/v1/models),
     // cho phép ngoài danh sách built-in.
     if (!ALLOWED_MODEL_IDS.has(selectedModelId) && !providerBase) {
@@ -1272,6 +1216,9 @@ export async function POST(req: Request) {
       : (defaultChainModels && defaultChainModels.length > 0)
         ? defaultChainModels
         : resolveProviderModelChain(baseConfig);
+    if (modelChain.some(retiredMediaModel)) {
+      return mediaGenerationRetired(requestId);
+    }
     // Negative cache: bỏ qua tên model vừa bị gateway từ chối gần đây (404 /
     // 400 unknown-model / 403 body rỗng) để không lặp lại lượt thử chết trong
     // mọi tin nhắn. Lọc sạch thì giữ nguyên chain — vẫn thử và tự phục hồi.
@@ -1622,9 +1569,7 @@ export async function POST(req: Request) {
                 continue;
               }
               let abortKind: AbortKind | null = null;
-              // Tạo video cần vài phút — nới ngân sách riêng cho model video,
-              // nhưng vẫn dưới trần 300s của nền tảng (xem VIDEO_BUDGET_MS).
-              const budgetMs = isVideoModel(targetModel) ? VIDEO_BUDGET_MS : STREAM_BUDGET_MS;
+              const budgetMs = STREAM_BUDGET_MS;
               const budgetController = new AbortController();
               const budgetTimer = setTimeout(() => {
                 abortKind = 'budget';
@@ -1673,173 +1618,6 @@ export async function POST(req: Request) {
                   model: targetModel,
                 });
                 startHeartbeat();
-
-                /* Model media:
-                   - Ảnh: ưu tiên /v1/images/generations chuẩn OpenAI (nhiều provider hỗ trợ, trả URL); nếu gateway không có endpoint
-                     này thì fallback qua chat SSE như trước.
-                   - Video: chat SSE (event type:video). */
-                if (isImageModel(targetModel) || isVideoModel(targetModel)) {
-                  const base =
-                    providerBase;
-                  const lastUser =
-                    [...coreToOpenAiMessages(core)].reverse().find((m) => m.role === 'user')
-                      ?.content ?? '';
-
-                  const emitMedia = (kind: 'image' | 'video', url: string) => {
-                    // Ảnh: markdown img. Video: markdown link (component `a`
-                    // của renderer nhận diện .mp4/.webm và render <video>).
-                    // Dùng cú pháp markdown tường minh cho cả hai để không phụ
-                    // thuộc autolink — URL media có query `?key=<JWT>` rất dài.
-                    if (kind === 'image') writeText(`\n\n![${targetModel}](${url})\n`);
-                    else writeText(`\n\n[${targetModel}](${url})\n`);
-                  };
-
-                  if (isImageModel(targetModel)) {
-                    try {
-                      const imgRes = await fetch(`${base}/images/generations`, {
-                        method: 'POST',
-                        headers: {
-                          'Content-Type': 'application/json',
-                          Authorization: `Bearer ${apiKey}`,
-                        },
-                        body: JSON.stringify({
-                          model: targetModel,
-                          prompt: lastUser.slice(0, 4000),
-                          n: 1,
-                          /* gpt-image-2  chỉ nhận 4 kích thước cố định:
-                             1536x1024, 1024x1536, 1024x1024, 1024x768. Gửi
-                             mặc định vuông cho model này; model khác không
-                             gửi `size` để giữ mặc định của từng gateway. */
-                          ...(/gpt-image/i.test(targetModel) ? { size: '1024x1024' } : {}),
-                        }),
-                        signal: link.signal,
-                      });
-                      resetIdleTimer();
-                      if (imgRes.ok) {
-                        const j = (await imgRes.json().catch(() => null)) as {
-                          data?: Array<{ url?: unknown; b64_json?: unknown }>;
-                        } | null;
-                        const item = j?.data?.[0];
-                        const url =
-                          typeof item?.url === 'string'
-                            ? item.url
-                            : typeof item?.b64_json === 'string'
-                              ? `data:image/png;base64,${item.b64_json}`
-                              : null;
-                        if (url) {
-                          emitMedia('image', url);
-                          clearIdle();
-                          clearTimeout(budgetTimer);
-                          writeFinish('stop');
-                          return;
-                        }
-                      }
-                      // 404/501 (endpoint chưa có) hoặc data rỗng → Pollinations
-                      // (free, không key) trước, rồi mới fallback SSE chậm.
-                      const poll = pollinationsMarkdown(lastUser, targetModel);
-                      if (poll) {
-                        writeText(poll);
-                        writeText(
-                          '\n_(Ảnh từ Pollinations.AI — dự phòng miễn phí vì provider không trả ảnh)_\n',
-                          'reasoning',
-                        );
-                        /* Sửa A4: đường thoát này cũng phải dọn timer + ghi công
-                           cho key như mọi đường thành công khác — để return không
-                           dọn thì request giữ nguyên 2 timer (idle + budget tới
-                           290s) sau khi stream đã khép. */
-                        clearIdle();
-                        clearTimeout(budgetTimer);
-                        writeFinish('stop');
-                        return;
-                      }
-                    } catch (e) {
-                      if (e instanceof ChatUpstreamError || isAbortError(e)) throw e;
-                      // lỗi mạng images API → thử đường chat SSE bên dưới.
-                    }
-                  }
-
-                  const res = await fetch(`${base}/chat/completions`, {
-                    method: 'POST',
-                    headers: {
-                      'Content-Type': 'application/json',
-                      Authorization: `Bearer ${apiKey}`,
-                    },
-                    body: JSON.stringify({
-                      model: targetModel,
-                      messages: coreToOpenAiMessages(core),
-                      stream: true,
-                    }),
-                    signal: link.signal,
-                  });
-                  if (!res.ok || !res.body) {
-                    const bodyText = await res.text().catch(() => '');
-                    // Trang lỗi HTML của gateway/CDN — không đem HTML vào message.
-                    const detail = /^\s*(!doctype|<html)/i.test(bodyText)
-                      ? 'gateway đang quá tải, thử lại sau.'
-                      : redact(bodyText).slice(0, 200);
-                    throw new ChatUpstreamError(
-                      `Không tạo được media tại ${hostOf(base) ?? base} (${res.status}): ${detail}`,
-                      `MEDIA_UPSTREAM_${res.status ?? 'ERROR'}`,
-                      requestId,
-                    );
-                  }
-                  resetIdleTimer();
-                  let got = false;
-                  let sseError = '';
-                  await pumpSseData(res.body, (raw) => {
-                    if (raw === '[DONE]') return;
-                    // JSON hỏng nhẹ (control char/backslash sai) được sửa lại
-                    // thay vì drop cả event — mất event image/video là mất URL.
-                    const j = parseLooseJson(raw);
-                    if (j === null) return;
-                    resetIdleTimer();
-                    const p = j as {
-                      type?: string;
-                      url?: unknown;
-                      text?: unknown;
-                      error?: unknown;
-                      choices?: Array<{ delta?: { content?: unknown }; message?: { content?: unknown } }>;
-                    };
-                    if (p.type === 'image' && typeof p.url === 'string') {
-                      got = true;
-                      emitMedia('image', p.url);
-                    } else if (p.type === 'video' && typeof p.url === 'string') {
-                      got = true;
-                      emitMedia('video', p.url);
-                    } else if (p.type === 'status' && typeof p.text === 'string') {
-                      // tiến trình tạo media — hiển thị như dòng suy luận.
-                      writeText(`${p.text}\n`, 'reasoning');
-                    } else {
-                      const c = p.choices?.[0]?.delta?.content ?? p.choices?.[0]?.message?.content;
-                      if (typeof c === 'string' && c) {
-                        got = true;
-                        writeText(c);
-                      } else if (p.error && !got) {
-                        // Envelope lỗi trong body 200 — rule "200-with-error"
-                        // của Free-Claude-Gateway: coi như lỗi gateway, cho
-                        // failover thay vì kết thúc im lặng.
-                        sseError =
-                          typeof p.error === 'string'
-                            ? p.error
-                            : JSON.stringify(p.error).slice(0, 300);
-                      }
-                    }
-                  },
-                  // Keepalive/comment line cũng là dấu hiệu upstream còn sống.
-                  resetIdleTimer);
-                  if (!got && sseError) {
-                    throw new ChatUpstreamError(
-                      `Gateway trả lỗi khi tạo media tại ${hostOf(base) ?? base}: ${redact(sseError).slice(0, 200)}`,
-                      'MEDIA_UPSTREAM_ERROR',
-                      requestId,
-                    );
-                  }
-                  if (!got) writeText('_(Nhà cung cấp không trả về media nào)_');
-                  clearIdle();
-                  clearTimeout(budgetTimer);
-                  writeFinish('stop');
-                  return;
-                }
 
                 /* Bộ tool SERVER dựng MỘT LẦN, dùng chung cho cả hai đường
                    (native/emulated) và cho cả việc sinh khối [Tools]. Trước
@@ -2804,15 +2582,9 @@ export async function POST(req: Request) {
                   }
                   const code = isIdle ? 'STREAM_IDLE_TIMEOUT' : 'STREAM_BUDGET_EXCEEDED';
                   const budgetSec = Math.round(budgetMs / 1000);
-                  /* Thông báo phải khớp ngân sách THỰC của lượt này: model video
-                     dùng VIDEO_BUDGET_MS, không phải 270s như model chat. Video
-                     chạm trần là do prompt nặng — gợi ý cách xử lý thay vì chỉ
-                     báo lỗi kỹ thuật. */
                   const diagMsg = isIdle
-                     ? `AI Provider ${upstreamHost} ngừng gửi token trong ${Math.round(IDLE_TIMEOUT_MS / 1000)} giây, phiên stream đã bị hủy.`
-                    : isVideoModel(targetModel)
-                      ? `Video chưa xong trong ${budgetSec} giây — vượt giới hạn thời gian của nền tảng. Thử mô tả ngắn/đơn giản hơn, hoặc tạo lại.`
-                      : `Phản hồi vượt quá ngân sách ${budgetSec} giây của phiên stream và đã bị cắt.`;
+                    ? `AI Provider ${upstreamHost} ngừng gửi token trong ${Math.round(IDLE_TIMEOUT_MS / 1000)} giây, phiên stream đã bị hủy.`
+                    : `Phản hồi vượt quá ngân sách ${budgetSec} giây của phiên stream và đã bị cắt.`;
                   console.error(`[req:${requestId}][${code}] key=${keyLabel} model=${targetModel}`);
                   writeAnnotation({ error: code });
                   throw new ChatUpstreamError(diagMsg, code, requestId);
