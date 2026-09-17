@@ -2,8 +2,8 @@
  * Auto-pilot Multi-turn Execution — permission classification.
  *
  * Determines whether a tool call should be auto-approved based on the
- * active approval policy. Inspired by Goose's GooseMode (Auto/SmartApprove),
- * Codex CLI's approval modes (suggest/auto-edit/full-auto), and Cline's
+ * active approval policy. Inspired by agent-mode approval patterns (Auto/SmartApprove),
+ * Các chế độ phê duyệt phổ biến (suggest/auto-edit/full-auto) và
  * per-category auto-approve toggles.
  *
  * Design principles:
@@ -31,7 +31,7 @@ export interface AutoApproveContext {
   autoPilotEnabled: boolean;
   /** Per-tool permission overrides (optional for backward compat). */
   toolPermissions?: ToolPermissions;
-  /** User-defined toolcall rules (Oh My Hermes port). */
+  /** User-defined toolcall rules. */
   toolcallRules?: ToolcallRule[];
 }
 

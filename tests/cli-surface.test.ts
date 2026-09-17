@@ -1,5 +1,5 @@
 /**
- * Khóa bảng lệnh CLI (tổ chức goose-style) và các pure builder của
+ * Khóa bảng lệnh CLI (tổ chức theo nhóm lệnh) và các pure builder của
  * lib/cli/cli-surface.ts.
  *
  * Sau khi tái cấu trúc từ chuỗi if trong bin/vyen.ts sang registry dữ liệu,

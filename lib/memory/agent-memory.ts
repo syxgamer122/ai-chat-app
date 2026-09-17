@@ -1,5 +1,5 @@
 /**
- * Structured Memory (port Goose remember/retrieve/remove) — bộ nhớ dài hạn
+ * Structured Memory (remember/retrieve/remove) — bộ nhớ dài hạn
  * CÓ CẤU TRÚC: category + tags + scope (local theo workspace / global).
  *
  * Khác hệ reviewer-gate (memoryCandidates/memoryRecords — quy trình duyệt),
@@ -10,7 +10,7 @@
  * Thuần function — Dexie/fs inject bên ngoài.
  */
 
-export const GOOSE_MEMORY_LIMITS = {
+export const AGENT_MEMORY_LIMITS = {
   /** Trần ký tự mỗi entry (spec: nâng từ 400 lên 2.000). */
   dataChars: 2_000,
   /** Trần TỔNG ký tự khối inject vào system prompt. */
@@ -24,14 +24,14 @@ export const GOOSE_MEMORY_LIMITS = {
   retrieveLimit: 8,
 } as const;
 
-export type GooseMemoryScope = 'local' | 'global';
+export type AgentMemoryScope = 'local' | 'global';
 
 export interface AgentMemoryRecord {
   id: string;
   category: string;
   data: string;
   tags: string[];
-  scope: GooseMemoryScope;
+  scope: AgentMemoryScope;
   /** Workspace mà memory local thuộc về (scope=global dùng '*'). */
   workspaceKey: string;
   createdAt: number;
@@ -39,15 +39,15 @@ export interface AgentMemoryRecord {
 }
 
 export function normalizeCategory(raw: string): string {
-  return raw.trim().toLowerCase().replace(/\s+/g, '-').slice(0, GOOSE_MEMORY_LIMITS.categoryChars);
+  return raw.trim().toLowerCase().replace(/\s+/g, '-').slice(0, AGENT_MEMORY_LIMITS.categoryChars);
 }
 
 export function normalizeTags(raw: readonly string[]): string[] {
   const seen = new Set<string>();
   for (const t of raw) {
-    const clean = t.trim().toLowerCase().slice(0, GOOSE_MEMORY_LIMITS.tagChars);
+    const clean = t.trim().toLowerCase().slice(0, AGENT_MEMORY_LIMITS.tagChars);
     if (clean) seen.add(clean);
-    if (seen.size >= GOOSE_MEMORY_LIMITS.maxTags) break;
+    if (seen.size >= AGENT_MEMORY_LIMITS.maxTags) break;
   }
   return [...seen];
 }
@@ -68,12 +68,12 @@ export function validateMemoryInput(input: {
 }): ValidatedMemory {
   const category = normalizeCategory(String(input.category ?? ''));
   if (!category) return { ok: false, error: 'Thiếu category (nhóm ghi nhớ).' };
-  const data = String(input.data ?? '').trim().slice(0, GOOSE_MEMORY_LIMITS.dataChars);
+  const data = String(input.data ?? '').trim().slice(0, AGENT_MEMORY_LIMITS.dataChars);
   if (data.length < 4) {
-    return { ok: false, error: `data quá ngắn (tối thiểu 4 ký tự, trần ${GOOSE_MEMORY_LIMITS.dataChars}).` };
+    return { ok: false, error: `data quá ngắn (tối thiểu 4 ký tự, trần ${AGENT_MEMORY_LIMITS.dataChars}).` };
   }
   const tags = normalizeTags(Array.isArray(input.tags) ? (input.tags.filter((t) => typeof t === 'string') as string[]) : []);
-  const scope: GooseMemoryScope = input.is_global === true ? 'global' : 'local';
+  const scope: AgentMemoryScope = input.is_global === true ? 'global' : 'local';
   return {
     ok: true,
     record: {
@@ -111,7 +111,7 @@ export interface MemoryIndexBlock {
  */
 export function buildMemoryIndexBlock(
   records: readonly AgentMemoryRecord[],
-  budget: number = GOOSE_MEMORY_LIMITS.injectChars,
+  budget: number = AGENT_MEMORY_LIMITS.injectChars,
 ): MemoryIndexBlock {
   if (!records.length) {
     return { block: '', truncated: false, injectedCount: 0, totalCount: 0 };
@@ -191,7 +191,7 @@ export function retrieveMatchingMemories(
   }
   const query = (q.query ?? '').trim();
   if (!query) {
-    return pool.sort((a, b) => b.createdAt - a.createdAt).slice(0, q.limit ?? GOOSE_MEMORY_LIMITS.retrieveLimit);
+    return pool.sort((a, b) => b.createdAt - a.createdAt).slice(0, q.limit ?? AGENT_MEMORY_LIMITS.retrieveLimit);
   }
   const folded = fold(query).toLowerCase();
   const words = folded.split(/[^\p{L}\d]+/u).filter((w) => w.length >= 2);
@@ -205,7 +205,7 @@ export function retrieveMatchingMemories(
   return scored
     .filter((s) => s.score > 0)
     .sort((a, b) => b.score - a.score || b.r.createdAt - a.r.createdAt)
-    .slice(0, q.limit ?? GOOSE_MEMORY_LIMITS.retrieveLimit)
+    .slice(0, q.limit ?? AGENT_MEMORY_LIMITS.retrieveLimit)
     .map((s) => s.r);
 }
 

@@ -11,7 +11,7 @@ import {
   type CliSessionData,
 } from '@/lib/cli/session-manager';
 
-describe('CLI Session Manager (Goose P2-8)', () => {
+describe('CLI Session Manager (P2-8)', () => {
   let tmpDir: string;
 
   beforeEach(() => {

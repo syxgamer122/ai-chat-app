@@ -100,7 +100,7 @@ describe('vision-bridge — bridgeImagesInMessages qua provider OpenAI-compat', 
     expect(headers.Authorization).toBe('Bearer k');
     const body = JSON.parse(String(calls[0].init?.body));
     expect(body.model).toBe('vision-model-x');
-    expect(body.stream).toBe(false); // quirk crax — xem non-streaming-fetch
+    expect(body.stream).toBe(false); // quirk gateway — xem non-streaming-fetch
     expect(body.temperature).toBe(0.2);
     expect(body.max_tokens).toBe(2048);
     const parts = body.messages[0].content;

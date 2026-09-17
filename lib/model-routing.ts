@@ -1,7 +1,7 @@
 /**
- * Lead/Worker model routing (port Goose P1-5).
+ * Lead/Worker model routing (P1-5).
  *
- * Goose dùng model mạnh cho N lượt đầu (lập kế hoạch) rồi chuyển model rẻ để
+ * Cách này dùng model mạnh cho N lượt đầu (lập kế hoạch) rồi chuyển model rẻ để
  * thực thi; khi worker thất bại thật thì tự quay lại lead vài lượt. Vyen port
  * nguyên state machine đó nhưng tính CLIENT-SIDE hoàn toàn:
  *

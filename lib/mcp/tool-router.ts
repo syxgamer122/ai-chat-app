@@ -1,5 +1,5 @@
 /**
- * Tool Router — Giải quyết trần 100 tool MCP (Port từ Goose & Hermes).
+ * Tool Router — Giải quyết trần 100 tool MCP 
  *
  * Khi hệ thống kết nối nhiều MCP server (~200+ tools), việc gửi toàn bộ schema
  * vào mỗi request gây lãng phí token, vượt rate limit hoặc trần API của LLM gateway.

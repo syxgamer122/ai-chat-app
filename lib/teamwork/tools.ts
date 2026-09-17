@@ -1,11 +1,11 @@
 /**
  * Headless Tool Runner & Safety Integration for Teamwork Multi-Agent Runtime Engine.
- * Conforms strictly to ORIGINAL_REQUEST.md R2 & R3, PROJECT.md, and .opencode/commands/teamwork.md.
+ * Conforms strictly to ORIGINAL_REQUEST.md R2 & R3 và PROJECT.md.
  *
  * Runs in pure Node.js without React, DOM, or Dexie IndexedDB dependencies.
  * Integrates:
  * 1. lib/path-guard.cjs: workspace boundary enforcement and path traversal blocking.
- * 2. lib/staging.ts: in-memory cumulative diff review overlay (Plandex model).
+ * 2. lib/staging.ts: in-memory cumulative diff review overlay.
  * 3. lib/auto-pilot.ts: command whitelisting and destructive command blocking.
  * 4. lib/edit-blocks.ts: SEARCH/REPLACE block parsing and robust chunk application.
  * 5. lib/teamwork/file-lock.ts: exclusive file ownership check on write/edit operations.
@@ -854,7 +854,7 @@ export class HeadlessToolRunner {
 
   /**
    * Executes a shell command with auto-pilot safety filtering, timeout, output capping,
-   * and optional process sandboxing (Arcbox model).
+   * and optional process sandboxing.
    */
   public async shellRun(
     command: string,

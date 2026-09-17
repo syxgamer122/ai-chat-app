@@ -29,7 +29,7 @@ import type { ProviderModel } from '@/lib/provider-url';
 
 const cfg = (over: Partial<ModelConfig> & { id: string }): ModelConfig => ({
   name: over.id,
-  provider: 'gateway',
+  provider: 'openai',
   providerModel: over.id,
   providerModelFallbacks: [],
   description: 'Mô tả catalog',
@@ -314,9 +314,8 @@ describe('buildPickerSections - Đề xuất', () => {
       [DEFAULT_MODEL_ID, firstCoding?.id, firstFast?.id].filter(Boolean),
     );
     // Mỏ neo dữ liệu: catalog đổi thì test này đỏ để chủ ý, không lặng lẽ đổi.
-    expect(DEFAULT_MODEL_ID).toBe('gpt-5-6-sol');
-    expect(firstCoding?.id).toBe('claude-3-5-sonnet');
-    expect(firstFast?.id).toBe('gpt-5-6-terra');
+    expect(DEFAULT_MODEL_ID).toBe('gpt-4o');
+    expect(firstFast?.id).toBe('gpt-4o-mini');
   });
 
   it('provider custom KHÔNG bao giờ có Đề xuất, kể cả khi id trùng catalog', () => {
@@ -341,11 +340,11 @@ describe('buildPickerSections - Gần đây / Yêu thích', () => {
   it('scoped theo provider: recents/favorites provider khác bị bỏ (không ghost)', () => {
     const sections = buildPickerSections(builtinOptions, {
       providerId: 'p1',
-      recents: [rec('gpt-5-6-sol', 'p2', 1), rec('claude-sonnet-5', 'p1', 2)],
-      favorites: [{ id: 'gpt-5-5', providerId: 'p2' }],
+      recents: [rec('gpt-4o', 'p2', 1), rec('o1', 'p1', 2)],
+      favorites: [{ id: 'o1-mini', providerId: 'p2' }],
     });
     expect(sections.find((s) => s.key === 'recent')?.items.map((m) => m.id)).toEqual([
-      'claude-sonnet-5',
+      'o1',
     ]);
     expect(sections.some((s) => s.key === 'favorite')).toBe(false);
   });
@@ -353,56 +352,56 @@ describe('buildPickerSections - Gần đây / Yêu thích', () => {
   it('ghost (id không còn trong danh sách) bị bỏ âm thầm', () => {
     const sections = buildPickerSections(builtinOptions, {
       providerId: 'srv',
-      recents: [rec('da-chet-tren-gateway', 'srv', 1), rec('gpt-5-5', 'srv', 2)],
+      recents: [rec('da-chet-tren-gateway', 'srv', 1), rec('o1', 'srv', 2)],
       favorites: [{ id: 'khong-ton-tai', providerId: 'srv' }],
     });
-    expect(sections.find((s) => s.key === 'recent')?.items.map((m) => m.id)).toEqual(['gpt-5-5']);
+    expect(sections.find((s) => s.key === 'recent')?.items.map((m) => m.id)).toEqual(['o1']);
     expect(sections.some((s) => s.key === 'favorite')).toBe(false);
   });
 
   it('Gần đây tối đa 4 mục, loại model đang chọn, thứ tự mới nhất trước', () => {
     const sections = buildPickerSections(builtinOptions, {
       providerId: 'srv',
-      currentId: 'gpt-5-5',
+      currentId: 'gpt-4o',
       recents: [
-        rec('gpt-5-5', 'srv', 50),
-        rec('claude-sonnet-5', 'srv', 40),
-        rec('gpt-5-6-luna', 'srv', 30),
-        rec('deepseek-chat', 'srv', 20),
-        rec('kimi-k3', 'srv', 10),
-        rec('grok-4-6', 'srv', 5),
+        rec('gpt-4o', 'srv', 50),
+        rec('o1', 'srv', 40),
+        rec('o1-mini', 'srv', 30),
+        rec('o3-mini', 'srv', 20),
+        rec('gpt-4o-mini', 'srv', 10),
+        rec('chatgpt-4o-latest', 'srv', 5),
       ],
     });
     expect(sections.find((s) => s.key === 'recent')?.items.map((m) => m.id)).toEqual([
-      'claude-sonnet-5',
-      'gpt-5-6-luna',
-      'deepseek-chat',
-      'kimi-k3',
+      'o1',
+      'o1-mini',
+      'o3-mini',
+      'gpt-4o-mini',
     ]);
   });
 
   it('Yêu thích giữ model đang chọn và thứ tự danh sách', () => {
     const sections = buildPickerSections(builtinOptions, {
       providerId: 'srv',
-      currentId: 'gpt-5-5',
+      currentId: 'gpt-4o',
       favorites: [
-        { id: 'kimi-k3', providerId: 'srv' },
-        { id: 'gpt-5-5', providerId: 'srv' },
+        { id: 'o1', providerId: 'srv' },
+        { id: 'gpt-4o', providerId: 'srv' },
       ],
     });
     expect(sections.find((s) => s.key === 'favorite')?.items.map((m) => m.id)).toEqual([
-      'kimi-k3',
-      'gpt-5-5',
+      'o1',
+      'gpt-4o',
     ]);
   });
 });
 
 describe('buildPickerSections - nhóm hãng / media / khác', () => {
   const mixed: ModelOption[] = [
-    { id: 'gpt-5-6-sol', label: 'ChatGPT-5.6 Sol' },
-    { id: 'claude-sonnet-5', label: 'Claude Sonnet 5' },
-    { id: 'gpt-image-2', label: 'GPT Image 2', media: 'image', hint: 'Tạo ảnh từ mô tả' },
-    { id: 'qwen-video', label: 'Qwen Video', media: 'video', hint: 'Tạo video, 2-5 phút' },
+    { id: 'gpt-4o', label: 'GPT-4o' },
+    { id: 'claude-sonnet-4', label: 'Claude Sonnet 4' },
+    { id: 'my-image-model', label: 'My Image', media: 'image', hint: 'Tạo ảnh từ mô tả' },
+    { id: 'my-video-model', label: 'My Video', media: 'video', hint: 'Tạo video, 2-5 phút' },
     { id: 'totally-unknown-lab', label: 'Unknown Lab 7B' },
   ];
 
@@ -410,8 +409,8 @@ describe('buildPickerSections - nhóm hãng / media / khác', () => {
     const sections = buildPickerSections(mixed, { providerId: 'srv' });
     const keys = sections.filter((s) => !s.quick).map((s) => s.key);
     expect(keys).toEqual(['gpt', 'claude', 'image', 'video', 'other']);
-    expect(sections.find((s) => s.key === 'gpt')?.items.map((m) => m.id)).toEqual(['gpt-5-6-sol']);
-    expect(sections.find((s) => s.key === 'image')?.items.map((m) => m.id)).toEqual(['gpt-image-2']);
+    expect(sections.find((s) => s.key === 'gpt')?.items.map((m) => m.id)).toEqual(['gpt-4o']);
+    expect(sections.find((s) => s.key === 'image')?.items.map((m) => m.id)).toEqual(['my-image-model']);
     expect(sections.find((s) => s.key === 'other')?.items.map((m) => m.id)).toEqual([
       'totally-unknown-lab',
     ]);
@@ -434,20 +433,20 @@ describe('buildPickerSections - query', () => {
   it('có query: sập thành một nhóm Kết quả (n), match cả id lẫn label', () => {
     const sections = buildPickerSections(builtinOptions, {
       providerId: 'srv',
-      query: 'sonnet',
-      favorites: [{ id: 'gpt-5-5', providerId: 'srv' }],
+      query: 'o1',
+      favorites: [{ id: 'gpt-4o', providerId: 'srv' }],
     });
     expect(sections).toHaveLength(1);
     expect(sections[0]).toMatchObject({ key: 'search', quick: false });
     expect(sections[0]!.label).toMatch(/^Kết quả \(\d+\)$/);
-    // label 'Claude Sonnet 5' chứa 'sonnet'
-    expect(sections[0]!.items.every((m) => m.id.includes('sonnet') || m.label.toLowerCase().includes('sonnet'))).toBe(true);
+    // id 'o1' / 'o1-mini' chứa 'o1'
+    expect(sections[0]!.items.every((m) => m.id.toLowerCase().includes('o1'))).toBe(true);
     expect(sections[0]!.items.length).toBeGreaterThan(0);
   });
 
   it('query khớp id nhưng không khớp label vẫn tìm thấy', () => {
-    const sections = buildPickerSections(builtinOptions, { providerId: 'srv', query: 'gpt-5-6-terra' });
-    expect(sections[0]?.items.map((m) => m.id)).toEqual(['gpt-5-6-terra']);
+    const sections = buildPickerSections(builtinOptions, { providerId: 'srv', query: 'o1-mini' });
+    expect(sections[0]?.items.map((m) => m.id)).toEqual(['o1-mini']);
   });
 
   it('query trống sau trim = không search', () => {

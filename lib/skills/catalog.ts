@@ -1,5 +1,5 @@
 /**
- * Curated Skills Catalog — Danh mục kỹ năng chuyên sâu theo stack dự án (Oh My Hermes P2 port).
+ * Curated Skills Catalog — Danh mục kỹ năng chuyên sâu theo stack dự án.
  *
  * Là một nguồn sự thật duy nhất cho:
  * - Tín hiệu định tuyến (trigger keywords & matcher)

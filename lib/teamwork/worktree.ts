@@ -1,6 +1,6 @@
 /**
  * Git Worktree Manager for Teamwork Multi-Agent Runtime Engine.
- * Reverse-engineered and adapted from stablyai/orca's core parallel worktree architecture.
+ * Kiến trúc worktree song song.
  *
  * Provides complete filesystem and git index isolation for parallel agents/workers:
  * 1. Each worker operates in an ephemeral worktree under `.teamwork/worktrees/<worker-id>`.

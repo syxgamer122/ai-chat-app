@@ -82,7 +82,7 @@ export class HitlApprovalGate {
       '.env.local',
       'lib/teamwork/**',
       '.github/**',
-      '.opencode/**',
+      '.vyen/**',
     ];
     this.blockedCommands = config?.blockedCommands ?? [
       'rm -rf',

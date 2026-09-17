@@ -1,5 +1,5 @@
 /**
- * Memory Store — Tầng lưu trữ Dexie cho bộ nhớ dài hạn có Reviewer Gate (Oh My Hermes port).
+ * Memory Store — Tầng lưu trữ Dexie cho bộ nhớ dài hạn có Reviewer Gate.
  *
  * Đảm bảo:
  * 1. Agent chỉ được tạo candidate trong `memoryCandidates` với status 'pending'.

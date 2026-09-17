@@ -23,15 +23,51 @@ export class PointInTimeReplayEngine {
   }
 
   /**
+   * "Mốc tri thức" hiện tại của ledger = txFrom LỚN NHẤT đã ghi.
+   *
+   * Dùng mốc NỘI TẠI của ledger thay cho `Date.now()` khi caller không chỉ định
+   * toạ độ replay. Lý do:
+   * - Đồng hồ hệ thống có thể nhảy LÙI (NTP sync/clock smear dưới tải). Bản ghi
+   *   COMPENSATE được append với `validFrom = Date.now()`; nếu lúc replay
+   *   `Date.now()` đã tụt xuống dưới mốc đó thì bản ghi bị `queryAsOf` loại →
+   *   replay trả lại CHÍNH state vừa bị rollback (test adversarial đỏ ngẫu
+   *   nhiên 1/5 lần tuỳ timing).
+   * - txFrom đã được ép đơn điệu tăng khi ghi (xem `lastTxFrom` trong
+   *   audit-ledger) nên max(txFrom) không bao giờ nhỏ hơn bất kỳ mốc nào đã ghi
+   *   → replay mặc định luôn nhìn thấy toàn bộ lịch sử đã ghi.
+   * Khi ledger rỗng (chưa có bản ghi) thì rơi về `Date.now()`.
+   */
+  private knowledgeTime(): number {
+    let max = 0;
+    for (const record of this.getRecords()) {
+      const from = BitemporalAlgebra.getTxRange(record).from;
+      if (Number.isFinite(from) && from > max) max = from;
+    }
+    return max > 0 ? max : Date.now();
+  }
+
+  /**
+   * Toạ độ replay: caller chỉ định thì tôn trọng nguyên văn, còn lại lấy mốc
+   * tri thức của ledger cho CẢ HAI trục — tránh hai lời gọi Date.now() khác
+   * nhau và tránh phụ thuộc đồng hồ tường.
+   */
+  private resolveCoordinates(options?: number | ReplayOptions): { validTime: number; txTime: number } {
+    const opts: ReplayOptions | undefined = typeof options === 'number' ? { asOfValidTime: options } : options;
+    const fallback = this.knowledgeTime();
+    return {
+      validTime: opts?.validTime ?? opts?.asOfValidTime ?? fallback,
+      txTime: opts?.txTime ?? opts?.asOfTransactionTime ?? fallback,
+    };
+  }
+
+  /**
    * Replays and reconstructs the state of a single entity at coordinate (validTime, txTime).
    */
   public replayEntityState<T = unknown>(
     entityId: string,
     options?: number | ReplayOptions
   ): ReplayEntityState<T> | null {
-    const opts: ReplayOptions | undefined = typeof options === 'number' ? { asOfValidTime: options } : options;
-    const validTime = opts?.validTime ?? opts?.asOfValidTime ?? Date.now();
-    const txTime = opts?.txTime ?? opts?.asOfTransactionTime ?? Date.now();
+    const { validTime, txTime } = this.resolveCoordinates(options);
 
     const all = this.getRecords();
     const entityRecords = all.filter((r) => r.entityId === entityId);
@@ -163,8 +199,8 @@ export class PointInTimeReplayEngine {
    * Reconstructs the virtual file tree (mapping of filePath -> content) at (validTime, txTime).
    */
   public replayFileTree(options?: ReplayOptions): Map<string, string> {
-    const validTime = options?.validTime ?? options?.asOfValidTime ?? Date.now();
-    const txTime = options?.txTime ?? options?.asOfTransactionTime ?? Date.now();
+    /* Cùng lý do replayEntityState: mốc tri thức ledger cho cả hai trục. */
+    const { validTime, txTime } = this.resolveCoordinates(options);
 
     const all = this.getRecords();
     const fileRecords = all.filter(

@@ -1,5 +1,5 @@
 /**
- * Code Mode — Thực thi mã JavaScript on-demand gọi MCP tools (Port từ Goose).
+ * Code Mode — Thực thi mã JavaScript on-demand gọi MCP tools (code mode).
  *
  * Thay vì đăng ký hàng chục/hàng trăm tool MCP riêng lẻ vào LLM context,
  * Code Mode cung cấp duy nhất 1 công cụ `run_code(code)`.
@@ -8,7 +8,7 @@
  * - Inject sẵn đối tượng `mcp.call(serverId, toolName, args)`.
  * - Hỗ trợ top-level await và console.log.
  * - Giới hạn thời gian (timeout mặc định 30s).
- * - Output được cắt tối đa 24.000 ký tự (quy chuẩn Vyen / Goose).
+ * - Output được cắt tối đa 24.000 ký tự (quy chuẩn Vyen).
  * - Vẫn tuân thủ đầy đủ cổng phê duyệt an toàn (auto-pilot / modal).
  */
 

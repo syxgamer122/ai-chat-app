@@ -3,18 +3,17 @@ import {
   validateProviderBaseUrl,
   normalizeProviderModels,
   providerNeedsApiKey,
-  pickRemovedDefaultProviders,
 } from '@/lib/providers';
 
 describe('providers — provider presets', () => {
   it('chấp nhận https hợp lệ và strip slash cuối', () => {
-    const r = validateProviderBaseUrl('https://gpt.crax.lol/v1/');
+    const r = validateProviderBaseUrl('https://api.openai.com/v1/');
     expect(r.ok).toBe(true);
-    if (r.ok) expect(r.url).toBe('https://gpt.crax.lol/v1');
+    if (r.ok) expect(r.url).toBe('https://api.openai.com/v1');
   });
 
   it('từ chối http trừ localhost (dev)', () => {
-    expect(validateProviderBaseUrl('http://gpt.crax.lol/v1').ok).toBe(false);
+    expect(validateProviderBaseUrl('http://api.example.com/v1').ok).toBe(false);
     expect(validateProviderBaseUrl('http://localhost:3000/v1').ok).toBe(true);
   });
 
@@ -37,54 +36,27 @@ describe('providers — provider presets', () => {
       data: [
         { id: 'qwen3.8-max', name: 'Qwen 3.8 Max', context_length: 131072 },
         { id: 'qwen3.8-max' },
-        { id: '  gpt-5-6-sol  ' },
+        { id: '  gpt-4o  ' },
         { id: '' },
         'rác',
       ],
     });
     expect(out).toHaveLength(2);
-    expect(out[0].id).toBe('gpt-5-6-sol'); // sort theo id
+    expect(out[0].id).toBe('gpt-4o'); // sort theo id
     expect(out[1].contextLength).toBe(131072);
     expect(normalizeProviderModels({ data: 'không phải mảng' })).toEqual([]);
   });
 });
 
 /**
- * Gateway free xác thực bằng IP, không đọc Authorization (kiểm chứng bằng
- * request thật: key rác / không key vẫn 200, 429 áp theo IP kể cả khi mỗi
- * request dùng key khác nhau). Ô nhập key phải bị ẩn cho các host này.
+ * Tầng gateway free (không cần key) đã gỡ hẳn — providerNeedsApiKey giờ luôn
+ * trả true: mọi provider BYOK đều cần key, ô nhập key luôn hiện.
  */
-describe('providerNeedsApiKey — gateway free không dùng key', () => {
-  /* crax ĐÃ RỜI nhóm này: bản cập nhật "User Accounts + API Keys" khiến mọi
-     endpoint trả 401 auth_required cho cả request không key lẫn key rác
-     (kiểm chứng bằng request thật tới /v1/models). Ô nhập key phải HIỆN lại,
-     nếu không người dùng không có chỗ dán key crk_live_… và sẽ kẹt ở 401. */
-  it('crax: NAY cần key (gateway đã chuyển sang mô hình tài khoản)', () => {
-    expect(providerNeedsApiKey('https://gpt.crax.lol/v1')).toBe(true);
-    expect(providerNeedsApiKey('https://GPT.CRAX.LOL/v1/')).toBe(true);
-    expect(providerNeedsApiKey('https://gpt.crax.lol')).toBe(true);
-  });
-
-  it('Kilgore: NAY cần key (chuyển sang kilgoreai.xyz + hỗ trợ Bearer)', () => {
-    expect(providerNeedsApiKey('https://kilgoreai.xyz/v1')).toBe(true);
-    expect(providerNeedsApiKey('https://kilgoreai.xyz')).toBe(true);
-  });
-
-  it('không phân biệt hoa thường và dung sai path/slash', () => {
-    expect(providerNeedsApiKey('https://KILGOREAI.XYZ/v1/')).toBe(true);
-  });
-
-  it('gateway key cá nhân: vẫn cần key', () => {
+describe('providerNeedsApiKey — BYOK-only', () => {
+  it('mọi URL đều cần key', () => {
+    expect(providerNeedsApiKey('https://api.openai.com/v1')).toBe(true);
     expect(providerNeedsApiKey('https://openrouter.ai/api/v1')).toBe(true);
-    expect(providerNeedsApiKey('https://api.orcarouter.ai/v1')).toBe(true);
-    expect(providerNeedsApiKey('https://tokenin.my.id/v1')).toBe(true);
-  });
-
-  it('khớp đúng hostname, không khớp chuỗi con — chống host giả mạo', () => {
-    // Kẻ tấn công dựng host chứa tên gateway free để lừa ẩn ô key.
-    expect(providerNeedsApiKey('https://gpt.crax.lol.evil.com/v1')).toBe(true);
-    expect(providerNeedsApiKey('https://evil.com/gpt.crax.lol/v1')).toBe(true);
-    expect(providerNeedsApiKey('https://notgpt.crax.lol/v1')).toBe(true);
+    expect(providerNeedsApiKey('https://my-proxy.example.com/v1')).toBe(true);
   });
 
   it('rỗng / URL lỗi → mặc định an toàn là cần key', () => {
@@ -92,43 +64,5 @@ describe('providerNeedsApiKey — gateway free không dùng key', () => {
     expect(providerNeedsApiKey(null)).toBe(true);
     expect(providerNeedsApiKey(undefined)).toBe(true);
     expect(providerNeedsApiKey('không-phải-url')).toBe(true);
-  });
-});
-
-/**
- * Cleanup v7: provider mặc định đã bỏ khỏi seed bị xóa khỏi DB CHỈ KHI chưa
- * từng có key — provider user đã dán key là đang dùng, không được đụng.
- */
-describe('pickRemovedDefaultProviders', () => {
-  const REMOVED = [
-    'https://kilgoreai.xyz/v1',
-    'https://openrouter.ai/api/v1',
-    'https://api.airforce/v1',
-    'https://api.orcarouter.ai/v1',
-    'https://tokenin.my.id/v1',
-  ];
-
-  it('xóa: baseUrl thuộc tập bị bỏ VÀ apiKey rỗng', () => {
-    const out = pickRemovedDefaultProviders([
-      { id: 'a', baseUrl: 'https://kilgoreai.xyz/v1', apiKey: '' },
-      { id: 'b', baseUrl: 'https://tokenin.my.id/v1', apiKey: '' },
-    ]);
-    expect(out).toEqual(['a', 'b']);
-  });
-
-  it('GIỮ: provider có key (kể cả secure pointer @secure:)', () => {
-    const out = pickRemovedDefaultProviders([
-      { id: 'used', baseUrl: 'https://api.orcarouter.ai/v1', apiKey: '@secure:provider:used' },
-      { id: 'manual', baseUrl: 'https://api.airforce/v1', apiKey: 'af-live-123' },
-    ]);
-    expect(out).toEqual([]);
-  });
-
-  it('GIỮ: crax và mọi provider ngoài tập bị bỏ', () => {
-    const out = pickRemovedDefaultProviders([
-      { id: 'crax', baseUrl: 'https://gpt.crax.lol/v1', apiKey: '' },
-      { id: 'other', baseUrl: 'https://my-proxy.example.com/v1', apiKey: '' },
-    ]);
-    expect(out).toEqual([]);
   });
 });

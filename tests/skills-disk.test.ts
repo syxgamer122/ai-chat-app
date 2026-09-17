@@ -144,8 +144,9 @@ describe('skills/disk — index block (progressive disclosure)', () => {
 });
 
 describe('skills/disk — hints', () => {
-  it('ưu tiên .vyenhints > AGENTS.md > CLAUDE.md > .goosehints', () => {
+  it('ưu tiên .vyenhints > AGENTS.md (không còn file tương thích của agent khác)', () => {
     expect(HINTS_FILE_CANDIDATES[0]).toBe('.vyenhints');
+    expect([...HINTS_FILE_CANDIDATES]).toEqual(['.vyenhints', 'AGENTS.md']);
     const picked = pickHintsContent([
       { file: 'AGENTS.md', content: 'agents' },
       { file: '.vyenhints', content: 'hints thắng' },

@@ -1,6 +1,6 @@
 /**
  * Core Types & Data Contracts for Strict Tool Contracts, Provenance & Dual-Gate Guardrails.
- * Adapted from Anthropic Commerce-Agents (anthropics/commerce-agents) & Arcbox (arcboxlabs/arcbox).
+ * Security model dùng chung cho thao tác ghi dữ liệu.
  */
 
 import { z } from 'zod';

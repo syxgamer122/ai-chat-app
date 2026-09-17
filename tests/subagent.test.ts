@@ -80,7 +80,7 @@ describe('subagent constants', () => {
     expect(SUBAGENT_DEFAULT_MAX_TURNS).toBe(10);
   });
 
-  it('absolute max turns caps at 25 (Goose default)', () => {
+  it('absolute max turns caps at 25 (mặc định)', () => {
     expect(SUBAGENT_ABSOLUTE_MAX_TURNS).toBe(25);
   });
 

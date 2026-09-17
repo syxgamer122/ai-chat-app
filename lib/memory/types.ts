@@ -1,5 +1,5 @@
 /**
- * Memory Types — Cấu trúc dữ liệu bộ nhớ dài hạn có Reviewer Gate (Oh My Hermes port).
+ * Memory Types — Cấu trúc dữ liệu bộ nhớ dài hạn có Reviewer Gate.
  *
  * Phân cấp trạng thái:
  * - pending: Candidate mới do agent đề xuất, chờ user review

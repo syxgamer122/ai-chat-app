@@ -1,5 +1,5 @@
 /**
- * Codegraph & UML Architecture Analysis — Phân tích đồ thị phụ thuộc và phát hiện chu trình (Oh My Hermes P2 port).
+ * Codegraph & UML Architecture Analysis — Phân tích đồ thị phụ thuộc và phát hiện chu trình.
  *
  * Tính năng chính:
  * 1. Trích xuất import/export edges giữa các file mã nguồn.
@@ -228,6 +228,6 @@ export function buildCodeGraph(files: Array<{ path: string; content: string }>):
 }
 
 /**
- * Bí danh chuẩn hóa tool theo hợp đồng OMH P2
+ * Bí danh chuẩn hóa tool theo hợp đồng tool P2
  */
 export const codegraph_uml = buildCodeGraph;

@@ -13,7 +13,7 @@ async function delayedEcho(args: unknown): Promise<unknown> {
   return { slept: ms };
 }
 
-describe('getToolExecutionMode — phân loại Pi', () => {
+describe('getToolExecutionMode — phân loại chế độ queue', () => {
   it('tool đọc chạy parallel', () => {
     for (const name of ['fs_read', 'fs_list', 'fs_search', 'git_status', 'git_diff', 'git_log', 'web_search', 'web_fetch', 'weather', 'exchange_rates', 'memory_search', 'mcp__server__tool']) {
       expect(getToolExecutionMode(name)).toBe('parallel');

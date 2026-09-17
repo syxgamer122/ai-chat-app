@@ -68,7 +68,7 @@ export interface GoalClarificationResult {
 }
 
 /**
- * Validates the 4 mandatory elements in Phase 1 per .opencode/agents/teamwork-orchestrator.md:
+ * Validates the 4 mandatory elements in Phase 1 per PROJECT.md:
  * 1. Purpose / Goal
  * 2. Target File Scope
  * 3. Testable Acceptance Criteria
@@ -105,7 +105,7 @@ export function validatePhase1FourElements(req: {
 }
 
 /**
- * Formats compact summary strictly <= 20 lines per .opencode/commands/teamwork.md.
+ * Formats compact summary strictly <= 20 lines per PROJECT.md.
  */
 export function formatCompletionSummary(summary: {
   status: 'COMPLETED' | 'BLOCKED_429' | 'FAILED';

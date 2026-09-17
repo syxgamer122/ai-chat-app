@@ -23,7 +23,7 @@ describe('isActiveProvider', () => {
   it('có baseUrl nhưng không key (provider-no-key) -> vẫn là provider active', () => {
     // Gateway miễn phí: route thay key bằng 'provider-no-key' — chuỗi model
     // phải theo provider người dùng, không theo env máy chủ.
-    expect(isActiveProvider('https://gpt.crax.lol/v1', undefined)).toBe(true);
+    expect(isActiveProvider('https://gateway.example.com/v1', undefined)).toBe(true);
   });
 
   it('chỉ có key BYOK -> provider active', () => {

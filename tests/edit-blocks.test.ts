@@ -54,7 +54,7 @@ describe('parseEditBlocks — parser khoan dung', () => {
   });
 });
 
-describe('replaceMostSimilarChunk — chuỗi fallback của aider', () => {
+describe('replaceMostSimilarChunk — chuỗi fallback', () => {
   it('exact match (indent đúng nguyên văn)', () => {
     const r = replaceMostSimilarChunk(FILE, '  return 1;', '  return 42;');
     expect(r.ok).toBe(true);
@@ -109,7 +109,7 @@ describe('replaceMostSimilarChunk — chuỗi fallback của aider', () => {
     expect(r.hint).toContain('return 1;');
   });
 
-  it('fuzzy TẮT mặc định (quyết định của aider — nguy hiểm)', () => {
+  it('fuzzy TẮT mặc định (nguy hiểm)', () => {
     const r = replaceMostSimilarChunk(FILE, 'totally different text\nno match at all', 'x');
     expect(r.ok).toBe(false);
   });

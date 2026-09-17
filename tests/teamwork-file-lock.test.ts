@@ -29,11 +29,11 @@ describe('normalizeLockPath', () => {
   });
 
   it('strips workspaceRoot prefix when provided', () => {
-    const root = 'C:/Users/huumanh/Downloads/ai-chat-app';
-    expect(normalizeLockPath('C:/Users/huumanh/Downloads/ai-chat-app/lib/teamwork/types.ts', root)).toBe(
+    const root = 'C:/projects/vyen';
+    expect(normalizeLockPath('C:/projects/vyen/lib/teamwork/types.ts', root)).toBe(
       'lib/teamwork/types.ts'
     );
-    expect(normalizeLockPath('C:\\Users\\huumanh\\Downloads\\ai-chat-app\\lib\\teamwork\\types.ts', root)).toBe(
+    expect(normalizeLockPath('C:\\projects\\vyen\\lib\\teamwork\\types.ts', root)).toBe(
       'lib/teamwork/types.ts'
     );
   });

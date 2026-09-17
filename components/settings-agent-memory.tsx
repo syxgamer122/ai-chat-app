@@ -16,10 +16,10 @@ import {
   syncCategoryMirror,
   importMirrorEdits,
 
-} from '@/lib/memory/goose-client';
+} from '@/lib/memory/agent-memory-client';
 import { db } from '@/lib/db';
-import type { AgentMemoryRecord } from '@/lib/memory/goose';
-import { normalizeCategory } from '@/lib/memory/goose';
+import type { AgentMemoryRecord } from '@/lib/memory/agent-memory';
+import { normalizeCategory } from '@/lib/memory/agent-memory';
 
 export function AgentMemorySection() {
   const [records, setRecords] = useState<AgentMemoryRecord[]>([]);

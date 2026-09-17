@@ -11,22 +11,15 @@ import {
 } from 'ai';
 import { z } from 'zod';
 import {
-  getKeyCandidates,
-  markKeyFailure,
-  markKeySuccess,
   getKeyLabel,
   classifyUpstreamStatus,
-  getStickyKey,
-  markStickyKey,
-  clearStickyKey,
-  preferStickyKey,
+  PROVIDER_NO_KEY_SENTINEL,
   type UpstreamScope,
 } from '@/lib/api-keys';
 import { ALLOWED_MODEL_IDS, DEFAULT_MODEL_ID, findModelConfig, getModelConfig, mediaKindOf, resolveProviderModelChain } from '@/lib/models';
 import { validateProviderBaseUrl, providerNeedsApiKey, THINKING_LEVELS, supportsThinkingLevel, type ThinkingLevel } from '@/lib/provider-url';
 import { getReasoningCapability } from '@/lib/model-reasoning-cache';
 import { resolveNearestEffort } from '@/lib/reasoning-capability';
-import { acquireUpstreamSlot, sharedFreeBudget } from '@/lib/upstream-queue';
 import { pumpSseLines } from '@/lib/sse';
 import { parseLooseJson } from '@/lib/json-repair';
 import { isContextOverflowError } from '@/lib/context-budget';
@@ -83,7 +76,7 @@ import { formatRecalledMemoriesBlock } from '@/lib/memory/recall';
 
 /**
  * Write tools bị vô hiệu hóa trong Plan mode — agent chỉ được explore (read/list/
- * search) và hỏi clarifying questions. Port từ Cline "Plan and Act" (Apache-2.0).
+ * search) và hỏi clarifying questions. Chế độ Plan/Act.
  * `delegate` nằm trong set vì subagent CÓ tool ghi file (qua relay renderer) —
  * cho phép delegate là mở cửa write lậu khỏi plan mode.
  */
@@ -103,12 +96,12 @@ import { checkRateLimit, getClientIp, checkSameOrigin, verifyAccessAuth } from '
  * về "edge" dưới đây chỉ còn giá trị lịch sử. Ngân sách thời gian (STREAM_BUDGET_MS,
  * VIDEO_BUDGET_MS) vẫn đặt dưới trần 300s của Vercel function streaming.
  *
- * Tạo ảnh/video ĐI QUA route này với mọi gateway chặn cross-origin — crax trả
+ * Tạo ảnh/video ĐI QUA route này với mọi gateway chặn cross-origin — trả
  * 403 cho bất kỳ request có header `Origin`, tức là mọi lời gọi từ trình duyệt,
  * nên đường "gọi thẳng từ client" (lib/media-generate.ts) không dùng được cho
- * crax và tự fallback về đây.
+ * và tự fallback về đây.
  *
- * Video vẫn kịp: đo thực tế crax `qwen-video-2.0-pro` xong trong 120-126s,
+ * Video vẫn kịp: đo thực tế `qwen-video-2.0-pro` xong trong 120-126s,
  * byte đầu < 1.7s — nằm trong trần 300s của Vercel.
  */
 export const runtime = 'nodejs';
@@ -128,7 +121,7 @@ const STREAM_BUDGET_MS = Number(process.env.CHAT_STREAM_BUDGET_MS ?? '') || 270_
  * ta kết thúc trước nền tảng và trả được thông báo tử tế — thay vì bị giết giữa
  * stream, người dùng thấy treo không rõ lý do.
  *
- * Đo thực tế trên crax `qwen-video-2.0-pro`: 120s và 126s cho 2 lần chạy,
+ * Đo thực tế trên `qwen-video-2.0-pro`: 120s và 126s cho 2 lần chạy,
  * first byte < 1.7s, khoảng cách event lớn nhất ~19s. Video thường nằm gọn
  * trong ngân sách; chỉ video nặng bất thường mới chạm trần.
  */
@@ -136,13 +129,6 @@ const VIDEO_BUDGET_MS = 290_000;
 const IDLE_TIMEOUT_MS = 90_000;
 const HEARTBEAT_MS = 10_000;
 const MAX_BODY_BYTES = 4.5 * 1024 * 1024;
-const MAX_FAILOVER_KEYS = 3;
-
-/* Vision bridge chờ hàng đợi gateway free ngắn hơn lượt chat chính (mặc định
-   12s của acquireUpstreamSlot): mô tả ảnh chỉ là phần PHỤ và đã có phương án
-   hạ cấp (placeholder), không đáng để người dùng chờ thêm chục giây trước khi
-   token đầu tiên của câu trả lời xuất hiện. */
-const BRIDGE_QUEUE_WAIT_MS = 4_000;
 
 /* Port từ prime-agent (`isRetryableError`): lỗi TẠM THỜI của gateway thì thử
    lại ĐÚNG model đó một lần (kèm backoff ngắn) trước khi đốt model/key kế
@@ -199,7 +185,7 @@ function extractDelta(part: unknown): string {
 }
 
 /* ------------------------------------------------------------------ */
-/* Model tạo ảnh (qwen-image của crax v.v.)                            */
+/* Model tạo ảnh (qwen-image v.v.)                            */
 /* ------------------------------------------------------------------ */
 
 /**
@@ -216,7 +202,7 @@ function isImageModel(modelId: string): boolean {
   return IMAGE_MODEL_RE.test(modelId);
 }
 
-/** Model tạo video — crax lộ alias `qwen-video` qua chat SSE (event type:video). */
+/** Model tạo video — lộ alias `qwen-video` qua chat SSE (event type:video). */
 const VIDEO_MODEL_RE = /video|kling|seedance|sora|veo|hailuo|vidu|jimeng/i;
 
 function isVideoModel(modelId: string): boolean {
@@ -242,7 +228,7 @@ function coreToOpenAiMessages(core: CoreMessage[]): Array<{ role: string; conten
  * Đọc từng payload `data:` từ một SSE stream.
  *
  * `onAlive` được gọi cho MỌI byte nhận được từ upstream, kể cả dòng comment
- * SSE (`: keepalive`) mà crax phát khi model còn đang xử lý. Idle-timer phải
+ * SSE (`: keepalive`) mà phát khi model còn đang xử lý. Idle-timer phải
  * reset theo tín hiệu này: tạo video có quãng chỉ toàn keepalive, nếu chỉ đếm
  * dòng `data:` thì stream đang sống vẫn bị coi là treo và bị abort oan.
  */
@@ -255,7 +241,7 @@ const pumpSseData = pumpSseLines;
  */
 const HARD_ARTIFACT = /^(?:undefined|\[object Object\])$/;
 
-/* Che bí mật: dùng CHUNG registry (lib/secret-registry.ts — port OpenHands
+/* Che bí mật: dùng CHUNG registry (lib/secret-registry.ts — port secret-registry
    SecretRegistry) thay cho bản regex copy-paste ở 5 file đã drift nhau. Bản cũ
    thiếu cờ 'g' nên chỉ che vị trí ĐẦU TIÊN trong mỗi chuỗi. */
 function redact(text: string): string {
@@ -293,7 +279,7 @@ function getStatusCode(e: unknown): number | undefined {
 
 /**
  * Lỗi trá hình lần 2 của gateway (sau pseudo-error HTTP 200 dạng "[Notion
- * is unavailable...]"): crax (New API) relay lỗi upstream trong stream 200
+ * is unavailable...]"): (New API) relay lỗi upstream trong stream 200
  * bằng chunk `data: {"error":{"message":"Upstream returned HTTP 502",...}}`.
  * AI SDK v4 (@ai-sdk/openai) với chunk kiểu này enqueue thẳng OBJECT THÔ của
  * gateway vào part 'error' — KHÔNG phải APICallError, không có `statusCode`.
@@ -302,7 +288,7 @@ function getStatusCode(e: unknown): number | undefined {
  * gateway THỰC SỰ đã phản hồi, và retry-in-place cho 5xx bị bỏ qua vì nhánh
  * đó yêu cầu status xác định (502 nằm sẵn trong RETRYABLE_SAME_MODEL_STATUSES).
  *
- * Sửa: suy status từ message ("HTTP NNN" — định dạng crax relay) hoặc các
+ * Sửa: suy status từ message ("HTTP NNN" — định dạng relay) hoặc các
  * field status chuẩn mà gateway kèm theo, rồi gắn `statusCode` để toàn bộ
  * pipeline (restatement → classify → retry/failover → thông báo) đi đúng
  * nhánh 5xx. Chỉ đụng vào object THÔ; Error thật của SDK (đã có status) và
@@ -383,7 +369,7 @@ interface UpstreamDiagnosis {
   userMessage: string;
   devLog: string;
   stopFailover: boolean;
-  /** true = lỗi của key, nên markKeyFailure. false = lỗi của ta hoặc của request. */
+  /** true = lỗi của key, false = lỗi của ta hoặc của request. */
   blameKey: boolean;
   /** true = gateway không có/không cho phép model này → ghi negative cache. */
   modelUnsupported: boolean;
@@ -411,7 +397,7 @@ function diagnoseUpstreamError(
   // Lỗi network/timeout không có url phản hồi — dùng provider thật của request
   // thay vì env, tránh báo sai địa chỉ khi user đang gọi provider riêng.
   const upstreamHost =
-    hostOf(url) ?? hostOf(ctx.providerBase) ?? hostOf(process.env.OPENAI_BASE_URL) ?? 'api.openai.com';
+    hostOf(url) ?? hostOf(ctx.providerBase) ?? 'api.openai.com';
   const bodySnippet = body ? redact(body).replace(/\s+/g, ' ').trim().slice(0, 300) : '';
   const looksLikeCloudflare =
     Boolean(cfRay) ||
@@ -434,7 +420,7 @@ function diagnoseUpstreamError(
 
   /* Lỗi VALIDATE PROMPT phía SDK (AI_InvalidPromptError): history chat nhiễm
      tin nhắn hỏng (vd text leaked từ upstream agent lạ như pool Notion của
-     crax). Không phải lỗi kết nối hay key — trước đây rơi vào nhánh
+    ). Không phải lỗi kết nối hay key — trước đây rơi vào nhánh
      status=undefined và bị gắn nhãn sai "Không kết nối được tới AI Provider",
      khiến người dùng tưởng provider mới chết trong khi chỉ cần bỏ tin hỏng. */
   const rawErrMsg = e instanceof Error ? e.message : String(e ?? '');
@@ -462,7 +448,7 @@ function diagnoseUpstreamError(
   let modelUnsupported = false;
   let stopFailover = false;
 
-  // crax (New API) trả 400 kèm "Unknown model" thay vì 404 cho model lạ.
+  // (New API) trả 400 kèm "Unknown model" thay vì 404 cho model lạ.
   const unknownModel400 = status === 400 && /unknown model/i.test(bodySnippet);
 
   /* Port từ prime-agent `classifyStreamFailure`: từ chối do bộ lọc nội dung
@@ -482,18 +468,17 @@ function diagnoseUpstreamError(
   switch (status) {
     case 401:
       code = 'UPSTREAM_AUTH_401';
-      /* crax đổi sang mô hình tài khoản: trước đây gateway này bỏ qua hoàn
-         toàn Authorization, giờ trả auth_required cho cả request không key
-         lẫn key rác. Người dùng cũ (cấu hình từ thời không cần key) sẽ dính
-         401 hàng loạt nên cần chỉ đúng đường lấy key thay vì báo "key sai". */
+      /* Provider yêu cầu key: auth_required cho cả request không key
+         lẫn key rác. Người dùng chưa nhập key cần được chỉ đúng đường
+         lấy key thay vì báo chung chung "key sai". */
       userMessage = /auth[_\s-]*required|log in at the site/i.test(bodySnippet)
-        ? `${upstreamHost} yêu cầu đăng nhập: gateway này đã chuyển sang mô hình tài khoản ` +
-          'và không còn dùng miễn phí không cần key. Hãy đăng ký tại trang của họ, tạo API key ' +
-          '(dạng crk_live_…) trong Settings → API keys, rồi dán vào phần Nhà cung cấp của ứng dụng.'
+        ? `${upstreamHost} yêu cầu đăng nhập/xác thực bằng API key. ` +
+          'Hãy đăng ký tại trang của nhà cung cấp, tạo API key ' +
+          'rồi dán vào phần Nhà cung cấp của ứng dụng (Settings).'
         : `AI Provider từ chối API Key (401 Unauthorized) tại ${upstreamHost}. ` +
           (ctx.providerBase
             ? 'Key sai hoặc đã bị thu hồi — kiểm tra lại API Key của nhà cung cấp này.'
-            : 'Key sai, đã bị thu hồi, hoặc không hợp lệ với OPENAI_BASE_URL đang cấu hình.');
+            : 'Key sai, đã bị thu hồi, hoặc không hợp lệ với provider đang cấu hình.');
       break;
     case 402:
       code = 'UPSTREAM_PAYMENT_402';
@@ -641,7 +626,7 @@ function diagnoseUpstreamError(
     .join(' ');
 
   // 403-WAF và 5xx: vẫn nên thử key khác (có thể route khác IP / retry may mắn).
-  // 400 "Unknown model" (kiểu crax trả thay vì 404) vẫn cho thử model kế tiếp.
+  // 400 "Unknown model" ( trả thay vì 404) vẫn cho thử model kế tiếp.
   // Rule 500-validation tự đặt stopFailover trong switch — lỗi request của ta,
   // retry nơi khác vô ích.
   if (!stopFailover) {
@@ -826,7 +811,7 @@ const BodySchema = z.object({
   /* Chế độ agent coding: 'plan' = chỉ explore (read/list/search), vô hiệu hóa
      write tools (fs_write, fs_edit). 'act' = bình thường. Mặc định 'act'. */
   agentMode: z.enum(['plan', 'act']).optional(),
-  /* Staging sandbox (Plandex-style): fs_edit/fs_write ghi vào bộ đệm thay vì
+  /* Staging sandbox: fs_edit/fs_write ghi vào bộ đệm thay vì
      đĩa; user review batch rồi Apply/Reject. Chỉ có ý nghĩa khi workspace đã kết nối. */
   staging: z.boolean().optional(),
   /**
@@ -839,7 +824,7 @@ const BodySchema = z.object({
    * `.catch(undefined)`: danh sách lỗi (server MCP lạ, bản renderer cũ) không
    * được phép làm hỏng cả cuộc trò chuyện — MCP là phần cộng thêm, hỏng thì tắt.
    */
-  /* Disk Skills + hints (port Goose P0-3): client quét `.vyen/skills/<name>/SKILL.md`
+  /* Disk Skills + hints (P0-3): client quét `.vyen/skills/<name>/SKILL.md`
      + ~/.vyen/skills (bridge) và .vyenhints/AGENTS.md/... rồi gửi CHỈ MỤC
      metadata — progressive disclosure: nội dung chỉ vào context khi model
      gọi skill_load (client tool, đọc file ở máy user). */
@@ -903,7 +888,7 @@ const BodySchema = z.object({
     )
     .max(40)
     .optional(),
-  /* Recipe (port Goose): client gửi khi đang chạy 1 recipe — instructions đã
+  /* Recipe : client gửi khi đang chạy 1 recipe — instructions đã
      render tham số ở client (server không biết giá trị), toolPolicy lọc
      tool client của lượt này. Nhẹ tùy ý: recipe tắt thì field vắng mặt. */
   recipe: z
@@ -1234,11 +1219,11 @@ export async function POST(req: Request) {
     for (const hit of webContext?.hits ?? []) collectProvenanceUrls(hit.url);
     for (const page of webContext?.pages ?? []) collectProvenanceUrls(page.url);
 
-    /* Mức suy luận: crax dịch trực tiếp (fast-path, không cần metadata).
+    /* Mức suy luận: dịch trực tiếp (fast-path, không cần metadata).
        Gateway khác tra metadata kiểu OpenRouter LƯỜI qua cache 5 phút —
        model khai báo hỗ trợ thì gửi mức GẦN NHẤT được hỗ trợ; không khai
        báo thì bỏ tham số như hành vi cũ (nhiều gateway 400 nếu nhận mù). */
-    const effortBase = providerBase ?? process.env.OPENAI_BASE_URL ?? null;
+    const effortBase = providerBase ?? null;
 
     // Provider override: model do gateway của user định nghĩa (/v1/models),
     // cho phép ngoài danh sách built-in.
@@ -1260,7 +1245,7 @@ export async function POST(req: Request) {
     const baseConfig = getModelConfig(selectedModelId);
     /* Provider override + model KHÔNG có trong catalog: getModelConfig() rơi
        về model mặc định, mà mặc định lại supportsImages=true. Hệ quả thật:
-       gửi ảnh cho một model chữ thuần (vd gemma-3-12b, qwen3.6-plus của crax)
+       gửi ảnh cho một model chữ thuần (vd gemma-3-12b, qwen3.6-plus)
        thì vision-bridge KHÔNG kích hoạt, ảnh đi thẳng lên và model trả
        "this model does not support image input".
 
@@ -1276,7 +1261,7 @@ export async function POST(req: Request) {
           ...(isUnknownOverrideModel ? { supportsImages: false, supportsPdf: false } : {}),
         }
       : baseConfig;
-    const upstreamBase = providerBase ?? process.env.OPENAI_BASE_URL ?? null;
+    const upstreamBase = providerBase ?? null;
 
     const defaultChainModels = activeCategory && !model
       ? (customChains?.[activeCategory]?.map((e) => e.model) ?? DEFAULT_CHAINS[activeCategory]?.map((e) => e.model))
@@ -1374,10 +1359,8 @@ export async function POST(req: Request) {
         m.experimental_attachments?.some((a) => a.contentType?.startsWith('image/')),
       )
     ) {
-      /* Bridge đi qua ĐÚNG gateway dùng chung của lượt chat này, nên phải
-         xếp hàng như mọi lượt gọi LLM khác (khối acquireUpstreamSlot bên dưới
-         lo cho lượt chat chính). Không xếp hàng = nhảy hàng: một tin nhắn kèm
-         ảnh chiếm ngân sách IP-chung mà queue không thấy.
+      /* Bridge đi qua ĐÚNG provider của lượt chat này (BYOK),
+         cùng một provider BYOK với lượt chat chính.
 
          Slot được chiếm LƯỜI (callback, do bridge gọi ngay trước mỗi lượt gọi
          provider) chứ không chiếm sẵn ở đây: ảnh đã có mô tả trong cache thì
@@ -1390,19 +1373,10 @@ export async function POST(req: Request) {
          hàng đợi mà giết lượt chat.
          Ghi chú: một slot phủ cả chuỗi retry (tối đa 3 lượt fetch) của nhóm
          ảnh — cùng quy ước với lượt chat (một request tự retry nội bộ). */
-      const bridgeBase = providerBase ?? process.env.OPENAI_BASE_URL;
-      const bridgeNeedsQueue = Boolean(bridgeBase && sharedFreeBudget(bridgeBase));
-      /* Hết ngân sách MỘT lần là bỏ bridge cho toàn bộ lượt này: mỗi lần chờ
-         hàng đợi tốn tới BRIDGE_QUEUE_WAIT_MS, mà history có thể chứa nhiều
-         tin nhắn kèm ảnh — thử lại từng nhóm sẽ cộng dồn thành hàng chục giây
-         chờ cho một thứ vốn có phương án hạ cấp (placeholder). */
-      let bridgeQueueExhausted = false;
       try {
         bridgeMessages = await bridgeImagesInMessages(sanitizedContextMessages, {
-          apiKey: customKey ?? 'provider-no-key',
-          // Không có providerBase thì dùng env base như mọi lượt gọi khác
-          // của route — cùng một upstream, không nguồn thứ hai.
-          baseUrl: bridgeBase,
+          apiKey: customKey ?? PROVIDER_NO_KEY_SENTINEL,
+          baseUrl: providerBase,
           model: visionModel,
           /* Ghép req.signal: user bấm Stop giữa lúc bridge chạy thì lượt gọi
              provider dừng theo, không để 25s × 3 retry chạy tiếp ở nền.
@@ -1413,21 +1387,6 @@ export async function POST(req: Request) {
             const merged = inner ? AbortSignal.any([inner, req.signal]) : req.signal;
             return fetch(input, { ...init, signal: merged });
           }) as typeof fetch,
-          ...(bridgeNeedsQueue && bridgeBase
-            ? {
-                acquireSlot: async () => {
-                  if (bridgeQueueExhausted) return false;
-                  const slot = await acquireUpstreamSlot(bridgeBase, BRIDGE_QUEUE_WAIT_MS);
-                  if (!slot.ok) {
-                    bridgeQueueExhausted = true;
-                    console.info(
-                      `[req:${requestId}] vision bridge bị bỏ qua: gateway free hết ngân sách (thử lại sau ~${slot.retryAfterSec}s), ảnh sẽ thành placeholder`,
-                    );
-                  }
-                  return slot.ok;
-                },
-              }
-            : {}),
         });
         console.info(`[req:${requestId}] vision bridge: ảnh đã thay bằng mô tả cho model ${selectedProviderModel}`);
       } catch (bridgeError) {
@@ -1482,73 +1441,37 @@ export async function POST(req: Request) {
 
     /* Provider override KHÔNG kèm key, mà gateway lại yêu cầu xác thực →
        chặn ngay tại đây. Nếu để đi tiếp, upstream nhận Bearer
-       'provider-no-key' và trả 401; người dùng thấy "Provider từ chối API
+       'PROVIDER_NO_KEY_SENTINEL' và trả 401; người dùng thấy "Provider từ chối API
        Key" và tưởng key mình sai, trong khi thực ra chưa hề nhập key.
-       Tình huống này phổ biến sau khi crax chuyển sang mô hình tài khoản:
-       preset cũ được seed với apiKey rỗng từ thời gateway còn miễn phí. */
+        */
     if (providerBase && !customKey && providerNeedsApiKey(providerBase)) {
       return jsonError(
         requestId,
         401,
         'PROVIDER_KEY_REQUIRED',
         `Nhà cung cấp ${hostOf(providerBase) ?? providerBase} yêu cầu API key nhưng bạn chưa nhập. ` +
-          'Mở Cài đặt → Nhà cung cấp, bấm Sửa và dán API key của gateway này.',
+          'Mở Cài đặt → Nhà cung cấp, bấm Sửa và dán API key của nhà cung cấp này.',
       );
     }
 
-    // Provider override: key thuộc về gateway của user, không dùng pool env.
-    const candidateResult = providerBase
-      ? { keys: [customKey ?? 'provider-no-key'] }
+    /* Key của lượt gọi: provider active của user (base + key BYOK) là nguồn
+       duy nhất. Tầng pool key máy chủ + hàng đợi gateway đã gỡ hẳn. */
+    const candidateKeys = providerBase
+      ? [customKey ?? PROVIDER_NO_KEY_SENTINEL]
       : customKey
-        ? { keys: [customKey] }
-        : getKeyCandidates();
-    /* Sticky key theo hội thoại: key đã thành công ở lượt trước của CÙNG
-       hội thoại được ưu tiên lên đầu (nếu còn khỏe) — ăn prompt-cache prefix
-       của provider. Chỉ là soft-preference, vòng xoay sức khỏe vẫn thắng. */
-    let candidateKeys = preferStickyKey(
-      candidateResult.keys.slice(0, MAX_FAILOVER_KEYS),
-      getStickyKey(conversationId),
-    );
+        ? [customKey]
+        : [];
 
-    /* Kiểm tra key TRƯỚC khi chiếm slot của gateway free dùng chung: request chắc
-       chắn không gọi được upstream thì không nên tiêu ngân sách IP chung (và có
-       thể phải chờ tới hết hàng đợi) rồi mới trả 503. */
     if (!candidateKeys.length) {
-      const retrySec = Math.max(1, Math.ceil((candidateResult.retryAfterMs ?? 60_000) / 1000));
       return jsonError(
         requestId,
         503,
         'NO_API_KEY_CONFIGURED',
-        'Toàn bộ API Key đang trong thời gian nghỉ / chờ xử lý. Vui lòng thử lại sau ít phút.',
-        undefined,
-        { 'Retry-After': String(retrySec) },
+        'Chưa cấu hình Nhà cung cấp — hãy vào Cài đặt để thêm địa chỉ và API key của provider.',
       );
     }
 
-    /* Gateway free dùng chung (crax/Kilgore): ngân sách theo IP server là
-       CHUNG cho toàn bộ user — xếp hàng để tổng luôn trong ngưỡng công bố. */
-    const queueBase =
-      sharedFreeBudget(providerBase) && providerBase
-        ? providerBase
-        : sharedFreeBudget(process.env.OPENAI_BASE_URL)
-          ? (process.env.OPENAI_BASE_URL as string)
-          : null;
-    if (queueBase) {
-      const slot = await acquireUpstreamSlot(queueBase);
-      if (!slot.ok) {
-        return jsonError(
-          requestId,
-          429,
-          'PROVIDER_BUSY',
-          `Nhà cung cấp free đang đông (giới hạn chung). Thử lại sau ~${slot.retryAfterSec} giây nhé.`,
-          undefined,
-          { 'Retry-After': String(slot.retryAfterSec) },
-        );
-      }
-    }
-
-    const upstreamHost =
-      hostOf(providerBase) ?? hostOf(process.env.OPENAI_BASE_URL) ?? 'api.openai.com';
+    const upstreamHost = hostOf(providerBase) ?? 'api.openai.com';
     console.info(
       `[req:${requestId}] start model=${selectedProviderModel} upstream=${providerBase ? hostOf(providerBase) ?? providerBase : upstreamHost} keys=${candidateKeys.length}`,
     );
@@ -1579,7 +1502,7 @@ export async function POST(req: Request) {
           );
         };
 
-        // Ghi lại biên nhận route (RouteReceipt) theo tiêu chuẩn Oh My Hermes để client và HUD hiển thị
+        // Ghi lại biên nhận route (RouteReceipt) theo tiêu chuẩn chung để client và HUD hiển thị
         writeAnnotation({ routeReceipt });
 
         /* Sửa A3: heartbeat 10s, chỉ chạy trong giai đoạn chưa có token nào.
@@ -1630,7 +1553,7 @@ export async function POST(req: Request) {
           dataStream.write(
             formatDataStreamPart('finish_message', {
               finishReason,
-              // Một số gateway (crax, Kilgore) không trả usage — ước lượng
+              // Một số gateway không trả usage — ước lượng
               // token vào từ độ dài context để thống kê vẫn có dữ liệu.
               usage:
                 usage && (usage.promptTokens || usage.completionTokens)
@@ -1664,16 +1587,16 @@ export async function POST(req: Request) {
             const keyLabel = getKeyLabel(apiKey);
             const openai = createOpenAI({
               apiKey,
-              baseURL: providerBase ?? (process.env.OPENAI_BASE_URL || undefined),
+              baseURL: providerBase,
             });
             /* Instance RIÊNG cho đường emulated: nó dùng generateText, mà
-               generateText không gửi trường `stream` — crax gặp vậy thì trả
+               generateText không gửi trường `stream` — gặp vậy thì trả
                SSE và AI SDK ném "Invalid JSON response". Đường native
                (streamText) PHẢI dùng `openai` gốc ở trên, không được ép
                stream:false. Xem lib/non-streaming-fetch.ts. */
             const openaiNonStreaming = createOpenAI({
               apiKey,
-              baseURL: providerBase ?? (process.env.OPENAI_BASE_URL || undefined),
+              baseURL: providerBase,
               fetch: nonStreamingFetch,
             });
 
@@ -1752,13 +1675,12 @@ export async function POST(req: Request) {
                 startHeartbeat();
 
                 /* Model media:
-                   - Ảnh: ưu tiên /v1/images/generations chuẩn OpenAI (crax,
-                     Kilgore đều hỗ trợ, trả URL); nếu gateway không có endpoint
+                   - Ảnh: ưu tiên /v1/images/generations chuẩn OpenAI (nhiều provider hỗ trợ, trả URL); nếu gateway không có endpoint
                      này thì fallback qua chat SSE như trước.
-                   - Video: chat SSE (crax `qwen-video` — event type:video). */
+                   - Video: chat SSE (event type:video). */
                 if (isImageModel(targetModel) || isVideoModel(targetModel)) {
                   const base =
-                    providerBase ?? process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1';
+                    providerBase;
                   const lastUser =
                     [...coreToOpenAiMessages(core)].reverse().find((m) => m.role === 'user')
                       ?.content ?? '';
@@ -1784,7 +1706,7 @@ export async function POST(req: Request) {
                           model: targetModel,
                           prompt: lastUser.slice(0, 4000),
                           n: 1,
-                          /* gpt-image-2 (crax) chỉ nhận 4 kích thước cố định:
+                          /* gpt-image-2  chỉ nhận 4 kích thước cố định:
                              1536x1024, 1024x1536, 1024x1024, 1024x768. Gửi
                              mặc định vuông cho model này; model khác không
                              gửi `size` để giữ mặc định của từng gateway. */
@@ -1808,7 +1730,6 @@ export async function POST(req: Request) {
                           emitMedia('image', url);
                           clearIdle();
                           clearTimeout(budgetTimer);
-                          markKeySuccess(apiKey);
                           writeFinish('stop');
                           return;
                         }
@@ -1819,7 +1740,7 @@ export async function POST(req: Request) {
                       if (poll) {
                         writeText(poll);
                         writeText(
-                          '\n_(Ảnh từ Pollinations.AI — dự phòng miễn phí vì gateway chính không trả ảnh)_\n',
+                          '\n_(Ảnh từ Pollinations.AI — dự phòng miễn phí vì provider không trả ảnh)_\n',
                           'reasoning',
                         );
                         /* Sửa A4: đường thoát này cũng phải dọn timer + ghi công
@@ -1828,7 +1749,6 @@ export async function POST(req: Request) {
                            290s) sau khi stream đã khép. */
                         clearIdle();
                         clearTimeout(budgetTimer);
-                        markKeySuccess(apiKey);
                         writeFinish('stop');
                         return;
                       }
@@ -1917,7 +1837,6 @@ export async function POST(req: Request) {
                   if (!got) writeText('_(Nhà cung cấp không trả về media nào)_');
                   clearIdle();
                   clearTimeout(budgetTimer);
-                  markKeySuccess(apiKey);
                   writeFinish('stop');
                   return;
                 }
@@ -1948,7 +1867,7 @@ export async function POST(req: Request) {
                      })
                    : {};
                  /**
-                  * Sub-recipe tools (port Goose): mỗi sub-recipe của run thành
+                  * Sub-recipe tools : mỗi sub-recipe của run thành
                   * MỘT tool server (có execute — chạy subagent ngay trong route,
                   * giống delegate ở đường native) + 1 tool batch song song.
                   * Gộp vào serverTools nên CẢ HAI đường (native + emulated) đều
@@ -1969,7 +1888,7 @@ export async function POST(req: Request) {
                   * để allowAgentTools=false một mình không được phép làm MCP
                   * biến mất im lặng.
                   */
-                  /* Capability projection (Oh My Hermes port): chiếu năng lực và lọc bớt MCP tool
+                  /* Capability projection : chiếu năng lực và lọc bớt MCP tool
                    * theo ngân sách byte và tín hiệu request thay cho trần cứng 100 tool. */
                   let projectedMcpList = mcpToolList;
                   let projectedProxyList = mcpProxyToolList;
@@ -2124,7 +2043,7 @@ export async function POST(req: Request) {
                   .filter(Boolean)
                   .join(' ');
 
-                /* Prompt-cache discipline (Oh My Hermes port):
+                /* Prompt-cache discipline :
                    Phần đầu ổn định từng byte giữa các sibling units/turns để tối đa cache hit.
                    Hiệu chuẩn theo họ model khi effort high/max.
                    Đẩy toàn bộ nội dung volatile (workspace, contextSummary, webContext, lessons) xuống sau. */
@@ -2146,7 +2065,7 @@ export async function POST(req: Request) {
                     /* Bộ nhớ có cấu trúc (P1-4) — index-only theo ngân sách. */
                     memoryIndex ?? '',
                     skillIndex?.length ? buildDiskSkillIndexBlock(skillIndex) : '',
-                    /* Recipe instructions (port Goose): workflow đang chạy — đứng
+                    /* Recipe instructions : workflow đang chạy — đứng
                        sau persona để giữ lực chỉ thị, trước các khối dữ liệu. */
                     recipeCtx?.instructions
                       ? recipeCtx.instructions.trim()
@@ -2181,15 +2100,15 @@ export async function POST(req: Request) {
                            })),
                          )
                         : '',
-                        /* Curated Stack Skills (OMH P2): tự động nạp kỹ năng khớp domain */
+                        /* Curated Stack Skills (P2): tự động nạp kỹ năng khớp domain */
                         userQueryText
                           ? generateSkillsPrompt(matchSkillsForRequest(userQueryText))
                           : '',
-                        /* Ghi nhớ dài hạn đã duyệt (OMH P1-D): nạp facts/rules/decisions không phải lesson */
+                        /* Ghi nhớ dài hạn đã duyệt (P1-D): nạp facts/rules/decisions không phải lesson */
                         formatRecalledMemoriesBlock(chatMemories),
                         /* Lessons: bài học từ các phiên trước, extract từ memories
                            có prefix [LESSON:*]. Inject vào system prompt để model
-                           không lặp lại lỗi cũ. Port từ Claude Code /reflect. */
+                           không lặp lại lỗi cũ. Port từ cơ chế /reflect. */
                         formatLessonsBlock(extractLessons(chatMemories)),
                         /* Khối [Workspace]: model KHÔNG có cách nào biết user đã
                           kết nối thư mục — thiếu khối này nó trả lời kiểu "tôi
@@ -2222,7 +2141,7 @@ export async function POST(req: Request) {
                         /* Plan mode: agent CHỈ explore, KHÔNG sửa gì. Write tools
                            đã bị loại khỏi registry (server-side) nhưng model cần
                            được NHẮC rõ ràng để không cố gọi hoặc hỏi "sao tôi
-                           không sửa được". Port từ Cline Plan/Act (Apache-2.0). */
+                           không sửa được". Chế độ Plan/Act. */
                         agentMode === 'plan'
                           ? '[PLAN MODE] Bạn đang ở chế độ LẬP KẾ HOẠCH. Chỉ được phép: đọc file ' +
                             '(fs_read), liệt kê thư mục (fs_list), tìm kiếm (fs_search), tra web ' +
@@ -2231,7 +2150,7 @@ export async function POST(req: Request) {
                             'kế hoạch chi tiết (file nào sẽ sửa, sửa gì, theo thứ tự nào) rồi CHỜ ' +
                             'người dùng xác nhận trước khi chuyển sang thực thi.'
                           : '',
-                        /* Staging sandbox (Plandex-style): thay đổi tích lũy trong
+                        /* Staging sandbox: thay đổi tích lũy trong
                            bộ đệm, user review batch rồi Apply. Model không được nói
                            "đã ghi vào đĩa" — thay vào đó nói "đã chuẩn bị thay đổi". */
                         staging && workspaceState?.connected
@@ -2250,7 +2169,7 @@ export async function POST(req: Request) {
                             'rồi chạy LẠI CHÍNH LỆNH ĐÓ để kiểm chứng. Đừng bỏ cuộc sau 1 lần fail. ' +
                             'Nếu retryGuidance nói "STOP" thì dừng và báo người dùng.'
                           : '',
-                        /* Shell output truncation (Goose-style): khi output quá dài,
+                        /* Shell output truncation : khi output quá dài,
                            kết quả chỉ chứa phần CUỐI (preview) + đường dẫn temp file. */
                         workspaceState?.connected
                           ? '[SHELL OUTPUT] Khi shell_run trả truncated: true, output đã bị cắt (giữ phần cuối chứa lỗi). ' +
@@ -2306,7 +2225,7 @@ export async function POST(req: Request) {
                             'Sử dụng `await mcp.call(serverId, toolName, args)` để gọi công cụ MCP theo kịch bản và xử lý kết quả trực tiếp.'
                           : '',
                         /* Sub-task planning: khi nhận task phức tạp, phân rã thành
-                           subtask để theo dõi tiến độ. Port từ Plandex + Cline. */
+                           subtask để theo dõi tiến độ. Port từ plans + sub-agents. */
                         workspaceState?.connected
                           ? '[PLANNING] Khi nhận task LỚN (nhiều file, nhiều bước, refactor...), ' +
                             'hãy gọi plan_create để phân rã thành subtask nhỏ. Làm từng subtask một, ' +
@@ -2439,7 +2358,6 @@ export async function POST(req: Request) {
                   });
                   clearIdle();
                   clearTimeout(budgetTimer);
-                  markKeySuccess(apiKey);
                   console.info(
                     `[req:${requestId}] emulated loop xong (${loopResult.status}, ${loopResult.roundsUsed} rounds, ${loopResult.totalCalls} calls).`,
                   );
@@ -2449,7 +2367,6 @@ export async function POST(req: Request) {
                   if (loopResult.status === 'pending-client') {
                     recordModelOutcome(upstreamBase ?? '', targetModel, true);
                     decayModelFailure(upstreamBase ?? '', keyLabel, targetModel);
-                    markStickyKey(conversationId, apiKey);
                     writeFinish('tool-calls');
                     return;
                   }
@@ -2462,7 +2379,6 @@ export async function POST(req: Request) {
                   }
                   recordModelOutcome(upstreamBase ?? '', targetModel, true);
                   decayModelFailure(upstreamBase ?? '', keyLabel, targetModel);
-                  markStickyKey(conversationId, apiKey);
                   writeFinish('stop');
                   return;
                 }
@@ -2582,7 +2498,7 @@ export async function POST(req: Request) {
                 let finishReason: string | undefined;
                 let toolCallCount = 0;
 
-                  /* Gom text đầu stream để soi "lỗi trá hình HTTP 200": crax
+                  /* Gom text đầu stream để soi "lỗi trá hình HTTP 200":
                      trả finish_reason 'stop' bình thường nhưng nội dung là
                      thông báo hết quota backend. Không bắt thì app lưu nguyên
                      thông báo đó như câu trả lời và KHÔNG failover.
@@ -2737,9 +2653,8 @@ export async function POST(req: Request) {
                   `[req:${requestId}] native xong (finish=${hasPendingClientCalls ? 'tool-calls' : (finishReason ?? '?')}, ` +
                     `chars=${emittedChars}, calls=${toolCallCount}, model=${targetModel}).`,
                 );
-                markKeySuccess(apiKey);
                 /**
-                 * Gateway đôi khi trả 200 + stream KHÔNG có token nào (crax
+                 * Gateway đôi khi trả 200 + stream KHÔNG có token nào (gateway
                  * lúc quá tải, model reasoning chỉ nhả reasoning bị gateway
                  * nuốt...). Kết thúc 'stop' im lặng ở đây = bong bóng rỗng
                  * không lời giải thích cho người dùng — báo EMPTY_RESPONSE
@@ -2755,8 +2670,6 @@ export async function POST(req: Request) {
                   // khóa mềm ô này để lượt sau ưu tiên hướng khác.
                   recordModelOutcome(upstreamBase ?? '', targetModel, false);
                   markModelFailure(upstreamBase ?? '', keyLabel, targetModel);
-                  if (getStickyKey(conversationId) === apiKey) clearStickyKey(conversationId);
-                  writeAnnotation({ error: 'EMPTY_RESPONSE' });
                   writeFinish('other');
                   return;
                 }
@@ -2764,7 +2677,6 @@ export async function POST(req: Request) {
                 // cho hội thoại để lượt sau ăn prompt-cache của provider.
                 recordModelOutcome(upstreamBase ?? '', targetModel, true);
                 decayModelFailure(upstreamBase ?? '', keyLabel, targetModel);
-                markStickyKey(conversationId, apiKey);
                 writeFinish(
                   hasPendingClientCalls ? 'tool-calls' : finishReason === 'length' ? 'length' : 'stop',
                 );
@@ -2774,7 +2686,6 @@ export async function POST(req: Request) {
                 clearTimeout(budgetTimer);
 
                 if (req.signal.aborted) {
-                  markKeySuccess(apiKey);
                   writeFinish(emittedChars > 0 ? 'stop' : 'other');
                   return;
                 }
@@ -2819,7 +2730,7 @@ export async function POST(req: Request) {
                   continue;
                 }
 
-                /* Pool backend của gateway cạn cho RIÊNG model này (crax trả
+                /* Pool backend của gateway cạn cho RIÊNG model này (gateway trả
                    HTTP 200 kèm thông báo lỗi — xem lib/pseudo-error-response).
                    Model khác trong chain thường vẫn chạy, nên chuyển tiếp thay
                    vì báo lỗi. KHÔNG phạt key: lỗi thuộc về pool tài khoản của
@@ -2867,14 +2778,13 @@ export async function POST(req: Request) {
                      khi abort — đủ tin cậy; client-abort đã xử lý ở trên. */
                   const isIdle = abortKind === 'idle';
                   if (isIdle) {
-                    markKeyFailure(apiKey, undefined);
                     // Idle = model/gateway ngắt hơi: trừ điểm + khóa mềm ô.
                     recordModelOutcome(upstreamBase ?? '', targetModel, false);
                     markModelFailure(upstreamBase ?? '', keyLabel, targetModel);
 
                     /* Idle với 0 token thường là gateway chết TẠM ở một patch
                        (quan sát thật: request tiếp diễn của agent coding dính
-                       đúng lúc crax ngốn 60s im lặng). status=none không rơi
+                       đúng lúc ngốn 60s im lặng). status=none không rơi
                        vào retry-in-place thường → thử lại ĐÚNG ô một lần ở
                        đây, nếu không agent turn đổ chỉ vì mạng hắt hơi. */
                     const idleSlotKey = `idle:${attempt}:${modelIndex}`;
@@ -2922,25 +2832,7 @@ export async function POST(req: Request) {
                   markModelUnsupported(upstreamBase, targetModel);
                 }
 
-                if (diagnosis.blameKey) {
-                  markKeyFailure(apiKey, diagnosis.status);
-                  // Key này vừa bị phạt → gỡ ghim sticky nếu đang trùng.
-                  if (getStickyKey(conversationId) === apiKey) clearStickyKey(conversationId);
-                }
-
-                /* Quality/lockout: chỉ trừ điểm ô (key×model) khi lỗi là
-                   TẠM THỜI của đường truyền/model — lỗi model-unsupported
-                   thuộc negative-cache, lỗi nội dung request (stopFailover)
-                   không phải tội của ai trong pool. */
-                if (
-                  !diagnosis.modelUnsupported &&
-                  !diagnosis.stopFailover &&
-                  !req.signal.aborted
-                ) {
-                  recordModelOutcome(upstreamBase ?? '', targetModel, false);
-                  markModelFailure(upstreamBase ?? '', keyLabel, targetModel);
-                }
-
+                
                 /* Retry-in-place (port từ prime-agent): lỗi tạm thời 429/5xx,
                    chưa emit token nào, không phải safety/invalid-request thì
                    thử lại ĐÚNG model này một lần trước khi chuyển model/key.
@@ -2973,7 +2865,7 @@ export async function POST(req: Request) {
                 /**
                  * Lỗi KHÔNG phải của key (400 "unknown model", 4xx đặc thù model)
                  * mà đổi key cũng vô ích: thử MODEL kế tiếp trong chain trước.
-                 * Đây là đường sống còn của model mặc định trên crax — crax đặt
+                 * Đây là đường sống còn của model mặc định trên — đặt
                  * tên bằng gạch (`gpt-5-6-sol`) và trả 400 cho bản chấm
                  * (`gpt-5.6-sol`); phải rơi xuống biến thể gạch ngay sau đó thay
                  * vì `break` sang key khác rồi kết thúc stream với bong bóng trống.

@@ -1,10 +1,10 @@
 /**
  * Cache capability suy luận (baseUrl → metadata /v1/models) cho route chat.
  *
- * Khi user chọn mức thinking trên provider override KHÔNG phải crax, route
+ * Khi user chọn mức thinking trên provider override không hỗ trợ fast-path, route
  * cần biết model đó có hỗ trợ `reasoning_effort` không — thông tin nằm trong
  * metadata kiểu OpenRouter của chính gateway. Fetch /v1/models LƯỜI theo TTL:
- * chỉ xảy ra khi có thinkingLevel được gửi + gateway không phải crax; cache
+ * chỉ xảy ra khi có thinkingLevel được gửi + gateway không hỗ trợ fast-path; cache
  * theo isolate để các request sau trong cùng warm window không fetch lại.
  *
  * Module-level Map, sống theo isolate Edge — cùng cấp độ bền với negative

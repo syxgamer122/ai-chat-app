@@ -1,5 +1,5 @@
 /**
- * P3.1 — Steering vs Follow-up queue (port kiến trúc Pi `pi-agent-core`).
+ * P3.1 — Steering vs Follow-up queue (port kiến trúc agent loop agent loop).
  *
  * - **Steering** (Enter khi agent đang chạy): inject NGAY sau khi turn hiện
  *   tại xong (kể cả turn đó là tool-call resubmit).
@@ -49,7 +49,7 @@ export function enqueueMessage(queue: readonly string[], text: string): EnqueueR
 }
 
 /**
- * Thứ tự poll trong onFinish (đúng Pi): hết tool call → steering? inject +
+ * Thứ tự poll trong onFinish (đúng chuẩn): hết tool call → steering? inject +
  * turn mới → không có thì goal-continue? → không thì follow-up? inject.
  * Hàm này chỉ quyết định giữa steering và follow-up khi caller đã biết turn
  * hiện tại KHÔNG phải tool-call resubmit.

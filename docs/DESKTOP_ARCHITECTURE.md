@@ -1,4 +1,4 @@
-# Kiến Trúc Tối Ưu Hóa Desktop, Web & CLI (Chuẩn Pi & Goose)
+# Kiến Trúc Tối Ưu Hóa Desktop, Web & CLI
 
 ## 1. Nguyên nhân gốc rễ: Tại sao Electron cũ lại "lag vc dell cả mở lên được"?
 

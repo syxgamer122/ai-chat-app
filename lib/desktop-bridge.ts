@@ -53,7 +53,7 @@ export interface VyenRunResult {
   stderr: string;
   durationMs: number;
   timedOut: boolean;
-  /** True khi output bị cắt bởi smart truncation (Goose-style). */
+  /** True khi output bị cắt bởi smart truncation (smart truncation). */
   truncated?: boolean;
   /** Đường dẫn temp file chứa full output (khi truncated). */
   savedTo?: string;
@@ -306,7 +306,7 @@ export interface VyenBridge {
     fetch(opts: VyenLlmFetchOptions): Promise<VyenLlmFetchResult>;
   };
   /**
-   * Skills toàn cục ~/.vyen/skills (port Goose). Optional như llm — bridge
+   * Skills toàn cục ~/.vyen/skills. Optional như llm — bridge
    * cũ không có lệnh home-skills-*.
    */
   skills?: {
@@ -325,7 +325,7 @@ export interface VyenBridge {
   code?: {
     run(opts: { code: string; timeoutMs?: number }): Promise<CodeModeResult>;
   };
-  /** Quản lý lịch chạy recipe tự động theo cron (Goose P2-9). */
+  /** Quản lý lịch chạy recipe tự động theo cron (P2-9). */
   scheduler?: {
     list(): Promise<ScheduleRecord[]>;
     save(schedule: ScheduleRecord): Promise<{ ok: boolean; error?: string }>;
@@ -363,11 +363,11 @@ export interface VyenBridge {
     ): () => void;
     onServerStatus(cb: (status: VyenMcpServerStatus) => void): () => void;
   };
-  /** Chẩn đoán sức khỏe hệ thống (Claude Code & MonkeyCode) */
+  /** Chẩn đoán sức khỏe hệ thống (terminal coding agent & Security) */
   doctor?(): Promise<VyenDoctorReport>;
-  /** Quản lý và kiểm tra tài liệu phân việc đa tác tử (MonkeyCode Triad) */
+  /** Quản lý và kiểm tra tài liệu phân việc đa tác tử (Teamwork Triad) */
   teamworkArtifacts?(): Promise<VyenTeamworkArtifacts>;
-  /** Kiểm toán an ninh mã nguồn & cấu hình (Chaitin MonkeyCode standard) */
+  /** Kiểm toán an ninh mã nguồn & cấu hình (Chaitin Security standard) */
   securityAudit?(): Promise<VyenSecurityAuditReport>;
 }
 
@@ -628,7 +628,7 @@ export function requireVyenDesktop(): VyenBridge {
 
 /**
  * Gọi gateway LLM THẲNG TỪ MAIN PROCESS (Node fetch, không header Origin)
- * — gateway có allowlist origin (crax 403) không chặn được đường này.
+ * — gateway có allowlist origin (403) không chặn được đường này.
  * Chỉ dùng trong desktop; ném lỗi rõ khi bridge/shell cũ không có.
  */
 export function desktopLlmFetch(opts: VyenLlmFetchOptions): Promise<VyenLlmFetchResult> {

@@ -1,6 +1,6 @@
 /**
  * Request Scorer — chấm điểm yêu cầu từ tín hiệu tường minh để phân loại hạng mục model.
- * (Port từ nguyên lý scoring của Oh My Hermes sang Vyen).
+ *.
  *
  * Nguyên tắc:
  * 1. Chấm điểm từ tín hiệu TƯỜNG MINH (explicit signals), không đoán mò.

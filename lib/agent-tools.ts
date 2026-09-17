@@ -14,8 +14,8 @@
  *  3. INJECTION GUARD: kết quả web mang mẫu prompt-injection rõ ràng thì bị
  *     chặn khỏi ngữ cảnh trước khi model bước sang step kế tiếp.
  *
- * Model gọi qua function calling của gateway (crax/Kilgore đều hỗ trợ với
- * model chat hiện đại); gateway từ chối thì route tự tắt tools và thử lại
+ * Model gọi qua function calling của gateway — hầu hết provider hỗ trợ với
+ * model chat hiện đại; gateway từ chối thì route tự tắt tools và thử lại
  * không tools — xem xử lý lỗi trong route.
  */
 

@@ -1,5 +1,5 @@
 /**
- * Bộ phân tích và đánh giá biểu thức Cron thuần TypeScript (Goose P2-9).
+ * Bộ phân tích và đánh giá biểu thức Cron thuần TypeScript (P2-9).
  *
  * Hỗ trợ cú pháp 5 trường tiêu chuẩn:
  *   minute (0-59)  hour (0-23)  dayOfMonth (1-31)  month (1-12)  dayOfWeek (0-6, 0=CN)

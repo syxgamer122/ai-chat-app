@@ -1,7 +1,6 @@
 /**
  * Triad Document Generator & Parser for Teamwork Runtime Engine.
- * Conforms strictly to .opencode/agents/teamwork-orchestrator.md,
- * spec_miner_survey_1/handoff.md, and ORIGINAL_REQUEST.md.
+ * Conforms strictly to PROJECT.md và ORIGINAL_REQUEST.md.
  *
  * Manages:
  * 1. teamwork/REQUEST.md: Goal, repo context, constraints, and testable acceptance criteria.

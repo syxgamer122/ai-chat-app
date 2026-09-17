@@ -1,6 +1,6 @@
 /**
  * Repository Dependency Graph & Test Impact Analyzer for Teamwork Runtime Engine.
- * Reverse-engineered and adapted from stablyai/orca's repository-aware indexing engine.
+ * Index ngữ cảnh repo.
  *
  * Capabilities:
  * 1. Statically analyzes TypeScript/JavaScript imports and exports (including `@/*` aliases and relative paths).

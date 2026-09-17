@@ -1,7 +1,14 @@
 import { db, toParentKey, type ChatSession, type StoredAttachment, type StoredMessage } from '@/lib/db';
 import { tokenize } from '@/lib/search-utils';
 
-export const BACKUP_FORMAT = 'ai-chat-backup';
+export const BACKUP_FORMAT = 'vyen-backup';
+/**
+ * Định dạng của các bản sao lưu xuất TRƯỚC khi dự án đổi tên (ai-chat-backup).
+ * Vẫn phải import được — người dùng đang giữ file cũ trong máy, chặn chúng
+ * đồng nghĩa với việc dữ liệu chat cũ không thể khôi phục.
+ */
+export const LEGACY_BACKUP_FORMATS: readonly string[] = ['ai-chat-backup'];
+export type BackupFormat = typeof BACKUP_FORMAT | 'ai-chat-backup';
 export const BACKUP_VERSION = 1;
 
 export interface SerializedAttachment {
@@ -17,7 +24,7 @@ export type SerializedMessage = Omit<StoredMessage, 'attachments' | 'tokens'> & 
 };
 
 export interface BackupFile {
-  format: typeof BACKUP_FORMAT;
+  format: BackupFormat;
   version: number;
   exportedAt: number;
   app: string;
@@ -144,7 +151,7 @@ export async function createBackup(
     format: BACKUP_FORMAT,
     version: BACKUP_VERSION,
     exportedAt: Date.now(),
-    app: 'ai-chat',
+    app: 'vyen',
     chats: [],
     messages: [],
   };
@@ -169,7 +176,7 @@ export async function createBackup(
     format: BACKUP_FORMAT,
     version: BACKUP_VERSION,
     exportedAt: Date.now(),
-    app: 'ai-chat',
+    app: 'vyen',
     chats,
     messages,
   };
@@ -180,7 +187,7 @@ export async function exportJson(chatIds?: string | string[]): Promise<void> {
   const single = backup.chats.length === 1 ? backup.chats[0] : null;
   const name = single
     ? `chat-${safeFileName(single.title)}-${stamp()}.json`
-    : `ai-chat-backup-${stamp()}.json`;
+    : `vyen-backup-${stamp()}.json`;
 
   downloadBlob(
     name,
@@ -306,12 +313,12 @@ export async function exportMarkdown(chatIds?: string | string[]): Promise<void>
   const content =
     chats.length === 1
       ? parts[0]
-      : `# Sao lưu AI Chat\n\n_Xuất lúc ${new Date().toLocaleString('vi-VN')} — ${chats.length} cuộc trò chuyện._\n\n---\n\n${parts.join('\n\n')}`;
+      : `# Sao lưu Vyen\n\n_Xuất lúc ${new Date().toLocaleString('vi-VN')} — ${chats.length} cuộc trò chuyện._\n\n---\n\n${parts.join('\n\n')}`;
 
   const name =
     chats.length === 1
       ? `chat-${safeFileName(chats[0].title)}-${stamp()}.md`
-      : `ai-chat-backup-${stamp()}.md`;
+      : `vyen-backup-${stamp()}.md`;
 
   downloadBlob(name, new Blob([content], { type: 'text/markdown;charset=utf-8' }));
 }
@@ -327,7 +334,10 @@ function parseBackup(text: string): BackupFile {
   } catch {
     throw new Error('Tệp không phải JSON hợp lệ.');
   }
-  if (!parsed || parsed.format !== BACKUP_FORMAT) {
+  const knownFormat =
+    parsed &&
+    (parsed.format === BACKUP_FORMAT || LEGACY_BACKUP_FORMATS.includes(String(parsed.format)));
+  if (!knownFormat) {
     throw new Error('Không đúng định dạng sao lưu của ứng dụng.');
   }
   if (!Array.isArray(parsed.chats) || !Array.isArray(parsed.messages)) {

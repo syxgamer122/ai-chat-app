@@ -1,5 +1,5 @@
 /**
- * Bảng lệnh CLI của Vyen (tổ chức theo chuẩn goose).
+ * Bảng lệnh CLI của Vyen (tổ chức theo nhóm lệnh).
  *
  * Trước đây bin/vyen.ts rải dispatch qua một chuỗi if dài: danh sách lệnh in
  * cứng trong help, thêm lệnh phải sửa nhiều chỗ và help drift ngay. Giờ bảng
@@ -76,8 +76,8 @@ const runDoctor = async (): Promise<void> => {
 const runAudit = async (argv: string[]): Promise<void> => {
   const jsonOutput = argv.includes('--json');
   const targetArg = argv.find((a) => !a.startsWith('--'));
-  const { runMonkeyCodeSast } = await import('../security-sast');
-  const report = runMonkeyCodeSast(process.cwd(), { targetPath: targetArg });
+  const { runSecuritySast } = await import('../security-sast');
+  const report = runSecuritySast(process.cwd(), { targetPath: targetArg });
   if (jsonOutput) {
     console.log(JSON.stringify(report, null, 2));
   } else {
@@ -303,7 +303,7 @@ const runCli = async (argv: string[]): Promise<void> => {
   await startInteractiveCli(process.cwd(), promptArg || undefined);
 };
 
-/** `vyen recipe list|run` và `vyen run --recipe ...` (headless, port Goose). */
+/** `vyen recipe list|run` và `vyen run --recipe ...` (headless). */
 const runRecipe = async (argv: string[]): Promise<void> => {
   const [sub, ...rest] = argv;
   if (sub === 'list' || sub === 'ls' || !sub) {
@@ -454,7 +454,7 @@ const runServe = async (): Promise<void> => {
 /**
  * Tool catalog map về verb CLI one-shot. Chỉ map tool có handler thật trong
  * bảng lệnh; tool không có map thì `vyen tool <tên>` hiện metadata thay vì
- * giả vờ chạy được (chuẩn goose: introspection trung thực).
+ * giả vờ chạy được (introspection trung thực).
  */
 export const TOOL_CLI_COMMANDS: Readonly<Record<string, string>> = {
   fs_read: 'read',
@@ -522,7 +522,7 @@ export const COMMANDS: Readonly<Record<string, CommandEntry>> = {
   cli: {
     name: 'cli',
     group: 'session',
-    description: 'Mở terminal coding agent tương tác (chuẩn Claude Code / Pi)',
+    description: 'Mở terminal coding agent tương tác ',
     aliases: ['run'],
     run: runCli,
   },
@@ -557,21 +557,21 @@ export const COMMANDS: Readonly<Record<string, CommandEntry>> = {
   recipe: {
     name: 'recipe',
     group: 'agent',
-    description: 'Workflow đóng gói tái sử dụng: list/run headless theo schema (Goose)',
+    description: 'Workflow đóng gói tái sử dụng: list/run headless theo schema',
     aliases: [],
     run: runRecipe,
   },
   schedule: {
     name: 'schedule',
     group: 'agent',
-    description: 'Quản lý lịch chạy recipe tự động theo cron (Goose P2-9)',
+    description: 'Quản lý lịch chạy recipe tự động theo cron (P2-9)',
     aliases: ['cron', 'scheduler'],
     run: runSchedule,
   },
   audit: {
     name: 'audit',
     group: 'agent',
-    description: 'Kiểm tra an ninh mã nguồn & cấu hình (chuẩn MonkeyCode)',
+    description: 'Kiểm tra an ninh mã nguồn & cấu hình',
     aliases: [],
     run: runAudit,
   },
@@ -585,7 +585,7 @@ export const COMMANDS: Readonly<Record<string, CommandEntry>> = {
   init: {
     name: 'init',
     group: 'workspace',
-    description: 'Khởi tạo context dự án & cấu hình workspace (Claude Code)',
+    description: 'Khởi tạo context dự án & cấu hình workspace ',
     aliases: [],
     run: runInit,
   },
@@ -686,7 +686,7 @@ export function buildHelpText(): string {
   const entries = Object.values(COMMANDS);
   const nameWidth = Math.max(...entries.map((c) => c.name.length));
   const lines: string[] = [
-    'Vyen AI Coding Agent Suite (Claude Code, Pi & Goose architecture)',
+    'Vyen AI Coding Agent Suite',
     '',
     'Cách dùng: vyen <lệnh> [tùy chọn]',
     '',

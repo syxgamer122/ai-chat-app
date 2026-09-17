@@ -342,7 +342,7 @@ export async function runEmulatedLoop(opts: EmulatedLoopOptions): Promise<Emulat
 
     const resultBlocks: string[] = [];
 
-    /* P2.1 — Parallel server-tool batch (kiến trúc Pi): nếu TẤT CẢ call trong
+    /* P2.1 — Parallel server-tool batch (kiến trúc agent loop): nếu TẤT CẢ call trong
        round là server tool, gom vào executeToolBatch (preflight tuần tự →
        Promise.all → TOOL_RESULT theo thứ tự source). Có delegate / client call
        → giữ nguyên vòng lặp tuần tự cũ từng dòng. */
@@ -395,7 +395,7 @@ export async function runEmulatedLoop(opts: EmulatedLoopOptions): Promise<Emulat
         },
       });
       totalCalls += calls.length;
-      // TOOL_RESULT theo thứ tự source — bất biến deterministic của Pi.
+      // TOOL_RESULT theo thứ tự source — bất biến deterministic của loop.
       calls.forEach((call, k) => {
         const result = outcomes[k].result;
         if (

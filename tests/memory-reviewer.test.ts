@@ -12,7 +12,7 @@ import type { MemoryRecord, MemoryScope } from '@/lib/memory/types';
 describe('Long-term Memory with Reviewer Gate & Recall Pack', () => {
   const sampleScope: MemoryScope = {
     kind: 'project',
-    ref: 'ai-chat-app',
+    ref: 'vyen',
   };
 
   const sampleProvenance = {
@@ -96,7 +96,7 @@ describe('Long-term Memory with Reviewer Gate & Recall Pack', () => {
 
     const activeMemory1: MemoryRecord = {
       id: 'mem-1',
-      scope: { kind: 'project', ref: 'ai-chat-app' },
+      scope: { kind: 'project', ref: 'vyen' },
       kind: 'rule',
       text: 'Vitest là test runner chính, không chạy jest',
       provenance: { threadId: 'th-1' },
@@ -120,7 +120,7 @@ describe('Long-term Memory with Reviewer Gate & Recall Pack', () => {
 
     const pendingCandidate: MemoryRecord = {
       id: 'cand-9',
-      scope: { kind: 'project', ref: 'ai-chat-app' },
+      scope: { kind: 'project', ref: 'vyen' },
       kind: 'rule',
       text: 'Không nên đưa vào pack vì chưa được duyệt',
       provenance: { threadId: 'th-1' },
@@ -133,7 +133,7 @@ describe('Long-term Memory with Reviewer Gate & Recall Pack', () => {
     it('strictly filters out pending and refused records', () => {
       const pack = buildRecallPack([activeMemory1, pendingCandidate], {
         taskText: 'chạy test vitest',
-        scope: { kind: 'project', ref: 'ai-chat-app' },
+        scope: { kind: 'project', ref: 'vyen' },
         now: fixedNow,
       });
 
@@ -144,7 +144,7 @@ describe('Long-term Memory with Reviewer Gate & Recall Pack', () => {
     it('enforces token budget and records droppedIds', () => {
       const pack = buildRecallPack([activeMemory1, activeMemory2], {
         taskText: 'vitest test runner package',
-        scope: { kind: 'project', ref: 'ai-chat-app' },
+        scope: { kind: 'project', ref: 'vyen' },
         budgetTokens: 12, // small budget, only 1 will fit
         now: fixedNow,
       });
@@ -157,7 +157,7 @@ describe('Long-term Memory with Reviewer Gate & Recall Pack', () => {
     it('resolves conflicts by preferring narrower scope (thread > project > user)', () => {
       const projectRule: MemoryRecord = {
         id: 'mem-proj-rule',
-        scope: { kind: 'project', ref: 'ai-chat-app' },
+        scope: { kind: 'project', ref: 'vyen' },
         kind: 'rule',
         text: 'Quy chuẩn đặt tên file là kebab-case',
         provenance: { threadId: 'th-1' },
@@ -196,7 +196,7 @@ describe('Long-term Memory with Reviewer Gate & Recall Pack', () => {
     it('resolves conflicts by preferring newer reviewed record when scope is identical', () => {
       const olderRecord: MemoryRecord = {
         id: 'mem-older',
-        scope: { kind: 'project', ref: 'ai-chat-app' },
+        scope: { kind: 'project', ref: 'vyen' },
         kind: 'rule',
         text: 'Quy chuẩn đặt tên file là kebab-case',
         provenance: { threadId: 'th-1' },
@@ -208,7 +208,7 @@ describe('Long-term Memory with Reviewer Gate & Recall Pack', () => {
 
       const newerRecord: MemoryRecord = {
         id: 'mem-newer',
-        scope: { kind: 'project', ref: 'ai-chat-app' },
+        scope: { kind: 'project', ref: 'vyen' },
         kind: 'rule',
         text: 'Quy chuẩn đặt tên file là kebab-case',
         provenance: { threadId: 'th-2' },
@@ -220,7 +220,7 @@ describe('Long-term Memory with Reviewer Gate & Recall Pack', () => {
 
       const pack = buildRecallPack([olderRecord, newerRecord], {
         taskText: 'đặt tên file',
-        scope: { kind: 'project', ref: 'ai-chat-app' },
+        scope: { kind: 'project', ref: 'vyen' },
         now: fixedNow,
       });
 

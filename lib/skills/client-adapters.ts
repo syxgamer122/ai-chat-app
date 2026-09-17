@@ -73,7 +73,7 @@ export function buildDiskSkillAdapters(): DiskSkillAdapters {
   };
 }
 
-/** Đọc hints (.vyenhints → AGENTS.md → CLAUDE.md → .goosehints) từ workspace. */
+/** Đọc hints (.vyenhints → AGENTS.md) từ workspace. */
 export async function readHintsFromWorkspace(): Promise<{ file: string; content: string } | null> {
   let read: (file: string) => Promise<string>;
   if (isVyenDesktop()) {

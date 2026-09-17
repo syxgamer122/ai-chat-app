@@ -1,5 +1,5 @@
 /**
- * Runner thực thi lịch chạy recipe (Goose P2-9 Scheduler).
+ * Runner thực thi lịch chạy recipe (P2-9 Scheduler).
  *
  * Chạy trong Node bridge và CLI:
  * - Lưu trữ lịch trong .vyen/schedules.json (workspace) và ~/.vyen/schedules.json (global).

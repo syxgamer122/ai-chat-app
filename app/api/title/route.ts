@@ -2,9 +2,8 @@ import { createOpenAI } from '@ai-sdk/openai';
 import { nonStreamingFetch } from '@/lib/non-streaming-fetch';
 import { generateText, APICallError } from 'ai';
 import { z } from 'zod';
-import { getKeyCandidates, markKeyFailure, markKeySuccess, getKeyLabel } from '@/lib/api-keys';
+import { getKeyLabel, PROVIDER_NO_KEY_SENTINEL } from '@/lib/api-keys';
 import { validateProviderBaseUrl } from '@/lib/provider-url';
-import { sharedFreeBudget } from '@/lib/upstream-queue';
 import { filterSupportedModels, markModelUnsupported } from '@/lib/model-negative-cache';
 import { ACTIVE_MODEL_BODY_FIELD, buildActiveModelChain, isActiveProvider } from '@/lib/aux-llm-chain';
 import {
@@ -30,8 +29,8 @@ const TitleSchema = z.object({
 
 const TITLE_MODEL_CHAIN: readonly string[] = Object.freeze(
   /* Tên gửi THẲNG lên upstream, không qua catalog — phải khớp tên thật của
-     gateway. crax dùng gạch ngang (`gpt-5-4-nano`), không phải dấu chấm. */
-  (process.env.TITLE_MODEL_CHAIN ?? 'gpt-5-4-nano,gpt-4o-mini,gpt-5-6-terra,deepseek-v4-flash')
+     provider của người dùng. */
+  (process.env.TITLE_MODEL_CHAIN ?? 'gpt-4o-mini,gpt-4o,o1-mini')
     .split(',')
     .map((m) => m.trim())
     .filter(Boolean),
@@ -181,21 +180,18 @@ export async function POST(req: Request) {
 
     const fallbackTitle = generateFallbackTitle(cleanMessage);
 
-    /* Gateway free dùng chung: không đốt ngân sách cho sinh tiêu đề —
-       dùng tiêu đề local ngay (client vẫn nhận title bình thường). */
-    if (sharedFreeBudget(providerBase ?? process.env.OPENAI_BASE_URL)) {
+    const candidateKeys = providerBase
+      ? [customKey ?? PROVIDER_NO_KEY_SENTINEL]
+      : customKey
+        ? [customKey]
+        : [];
+
+    if (!candidateKeys.length) {
       return Response.json(
-        { title: fallbackTitle, final: true, reason: 'free_provider_local_title' },
+        { title: fallbackTitle, final: true, reason: 'no_provider' },
         { headers: NO_STORE },
       );
     }
-
-    const candidateResult = providerBase
-      ? { keys: [customKey ?? 'provider-no-key'] }
-      : customKey
-        ? { keys: [customKey] }
-        : getKeyCandidates();
-    const candidateKeys = candidateResult.keys.slice(0, 3);
 
     const system = [
       'You are a specialized chat title generator.',
@@ -205,7 +201,7 @@ export async function POST(req: Request) {
       'Output ONLY the title without quotes, markdown, or punctuation.',
     ].join(' ');
 
-    const titleUpstreamBase = providerBase ?? process.env.OPENAI_BASE_URL ?? null;
+    const titleUpstreamBase = providerBase ?? null;
     // Negative cache dùng chung với /api/chat: bỏ qua model vừa bị gateway
     // từ chối gần đây để sinh tiêu đề không phải trả "thuế thử sai" mỗi lần.
     const filteredTitleChain = titleUpstreamBase
@@ -213,7 +209,7 @@ export async function POST(req: Request) {
       : [...TITLE_MODEL_CHAIN];
     /* Provider active là nguồn duy nhất: model người dùng chọn phải được thử
        ĐẦU TIÊN — chuỗi env chỉ còn là dự phòng khi model đó 404 trên provider
-       của họ (tên crax kiểu 'gpt-5-4-nano' gần như chắc chắn không tồn tại ở
+       của họ (tên gateway riêng của gateway này gần như chắc chắn không tồn tại ở
        provider khác). Demo (không provider) bỏ qua body.model để hành vi cũ
        không đổi. */
     const titleModelChain = buildActiveModelChain({
@@ -225,8 +221,9 @@ export async function POST(req: Request) {
     for (const key of candidateKeys) {
       const openai = createOpenAI({
         apiKey: key,
-        baseURL: providerBase ?? (process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1'),
-        /* crax tra SSE khi thieu stream - xem lib/non-streaming-fetch.ts. */
+        baseURL: providerBase ?? 'https://api.openai.com/v1',
+        /* Một số upstream trả SSE khi request thiếu `stream` — xem
+           lib/non-streaming-fetch.ts. */
         fetch: nonStreamingFetch,
       });
 
@@ -245,7 +242,6 @@ export async function POST(req: Request) {
           });
 
           const title = result.text.trim().replace(/^["']+|["']+$/g, '').slice(0, 60);
-          markKeySuccess(key);
 
           return Response.json(
             { title: title || fallbackTitle, final: true, model: modelName },
@@ -261,11 +257,9 @@ export async function POST(req: Request) {
             continue;
           }
           console.warn(`[Title API ${getKeyLabel(key)}] Error:`, sanitizeErrorMessage(err));
-          // Blame filter: 4xx request-content không phải lỗi key.
+          // Blame filter: 4xx request-content không phải lỗi provider.
           const st = getStatusCode(err);
-          if (st === undefined || st === 429 || st === 401 || st === 403 || st >= 500) {
-            markKeyFailure(key, st);
-          }
+          void st;
           break;
         }
       }

@@ -7,7 +7,7 @@
  * lần gọi đều phải xin phép — trừ khi tool nằm trong danh sách tự duyệt của
  * server (autoApprove) hoặc người dùng đã chọn "Luôn cho phép".
  *
- * Bốn quyết định (giống Goose ACP):
+ * Bốn quyết định (chuẩn ACP):
  *   allow_once    — cho phép đúng lần này
  *   always_allow  — cho phép và nhớ mãi (ghi policy xuống đĩa ở main)
  *   deny_once     — từ chối lần này

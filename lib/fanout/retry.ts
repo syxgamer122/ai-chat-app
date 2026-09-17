@@ -1,5 +1,5 @@
 /**
- * Fanout Retry Classifier & Replay Safety Probe (Oh My Hermes port).
+ * Fanout Retry Classifier & Replay Safety Probe.
  *
  * Hai câu hỏi bắt buộc trước khi retry:
  * 1. Lỗi có phải transient không?

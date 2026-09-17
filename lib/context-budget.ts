@@ -2,7 +2,7 @@
  * Ngân sách context cho hội thoại dài — nền của tính năng compaction.
  *
  * Vấn đề: route /api/chat cắt cứng `messages.slice(-50)` rồi gửi nguyên khối
- * lên upstream. Free gateway có context window nhỏ (thực đo metadata crax),
+ * lên upstream. Free gateway có context window nhỏ (thực đo metadata),
  * chat dài sẽ tràn — lỗi kiểu "prompt is too long" hoặc 500-validation tùy
  * gateway, người dùng chỉ thấy lỗi khó hiểu.
  *

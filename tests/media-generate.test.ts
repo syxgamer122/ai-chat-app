@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { MediaGenerationError, generateMedia } from '@/lib/media-generate';
 
-const BASE = 'https://gpt.crax.lol/v1';
+const BASE = 'https://gateway.example.com/v1';
 
 function sseResponse(lines: string[]): Response {
   const body = new ReadableStream<Uint8Array>({
@@ -175,7 +175,7 @@ describe('generateMedia — kiểm tra đầu vào', () => {
 
   it('chặn baseUrl http để tránh mixed content', async () => {
     await expect(
-      generateMedia({ ...baseReq, baseUrl: 'http://gpt.crax.lol/v1', kind: 'image' }),
+      generateMedia({ ...baseReq, baseUrl: 'http://gateway.example.com/v1', kind: 'image' }),
     ).rejects.toThrow(/https/);
   });
 

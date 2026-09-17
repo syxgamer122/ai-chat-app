@@ -1,39 +1,39 @@
 # Project: Vyen Multi-Agent Architecture & Capability Enhancement
 
 ## Architecture
-Vyen is a high-assurance multi-agent coding harness running dual-mode (headless CLI and desktop Electron). This project extracts, adapts, and integrates architectural patterns from 6 frontier reference codebases into `lib/teamwork/`:
-1. **Hatchet (`hatchet-dev/hatchet`) & Stably Orca (`stablyai/orca`)**: Durable DAG task execution, topological ordering, parallel branches, concurrency semaphores, exponential backoff with randomized jitter, durable state checkpoints, and pause/resume lifecycle.
-2. **HumanLayer (`humanlayer/skills`) & Anthropic Commerce-Agents (`anthropics/commerce-agents`)**: Human-in-the-loop approval interrupts, cryptographic interrupt tokens, visual diff visualizer, ASCII/Unicode flow sketches, code-shape AST outline, `<show-me>` visual inspection artifacts, and cybernetic control loop (Sensor -> Controller -> Actuator -> Disturbance).
-3. **Anthropic Commerce-Agents (`anthropics/commerce-agents`) & Arcbox (`arcboxlabs/arcbox`)**: Typed Zod tool contracts with strict schema validation, provenance-gated writes with SHA-256 hash chains, dual-gate pre-flight and post-flight guardrails, process sandboxing with regex environment variable scrubbing, CWD lockdown, disposable temp directories, and clean process tree teardown.
-4. **Utopia (`deeplethe/utopia`) & HumanLayer (`humanlayer/skills`)**: Bitemporal Codebase Ledger decoupling Valid Time ($T_v$) from Transaction Time ($T_t$), append-only JSONL audit ledger, point-in-time state replay, 3-tier progressive context querying (Index, Decisions, Diffs), and semantic knowledge ontology triples.
+Vyen is a high-assurance multi-agent coding harness running dual-mode (headless CLI and desktop Electron). Dự án tổng hợp các mẫu kiến trúc tiên tiến vào `lib/teamwork/`:
+1. **DAG bền vững & song song hoá**: Durable DAG task execution, topological ordering, parallel branches, concurrency semaphores, exponential backoff with randomized jitter, durable state checkpoints, and pause/resume lifecycle.
+2. **Human-in-the-loop & thẩm định trực quan**: Human-in-the-loop approval interrupts, cryptographic interrupt tokens, visual diff visualizer, ASCII/Unicode flow sketches, code-shape AST outline, `<show-me>` visual inspection artifacts, and cybernetic control loop (Sensor -> Controller -> Actuator -> Disturbance).
+3. **Hợp đồng công cụ & sandbox**: Typed Zod tool contracts with strict schema validation, provenance-gated writes with SHA-256 hash chains, dual-gate pre-flight and post-flight guardrails, process sandboxing with regex environment variable scrubbing, CWD lockdown, disposable temp directories, and clean process tree teardown.
+4. **Ledger bitemporal & ngữ cảnh**: Bitemporal Codebase Ledger decoupling Valid Time ($T_v$) from Transaction Time ($T_t$), append-only JSONL audit ledger, point-in-time state replay, 3-tier progressive context querying (Index, Decisions, Diffs), and semantic knowledge ontology triples.
 5. **Full Compatibility & Zero Regression Engine**: Seamless integration into `TeamworkEngine` (`lib/teamwork/engine.ts`), `HeadlessToolRunner` (`lib/teamwork/tools.ts`), and `bin/teamwork.ts`, maintaining 100% backward compatibility and passing all existing 128 test files (1850+ tests) plus all new test suites.
 
 ## Feature Inventory
 | # | Feature | Description | Milestone | Source |
 |---|---------|-------------|-----------|--------|
-| 1 | DAG Dependency Graph & Topological Sort | Kahn's algorithm topological sorting with cycle detection and parallel independent branches | M1 | Hatchet & Orca |
-| 2 | Async Concurrency Limiter & Semaphore | Slot-based semaphore enforcing concurrency ceiling during DAG branch execution | M1 | Hatchet & Orca |
-| 3 | Exponential Backoff with Randomized Jitter | Configurable backoff formula `delay = min(max_delay, base * 2^attempt) ± jitter` with full/equal jitter | M1 | Hatchet & Orca |
-| 4 | State Checkpoint Serialization | Serialize full task execution state to memory or JSON disk format | M1 | Hatchet & Orca |
-| 5 | Pause and Resume Lifecycle | Seamless pause at any node, restart/resume from last valid checkpoint without re-running completed tasks | M1 | Hatchet & Orca |
-| 6 | Task Idempotency Tokens | Unique execution idempotency tokens preventing duplicate execution on retry | M1 | Hatchet & Orca |
-| 7 | Human-in-the-Loop Approval Gates | Interrupt engine before sensitive operations (destructive writes, critical shell commands) | M2 | HumanLayer & Commerce-Agents |
-| 8 | Cryptographic Interrupt Tokens | HMAC/SHA-256 tokens securing approval/rejection authorizations across process boundaries | M2 | HumanLayer & Commerce-Agents |
-| 9 | Visual Diff Inspection (`show-me`) | Terminal and markdown unified diff viewer with contextual syntax highlighting | M2 | HumanLayer & Commerce-Agents |
-| 10 | ASCII / Unicode Flow Sketches | Concise ASCII graph visualizer illustrating DAG state, active branches, and pending gates | M2 | HumanLayer & Commerce-Agents |
-| 11 | Code-Shape AST Outlining | High-level structural outline of modified files (classes, methods, signatures) for review | M2 | HumanLayer & Commerce-Agents |
-| 12 | Cybernetic Control Loop | Structured Sensor -> Controller -> Actuator -> Disturbance loop for self-correcting agents | M2 | HumanLayer |
-| 13 | Typed Tool Contracts with Zod | Strict schema validation separating static rules from dynamic execution context | M3 | Commerce-Agents |
-| 14 | Provenance-Gated Resource Writes | Every write tagged with worker ID, milestone ID, auth token, and chained SHA-256 hash | M3 | Commerce-Agents |
-| 15 | Dual-Gate Guardrails | Gate 1 (pre-flight schema/lock/path guard) and Gate 2 (post-flight critic review & verifyCommand) | M3 | Commerce-Agents |
-| 16 | Environment Variable Scrubbing | Regex-based filtering stripping API keys, secrets, and sensitive tokens from subprocess env | M3 | Arcbox |
-| 17 | CWD Lockdown & Temp Isolation | Strict working directory confinement and disposable isolated temp directories per worker | M3 | Arcbox |
-| 18 | Process Tree Teardown & Deadlines | Enforce execution deadlines and clean recursive process group termination (taskkill/SIGKILL) | M3 | Arcbox |
-| 19 | Bitemporal Context Ledger | Decouple Valid Time ($T_v$) from Transaction Time ($T_t$) in append-only JSONL ledger | M4 | Utopia |
-| 20 | Historical State Replay & Point-in-Time Query | Reconstruct codebase and milestone state at any $(T_v, T_t)$ coordinate | M4 | Utopia |
-| 21 | Non-Destructive Compensating Rollback | Roll back milestone changes by appending inverse compensating actions | M4 | Utopia |
-| 22 | 3-Tier Progressive Context Querying | Tier 1 Index (~100 tokens), Tier 2 Decisions (~400 tokens), Tier 3 Diffs (~1500 tokens) | M4 | Utopia & HumanLayer |
-| 23 | Semantic Knowledge Ontology | Subject-Predicate-Object triples representing codebase facts and architectural constraints | M4 | Utopia |
+| 1 | DAG Dependency Graph & Topological Sort | Kahn's algorithm topological sorting with cycle detection and parallel independent branches | M1 | DAG & song song hoá |
+| 2 | Async Concurrency Limiter & Semaphore | Slot-based semaphore enforcing concurrency ceiling during DAG branch execution | M1 | DAG & song song hoá |
+| 3 | Exponential Backoff with Randomized Jitter | Configurable backoff formula `delay = min(max_delay, base * 2^attempt) ± jitter` with full/equal jitter | M1 | DAG & song song hoá |
+| 4 | State Checkpoint Serialization | Serialize full task execution state to memory or JSON disk format | M1 | DAG & song song hoá |
+| 5 | Pause and Resume Lifecycle | Seamless pause at any node, restart/resume from last valid checkpoint without re-running completed tasks | M1 | DAG & song song hoá |
+| 6 | Task Idempotency Tokens | Unique execution idempotency tokens preventing duplicate execution on retry | M1 | DAG & song song hoá |
+| 7 | Human-in-the-Loop Approval Gates | Interrupt engine before sensitive operations (destructive writes, critical shell commands) | M2 | Human-in-the-loop |
+| 8 | Cryptographic Interrupt Tokens | HMAC/SHA-256 tokens securing approval/rejection authorizations across process boundaries | M2 | Human-in-the-loop |
+| 9 | Visual Diff Inspection (`show-me`) | Terminal and markdown unified diff viewer with contextual syntax highlighting | M2 | Human-in-the-loop |
+| 10 | ASCII / Unicode Flow Sketches | Concise ASCII graph visualizer illustrating DAG state, active branches, and pending gates | M2 | Human-in-the-loop |
+| 11 | Code-Shape AST Outlining | High-level structural outline of modified files (classes, methods, signatures) for review | M2 | Human-in-the-loop |
+| 12 | Cybernetic Control Loop | Structured Sensor -> Controller -> Actuator -> Disturbance loop for self-correcting agents | M2 | Human-in-the-loop |
+| 13 | Typed Tool Contracts with Zod | Strict schema validation separating static rules from dynamic execution context | M3 | Hợp đồng công cụ |
+| 14 | Provenance-Gated Resource Writes | Every write tagged with worker ID, milestone ID, auth token, and chained SHA-256 hash | M3 | Hợp đồng công cụ |
+| 15 | Dual-Gate Guardrails | Gate 1 (pre-flight schema/lock/path guard) and Gate 2 (post-flight critic review & verifyCommand) | M3 | Hợp đồng công cụ |
+| 16 | Environment Variable Scrubbing | Regex-based filtering stripping API keys, secrets, and sensitive tokens from subprocess env | M3 | Sandbox |
+| 17 | CWD Lockdown & Temp Isolation | Strict working directory confinement and disposable isolated temp directories per worker | M3 | Sandbox |
+| 18 | Process Tree Teardown & Deadlines | Enforce execution deadlines and clean recursive process group termination (taskkill/SIGKILL) | M3 | Sandbox |
+| 19 | Bitemporal Context Ledger | Decouple Valid Time ($T_v$) from Transaction Time ($T_t$) in append-only JSONL ledger | M4 | Ledger bitemporal |
+| 20 | Historical State Replay & Point-in-Time Query | Reconstruct codebase and milestone state at any $(T_v, T_t)$ coordinate | M4 | Ledger bitemporal |
+| 21 | Non-Destructive Compensating Rollback | Roll back milestone changes by appending inverse compensating actions | M4 | Ledger bitemporal |
+| 22 | 3-Tier Progressive Context Querying | Tier 1 Index (~100 tokens), Tier 2 Decisions (~400 tokens), Tier 3 Diffs (~1500 tokens) | M4 | Ledger & ngữ cảnh |
+| 23 | Semantic Knowledge Ontology | Subject-Predicate-Object triples representing codebase facts and architectural constraints | M4 | Ledger bitemporal |
 | 24 | TeamworkEngine DAG & Checkpoint Integration | Wire DAG scheduler, backoff retry, and checkpointing into `lib/teamwork/engine.ts` | M5 | Core Vyen Integration |
 | 25 | ToolRunner Strict Contract & Sandbox Integration | Wire Zod tool contracts, provenance, and sandboxing into `lib/teamwork/tools.ts` | M5 | Core Vyen Integration |
 | 26 | CLI & Headless Runner Upgrades | Expose DAG visualization, pause/resume flags, approval prompt, and ledger replay in `bin/teamwork.ts` | M5 | Core Vyen Integration |

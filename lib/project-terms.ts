@@ -1,5 +1,5 @@
 /**
- * Project Terms Strict Parser & Freshness Checker (Oh My Hermes P2 port).
+ * Project Terms Strict Parser & Freshness Checker.
  *
  * Ràng buộc ngữ pháp nghiêm ngặt (§13):
  * 1. Mã hóa UTF-8 không BOM (từ chối ngay nếu có Byte Order Mark).

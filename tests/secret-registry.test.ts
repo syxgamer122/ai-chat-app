@@ -1,5 +1,5 @@
 /**
- * Bảo vệ port OpenHands SecretRegistry (lib/secret-registry.ts) — bịt đường rò
+ * Bảo vệ SecretRegistry (lib/secret-registry.ts) — bịt đường rò
  * bí mật vào NGỮ CẢNH MODEL (trước đây không lớp nào che kết quả tool):
  *  - tầng VALUE: khoá đã đăng ký bị che ở mọi chỗ, kể cả khi pattern không nhận ra
  *  - tầng PATTERN: khoá chưa đăng ký vẫn bị che (sk-, ghp_, AKIA, PEM, JWT, DSN…)
@@ -30,7 +30,7 @@ import {
 import { serializeToolResult } from '@/lib/tool-limits';
 import { buildAgentTools, type MemoryItem } from '@/lib/agent-tools';
 import { __clearAllToolCallBudgets } from '@/lib/tool-call-budget';
-import { MONKEYCODE_RULES } from '@/lib/security-sast';
+import { SAST_RULES } from '@/lib/security-sast';
 import {
   agentLoop,
   type AgentEvent,
@@ -123,15 +123,15 @@ describe('tầng PATTERN — không bắt oan nội dung code', () => {
   }
 });
 
-describe('tầng VALUE — giá trị đã đăng ký (lõi OpenHands SecretRegistry)', () => {
+describe('tầng VALUE — giá trị đã đăng ký (lõi SecretRegistry)', () => {
   const CRED = 'gw-9f8e7d6c5b4a39281706';
 
   it('che giá trị đã đăng ký dù pattern không nhận dạng được nó', () => {
     const reg = new SecretRegistry();
-    expect(reg.register(CRED, 'CRAX_API_KEY')).toBe(true);
+    expect(reg.register(CRED, 'VYEN_API_KEY')).toBe(true);
     expect(reg.register(CRED)).toBe(false); // trùng
     expect(reg.register('short')).toBe(false); // dưới ngưỡng
-    expect(reg.labelOf(CRED)).toBe('CRAX_API_KEY');
+    expect(reg.labelOf(CRED)).toBe('VYEN_API_KEY');
 
     const res = reg.redact(`401 từ gateway: token ${CRED} không hợp lệ`);
     expect(res.text).toBe(`401 từ gateway: token ${REDACT_PLACEHOLDER} không hợp lệ`);
@@ -144,7 +144,7 @@ describe('tầng VALUE — giá trị đã đăng ký (lõi OpenHands SecretRegi
     expect(reg.redact('abcdefghijklmnop').text).toBe(REDACT_PLACEHOLDER);
   });
 
-  it('registerFromEnv phủ danh sách Arcbox LẪN đuôi *_KEY/*_TOKEN riêng của Vyen', () => {
+  it('registerFromEnv phủ danh sách deny chuẩn LẪN đuôi *_KEY/*_TOKEN riêng của Vyen', () => {
     const reg = new SecretRegistry();
     const added = reg.registerFromEnv({
       OPENAI_API_KEY: 'sk-proj-env-abcdefghijklmnop',
@@ -235,7 +235,7 @@ describe('chống drift với security-sast.ts (cùng fixture, hai bộ rule)', 
 
   for (const [ruleId, token] of samples) {
     it(`${ruleId}: SAST bắt được thì registry cũng phải che`, () => {
-      const rule = MONKEYCODE_RULES.find((r) => r.id === ruleId);
+      const rule = SAST_RULES.find((r) => r.id === ruleId);
       expect(rule, `rule ${ruleId} biến mất khỏi lib/security-sast.ts`).toBeDefined();
       const line =
         ruleId === 'SECRET-GENERIC-001' ? `apiKey = '${token}'` : `const x = "${token}";`;

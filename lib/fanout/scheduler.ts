@@ -1,5 +1,5 @@
 /**
- * Fanout Scheduler — Bộ lập lịch Frontier dựa trên DAG phụ thuộc và điều phối lưu lượng thích ứng (Oh My Hermes port).
+ * Fanout Scheduler — Bộ lập lịch Frontier dựa trên DAG phụ thuộc và điều phối lưu lượng thích ứng.
  *
  * Tính năng chính:
  * 1. Dependency-Frontier: Một unit được kích hoạt NGAY KHI mọi unit phụ thuộc (dependsOn) hoàn thành,

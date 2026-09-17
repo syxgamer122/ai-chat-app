@@ -1,5 +1,5 @@
 /**
- * Toolcall Rules — Luật kiểm soát hành vi gọi công cụ do người dùng định nghĩa (Oh My Hermes port).
+ * Toolcall Rules — Luật kiểm soát hành vi gọi công cụ do người dùng định nghĩa.
  *
  * Cho phép người dùng hoặc dự án đặt các luật cứng:
  * - Chặn thao tác nguy hiểm kèm thông điệp giải thích NGUYÊN VĂN câu chữ của luật.

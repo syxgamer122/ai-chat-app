@@ -1,7 +1,7 @@
 /**
- * Subagent Delegation — Goose-style lightweight subagent as emulated loop fork.
+ * Subagent Delegation — Lightweight subagent as emulated loop fork.
  *
- * Design principles (from Goose subagent_handler.rs + subagent_system.md):
+ * Design principles:
  * 1. Context isolation: subagent gets FRESH message array (no parent history) —
  *    hoặc context 'brief' nhận một khối tóm tắt tất định của phiên cha
  *    (deps.getParentBrief, dựng bởi buildSubagentParentBrief) chứ không phải
@@ -12,7 +12,7 @@
  * 4. Same safety layers: guarded(), doom-loop detection, path-guard all apply
  * 5. Result extraction: last assistant text = subagent's answer
  *
- * Fan-out song song (tương tự runs.all của pi-subagents): args.tasks chạy 1-4
+ * Fan-out song song (tương tự runs.all của subagent): args.tasks chạy 1-4
  * subagent CÙNG LÚC qua runPool (cap SUBAGENT_PARALLEL_CONCURRENCY), kết quả
  * giữ đúng thứ tự đầu vào. Mode 'scout' là denylist tool ghi, KHÔNG phải
  * sandbox: git_add/git_commit vẫn gọi được.
@@ -153,7 +153,7 @@ export interface SubagentResult {
 /* ------------------------------------------------------------------ */
 
 /**
- * Build subagent system prompt. Port from Goose subagent_system.md template.
+ * Build subagent system prompt từ template chuẩn.
  * Key rules: specialized, independent, bounded, NO recursive delegation.
  * `opts.mode === 'scout'` thêm khối chỉ-đọc; `opts.parentBrief` gắn ngữ cảnh
  * cha như DỮ KIỆN tham khảo, không phải chỉ thị mới.

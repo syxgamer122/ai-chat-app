@@ -417,7 +417,7 @@ function computeTotal(x: number): number {
     expect(updated).toContain('const result = x + 100;');
   });
 
-  it('handles whitespace / outdent variations via aider fallback', async () => {
+  it('handles whitespace / outdent variations via fallback', async () => {
     // Search chunk has stripped leading indentation
     const blocks = `<<<<<<< SEARCH
 const result = x * 2;

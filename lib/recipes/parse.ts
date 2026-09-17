@@ -2,7 +2,7 @@
  * Parse/serialize recipe từ text (YAML hoặc JSON).
  *
  * JSON nhận nếu chuỗi bắt đầu bằng '{' (sau trim); còn lại coi là YAML
- * (chuẩn Goose dùng YAML cho recipe). Cả hai đường đều đi qua RecipeSchema.
+ * (dùng YAML cho recipe). Cả hai đường đều đi qua RecipeSchema.
  */
 
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';

@@ -8,10 +8,10 @@ import {
   retrieveMatchingMemories,
   renderMemoryMarkdown,
   agentMemoriesAsLessons,
-  GOOSE_MEMORY_LIMITS,
+  AGENT_MEMORY_LIMITS,
   type AgentMemoryRecord,
-} from '@/lib/memory/goose';
-import { parseMemoryMarkdown } from '@/lib/memory/goose-client';
+} from '@/lib/memory/agent-memory';
+import { parseMemoryMarkdown } from '@/lib/memory/agent-memory-client';
 
 function rec(over: Partial<AgentMemoryRecord> = {}): AgentMemoryRecord {
   return {
@@ -20,7 +20,7 @@ function rec(over: Partial<AgentMemoryRecord> = {}): AgentMemoryRecord {
     data: 'project dùng pnpm',
     tags: ['tooling'],
     scope: 'local',
-    workspaceKey: 'ai-chat-app',
+    workspaceKey: 'vyen',
     createdAt: 1_000,
     updatedAt: 1_000,
     ...over,
@@ -30,11 +30,11 @@ function rec(over: Partial<AgentMemoryRecord> = {}): AgentMemoryRecord {
 /** fold đơn giản cho test (bỏ dấu thủ công không cần ở đây — dùng lowercase). */
 const fold = (s: string) => s.toLowerCase();
 
-describe('memory/goose — validate + normalize', () => {
+describe('memory/agent-memory — validate + normalize', () => {
   it('category chuẩn hoá: lower + space→dash + trần', () => {
     expect(normalizeCategory('  WorkFlow  ')).toBe('workflow');
     expect(normalizeCategory('My Notes Here')).toBe('my-notes-here');
-    expect(normalizeCategory('x'.repeat(100)).length).toBe(GOOSE_MEMORY_LIMITS.categoryChars);
+    expect(normalizeCategory('x'.repeat(100)).length).toBe(AGENT_MEMORY_LIMITS.categoryChars);
   });
 
   it('tags: dedupe + lower + trần 8', () => {
@@ -51,7 +51,7 @@ describe('memory/goose — validate + normalize', () => {
     const long = 'x'.repeat(3_000);
     const r = validateMemoryInput({ category: 'c', data: long, workspaceKey: 'w' });
     expect(r.ok).toBe(true);
-    expect(r.record!.data.length).toBe(GOOSE_MEMORY_LIMITS.dataChars);
+    expect(r.record!.data.length).toBe(AGENT_MEMORY_LIMITS.dataChars);
   });
 
   it('is_global=true → scope global + workspaceKey "*"', () => {
@@ -67,7 +67,7 @@ describe('memory/goose — validate + normalize', () => {
   });
 });
 
-describe('memory/goose — lọc scope', () => {
+describe('memory/agent-memory — lọc scope', () => {
   it('global luôn vào; local chỉ khi trùng workspaceKey', () => {
     const records = [
       rec({ id: 'l1', workspaceKey: 'proj-a' }),
@@ -78,7 +78,7 @@ describe('memory/goose — lọc scope', () => {
   });
 });
 
-describe('memory/goose — index block (ngân sách 4.000)', () => {
+describe('memory/agent-memory — index block (ngân sách 4.000)', () => {
   it('rỗng → block rỗng', () => {
     const b = buildMemoryIndexBlock([]);
     expect(b.block).toBe('');
@@ -108,7 +108,7 @@ describe('memory/goose — index block (ngân sách 4.000)', () => {
   });
 });
 
-describe('memory/goose — retrieve', () => {
+describe('memory/agent-memory — retrieve', () => {
   const records = [
     rec({ id: 'a', category: 'workflow', data: 'project dùng pnpm để cài', tags: ['tooling'], createdAt: 3 }),
     rec({ id: 'b', category: 'preference', data: 'thích dark mode', tags: ['ui'], createdAt: 2 }),
@@ -116,37 +116,37 @@ describe('memory/goose — retrieve', () => {
   ];
 
   it('không query → mới nhất trước, theo scope', () => {
-    const r = retrieveMatchingMemories(records, { workspaceKey: 'ai-chat-app' }, fold);
+    const r = retrieveMatchingMemories(records, { workspaceKey: 'vyen' }, fold);
     expect(r.map((x) => x.id)).toEqual(['a', 'b']);
   });
 
   it('query khớp text', () => {
-    const r = retrieveMatchingMemories(records, { query: 'pnpm', workspaceKey: 'ai-chat-app' }, fold);
+    const r = retrieveMatchingMemories(records, { query: 'pnpm', workspaceKey: 'vyen' }, fold);
     expect(r.map((x) => x.id)).toEqual(['a']);
   });
 
   it('filter category + tags', () => {
     expect(
-      retrieveMatchingMemories(records, { category: 'preference', workspaceKey: 'ai-chat-app' }, fold).map((x) => x.id),
+      retrieveMatchingMemories(records, { category: 'preference', workspaceKey: 'vyen' }, fold).map((x) => x.id),
     ).toEqual(['b']);
     expect(
-      retrieveMatchingMemories(records, { tags: ['tooling'], workspaceKey: 'ai-chat-app' }, fold).map((x) => x.id),
+      retrieveMatchingMemories(records, { tags: ['tooling'], workspaceKey: 'vyen' }, fold).map((x) => x.id),
     ).toEqual(['a']);
   });
 
   it('không khớp → rỗng', () => {
-    expect(retrieveMatchingMemories(records, { query: 'zzzz', workspaceKey: 'ai-chat-app' }, fold)).toEqual([]);
+    expect(retrieveMatchingMemories(records, { query: 'zzzz', workspaceKey: 'vyen' }, fold)).toEqual([]);
   });
 
   it('trần kết quả retrieveLimit', () => {
     const many = Array.from({ length: 20 }, (_, i) => rec({ id: `x${i}`, data: 'chung chung', createdAt: i }));
     expect(
-      retrieveMatchingMemories(many, { workspaceKey: 'ai-chat-app' }, fold).length,
-    ).toBe(GOOSE_MEMORY_LIMITS.retrieveLimit);
+      retrieveMatchingMemories(many, { workspaceKey: 'vyen' }, fold).length,
+    ).toBe(AGENT_MEMORY_LIMITS.retrieveLimit);
   });
 });
 
-describe('memory/goose — markdown mirror', () => {
+describe('memory/agent-memory — markdown mirror', () => {
   it('render ra heading theo category + id comment', () => {
     const md = renderMemoryMarkdown('workflow', [rec({ id: 'abc' })]);
     expect(md).toContain('# workflow');
@@ -176,13 +176,13 @@ describe('memory/goose — markdown mirror', () => {
   });
 });
 
-describe('memory/goose — lesson bridge (không phá lesson_save)', () => {
+describe('memory/agent-memory — lesson bridge (không phá lesson_save)', () => {
   it('category lesson → prefix [LESSON:pattern] giữ đường formatLessonsBlock cũ', () => {
-    const out = agentMemoriesAsLessons([rec({ category: 'lesson', data: 'luôn chạy tsc trước commit' })], 'ai-chat-app');
+    const out = agentMemoriesAsLessons([rec({ category: 'lesson', data: 'luôn chạy tsc trước commit' })], 'vyen');
     expect(out[0]!.text).toBe('[LESSON:pattern] luôn chạy tsc trước commit');
   });
 
   it('category khác lesson bị loại', () => {
-    expect(agentMemoriesAsLessons([rec({ category: 'workflow' })], 'ai-chat-app')).toEqual([]);
+    expect(agentMemoriesAsLessons([rec({ category: 'workflow' })], 'vyen')).toEqual([]);
   });
 });

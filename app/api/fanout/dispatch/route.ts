@@ -1,5 +1,5 @@
 /**
- * POST /api/fanout/dispatch — SSE Endpoint điều phối Fanout Units song song (Oh My Hermes port).
+ * POST /api/fanout/dispatch — SSE Endpoint điều phối Fanout Units song song.
  *
  * Nhận FanoutContract, kiểm tra freeze contract (overlap/cycle/spawn_plan),
  * điều phối thực thi các units theo Dependency-Frontier và stream cập nhật trạng thái SSE live.

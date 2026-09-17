@@ -2,7 +2,7 @@
  * Prompt của orchestrator — 4 vai trò, tách biệt có chủ đích.
  *
  * Đây là chỗ kiềm chế lớn nhất của bản port. agent-orchestrator chạy MỖI
- * spawned agent như một process thật (Claude Code / Codex) với workspace
+ * spawned agent như một process thật với workspace
  * riêng, terminal riêng, hàng nghìn dòng harness. Vyen không có (và không cần)
  * hạ tầng đó: "spawn agent" ở đây được thu gọn thành **cùng một model, nhưng
  * bị ép vào một cấu hình khác nhau của lưới tham số**. Cô lập vẫn đạt được —

@@ -1,5 +1,5 @@
 /**
- * ChatRecall — Tra cứu full-text trên toàn bộ lịch sử trò chuyện (Goose P2-8).
+ * ChatRecall — Tra cứu full-text trên toàn bộ lịch sử trò chuyện (P2-8).
  *
  * Tái sử dụng engine tokenize và foldText (chuẩn tiếng Việt không dấu/có dấu)
  * từ lib/search-utils.ts và searchChats từ lib/chat-search.ts.

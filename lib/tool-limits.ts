@@ -63,7 +63,7 @@ export function serializeToolResult(
   /* Redact TRƯỚC khi cắt: nếu cắt trước, một khoá nằm vắt qua ranh giới cắt sẽ
      chỉ còn nửa chuỗi và không khớp rule nào nữa → lọt bí mật vào ngữ cảnh.
      Đây là chốt chặn cuối của đường emulated (mọi kết quả tool đều đi qua đây)
-     — xem lib/secret-registry.ts (port OpenHands SecretRegistry). */
+     — xem lib/secret-registry.ts (SecretRegistry). */
   return truncateToolResult(redactSecretText(raw), maxChars);
 }
 

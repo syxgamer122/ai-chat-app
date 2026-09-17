@@ -23,7 +23,7 @@ export { SECURE_KEY_MARKER, secureKeyOf, isSecureKeyPointer, resolveProviderApiK
 export interface ProviderConfig {
   id: string;
   name: string;
-  /** baseURL chuẩn OpenAI, ví dụ https://gpt.crax.lol/v1 */
+  /** baseURL chuẩn OpenAI, ví dụ https://api.openai.com/v1 */
   baseUrl: string;
   apiKey: string;
   createdAt: number;
@@ -100,113 +100,29 @@ export async function syncActiveProviderSnapshot(providerId: string): Promise<vo
 }
 
 /* ------------------------------------------------------------------ */
-/* Seed 2 provider mặc định (chạy 1 lần)                               */
+/* Seed — ĐÃ GỠ                                                        */
 /* ------------------------------------------------------------------ */
 
-// v6: KHÔNG seed API key nào kèm code. Trước đây `crax-gpt` mang sẵn
-// apiKey: 'crax-gpt' — credential nằm trong repo và trong git history. User tự
-// dán key qua nút Sửa; key chỉ sống trong IndexedDB của trình duyệt.
-const PROVIDER_SEED_FLAG = 'providers-seeded-v6';
-
-/** Khoá module: chống 2 effect chạy song song cùng lúc (StrictMode / 2 tab). */
+/**
+ * Tầng gateway miễn phí dùng chung (preset gateway cũ) đã gỡ hẳn khỏi seed:
+ * provider chỉ đến từ người dùng tự thêm (BYOK). ensureProviderSeed giờ chỉ
+ * dọn trùng lặp provider trùng baseUrl — giữ lại để caller cũ không vỡ.
+ */
 let seedPromise: Promise<void> | null = null;
-
-const DEFAULT_PROVIDER_SEEDS: Array<Pick<ProviderConfig, 'name' | 'baseUrl' | 'apiKey'>> = [
-  {
-    /* Từ bản cập nhật "User Accounts + API Keys", crax BẮT BUỘC key: mọi
-       endpoint trả 401 auth_required kể cả với key rác. Đăng ký tài khoản
-       (hoặc vào bằng guest) tại https://gpt.crax.lol rồi lấy key crk_live_…
-       ở Settings → API keys. Seed vẫn để trống — không nhúng credential. */
-    name: 'crax-gpt',
-    baseUrl: 'https://gpt.crax.lol/v1',
-    apiKey: '',
-  },
-];
-
-/**
- * Provider mặc định ĐÃ BỎ khỏi seed (v7, theo yêu cầu dọn danh sách):
- * Kilgore chết (domain chuyển + chat timeout), OpenRouter/airforce là dự
- * phòng chưa dùng, OrcaRouter/Tokenin là key cá nhân tự thêm dễ dàng.
- * Cleanup v7 xóa khỏi DB những preset này CHỈ KHI apiKey rỗng — provider
- * user đã dán key là đang dùng, không đụng.
- */
-const REMOVED_DEFAULT_BASE_URLS = [
-  'https://kilgoreai.xyz/v1',
-  'https://openrouter.ai/api/v1',
-  'https://api.airforce/v1',
-  'https://api.orcarouter.ai/v1',
-  'https://tokenin.my.id/v1',
-];
-
-const PROVIDER_CLEANUP_FLAG = 'providers-cleanup-v7';
-
-/**
- * Thuần: chọn id của provider thuộc tập mặc định bị bỏ VÀ chưa từng có key.
- * Client tự thêm cùng baseUrl nhưng ĐÃ có key → không bao giờ bị chọn.
- */
-export function pickRemovedDefaultProviders(
-  all: ReadonlyArray<Pick<ProviderConfig, 'id' | 'baseUrl' | 'apiKey'>>,
-): string[] {
-  return all
-    .filter((p) => REMOVED_DEFAULT_BASE_URLS.includes(p.baseUrl) && !p.apiKey)
-    .map((p) => p.id);
-}
-
-async function cleanupRemovedDefaultProviders(): Promise<void> {
-  const done = await db.kv.get(PROVIDER_CLEANUP_FLAG);
-  if (done) return;
-  const ids = pickRemovedDefaultProviders(await db.providers.toArray());
-  for (const id of ids) await db.providers.delete(id);
-  await db.kv.put({ key: PROVIDER_CLEANUP_FLAG, value: true });
-}
-
-/** Thêm sẵn các nhà cung cấp user định dùng + dọn trùng lặp — chỉ chạy lần đầu. */
 export async function ensureProviderSeed(): Promise<void> {
   if (!seedPromise) {
-    seedPromise = seedOnce()
-      .then(() => migrateKiloreDomain())
-      .then(() => cleanupRemovedDefaultProviders())
-      .catch((err) => {
-        seedPromise = null; // lỗi (vd 2 tab write-conflict) → cho phép thử lại lần sau
-        throw err;
-      });
+    seedPromise = dedupeProviders().catch((err) => {
+      seedPromise = null;
+      throw err;
+    });
   }
   return seedPromise;
 }
 
-/**
- * Migration Kilgore domain: freesrv.com → xyz. Chạy MỖI LẦN app khởi động
- * (idempotent), KHÔNG phụ thuộc seed flag. Nếu user đã seed từ trước khi
- * migration được thêm, seed flag đã tồn tại nên seedOnce skip — nhưng migration
- * này vẫn chạy để update preset cũ.
- */
-async function migrateKiloreDomain(): Promise<void> {
-  const OLD_HOST = 'kilgoreai.freesrv.com';
-  const NEW_BASE = 'https://kilgoreai.xyz/v1';
-  try {
+/** Dọn bản trùng baseUrl (giữ bản mới nhất, ưu tiên bản đã tải được models). */
+async function dedupeProviders(): Promise<void> {
+  await db.transaction('rw', [db.providers], async () => {
     const existing = await db.providers.toArray();
-    const hasNew = existing.some((p) => {
-      try { return new URL(p.baseUrl).hostname.toLowerCase() === 'kilgoreai.xyz'; } catch { return false; }
-    });
-    if (hasNew) return; // Đã có preset mới → không cần migrate
-    for (const p of existing) {
-      try {
-        if (new URL(p.baseUrl).hostname.toLowerCase() !== OLD_HOST) continue;
-      } catch { continue; }
-      await db.providers.update(p.id, { baseUrl: NEW_BASE, updatedAt: Date.now() });
-    }
-  } catch {
-    // Migration thất bại không được chặn app khởi động.
-  }
-}
-
-async function seedOnce(): Promise<void> {
-  const flag = await db.kv.get(PROVIDER_SEED_FLAG);
-  if (flag) return;
-  await db.transaction('rw', [db.providers, db.kv], async () => {
-    const existing = await db.providers.toArray();
-
-    // Dọn bản trùng baseUrl (giữ bản mới nhất, ưu tiên bản đã tải được models).
     const byBase = new Map<string, ProviderConfig>();
     for (const p of [...existing].sort((a, b) => a.updatedAt - b.updatedAt)) {
       const cur = byBase.get(p.baseUrl);
@@ -214,8 +130,6 @@ async function seedOnce(): Promise<void> {
         byBase.set(p.baseUrl, p);
         continue;
       }
-      // Ưu tiên bản có nhiều model đã tải; HOÀ thì giữ bản MỚI hơn —
-      // trước đây hoà giữ bản cũ nhất, xoá mất sửa đổi của user trên bản mới.
       const curModels = cur.models?.length ?? 0;
       const pModels = p.models?.length ?? 0;
       const keep =
@@ -224,20 +138,5 @@ async function seedOnce(): Promise<void> {
       await db.providers.delete(drop.id);
       byBase.set(p.baseUrl, keep);
     }
-
-    const knownBases = new Set([...byBase.keys()]);
-    const now = Date.now();
-    const missing = DEFAULT_PROVIDER_SEEDS.filter((s) => !knownBases.has(s.baseUrl));
-    if (missing.length) {
-      await db.providers.bulkAdd(
-        missing.map((s, i) => ({
-          id: newProviderId(),
-          ...s,
-          createdAt: now + i,
-          updatedAt: now + i,
-        })),
-      );
-    }
-    await db.kv.put({ key: PROVIDER_SEED_FLAG, value: true });
   });
 }

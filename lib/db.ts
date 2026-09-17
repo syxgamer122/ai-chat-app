@@ -1,7 +1,7 @@
 import Dexie, { type Table } from 'dexie';
 import { tokenize } from '@/lib/search-utils';
 import type { MemoryRecord, MemoryReviewEntry } from '@/lib/memory/types';
-import type { AgentMemoryRecord } from '@/lib/memory/goose';
+import type { AgentMemoryRecord } from '@/lib/memory/agent-memory';
 
 /**
  * IndexedDB KHÔNG index được `null`. Message gốc phải mang sentinel này,
@@ -182,7 +182,7 @@ export interface StoredMemory {
 }
 
 /**
- * Recipe (port Goose): workflow đóng gói tái sử dụng. `content` là text
+ * Recipe: workflow đóng gói tái sử dụng. `content` là text
  * yaml/json nguyên văn; parse qua lib/recipes/parse.ts khi cần dùng.
  */
 export interface RecipeRecord {
@@ -205,7 +205,7 @@ export interface StoredToolPermissionRecord {
 
 export type ScheduleStatus = 'idle' | 'running' | 'success' | 'failure';
 
-/** Bản ghi lịch chạy recipe tự động theo cron (Goose P2-9). */
+/** Bản ghi lịch chạy recipe tự động theo cron (P2-9). */
 export interface ScheduleRecord {
   id: string;
   recipeId: string;
@@ -466,7 +466,7 @@ export class ChatAppDatabase extends Dexie {
         }
       });
 
-    // v11: reviewer-gated long-term memory (OMH P1-D port)
+    // v11: reviewer-gated long-term memory (P1-D)
     // - memoryCandidates: pending candidates do agent đề xuất, chờ user review
     // - memoryRecords: ký ức đã duyệt (active/reference/archive) kèm reviewDueAt + provenance
     // - memoryReviews: nhật ký kiểm duyệt (remember/refuse/defer)
@@ -510,7 +510,7 @@ export class ChatAppDatabase extends Dexie {
         }
       });
 
-    // v12: recipes — workflow đóng gói tái sử dụng (port Goose recipe).
+    // v12: recipes — workflow đóng gói tái sử dụng (recipe).
     // content giữ NGUYÊN VĂN yaml/json để export lại y hệt; parse/schema nằm ở
     // lib/recipes. source phân biệt recipe người dùng tự tạo và recipe import
     // từ link/file.
@@ -531,7 +531,7 @@ export class ChatAppDatabase extends Dexie {
       recipes: 'id, title, updatedAt, source',
     });
 
-    // v13: agentMemories — bộ nhớ có cấu trúc kiểu Goose (P1-4): category +
+    // v13: agentMemories — bộ nhớ có cấu trúc (P1-4): category +
     // tags + scope local/global; tách biệt hệ reviewer-gate (v11) — hệ này là
     // kho ghi nhanh do tool remember_memory ghi, không qua duyệt.
     this.version(13).stores({
@@ -592,7 +592,7 @@ export class ChatAppDatabase extends Dexie {
       toolPermissions: 'toolName, permission, updatedAt',
     });
 
-    // v16: schedules (Goose P2-9) — chạy recipe theo lịch cron (desktop/CLI runner)
+    // v16: schedules (P2-9) — chạy recipe theo lịch cron (desktop/CLI runner)
     this.version(16).stores({
       chats: 'id, createdAt, updatedAt, pinned, activeLeafId, workspacePath, *titleTokens',
       messages:

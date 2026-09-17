@@ -172,7 +172,7 @@ export function formatCompactContextBlock(
 /**
  * Context window thực tế của model đang chọn, ưu tiên theo độ tin cậy:
  * 1. metadata `contextLength` gateway tự khai báo (/v1/models của provider
- *    override — crax trả số liệu chuẩn từng model);
+ *    override — một số provider trả số liệu chuẩn từng model);
  * 2. config built-in của app cho model nằm trong danh sách chính thức;
  * 3. fallback bảo thủ 32k — nén sớm còn hơn tràn.
  */
@@ -509,7 +509,7 @@ export function buildEmergencySummary(input: EmergencySummaryInput): string {
 
 /**
  * Ngữ cảnh phiên cha cho subagent (delegate `context: 'brief'` — tương đương
- * fork-pruned của pi-subagents nhưng TẤT ĐỊNH, không tốn call LLM: tái dùng
+ * fork-pruned của subagent nhưng TẤT ĐỊNH, không tốn call LLM: tái dùng
  * các bộ trích của compaction). Trả '' khi không trích được gì để caller
  * bỏ qua việc gắn; caller tự quyết định chèn vào system prompt ở đâu.
  */

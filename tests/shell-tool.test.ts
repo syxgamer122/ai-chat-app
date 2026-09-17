@@ -1,5 +1,5 @@
 /**
- * Shell tool tests — smart output truncation (Goose-style) trong lib/ipc.cjs.
+ * Shell tool tests — smart output truncation trong lib/ipc.cjs.
  *
  * truncateShellOutput là hàm thuần (không phụ thuộc Electron/spawn) nên test
  * trực tiếp qua createRequire. shellRun integration test cần Electron env

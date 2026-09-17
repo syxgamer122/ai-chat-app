@@ -1,6 +1,6 @@
 /**
  * Rate Limit & Overload Protection for Teamwork Multi-Agent Runtime Engine.
- * Conforms strictly to ORIGINAL_REQUEST.md R3, PROJECT.md, and .opencode/agents/teamwork-orchestrator.md.
+ * Conforms strictly to ORIGINAL_REQUEST.md R3 và PROJECT.md.
  *
  * Implements:
  * 1. isRateLimitError(err): Robust detection of HTTP 429, status code 429, and provider overload patterns.

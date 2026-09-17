@@ -66,65 +66,44 @@ export function validateProviderBaseUrl(input: string): BaseUrlCheck {
 }
 
 /**
- * Mức suy luận crax nhận qua `reasoning_effort` (alias `thinking_level`).
- * Chỉ crax dịch giá trị này xuống backend; gateway khác bỏ qua hoặc trả 400.
+ * Mức suy luận một số gateway nhận qua `reasoning_effort` (alias `thinking_level`).
+ * Chỉ gateway hỗ trợ mới dịch giá trị này; gateway khác bỏ qua hoặc trả 400.
  */
 export const THINKING_LEVELS = ['low', 'medium', 'high', 'max'] as const;
 
 export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
 
-/** Model Notion-backed của crax mặc định 'high' khi request không gửi gì. */
 export const DEFAULT_THINKING_LEVEL: ThinkingLevel = 'high';
 
 export function isThinkingLevel(value: unknown): value is ThinkingLevel {
   return typeof value === 'string' && (THINKING_LEVELS as readonly string[]).includes(value);
 }
 
-/** true khi baseUrl trỏ tới gateway crax — nơi duy nhất đổi được mức suy luận. */
+/**
+ * Tầng gateway (nơi duy nhất đổi mức suy luận bằng fast-path) đã gỡ.
+ * Mức suy luận giờ chỉ tra qua metadata kiểu OpenRouter (model-reasoning-cache).
+ */
 export function supportsThinkingLevel(baseUrl: string | null | undefined): boolean {
-  if (!baseUrl) return false;
-  try {
-    return /(^|\.)crax\.lol$/i.test(new URL(baseUrl).hostname);
-  } catch {
-    return false;
-  }
+  void baseUrl;
+  return false;
 }
 
 /**
- * true khi gateway có sẵn model sinh ảnh/video built-in (crax: qwen-image-*,
- * qwen-video). Gateway khác vẫn dùng được nếu /v1/models của họ liệt kê model
- * media — phần đó phát hiện qua tên model, không qua hàm này.
+ * Model media built-in đã gỡ khỏi catalog — khả năng media chỉ còn đến từ
+ * /v1/models của provider người dùng (phát hiện qua tên model).
  */
 export function supportsMediaGeneration(baseUrl: string | null | undefined): boolean {
-  return supportsThinkingLevel(baseUrl);
+  void baseUrl;
+  return false;
 }
 
 /**
- * Gateway KHÔNG kiểm tra API key — xác thực bằng IP/cookie, không bằng key.
- * Ô nhập key bị ẩn cho các host này vì bắt dán key chỉ gây hiểu nhầm.
- *
- * LỊCH SỬ:
- *  - gpt.crax.lol TỪNG nằm trong danh sách (trả 200 với key rác). Bản cập
- *    nhật "User Accounts + API Keys" đã đổi hẳn: mọi endpoint trả 401
- *    auth_required cho cả request không key lẫn key rác → đã GỠ khỏi đây.
- *  - kilgoreai.freesrv.com từng miễn phí theo IP. Kilgore đã chuyển sang
- *    kilgoreai.xyz và hỗ trợ Bearer key (`sk-kilg-…`). Server proxy của app
- *    không giữ cookie giữa các request nên mỗi lượt là phiên mới; người dùng
- *    NÊN tạo key để có danh tính ổn định → đã GỠ khỏi đây, ô nhập key hiện lại.
- */
-const NO_AUTH_HOSTS: readonly string[] = Object.freeze([]);
-
-/**
- * false = gateway không cần API key (miễn phí, chặn theo IP). Dùng để ẩn ô nhập
- * key trong Settings và để cho phép gọi thẳng từ trình duyệt dù không có key.
+ * Mọi provider đều cần key BYOK (ô nhập key luôn hiện). Hàm giữ lại vì
+ * nhiều nơi gọi; NO_AUTH_HOSTS rỗng là mặc định an toàn.
  */
 export function providerNeedsApiKey(baseUrl: string | null | undefined): boolean {
-  if (!baseUrl) return true;
-  try {
-    return !NO_AUTH_HOSTS.includes(new URL(baseUrl).hostname.toLowerCase());
-  } catch {
-    return true;
-  }
+  void baseUrl;
+  return true;
 }
 
 /** Chuẩn hoá danh sách model từ GET /v1/models (dung sai nhiều dạng). */

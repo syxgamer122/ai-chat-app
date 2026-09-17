@@ -1,5 +1,5 @@
 /**
- * HUD Store — Quản lý trạng thái telemetry live cho các lane (Oh My Hermes port).
+ * HUD Store — Quản lý trạng thái telemetry live cho các lane.
  *
  * Mỗi lane đại diện cho một luồng thực thi: main conversation, subagent relay, fanout unit,
  * hoặc orchestrator cell.

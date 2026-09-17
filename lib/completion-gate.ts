@@ -1,5 +1,5 @@
 /**
- * Completion-Integrity Gate — cổng kiểm định tính liêm chính của mã nguồn (Oh My Hermes port).
+ * Completion-Integrity Gate — cổng kiểm định tính liêm chính của mã nguồn.
  *
  * Từ chối nâng trạng thái lên "verified" nếu diff có dấu hiệu làm khống (stubbing, fake pass):
  * - Thêm TODO / FIXME / not implemented

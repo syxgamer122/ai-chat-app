@@ -1,6 +1,6 @@
 /**
  * Compact Completion & Stoppage Summary Generator for Teamwork Runtime Engine.
- * Conforms strictly to ORIGINAL_REQUEST.md R3, PROJECT.md, and .opencode/commands/teamwork.md.
+ * Conforms strictly to ORIGINAL_REQUEST.md R3 và PROJECT.md.
  *
  * Requirements:
  * 1. Strict Line Count Constraint: Output MUST be strictly <= 20 lines under all scenarios.

@@ -7,7 +7,7 @@ import {
   pickQueuedPrompt,
 } from '@/lib/message-queue';
 
-describe('drainQueue — QueueMode Pi', () => {
+describe('drainQueue — QueueMode', () => {
   it('rỗng → không lấy gì', () => {
     expect(drainQueue([], 'one-at-a-time')).toEqual({ taken: [], rest: [] });
     expect(drainQueue([], 'all')).toEqual({ taken: [], rest: [] });
@@ -43,7 +43,7 @@ describe('enqueueMessage — trần hàng đợi', () => {
   });
 });
 
-describe('pickQueuedPrompt — thứ tự poll Pi', () => {
+describe('pickQueuedPrompt — thứ tự poll', () => {
   it('ưu tiên steering trước follow-up', () => {
     const r = pickQueuedPrompt(['s1'], ['f1'], 'one-at-a-time', 'one-at-a-time');
     expect(r.kind).toBe('steering');

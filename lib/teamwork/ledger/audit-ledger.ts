@@ -27,6 +27,15 @@ export class AppendOnlyLedger {
   private lastHash = GENESIS_PREV_HASH;
   /** Mốc transaction time lớn nhất đã ghi — xem chú thích trong appendRecord(). */
   private lastTxFrom = 0;
+  /**
+   * Mốc valid time lớn nhất từng ghi trên đường default (Date.now()).
+   * Đồng hồ hệ thống có thể nhảy LÙI (NTP sync dưới tải) — nếu không chặn,
+   * một bản ghi mới có validFrom < validFrom của bản ghi trước sẽ bị
+   * sortChronologically() xếp về TRƯỚC bản cũ; trên đường COMPENSATE điều này
+   * làm replay trả lại state ĐÃ BỊ rollback (test e2e adversarial đỏ ngẫu
+   * nhiên tuỳ timing). Cùng mẫu fix với txFrom bên dưới.
+   */
+  private lastValidFrom = 0;
   private appendQueue: Promise<any> = Promise.resolve();
   private lastVerification: IntegrityVerificationResult | null = null;
 
@@ -55,6 +64,7 @@ export class AppendOnlyLedger {
     this.sequenceCounter = 0;
     this.lastHash = GENESIS_PREV_HASH;
     this.lastTxFrom = 0;
+    this.lastValidFrom = 0;
 
     for (const line of lines) {
       const record = JSON.parse(line) as BitemporalRecord<any>;
@@ -62,6 +72,7 @@ export class AppendOnlyLedger {
       this.sequenceCounter = Math.max(this.sequenceCounter, record.sequence);
       this.lastHash = record.recordHash;
       this.lastTxFrom = Math.max(this.lastTxFrom, record.txFrom);
+      this.lastValidFrom = Math.max(this.lastValidFrom, record.validFrom ?? 0);
 
       // If this record superseded or compensated an earlier record, update in-memory txTo
       if (record.parentRecordId) {
@@ -127,7 +138,11 @@ export class AppendOnlyLedger {
         .then(async () => {
           const id = crypto.randomUUID();
           const sequence = ++this.sequenceCounter;
-          const validFrom = input.validFrom ?? Date.now();
+          /* Valid time trên đường default cũng phải đơn điệu tăng (không nhỏ hơn
+             mốc đã ghi) — lý do như `lastValidFrom`. Khi caller truyền validFrom
+             tường minh (test sử dụng mốc 100/1000...) thì tôn trọng nguyên văn. */
+          const validFrom = input.validFrom ?? Math.max(Date.now(), this.lastValidFrom);
+          this.lastValidFrom = Math.max(this.lastValidFrom, validFrom);
           const validTo = input.validTo ?? null;
           /* Transaction time phải ĐƠN ĐIỆU TĂNG. Khoảng Tt là half-open [from, to)
              và khi một bản ghi bị supersede/compensate, `txTo` của nó bị đóng

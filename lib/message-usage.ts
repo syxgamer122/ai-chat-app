@@ -1,5 +1,5 @@
 /**
- * Dòng thống kê dưới mỗi câu trả lời assistant (mượn ý @rokiy/pi-ui cho Pi:
+ * Dòng thống kê dưới mỗi câu trả lời assistant (mượn ý UI cho Pi:
  * ↑input ↓output · thời lượng · chi phí). Thuần hàm để test node.
  *
  * Nguồn dữ liệu: annotation { usage: { promptTokens, completionTokens },

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Unified CLI Entrypoint for Vyen (Pi / Goose Architecture).
+ * Unified CLI Entrypoint for Vyen.
  *
  * Bảng lệnh (registry dữ liệu), help nhóm theo nhóm lệnh và điều phối sống ở
  * lib/cli/cli-surface.ts để test import được mà không spawn tiến trình; file

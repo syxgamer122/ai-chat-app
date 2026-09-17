@@ -1,6 +1,6 @@
 /**
  * Unified Teamwork Engine Integration Test Suite.
- * Conforms strictly to ORIGINAL_REQUEST.md, PROJECT.md (M1-M5), and .opencode/commands/teamwork.md.
+ * Conforms strictly to ORIGINAL_REQUEST.md và PROJECT.md (M1-M5).
  *
  * Verifies the complete integrated Teamwork Multi-Agent Runtime:
  * 1. Clean module re-exports from '@/lib/teamwork'.
@@ -450,7 +450,7 @@ describe('Teamwork Engine Integrated Verification Suite (Milestone 5)', () => {
   });
 
   // ==========================================================================
-  // 6. Process Sandboxing (Arcbox Model)
+  // 6. Process Sandboxing
   // ==========================================================================
   describe('6. Process Sandboxing, Environment Scrubbing & Teardown', () => {
     it('scrubs sensitive credentials from subprocess environment when enabled', async () => {

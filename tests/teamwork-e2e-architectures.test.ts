@@ -3,10 +3,10 @@
  * Conforms to ORIGINAL_REQUEST.md, PROJECT.md, and TEST_INFRA.md.
  *
  * Covers 6 Reference Architectures & 27 Features:
- * - Architecture 1 & 5: Hatchet & Stably Orca (F1-F6, F24)
- * - Architecture 2: HumanLayer Skills & Anthropic Commerce-Agents (F7-F12)
- * - Architecture 3 & 6: Anthropic Commerce-Agents & Arcbox (F13-F18, F25)
- * - Architecture 4: Utopia & HumanLayer (F19-F23)
+ * - Nhóm 1 & 5: DAG bền vững & song song hoá (F1-F6, F24)
+ * - Nhóm 2: Human-in-the-loop & thẩm định trực quan (F7-F12)
+ * - Nhóm 3 & 6: Hợp đồng công cụ & sandbox (F13-F18, F25)
+ * - Nhóm 4: Ledger bitemporal & ngữ cảnh (F19-F23)
  * - Core Integration: TeamworkEngine, ToolRunner, CLI, Zero Regression (F24-F27)
  *
  * Tiers Covered:
@@ -112,9 +112,9 @@ describe('Teamwork E2E Reference Architectures & Capabilities (Tiers 1-3)', () =
 
   describe('Tier 1: Feature Isolation (F1 - F27)', () => {
     // ------------------------------------------------------------------------
-    // Architecture 1 & 5: Hatchet & Stably Orca (F1 - F6)
+    // Nhóm 1 & 5: DAG bền vững & song song hoá (F1 - F6)
     // ------------------------------------------------------------------------
-    describe('Hatchet & Orca: Durable DAG Workflows, Retries & Checkpointing', () => {
+    describe('Durable DAG Workflows, Retries & Checkpointing', () => {
       it('F1: DAG Topological Sort & Dependency Resolution computes execution levels and ready nodes', () => {
         // Linear chain + diamond: A -> B, A -> C, B -> D, C -> D
         const nodes = [
@@ -364,9 +364,9 @@ describe('Teamwork E2E Reference Architectures & Capabilities (Tiers 1-3)', () =
     });
 
     // ------------------------------------------------------------------------
-    // Architecture 2: HumanLayer Skills & Anthropic Commerce-Agents (F7 - F12)
+    // Nhóm 2: Human-in-the-loop & thẩm định trực quan (F7 - F12)
     // ------------------------------------------------------------------------
-    describe('HumanLayer & Commerce-Agents: Human-in-the-Loop & Visual Inspection', () => {
+    describe('Human-in-the-Loop & Visual Inspection', () => {
       it('F7: HITL Approval Gates intercepts critical files and dangerous shell commands', () => {
         const gate = new HitlApprovalGate({ policy: 'smart' });
 
@@ -583,9 +583,9 @@ Proceed with task.
     });
 
     // ------------------------------------------------------------------------
-    // Architecture 3 & 6: Anthropic Commerce-Agents & Arcbox (F13 - F18)
+    // Nhóm 3 & 6: Hợp đồng công cụ & sandbox (F13 - F18)
     // ------------------------------------------------------------------------
-    describe('Commerce-Agents & Arcbox: Strict Contracts, Provenance & Sandbox', () => {
+    describe('Strict Contracts, Provenance & Sandbox', () => {
       it('F13: Typed Tool Contracts with Zod enforce strict schemas and dynamic execution context separation', async () => {
         const InputSchema = z
           .object({
@@ -813,9 +813,9 @@ Proceed with task.
     });
 
     // ------------------------------------------------------------------------
-    // Architecture 4: Utopia & HumanLayer (F19 - F23)
+    // Nhóm 4: Ledger bitemporal & ngữ cảnh (F19 - F23)
     // ------------------------------------------------------------------------
-    describe('Utopia & HumanLayer: Bitemporal Codebase Ledger & Context Memory', () => {
+    describe('Bitemporal Codebase Ledger & Context Memory', () => {
       it('F19: Bitemporal Context Ledger decouples Valid Time (Tv) from Transaction Time (Tt)', () => {
         const record = {
           id: 'rec-1',

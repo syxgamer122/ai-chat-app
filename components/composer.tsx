@@ -80,7 +80,7 @@ export interface ComposerApi {
 const DEFAULT_MAX_FILE_BYTES = 20 * 1024 * 1024;
 
 /**
- * Nút icon 32px như Pi toolbar; vùng chạm mở rộng bằng pseudo `after:-inset-6px`
+ * Nút icon 32px như thanh công cụ; vùng chạm mở rộng bằng pseudo `after:-inset-6px`
  * (32+12=44px) để đạt tap target mobile mà không phình thanh công cụ.
  */
 function ToolbarButton({
@@ -552,7 +552,7 @@ export const Composer = memo(function Composer({
         }
       }
 
-      /* P3.1: Alt+Enter = follow-up queue (Pi); Alt+↑ = lấy lại tin đã queue. */
+      /* P3.1: Alt+Enter = follow-up queue ; Alt+↑ = lấy lại tin đã queue. */
       if (e.key === 'Enter' && e.altKey && !isTouchDevice) {
         e.preventDefault();
         void submitDraft({ queueAs: 'follow-up' });

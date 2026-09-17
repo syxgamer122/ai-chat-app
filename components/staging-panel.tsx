@@ -12,7 +12,7 @@ export interface StagingPanelState {
 }
 
 /**
- * Panel review batch thay đổi của agent (Plandex-style staging sandbox).
+ * Panel review batch thay đổi của agent (staging sandbox).
  * Hiển thị diff từng file, reject từng file hoặc reject all, Apply all.
  * Đĩa CHƯA BAO GIỜ bị đụng cho tới khi user bấm Apply.
  */

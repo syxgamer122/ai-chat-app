@@ -6,7 +6,7 @@ import {
   ProcessTreeSupervisor,
 } from '../lib/teamwork/permission-broker';
 
-describe('PermissionBroker & Capability Policy (OpenMausBot Model)', () => {
+describe('PermissionBroker & Capability Policy ', () => {
   const workspaceRoot = path.resolve(process.cwd());
 
   describe('matchesGlob', () => {

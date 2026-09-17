@@ -1,5 +1,5 @@
 /**
- * Fanout Dispatcher — Điều phối thực thi các Unit theo hợp đồng và Dependency Frontier (Oh My Hermes port).
+ * Fanout Dispatcher — Điều phối thực thi các Unit theo hợp đồng và Dependency Frontier.
  *
  * Tính năng chính:
  * 1. Nối DependencyFrontierScheduler với hàm thực thi subagent / tool runner.
@@ -105,8 +105,8 @@ export async function dispatchFanout(options: DispatchOptions): Promise<Dispatch
     signal,
   } = options;
 
-  // 0. Spawn Guard: Chặn fanout lồng nhau (OMH_FANOUT_DEPTH)
-  const currentDepth = Number(fanoutDepth ?? process.env.OMH_FANOUT_DEPTH ?? 1);
+  // 0. Spawn Guard: Chặn fanout lồng nhau (VYEN_FANOUT_DEPTH)
+  const currentDepth = Number(fanoutDepth ?? process.env.VYEN_FANOUT_DEPTH ?? 1);
   if (currentDepth > 1) {
     throw new Error('fanout_depth_exceeded: Dispatch lồng nhau bị từ chối trước khi tạo subprocess.');
   }
@@ -164,7 +164,7 @@ export async function dispatchFanout(options: DispatchOptions): Promise<Dispatch
   let totalSpawns = 0;
   const runningPromises = new Map<string, Promise<void>>();
 
-  // Hàm thực thi một unit (có retry loop tuân thủ kỷ luật OMH)
+  // Hàm thực thi một unit (có retry loop tuân thủ kỷ luật fanout)
   const runUnit = async (unit: UnitContract) => {
     let attempt = 0;
     let unitDone = false;

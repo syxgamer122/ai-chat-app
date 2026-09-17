@@ -1,5 +1,5 @@
 /**
- * Dual-Gate Guardrails (Commerce-Agents & Arcbox Model).
+ * Dual-Gate Guardrails.
  * Gate 1 (Pre-Flight): Schema validation, CWD lockdown, capability scopes, and exclusive file lock checks.
  * Gate 2 (Post-Flight): Output schema validation, adversarial diff audit, and verifyCommand critic review.
  */

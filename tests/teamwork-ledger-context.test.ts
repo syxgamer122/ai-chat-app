@@ -492,6 +492,57 @@ describe('Append-Only Bitemporal Ledger (Audit Trail & Merkle Chains)', () => {
     }
   });
 
+  /* Regression: đồng hồ hệ thống nhảy LÙI (NTP step / clock smear khi máy tải
+     nặng). Trước đây `replayEntityState()` không truyền toạ độ sẽ lấy
+     `Date.now()`; nếu lúc replay `Date.now()` tụt xuống dưới `validFrom` của
+     bản ghi COMPENSATE (ghi bằng Date.now() lúc append) thì bản ghi đó bị
+     `queryAsOf` loại → replay trả lại CHÍNH state vừa bị rollback (test
+     adversarial đỏ ngẫu nhiên ~1/5 lần). Mốc mặc định nay lấy từ ledger
+     (max txFrom) nên hoàn toàn không phụ thuộc đồng hồ tường. */
+  it('đồng hồ nhảy lùi vẫn replay đúng state sau COMPENSATE (mốc mặc định từ ledger)', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(1_700_000_000_000);
+      const r1 = await ledger.appendRecord({
+        entityId: 'service.config',
+        eventType: 'entity_state',
+        action: 'INSERT',
+        milestoneId: 'M1',
+        workerId: 'worker-1',
+        payload: { maxConns: 50 },
+      });
+      vi.setSystemTime(1_700_000_001_000);
+      const r2 = await ledger.appendRecord({
+        entityId: 'service.config',
+        eventType: 'entity_state',
+        action: 'UPDATE',
+        milestoneId: 'M2',
+        workerId: 'worker-2',
+        parentRecordId: r1.id,
+        payload: { maxConns: 500 },
+      });
+      const comp = await ledger.compensate({
+        targetRecordId: r2.id,
+        workerId: 'critic-lead',
+        reason: 'Rollback cấu hình nguy hiểm',
+        inversePayload: { restoredState: { maxConns: 50 } },
+      });
+
+      // Đồng hồ nhảy lùi 1 giờ so với thời điểm ghi.
+      vi.setSystemTime(1_700_000_000_000 - 3_600_000);
+
+      const replayer = new PointInTimeReplayEngine(ledger);
+      const state = replayer.replayEntityState<any>('service.config');
+      expect(state?.state).toEqual({ maxConns: 50 });
+      expect(state?.active).toBe(true);
+      expect(state?.history.map((h) => h.action)).toEqual(['COMPENSATE']);
+      expect(comp.action).toBe('COMPENSATE');
+      expect(ledger.verifyIntegrity().valid).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('filters records by milestoneId, eventType, and action', async () => {
     await ledger.appendRecord({
       eventType: 'milestone_init',

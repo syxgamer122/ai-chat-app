@@ -8,10 +8,29 @@ import { createBackup } from '@/lib/backup';
  * - Nền tảng khác: nhắc định kỳ bằng banner → bấm là xuất file download.
  */
 
-const LAST_BACKUP_KEY = 'ai-chat-last-backup-at';
-const SNOOZE_KEY = 'ai-chat-backup-snoozed-at';
-const INTERVAL_KEY = 'ai-chat-backup-interval-days';
+const LAST_BACKUP_KEY = 'vyen-last-backup-at';
+const SNOOZE_KEY = 'vyen-backup-snoozed-at';
+const INTERVAL_KEY = 'vyen-backup-interval-days';
 const DIR_HANDLE_KEY = 'backup-dir-handle';
+
+/**
+ * Khoá localStorage thời kỳ đầu (tên cũ của dự án). Chỉ ĐỌC để không mất lịch
+ * sử backup/tuỳ chọn của người dùng đã dùng bản cũ; mọi ghi mới dùng khoá vyen-*.
+ */
+const LEGACY_KEYS: Readonly<Record<string, string>> = Object.freeze({
+  [LAST_BACKUP_KEY]: 'ai-chat-last-backup-at',
+  [SNOOZE_KEY]: 'ai-chat-backup-snoozed-at',
+  [INTERVAL_KEY]: 'ai-chat-backup-interval-days',
+});
+
+/** Đọc khoá mới, chưa có thì đọc khoá cũ. */
+function readStored(key: string): string | null {
+  if (typeof window === 'undefined') return null;
+  const fresh = window.localStorage.getItem(key);
+  if (fresh !== null) return fresh;
+  const legacy = LEGACY_KEYS[key];
+  return legacy ? window.localStorage.getItem(legacy) : null;
+}
 
 export const DEFAULT_BACKUP_INTERVAL_DAYS = 7;
 
@@ -46,7 +65,7 @@ export function isFileSystemAccessSupported(): boolean {
 
 export function getBackupIntervalDays(): number {
   if (typeof window === 'undefined') return DEFAULT_BACKUP_INTERVAL_DAYS;
-  const raw = Number(window.localStorage.getItem(INTERVAL_KEY));
+  const raw = Number(readStored(INTERVAL_KEY));
   if (!Number.isFinite(raw) || raw < MIN_INTERVAL_DAYS || raw > MAX_INTERVAL_DAYS) {
     return DEFAULT_BACKUP_INTERVAL_DAYS;
   }
@@ -60,7 +79,7 @@ export function setBackupIntervalDays(days: number): void {
 
 export function getLastBackupAt(): number | null {
   if (typeof window === 'undefined') return null;
-  const raw = Number(window.localStorage.getItem(LAST_BACKUP_KEY));
+  const raw = Number(readStored(LAST_BACKUP_KEY));
   return Number.isFinite(raw) && raw > 0 ? raw : null;
 }
 
@@ -70,7 +89,7 @@ export function setLastBackupAt(ts = Date.now()): void {
 }
 
 function getSnoozedAt(): number | null {
-  const raw = Number(window.localStorage.getItem(SNOOZE_KEY));
+  const raw = Number(readStored(SNOOZE_KEY));
   return Number.isFinite(raw) && raw > 0 ? raw : null;
 }
 
@@ -132,7 +151,7 @@ async function writeBackupToDir(
     if (backup.chats.length === 0) return 'failed';
 
     const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
-    const fileHandle = await handle.getFileHandle(`ai-chat-backup-${stamp}.json`, {
+    const fileHandle = await handle.getFileHandle(`vyen-backup-${stamp}.json`, {
       create: true,
     });
     const writable = await fileHandle.createWritable();

@@ -1,7 +1,7 @@
-# DESIGN.md — Pi Harness × Pixel/Minecraft Identity
+# DESIGN.md — Vyen Harness × Pixel/Minecraft Identity
 
 > Tài liệu Design System chuẩn cho ứng dụng Chat/Harness: Kế thừa triết lý Dark Slate, 
-> viền tóc, góc vuông và sọc active đặc trưng của Pi, kết hợp hệ font Pixel Minecraft.
+> viền tóc, góc vuông và sọc active đặc trưng của Vyen Harness, kết hợp hệ font Pixel Minecraft.
 
 ---
 
@@ -31,7 +31,7 @@
 
 ### Màu trạng thái & Code block
 - **Success / Warning / Error**: `#5db87a` / `#e8993a` / `#e8704f`
-- **Sọc Active chữ ký (Pi Split Indicator)**:
+- **Sọc Active chữ ký (Split Indicator)**:
   `linear-gradient(90deg, #6a9fcc 0 62%, #4b607c 62% 100%)` (đặt ở mép trái session/tab đang chọn).
 - **Code Block Theme**: One Dark tinh chỉnh (`#1c2128` hoặc `#212730`), cú pháp ưu tiên highlight nhẹ nhàng, không chói.
 

@@ -50,7 +50,7 @@ function friendlyErrorMessage(raw?: string): string {
  * hoặc regenerate chưa nhả chữ). Chấm nảy + số giây đã chờ để người dùng biết
  * hệ thống còn hoạt động, không phải treo.
  *
- * Tông màu theo độ chờ (mượn ý @rokiy/pi-ui): <10s bình thường, 10-30s chờ
+ * Tông màu theo độ chờ (mượn ý UI): <10s bình thường, 10-30s chờ
  * dài (vàng), >30s đỏ kèm chú thích. Model suy luận nặng từng đo TTFT tới
  * 60s nên đỏ không có nghĩa là lỗi, chỉ là "còn chờ hơi lâu".
  */

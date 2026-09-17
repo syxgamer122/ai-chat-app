@@ -505,7 +505,7 @@ export function mapMcpTools(
 }
 
 /* ------------------------------------------------------------------ */
-/* Proxy mode — search/describe/call (port ý tưởng pi-mcp-adapter)     */
+/* Proxy mode — search/describe/call (port ý tưởng mcp adapter)     */
 /* ------------------------------------------------------------------ */
 
 /**

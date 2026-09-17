@@ -1,5 +1,5 @@
 /**
- * Universal Prompt Protocol & Model Family Calibration (Port từ Oh My Hermes).
+ * Universal Prompt Protocol & Model Family Calibration 
  *
  * Kỷ luật thiết kế:
  * 1. Prompt-cache discipline: Preamble dùng chung byte-stable, không timestamp, không state biến động.

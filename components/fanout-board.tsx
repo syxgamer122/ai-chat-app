@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * Fanout Board — Bảng điều hành song song hoá có hợp đồng (Oh My Hermes port).
+ * Fanout Board — Bảng điều hành song song hoá có hợp đồng.
  *
  * Hiển thị:
  * - Hợp đồng Fanout (id, baseRevision, spawnPlan)

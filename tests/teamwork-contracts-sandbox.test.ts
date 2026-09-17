@@ -477,7 +477,7 @@ describe('Milestone 3: Strict Tool Contracts, Provenance & Process Sandbox', () 
   });
 
   // =========================================================================
-  // 4. Environment Variable Scrubbing (Arcbox Model)
+  // 4. Environment Variable Scrubbing
   // =========================================================================
   describe('Environment Variable Scrubbing (EnvScrubber)', () => {
     const dirtyEnv: NodeJS.ProcessEnv = {

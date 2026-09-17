@@ -1,24 +1,24 @@
 /**
- * SecretRegistry — port OpenHands (`openhands/core/utils/secret_registry.py`).
+ * SecretRegistry — che giá trị bí mật trước khi vào ngữ cảnh model.
  *
  * VÌ SAO CÓ FILE NÀY: cùng một regex che bí mật từng bị copy ở 5 nơi
  * (app/api/chat, app/api/compact, app/api/orchestrate, app/api/title,
  * lib/fs-access) và chúng đã drift thật (fs-access thêm nhánh `key`, các route
  * khác không có). Quan trọng hơn: KHÔNG nơi nào che bí mật nằm trong KẾT QUẢ
- * TOOL trước khi kết quả đó vào ngữ cảnh model — đúng lỗ mà OpenHands bịt bằng
+ * TOOL trước khi kết quả đó vào ngữ cảnh model — đúng lỗ mà registry bịt bằng
  * registry: giá trị bí mật được ĐĂNG KÝ (từ env của tiến trình) rồi bị thay
  * bằng [redacted] ở MỌI chỗ nó xuất hiện, kể cả khi khoá không có tiền tố nhận
  * dạng được; kèm một tầng pattern cho khoá chưa từng đăng ký.
  *
  * Hai tầng, cố tình tách bạch:
- *   1. VALUE-BASED (đúng OpenHands): register(value) — che chính xác giá trị đã
+ *   1. VALUE-BASED: register(value) — che chính xác giá trị đã
  *      biết (openai trả về 401 kèm key trong message, shell_run in env, ...).
  *   2. PATTERN-BASED (Vyen bổ sung): sk-…, ghp_…, AKIA…, xoxb-…, PEM, JWT,
  *      DSN có mật khẩu, và assignment `API_KEY="…"`.
  *
  * BẤT BIẾN
  *  - Placeholder giữ nguyên '[redacted]' như bản cũ → log/lỗi không đổi định dạng.
- *  - Chỉ import DEFAULT_DENY_PATTERNS (Arcbox) — không dựng danh sách env-deny
+ *  - Chỉ import DEFAULT_DENY_PATTERNS — không dựng danh sách env-deny
  *    thứ hai để khỏi drift; module thuần nên chạy được cả client bundle lẫn Node.
  *  - Không bao giờ ném và không bao giờ trả undefined: input lạ giữ nguyên trạng.
  *  - Pattern phải ĐỦ HẸP để dùng được cho kết quả tool (đọc file code): rule
@@ -38,12 +38,12 @@ export const MIN_REGISTERED_SECRET_LENGTH = 8;
 /**
  * Khoá env TRÔNG NHƯ bí mật — dùng để quyết định giá trị nào đáng đăng ký.
  *
- * Gồm danh sách deny của Arcbox (vốn nhắm strip env của tiến trình con) CỘNG
+ * Gồm danh sách deny chuẩn (vốn nhắm strip env của tiến trình con) CỘNG
  * các đuôi *_KEY / *_TOKEN / *_SECRET / *_PASSWORD / *_CREDENTIAL và ACCESS_CODE.
- * Lý do phải cộng thêm: danh sách Arcbox chỉ liệt kê biến của NHÀ CUNG CẤP
+ * Lý do phải cộng thêm: danh sách deny chuẩn chỉ liệt kê biến của NHÀ CUNG CẤP
  * (OPENAI_API_KEY, AWS_SECRET_ACCESS_KEY…) nên nó bỏ sót biến thật của Vyen —
  * `BRAVE_SEARCH_KEY`, `TINYFISH_API_KEY` (khớp), `DIAG_SECRET` (khớp), nhưng
- * `ACCESS_CODE`, `CUSTOM_ACME_TOKEN`, `KILGORE_KEY` thì KHÔNG. Với mục đích
+ * `ACCESS_CODE`, `CUSTOM_ACME_TOKEN`, `VYEN_KEY` thì KHÔNG. Với mục đích
  * STRIP thì bỏ sót là chuyện nhỏ; với mục đích CHE thì bỏ sót = rò rỉ, còn bắt
  * dư chỉ tốn vài phép so chuỗi.
  */
@@ -216,7 +216,7 @@ function hitsOf(bag: Map<string, number>): SecretHit[] {
 }
 
 /**
- * Tầng VALUE (đúng OpenHands): thay chính xác giá trị đã đăng ký.
+ * Tầng VALUE: thay chính xác giá trị đã đăng ký.
  * Dùng split/join nên không cần escape regex; giá trị dài chạy TRƯỚC giá trị
  * ngắn để khoá ngắn là substring của khoá khác không cắt khoá dài thành mảnh.
  */
@@ -308,7 +308,7 @@ export function isSecretRedactionDisabled(
 }
 
 /**
- * Port OpenHands SecretRegistry: đăng ký giá trị bí mật rồi che mọi chỗ nó
+ * SecretRegistry: đăng ký giá trị bí mật rồi che mọi chỗ nó
  * xuất hiện, kèm tầng pattern cho khoá chưa đăng ký. Instance độc lập hoàn toàn
  * (không global state) nên test được từng tầng riêng.
  */
@@ -373,7 +373,7 @@ export class SecretRegistry {
 
   /**
    * Đăng ký mọi biến môi trường trông như bí mật (SECRET_ENV_KEY_PATTERNS: danh
-   * sách deny của Arcbox + đuôi *_KEY/*_TOKEN…). Trả số giá trị mới.
+   * sách deny chuẩn + đuôi *_KEY/*_TOKEN…). Trả số giá trị mới.
    */
   registerFromEnv(
     env?: Record<string, string | undefined>,
@@ -489,7 +489,7 @@ let defaultRegistry: SecretRegistry | null = null;
 /**
  * Registry toàn tiến trình: tự đăng ký bí mật từ env ngay lần đầu dùng, để mọi
  * đường (log lỗi route, kết quả tool, transcript emulated) dùng CÙNG một bộ che
- * — đúng vai trò của SecretRegistry trong OpenHands.
+ * — đúng vai trò của SecretRegistry trong harness.
  */
 export function getDefaultSecretRegistry(): SecretRegistry {
   if (!defaultRegistry) {

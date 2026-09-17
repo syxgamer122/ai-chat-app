@@ -1,11 +1,11 @@
 /**
- * P2.1 — Parallel tool execution (port kiến trúc Pi `pi-agent-core`).
+ * P2.1 — Parallel tool execution (port kiến trúc agent loop agent loop).
  *
- * Thuật toán đúng theo Pi:
+ * Thuật toán đúng theo chuẩn:
  * 1. Preflight TUẦN TỰ: gán id, bắn `onStart` theo đúng thứ tự source.
  * 2. Nếu BẤT KỲ tool nào trong batch có mode `sequential` → cả batch chạy tuần tự.
  * 3. Còn lại chạy `Promise.all`; `onSettled` bắn NGAY khi từng tool xong
- *    (thứ tự hoàn thành — tương đương `tool_execution_end` của Pi).
+ *    (thứ tự hoàn thành — tương đương `tool_execution_end` của agent loop).
  * 4. Kết quả trả về LUÔN theo thứ tự source (bất biến transcript deterministic).
  *
  * File thuần, không import AI SDK / DOM — test được bằng vitest trong node.
@@ -16,7 +16,7 @@ export type ToolExecutionMode = 'parallel' | 'sequential';
 /**
  * Tool ghi/side-effect ngoài process PHẢI chạy tuần tự (tránh race cùng file,
  * modal duyệt chồng nhau). Tool chỉ đọc / thuần validation chạy song song.
- * Tên lạ (mcp__*, tool tương lai) mặc định parallel — Pi cũng vậy.
+ * Tên lạ (mcp__*, tool tương lai) mặc định parallel — Loop cũng vậy.
  */
 const SEQUENTIAL_TOOLS: ReadonlySet<string> = new Set([
   // Ghi file qua staging — race trên cùng file.

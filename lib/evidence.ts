@@ -1,5 +1,5 @@
 /**
- * Evidence Ladder — bậc thang bằng chứng 4 cấp độ (Oh My Hermes port).
+ * Evidence Ladder — bậc thang bằng chứng 4 cấp độ.
  *
  * Phân biệt rạch ròi giữa lời nói của model và bằng chứng thực tế:
  * - prepared: "Plan · not run" — kế hoạch đã sẵn, chưa chạy gì

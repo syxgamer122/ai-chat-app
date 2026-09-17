@@ -1,5 +1,5 @@
 /**
- * Recipe Schema — đóng gói workflow tái sử dụng (port mô hình Goose recipe).
+ * Recipe Schema — đóng gói workflow tái sử dụng (mô hình recipe).
  *
  * Recipe ≠ prompt mẫu: ngoài text nó gói cả tham số, tool policy, model
  * settings, success-check + retry, structured output và sub-recipe — một

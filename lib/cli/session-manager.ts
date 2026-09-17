@@ -1,5 +1,5 @@
 /**
- * Quản lý phiên làm việc CLI (Goose P2-8).
+ * Quản lý phiên làm việc CLI (P2-8).
  *
  * Lưu trữ phiên hội thoại trong .vyen/sessions/ (workspace) và ~/.vyen/sessions/ (global).
  * Hỗ trợ lưu lịch sử, đổi tên, liệt kê và resume (-r, --name).

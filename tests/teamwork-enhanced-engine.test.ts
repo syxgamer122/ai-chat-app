@@ -8,7 +8,7 @@ import { PermissionBroker } from '../lib/teamwork/permission-broker';
 import { RepoDependencyGraph } from '../lib/teamwork/repo-graph';
 import { GitWorktreeManager } from '../lib/teamwork/worktree';
 
-describe('Enhanced Teamwork Harness — End-to-End Orca & OpenMausBot Integration', () => {
+describe('Enhanced Teamwork Harness — End-to-End Integration', () => {
   const workspaceRoot = path.resolve(process.cwd());
 
   // Test quyền ghi chạm đĩa thật — dùng workspace tạm để không rò file vào cây nguồn

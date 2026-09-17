@@ -14,7 +14,7 @@ import {
 import type { ScheduleRecord } from '@/lib/db';
 import { loadCliSession } from '@/lib/cli/session-manager';
 
-describe('Scheduler Runner Engine (Goose P2-9)', { timeout: 15000 }, () => {
+describe('Scheduler Runner Engine (P2-9)', { timeout: 15000 }, () => {
   let tmpDir: string;
 
   beforeEach(() => {

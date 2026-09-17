@@ -1,4 +1,4 @@
-# Báo cáo port tính năng Goose → Vyen (đợt 1: P0-1 → P1-4)
+# Báo cáo port bộ nhớ dài hạn & nền tảng → Vyen (đợt 1: P0-1 → P1-4)
 
 Ngày: 2026-09-13 · Lỗi gốc: `fcb5a8d` → HEAD `036b765` (5 commit + 1 fix lint riêng `a1672a8`)
 
@@ -79,7 +79,7 @@ Session/chat_recall, Scheduler, Headless CLI slash, Cost telemetry, ACP).
   `vyen:home-skills-list/read` — name chặn regex, chỉ đọc đúng thư mục đó, không mở fs tùy ý).
   Trùng tên workspace > global.
 - **Front-matter**: name/description/version/allowed_tools (YAML giữa 2 dòng `---`, CRLF chuẩn hoá).
-- **`.vyenhints`**: fallback `AGENTS.md` → `CLAUDE.md` → `.goosehints`; trần 8.000 ký tự; chip
+- **`.vyenhints`**: fallback `AGENTS.md`; trần 8.000 ký tự; chip
   "hints loaded" trên UI click xem nguyên văn. Merge order theo spec: hints < skills < lessons < recipe
   (hints + skill index chèn TRƯỚC các khối đó trong composedSystem).
 - **UI Settings → tab Skills**: liệt kê + bật/tắt từng cái (persist `disabledSkills` trong localStorage
@@ -93,15 +93,15 @@ Session/chat_recall, Scheduler, Headless CLI slash, Cost telemetry, ACP).
 
 ## P1-4 — MEMORY CÓ CẤU TRÚC (commits `2db62f7` + `036b765`)
 
-**File thêm**: `lib/memory/{goose,goose-client}.ts`, `components/settings-agent-memory.tsx`,
-`tests/memory-goose.test.ts`
+**File thêm**: `lib/memory/{agent-memory,agent-memory-client}.ts`, `components/settings-agent-memory.tsx`,
+`tests/agent-memory.test.ts`
 **File sửa**: `lib/db.ts`, `lib/{agent-tools,tool-catalog,auto-pilot}.ts`, `lib/ipc.cjs` (+2 lệnh),
 `lib/desktop-bridge.ts`, `app/api/chat/route.ts`, `components/{chat-interface,settings-dialog}.tsx`,
 3 file test lock số tool
 
 - **Dexie v13**: bảng `agentMemories` (id, category, scope, workspaceKey, createdAt, *tags) — tách biệt
   hệ reviewer-gate v11 (hệ này là kho ghi nhanh do tool ghi, không qua duyệt).
-- **4 tool đúng tên Goose**: `remember_memory(category, data, tags, is_global)` /
+- **4 tool bộ nhớ**: `remember_memory(category, data, tags, is_global)` /
   `retrieve_memories(query|category|tags)` / `remove_memory_category(category)` /
   `remove_specific_memory(id)` — client tool, CRUD Dexie renderer. retrieve read-only auto-approve;
   3 tool ghi thuộc WRITE_TOOLS (phải duyệt). Trần 2.000 ký tự/entry (nâng từ 400).

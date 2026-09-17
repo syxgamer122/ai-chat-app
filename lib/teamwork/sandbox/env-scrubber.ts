@@ -1,5 +1,5 @@
 /**
- * Environment Variable Scrubbing & Sanitization (Arcbox Model).
+ * Environment Variable Scrubbing & Sanitization.
  * Strips or masks credentials, API keys, tokens, and database connection strings from subprocess environments.
  */
 

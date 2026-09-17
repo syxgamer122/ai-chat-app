@@ -2,7 +2,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { RepoDependencyGraph } from '../lib/teamwork/repo-graph';
 
-describe('RepoDependencyGraph — Repository-Aware Dependency Mapping (Orca Model)', () => {
+describe('RepoDependencyGraph — Repository-Aware Dependency Mapping', () => {
   const workspaceRoot = path.resolve(process.cwd());
   const graph = new RepoDependencyGraph({
     workspaceRoot,

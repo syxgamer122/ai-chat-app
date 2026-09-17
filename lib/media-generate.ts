@@ -5,11 +5,11 @@
  * origin của trang, và (b) có API key nằm phía client (IndexedDB). Key trong
  * env của server không bao giờ được gửi ra browser.
  *
- * KHÔNG dùng được với crax: crax chỉ allowlist origin của chính site họ, mọi
+ * KHÔNG dùng được với
  * request kèm header `Origin` (tức mọi fetch từ trình duyệt) đều bị trả
  * 403 "Origin not allowed" — đã kiểm chứng bằng request thật, cùng URL bỏ
- * `Origin` thì 200. crax cũng không đọc `Authorization`, nên không có key phía
- * client để bật đường này. Lượt media crax do đó đi qua /api/chat, và ở đó
+ * `Origin` thì 200.
+ * client để bật đường này. Lượt media
  * vẫn kịp: video đo được 120-126s, dưới trần 300s của Vercel.
  *
  * Giữ lại module vì `originBlocked` là cơ chế fallback tự động: gateway nào
@@ -18,7 +18,7 @@
  *
  * GIAI ĐOẠN 2 (desktop tự chủ): trên Vyen desktop, tạo ẢNH đi qua main-process
  * proxy `vyen:llm-fetch` (Node fetch — KHÔNG gắn header Origin) nên gateway có
- * allowlist origin kiểu crax không chặn được; đường web giữ nguyên như cũ.
+ * allowlist origin kiểu
  */
 
 import { validateProviderBaseUrl } from '@/lib/provider-url';
@@ -30,7 +30,7 @@ export type MediaKind = 'image' | 'video';
 
 export interface MediaRequest {
   kind: MediaKind;
-  /** baseUrl chuẩn OpenAI, ví dụ https://gpt.crax.lol/v1 */
+  /** baseUrl chuẩn OpenAI, ví dụ https://gpt.gateway.lol/v1 */
   baseUrl: string;
   apiKey: string;
   model: string;
@@ -105,7 +105,7 @@ function mediaError(status: number, raw: string): MediaGenerationError {
   }
 
   /**
-   * Gateway crax có allowlist origin: gọi từ domain lạ trả 403
+   * Gateway
    * "Origin not allowed" dù key hợp lệ. Đánh dấu để caller fallback qua server
    * (server không gửi Origin nên không bị chặn).
    */
@@ -184,7 +184,7 @@ async function generateImage(req: MediaRequest, base: string): Promise<MediaResu
   const body = JSON.stringify({ model: req.model, prompt: req.prompt.slice(0, 4000), n: 1 });
 
   /* Desktop (giai đoạn 2): gọi qua main process — Node fetch không gắn Origin
-     nên gateway allowlist-origin (crax "Origin not allowed") không chặn, khỏi
+     nên gateway allowlist-origin (gateway "Origin not allowed") không chặn, khỏi
      phải fallback /api/chat. Trade-off: IPC không chuyển AbortSignal được —
      bấm Dừng chỉ bỏ qua kết quả khi về; request phía main tự hết timeout 300s. */
   const bridge = vyenDesktop();

@@ -1,7 +1,7 @@
 /**
- * Terminal Coding Agent Harness (Pi / Goose architecture).
+ * Terminal Coding Agent Harness.
  *
- * Triết lý từ earendil-works/pi:
+ * Triết lý thiết kế:
  * - Tập trung vào 4 primitives cốt lõi: read, write, edit, bash.
  * - Chạy trực tiếp trong terminal với zero GUI overhead, khởi động tức thì (<100ms).
  * - Tương thích hoàn toàn với workspace cục bộ và Git.
@@ -15,7 +15,7 @@ import { createOpenAI } from '@ai-sdk/openai';
 import { streamText, tool, type CoreMessage } from 'ai';
 import { z } from 'zod';
 import { resolveWithin } from '../path-guard.cjs';
-import { runMonkeyCodeSast } from '../security-sast';
+import { runSecuritySast } from '../security-sast';
 import { renderToolsCommand } from './cli-surface';
 import { saveCliSession, type CliSessionData } from './session-manager';
 import { normalizeModeParam } from '../slash-commands';
@@ -152,7 +152,7 @@ export class CliCodingHarness {
       const stderr = res.stderr || '';
       const combined = `${stdout}\n${stderr}`.trim();
 
-      // Goose-style smart truncation: Cắt nếu quá 100 dòng để tiết kiệm
+      // Smart truncation: Cắt nếu quá 100 dòng để tiết kiệm
       const lines = combined.split(/\r?\n/);
       let preview = combined;
       if (lines.length > 100) {
@@ -172,7 +172,12 @@ export class CliCodingHarness {
   public find(pattern?: string, maxDepth = 5): CliAgentToolResult {
     try {
       const results: string[] = [];
-      const ignoreDirs = new Set(['.git', 'node_modules', '.next', 'dist', '.gemini', 'tmp', '.agents', '.opencode', 'coverage', '.turbo', 'build']);
+      /* .vyen/sessions: file CLI session sinh lúc chạy (110+ file khi đã dùng
+         app một thời gian) — không phải source. Khi nằm trong 100 kết quả đầu
+         nó CHÈN ngưỡng làm mất package.json/tsconfig.json khỏi output (test
+         glob đỏ trên môi trường đã chạy CLI). Mọi thư mục ignore phải thêm
+         1 dòng ở đây thôi. */
+      const ignoreDirs = new Set(['.git', 'node_modules', '.next', 'dist', 'tmp', '.agents', 'coverage', '.turbo', 'build', '.vyen']);
       const rawPat = pattern ? pattern.trim().replace(/^["']|["']$/g, '') : '';
       let matcher: ((rel: string, name: string) => boolean) | null = null;
 
@@ -228,7 +233,7 @@ export class CliCodingHarness {
         return { ok: false, error: 'Cần cung cấp chuỗi tìm kiếm.' };
       }
       const results: string[] = [];
-      const ignoreDirs = new Set(['.git', 'node_modules', '.next', 'dist', '.gemini', 'tmp', '.agents', '.opencode', 'coverage', '.turbo', 'build']);
+      const ignoreDirs = new Set(['.git', 'node_modules', '.next', 'dist', 'tmp', '.agents', 'coverage', '.turbo', 'build', '.vyen']);
       const binaryExts = new Set(['.png', '.jpg', '.jpeg', '.gif', '.ico', '.pdf', '.exe', '.dll', '.zip', '.tar', '.gz', '.woff', '.woff2', '.ttf', '.bin']);
       let reg: RegExp | null = null;
       if (isRegex) {
@@ -315,7 +320,7 @@ export class CliCodingHarness {
 
   public audit(targetPath?: string): CliAgentToolResult {
     try {
-      const report = runMonkeyCodeSast(this.workspaceRoot, { targetPath });
+      const report = runSecuritySast(this.workspaceRoot, { targetPath });
       return {
         ok: report.ok,
         output: report.textReport,
@@ -328,14 +333,14 @@ export class CliCodingHarness {
   public init(): CliAgentToolResult {
     try {
       const projectMdPath = path.join(this.workspaceRoot, 'PROJECT.md');
-      const opencodePath = path.join(this.workspaceRoot, '.opencode');
+      const vyenDirPath = path.join(this.workspaceRoot, '.vyen');
       const hasProjectMd = fs.existsSync(projectMdPath);
-      const hasOpencode = fs.existsSync(opencodePath);
+      const hasVyenDir = fs.existsSync(vyenDirPath);
 
-      if (hasProjectMd && hasOpencode) {
+      if (hasProjectMd && hasVyenDir) {
         return {
           ok: true,
-          output: `[vyen init] Không gian làm việc đã được khởi tạo chuẩn:\n  - PROJECT.md: Sẵn sàng\n  - .opencode/: Sẵn sàng`,
+          output: `[vyen init] Không gian làm việc đã được khởi tạo chuẩn:\n  - PROJECT.md: Sẵn sàng\n  - .vyen/: Sẵn sàng`,
         };
       }
 
@@ -343,23 +348,23 @@ export class CliCodingHarness {
         const initialProjectMd = `# PROJECT — Vyen Workspace Configuration\n\nKhởi tạo: ${new Date().toISOString()}\nWorkspace: ${this.workspaceRoot}\n`;
         fs.writeFileSync(projectMdPath, initialProjectMd, 'utf8');
       }
-      /* Trước đây init() chỉ existsSync-check .opencode mà không bao giờ tạo —
+      /* Trước đây init() chỉ existsSync-check .vyen mà không bao giờ tạo —
          thư mục bị xoá (dọn rác) thì mọi lần init sau vẫn báo thiếu mãi. */
-      if (!hasOpencode) {
-        fs.mkdirSync(opencodePath, { recursive: true });
+      if (!hasVyenDir) {
+        fs.mkdirSync(vyenDirPath, { recursive: true });
       }
 
       /* Liệt kê từng mục ở CẢ HAI nhánh: nhánh "đã khởi tạo" từng in PROJECT.md
          còn nhánh vừa tạo thì không, nên output phụ thuộc thứ tự chạy (test
-         nào chạm trước tạo .opencode/ là test sau thấy nhánh khác). */
+         nào chạm trước tạo .vyen/ là test sau thấy nhánh khác). */
       const created = [
         hasProjectMd ? '  - PROJECT.md: Sẵn sàng' : '  - PROJECT.md: Đã tạo',
-        hasOpencode ? '  - .opencode/: Sẵn sàng' : '  - .opencode/: Đã tạo',
+        hasVyenDir ? '  - .vyen/: Sẵn sàng' : '  - .vyen/: Đã tạo',
       ];
 
       return {
         ok: true,
-        output: `[vyen init] Đã khởi tạo thành công cấu hình workspace Vyen & Claude Code context.\n${created.join('\n')}`,
+        output: `[vyen init] Đã khởi tạo thành công cấu hình workspace Vyen.\n${created.join('\n')}`,
       };
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) };
@@ -452,7 +457,7 @@ export function loadEnvFiles(workspaceRoot: string = process.cwd()) {
 }
 
 /**
- * Autonomous Terminal Coding Agent (Claude Code / Codex architecture).
+ * Autonomous Terminal Coding Agent (terminal coding agent).
  * Provides an autonomous LLM reasoning and tool-calling loop that:
  * - Streams tokens directly to stdout in real-time.
  * - Executes tools (read, write, edit, bash, grep, find, git_status, git_diff, security_audit).
@@ -842,13 +847,13 @@ export class AutonomousCliAgent {
         },
       }),
       security_audit: tool({
-        description: 'Run Chaitin MonkeyCode Static Application Security Testing (SAST) vulnerability scan',
+        description: 'Run Static Application Security Testing (SAST) vulnerability scan',
         parameters: z.object({
           path: z.string().optional().describe('Optional subpath to audit'),
         }),
         execute: async ({ path: auditPath }) => {
           toolCallsCount++;
-          const callMsg = `\n● [Vyen Tool] 🛡️ security_audit (MonkeyCode SAST)\n`;
+          const callMsg = `\n● [Vyen Tool] 🛡️ security_audit (SAST)\n`;
           if (callbacks?.onToken) callbacks.onToken(callMsg);
           else process.stdout.write(callMsg);
           callbacks?.onToolCall?.('security_audit', { path: auditPath });
@@ -872,7 +877,7 @@ export class AutonomousCliAgent {
     try {
       const result = streamText({
         model: openai(this.model),
-        system: `You are Vyen Terminal Autonomous Coding Agent (Claude Code & Codex architecture).
+        system: `You are Vyen Terminal Autonomous Coding Agent (terminal coding agent).
 Workspace root: ${this.workspaceRoot}. Platform: ${process.platform}.
 You have direct autonomous access to tools: read_file, write_file, edit_file, bash, grep, find, git_status, git_diff, security_audit.
 Guidelines:
@@ -956,12 +961,12 @@ Guidelines:
       resultSummary = `Đã đọc file ${target}:\n${res.output?.slice(0, 300) || ''}`;
     } else if (lower.includes('audit') || lower.includes('an ninh') || lower.includes('security')) {
       toolCallsCount++;
-      emit(`● [Vyen Tool] 🛡️ security_audit (MonkeyCode SAST)\n`);
+      emit(`● [Vyen Tool] 🛡️ security_audit (SAST)\n`);
       callbacks?.onToolCall?.('security_audit', {});
       const res = this.harness.audit();
       callbacks?.onToolResult?.('security_audit', res.output);
       emit(`✔ [Vyen Tool Complete] security_audit\n`);
-      resultSummary = `Báo cáo kiểm toán an ninh MonkeyCode:\n${res.output?.slice(0, 300) || ''}`;
+      resultSummary = `Báo cáo kiểm toán an ninh:\n${res.output?.slice(0, 300) || ''}`;
     } else if (lower.includes('status') || lower.includes('git')) {
       toolCallsCount++;
       emit(`● [Vyen Tool] 🌿 git_status\n`);
@@ -1009,7 +1014,7 @@ Guidelines:
 }
 
 /**
- * Chạy interactive REPL terminal cho lập trình viên (chuẩn Claude Code / Codex).
+ * Chạy interactive REPL terminal cho lập trình viên (terminal coding agent).
  * Tích hợp toàn diện LLM streaming reasoning và autonomous tool-calling loop.
  */
 export async function startInteractiveCli(
@@ -1033,11 +1038,11 @@ export async function startInteractiveCli(
   }
 
   console.log(`\n======================================================`);
-  console.log(` Vyen Autonomous Coding Agent (Claude Code & Codex Harness)`);
+  console.log(` Vyen Autonomous Coding Agent (Terminal Harness)`);
   console.log(` Workspace: ${cfg.workspace}`);
   console.log(` Phiên:     ${agent.getSessionName()} (${agent.getSessionId()})`);
   console.log(` Model:     ${cfg.model} | Key: ${cfg.hasKey ? 'Sẵn sàng ✔' : 'Chưa cấu hình (dùng /key để gán)'}`);
-  console.log(` Các lệnh slash / colon khả dụng (Goose Standard P2-10):`);
+  console.log(` Các lệnh slash / colon khả dụng (P2-10):`);
   console.log(`   /plan <mục tiêu>      - Khảo sát và lập kế hoạch thực hiện`);
   console.log(`   /mode <policy>        - Chuyển chế độ phê duyệt (auto|smart|approve|chat)`);
   console.log(`   /summarize, :compact  - Nén và dọn dẹp bộ nhớ ngữ cảnh`);
@@ -1062,8 +1067,8 @@ export async function startInteractiveCli(
   console.log(`   /status, :status      - Trạng thái git ngắn gọn`);
   console.log(`   /diff, :diff [path]   - Xem khác biệt git diff`);
   console.log(`   /doctor, :doctor      - Kiểm tra chẩn đoán hệ thống`);
-  console.log(`   /audit, :audit        - Kiểm tra an ninh mã nguồn (MonkeyCode)`);
-  console.log(`   /init, :init          - Khởi tạo context dự án (Claude Code)`);
+  console.log(`   /audit, :audit        - Kiểm tra an ninh mã nguồn`);
+  console.log(`   /init, :init          - Khởi tạo context dự án`);
   console.log(`   /teamwork <goal>      - Chạy Teamwork Multi-Agent Engine`);
   console.log(`   /clear, :clear        - Xóa màn hình terminal & reset lịch sử`);
   console.log(`   /exit, :exit          - Thoát CLI`);
@@ -1153,7 +1158,7 @@ export async function startInteractiveCli(
 
     if (lower === '/help' || lower === ':help' || lower === 'help' || lower === '/?') {
       console.log(`
-Các lệnh khả dụng (Goose Standard P2-10):
+Các lệnh khả dụng (P2-10):
   /plan <mục tiêu>                  Khảo sát và lập kế hoạch thực hiện
   /mode <auto|smart|approve|chat>   Đổi chính sách phê duyệt công cụ
   /summarize, /compact              Nén và dọn dẹp bộ nhớ context
@@ -1175,7 +1180,7 @@ Các lệnh khả dụng (Goose Standard P2-10):
   /status                           Xem git status
   /diff [file]                      Xem git diff
   /doctor                           Kiểm tra sức khỏe hệ thống
-  /audit [path]                     Kiểm toán an ninh mã nguồn MonkeyCode
+  /audit [path]                     Kiểm toán an ninh mã nguồn Security
   /init                             Khởi tạo ngữ cảnh dự án
   /teamwork <goal>                  Khởi chạy Teamwork 2-phase Multi-Agent
   /clear                            Xóa màn hình & reset ngữ cảnh

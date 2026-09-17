@@ -1,6 +1,6 @@
 /**
  * Staging Diff Sandbox — module thuần.
- * Port mô hình Plandex (MIT): thay đổi tích lũy trong overlay, đĩa được bảo
+ * Mô hình staging: thay đổi tích lũy trong overlay, đĩa được bảo
  * vệ cho tới khi user Apply. Reject = xóa overlay, đĩa chưa bao giờ bị đụng.
  */
 

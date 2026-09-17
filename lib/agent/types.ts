@@ -1,12 +1,12 @@
 /**
- * P1.1 — Kiểu dữ liệu của agent loop thuần (port kiến trúc `pi-agent-core`).
+ * P1.1 — Kiểu dữ liệu của agent loop thuần (kiến trúc agent loop nội bộ).
  *
  * Loop KHÔNG biết gì về React / Next / DOM / AI SDK: mọi phụ thuộc bên ngoài
  * được inject qua `AgentLoopConfig` (streamFn, executeTool, các hook). Nhờ vậy
  * file này và `loop.ts` test được bằng vitest môi trường node thuần.
  *
- * Tên event giữ dạng Pi: agent_start / turn_* / message_* / tool_execution_*.
- * Khác biệt so với ticket gốc (đã đối chiếu source Pi thật):
+ * Tên event giữ dạng chuẩn: agent_start / turn_* / message_* / tool_execution_*.
+ * Khác biệt so với ticket gốc (đã đối chiếu source thật):
  * - `turn_start` không mang số turn (số turn nằm trong event).
  * - `tool_execution_*` dùng `toolName` (không phải `name`).
  * - `message_update` mang `delta: string` (text delta thuần).

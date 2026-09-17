@@ -1,7 +1,7 @@
 /**
  * Provenance Tracking & Cryptographic Hash Chaining.
  * Implements immutable audit trails for file writes and modifications.
- * Conforms to Anthropic Commerce-Agents & Arcbox security requirements.
+ * Yêu cầu an ninh cho thao tác ghi dữ liệu.
  */
 
 import crypto from 'node:crypto';

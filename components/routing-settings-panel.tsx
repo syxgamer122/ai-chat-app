@@ -269,7 +269,7 @@ export function RoutingSettingsPanel() {
   );
 }
 
-/* ------------------ Lead/Worker routing (port Goose P1-5) ------------------ */
+/* ------------------ Lead/Worker routing (P1-5) ------------------ */
 
 function RoutingModelSelect({
   id,

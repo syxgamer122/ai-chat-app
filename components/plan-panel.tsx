@@ -22,7 +22,7 @@ import { EvidenceBadge } from "@/components/evidence-badge";
  * thực bởi component này. Dữ liệu do plan_create/plan_update ghi vào kv
  * (key `plan:<chatId>`), chat-interface nạp và cập nhật qua props.
  *
- * Phase-TODO Discipline (Oh My Hermes port):
+ * Phase-TODO Discipline :
  * - Ép tối đa 1 item active (in_progress) tại một thời điểm
  * - Tự động thu gọn (fold) khi danh sách vượt quá 8 dòng
  * - Hiển thị badge bậc thang bằng chứng (Evidence Ladder)

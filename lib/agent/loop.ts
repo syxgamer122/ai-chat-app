@@ -1,5 +1,5 @@
 /**
- * P1.1 — Agent loop thuần (port kiến trúc `pi-agent-core` của Pi).
+ * P1.1 — Agent loop thuần (kiến trúc agent loop nội bộ).
  *
  * Async generator KHÔNG biết gì về React / Next / DOM / AI SDK:
  * - Gọi model qua `streamFn` inject; thực thi tool qua `executeTool` inject.
@@ -43,7 +43,7 @@ const DEFAULT_MAX_TURNS = 24;
 
 /**
  * Producer (vòng loop) push event; consumer (generator) yield tuần tự.
- * Bắt buộc vì bên trong `Promise.all` không yield được — đây là cách Pi giữ
+ * Bắt buộc vì bên trong `Promise.all` không yield được — đây là cách agent loop giữ
  * `tool_execution_end` bắn theo thứ tự hoàn thành trong khi transcript vẫn
  * theo thứ tự source.
  */

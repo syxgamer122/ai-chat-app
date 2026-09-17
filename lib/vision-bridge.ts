@@ -6,7 +6,7 @@
  * Model chữ nhận image part sẽ trả 400 hoặc bỏ qua im lặng — người dùng thấy
  * "nó không thấy ảnh của mình".
  *
- * Giải pháp (port ý tưởng từ opencode-vision-bridge): trước khi gọi upstream,
+ * Giải pháp (cầu nối vision): trước khi gọi upstream,
  * ảnh (data URL) được gửi cho MODEL VISION CỦA PROVIDER ACTIVE của người dùng
  * (gateway tương thích OpenAI — BYOK như mọi route LLM khác) kèm prompt
  * "mô tả chi tiết + chép nguyên văn mọi chữ", phần ảnh trong message được
@@ -248,7 +248,7 @@ async function describeImageBatch(
       return underlying(input, init);
     };
 
-  // Quirk crax: thiếu `stream` trong body thì gateway trả SSE — generateText
+  // Quirk: thiếu `stream` trong body thì một số gateway trả SSE — generateText
   // không gửi trường đó (xem lib/non-streaming-fetch.ts). Dùng chung factory
   // với các route khác thay vì copy lại logic; fetchImpl của caller (route ghép
   // req.signal / test nhét mock) nằm ở đáy chuỗi bọc.

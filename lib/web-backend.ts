@@ -726,7 +726,7 @@ async function fetchReadablePageOnce(rawUrl: string): Promise<ReadablePage> {
 
 /**
  * Cứu link chết qua Internet Archive (lấy cảm hứng từ Hound, page 3 pi.dev —
- * gói đó là Pi-extension-only không nối qua MCP được, nên port ý tưởng).
+ * gói đó là extension-only không nối qua MCP được, nên port ý tưởng).
  * Chỉ chạy cho 404/410: 403 là anti-bot (archive không giúp), 5xx là lỗi
  * tạm thời của chính trang (nếu trang sống lại, lần fetch sau thành công).
  */

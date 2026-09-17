@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Vyen Fast Desktop Launcher (Goose / Pi architecture).
+ * Vyen Fast Desktop Launcher.
  *
  * Thay thế Electron nặng nề (~600MB RAM, 80s startup) bằng Native App Mode (Edge/Chrome/WebView2):
  * - Khởi động < 0.3s
@@ -29,7 +29,7 @@ for (let i = 0; i < rawArgs.length; i++) {
   const a = rawArgs[i];
   if (a === '--help' || a === '-h' || a === 'help') {
     console.log(`
-Vyen Fast Desktop Launcher (Goose & Pi WebView architecture)
+Vyen Fast Desktop Launcher (WebView app)
 
 Cách dùng:
   node scripts/launch-desktop.cjs [tùy chọn]

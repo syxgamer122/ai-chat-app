@@ -8,15 +8,11 @@ gui-test-screenshots
 .dev-log.txt
 .dev-err.txt
 
-# Chứa API key dạng plaintext (provider "chatbai") — KHÔNG BAO GIỜ commit.
-opencode.json
-
 # Rác sinh ra do lệnh redirect gõ nhầm (`curl -w` / `echo > -w`)
 -w
 
 # Thư mục làm việc của agent (ghi chú, memory) — không phải mã nguồn
 .workbuddy-ai/
-.opencode/
 .agents/
 
 # State runtime của teamwork engine (worktree cách ly, audit)

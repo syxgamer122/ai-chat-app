@@ -1,10 +1,10 @@
 /**
- * SEARCH/REPLACE edit blocks — port từ aider `coders/editblock_coder.py`
+ * SEARCH/REPLACE edit blocks — block sửa file dạng SEARCH/REPLACE
  * (Apache-2.0), thu gọn về TS thuần cho agent coding của Vyen.
  *
  * Vì sao: model free viết khối edit rất hay lệch — thiếu/thừa indent, bọc
  * thêm fence, quên tên file, dùng "..." để lược code. Chuỗi fallback của
- * aider xử lý gần hết mà KHÔNG cần fuzzy matching (họ đã TẮT
+ * thực tế gần hết trường hợp KHÔNG cần fuzzy matching (đã TẮT
  * replace_closest_edit_distance vì nguy hiểm — giữ nguyên quyết định đó,
  * chỉ để lại cờ opt-in).
  *
@@ -154,7 +154,7 @@ export function parseEditBlocks(content: string): ParseEditBlocksResult {
 /* ------------------------------------------------------------------ */
 
 interface ApplyOptions {
-  /** Fuzzy edit-distance (nguy hiểm — aider đã tắt, mặc định false). */
+  /** Fuzzy edit-distance (nguy hiểm — mặc định false). */
   allowFuzzy?: boolean;
 }
 
@@ -304,7 +304,7 @@ function tryDotDotDots(whole: string, part: string, replace: string): string | n
       continue;
     }
     const count = out.split(p).length - 1;
-    if (count !== 1) return null; // 0 hoặc >1 lần → từ chối (aider raise)
+    if (count !== 1) return null; // 0 hoặc >1 lần → từ chối (fail-closed)
     out = out.replace(p, r);
   }
   return out;
@@ -346,7 +346,7 @@ export function findSimilarLines(searchText: string, contentText: string, thresh
 }
 
 /**
- * Áp MỘT khối edit lên nội dung file theo chuỗi fallback của aider.
+ * Áp MỘT khối edit lên nội dung file theo chuỗi fallback.
  * Trả `{ ok:false, hint }` khi không tìm thấy — hint là đoạn giống nhất để
  * model tự chỉnh khối SEARCH ở lượt kế.
  */
@@ -368,7 +368,7 @@ export function replaceMostSimilarChunk(
   if (res === 'ambiguous') return { ok: false, hint: ambiguousHint };
   if (res !== null) return { ok: true, text: res.text, strategy: res.strategy };
 
-  // GPT hay tự thêm dòng trắng đầu khối (aider issue #25).
+  // GPT hay tự thêm dòng trắng đầu khối (model tự thêm).
   if (partLines.length > 2 && !partLines[0].trim()) {
     res = perfectOrWhitespace(wholeLines, partLines.slice(1), replaceLines);
     if (res === 'ambiguous') return { ok: false, hint: ambiguousHint };
@@ -380,11 +380,11 @@ export function replaceMostSimilarChunk(
     const dots = tryDotDotDots(wholeN, part, replace);
     if (dots !== null) return { ok: true, text: dots, strategy: 'dotdotdots' };
   } catch {
-    /* ValueError của aider tương ứng return null ở đây */
+    /* Lỗi parse tương ứng return null ở đây */
   }
 
   if (opts.allowFuzzy) {
-    // Giữ chuẩn aider: fuzzy TẮT mặc định — chỉ bật khi caller hiểu rủi ro.
+    // Fuzzy TẮT mặc định — chỉ bật khi caller hiểu rủi ro.
     const similarity = (a: string, b: string): number => {
       const sa = new Set(a.split(/\s+/).filter(Boolean));
       const sb = new Set(b.split(/\s+/).filter(Boolean));

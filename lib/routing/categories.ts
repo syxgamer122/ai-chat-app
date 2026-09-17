@@ -1,5 +1,5 @@
 /**
- * Mixture-of-models routing theo hạng mục công việc (port từ Oh My Hermes sang Vyen).
+ * Mixture-of-models routing theo hạng mục công việc.
  *
  * Mỗi hạng mục (Category) ánh xạ sang một chuỗi dự phòng (Chain) các entry { model, effort }.
  * Người dùng có thể cấu hình chuỗi này trong Settings -> Routing hoặc override qua file JSON.
@@ -34,47 +34,41 @@ export interface RouteReceipt {
 }
 
 /**
- * Chuỗi model & effort mặc định ánh xạ vào 32 model khả dụng trong Vyen.
+ * Chuỗi model & effort mặc định ánh xạ vào 6 model OpenAI trong Vyen.
+ * Tầng gateway miễn phí đã gỡ — chỉ còn model chính gốc OpenAI.
  */
 export const DEFAULT_CHAINS: Record<CategoryId, ChainEntry[]> = {
   ultrabrain: [
     { model: 'o1', effort: 'max' },
-    { model: 'gpt-5-6-sol', effort: 'max' },
-    { model: 'claude-opus-5', effort: 'max' },
+    { model: 'o3-mini', effort: 'max' },
   ],
   architect: [
-    { model: 'claude-opus-5', effort: 'high' },
-    { model: 'gpt-5-6-sol', effort: 'high' },
-    { model: 'claude-sonnet-5', effort: 'high' },
+    { model: 'o1', effort: 'high' },
+    { model: 'gpt-4o', effort: 'high' },
   ],
   deep: [
-    { model: 'deepseek-reasoner', effort: 'high' },
+    { model: 'o1', effort: 'high' },
     { model: 'o3-mini', effort: 'high' },
-    { model: 'deepseek-v4-pro', effort: 'high' },
   ],
   capable: [
-    { model: 'claude-3-5-sonnet', effort: 'medium' },
-    { model: 'gpt-5-6-sol', effort: 'medium' },
-    { model: 'gemini-3-1-pro', effort: 'medium' },
+    { model: 'gpt-4o', effort: 'medium' },
+    { model: 'chatgpt-4o-latest', effort: 'medium' },
   ],
   quick: [
     { model: 'gpt-4o-mini', effort: 'low' },
-    { model: 'gemini-3-flash', effort: 'low' },
-    { model: 'claude-3-5-haiku', effort: 'low' },
+    { model: 'o1-mini', effort: 'low' },
   ],
   writing: [
-    { model: 'kimi-k3', effort: 'medium' },
-    { model: 'minimax_m3', effort: 'medium' },
     { model: 'gpt-4o', effort: 'medium' },
+    { model: 'chatgpt-4o-latest', effort: 'medium' },
   ],
   'visual-engineering': [
-    { model: 'claude-3-5-sonnet', effort: 'high' },
-    { model: 'gpt-5-6-sol', effort: 'high' },
-    { model: 'gemini-3-1-pro', effort: 'high' },
+    { model: 'gpt-4o', effort: 'high' },
+    { model: 'chatgpt-4o-latest', effort: 'high' },
   ],
   'simple-work': [
-    { model: 'gpt-5-4-mini', effort: 'low' },
-    { model: 'deepseek-chat', effort: 'low' },
+    { model: 'gpt-4o-mini', effort: 'low' },
+    { model: 'o1-mini', effort: 'low' },
   ],
 };
 

@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 
-describe('DESIGN.md — Pi Harness × Pixel/Minecraft Identity verification', () => {
+describe('DESIGN.md — Vyen Harness × Pixel/Minecraft Identity verification', () => {
   const globalsCssPath = path.resolve(__dirname, '../app/globals.css');
   const sidebarPath = path.resolve(__dirname, '../components/sidebar.tsx');
   const backupReminderPath = path.resolve(__dirname, '../components/backup-reminder.tsx');

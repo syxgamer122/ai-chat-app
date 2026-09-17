@@ -2,9 +2,8 @@ import { createOpenAI } from '@ai-sdk/openai';
 import { nonStreamingFetch } from '@/lib/non-streaming-fetch';
 import { generateText, APICallError } from 'ai';
 import { z } from 'zod';
-import { getKeyCandidates, markKeyFailure, markKeySuccess, getKeyLabel } from '@/lib/api-keys';
+import { getKeyLabel, PROVIDER_NO_KEY_SENTINEL } from '@/lib/api-keys';
 import { validateProviderBaseUrl } from '@/lib/provider-url';
-import { sharedFreeBudget, acquireUpstreamSlot } from '@/lib/upstream-queue';
 import { filterSupportedModels, markModelUnsupported } from '@/lib/model-negative-cache';
 import { ACTIVE_MODEL_BODY_FIELD, buildActiveModelChain, isActiveProvider } from '@/lib/aux-llm-chain';
 import {
@@ -67,9 +66,9 @@ const CompactSchema = z.object({
 const COMPACT_MODEL_CHAIN: readonly string[] = Object.freeze(
   (
     /* Tên gửi THẲNG lên upstream, không qua catalog — phải khớp tên thật của
-       gateway. crax dùng gạch ngang cho số phiên bản GPT. */
+       gateway của người dùng. */
     process.env.COMPACT_MODEL_CHAIN ??
-      'qwen3.5-flash,gpt-5-4-nano,gpt-4o-mini,gpt-5-6-terra,deepseek-v4-flash'
+      'gpt-4o-mini,gpt-4o,o1-mini'
   )
     .split(',')
     .map((m) => m.trim())
@@ -171,32 +170,20 @@ export async function POST(req: Request) {
       return Response.json({ summary: null, reason: 'bad_schema' }, { status: 400, headers: NO_STORE });
     }
 
-    /* Gateway free ngân sách chung: bắt buộc xếp hàng — tóm tắt hiếm nhưng
-       không được phép phá trần công bố của gateway (crax/Kilgore...). */
-    const queueBase =
-      sharedFreeBudget(providerBase) && providerBase
-        ? providerBase
-        : sharedFreeBudget(process.env.OPENAI_BASE_URL)
-          ? (process.env.OPENAI_BASE_URL as string)
-          : null;
-    if (queueBase) {
-      const slot = await acquireUpstreamSlot(queueBase);
-      if (!slot.ok) {
-        return Response.json(
-          { summary: null, reason: 'busy', retryAfterSec: slot.retryAfterSec },
-          { status: 429, headers: { ...NO_STORE, 'Retry-After': String(slot.retryAfterSec) } },
-        );
-      }
+    const candidateKeys = providerBase
+      ? [customKey ?? PROVIDER_NO_KEY_SENTINEL]
+      : customKey
+        ? [customKey]
+        : [];
+
+    if (!candidateKeys.length) {
+      return Response.json(
+        { summary: null, reason: 'no_provider' },
+        { status: 503, headers: NO_STORE },
+      );
     }
 
-    const candidateResult = providerBase
-      ? { keys: [customKey ?? 'provider-no-key'] }
-      : customKey
-        ? { keys: [customKey] }
-        : getKeyCandidates();
-    const candidateKeys = candidateResult.keys.slice(0, 3);
-
-    const compactUpstreamBase = providerBase ?? process.env.OPENAI_BASE_URL ?? null;
+    const compactUpstreamBase = providerBase ?? null;
     const filteredCompactChain = compactUpstreamBase
       ? filterSupportedModels(compactUpstreamBase, COMPACT_MODEL_CHAIN)
       : [...COMPACT_MODEL_CHAIN];
@@ -229,8 +216,8 @@ export async function POST(req: Request) {
     for (const key of candidateKeys) {
       const openai = createOpenAI({
         apiKey: key,
-        baseURL: providerBase ?? (process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1'),
-        /* Bắt buộc: crax trả SSE khi request thiếu `stream`, còn generateText
+        baseURL: providerBase ?? 'https://api.openai.com/v1',
+        /* Bắt buộc: một số gateway trả SSE khi request thiếu `stream`, còn generateText
            thì không gửi trường đó — xem lib/non-streaming-fetch.ts. */
         fetch: nonStreamingFetch,
       });
@@ -250,11 +237,10 @@ export async function POST(req: Request) {
           });
           const summary = result.text.trim();
           if (!summary) {
-            // Stream rỗng kiểu crax lúc quá tải — thử model kế tiếp thay vì
+            // Stream rỗng lúc quá tải — thử model kế tiếp thay vì
             // trả summary rỗng cho client.
             continue;
           }
-          markKeySuccess(key);
           return Response.json(
             {
               summary,
@@ -277,12 +263,10 @@ export async function POST(req: Request) {
           sanitizeErrorMessage(err),
         );
 
-          // Blame filter (đồng bộ chat route): 400/422/overflow là lỗi của
-          // REQUEST/nội dung — phạt key khỏe oan làm pool cạn giả tạo.
+          // Blame filter: 400/422/overflow là lỗi của REQUEST/nội dung —
+          // không do provider; không có gì để đánh dấu nữa (pool key đã gỡ).
           const st = getStatusCode(err);
-          if (st === undefined || st === 429 || st === 401 || st === 403 || st >= 500) {
-            markKeyFailure(key, st);
-          }
+          void st;
           break; // key này hỏng -> key kế tiếp
         }
       }

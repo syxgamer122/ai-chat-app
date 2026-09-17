@@ -1,6 +1,6 @@
 /**
  * Teamwork Engine Unit & Integration Test Suite.
- * Conforms strictly to ORIGINAL_REQUEST.md, PROJECT.md, and .opencode/commands/teamwork.md.
+ * Conforms strictly to ORIGINAL_REQUEST.md và PROJECT.md.
  *
  * Tests:
  * 1. Phase 1 Triad Generation & 4-Element Validation (REQUEST.md, PLAN.md, PROGRESS.md).

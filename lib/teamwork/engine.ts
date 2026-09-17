@@ -1,13 +1,13 @@
 /**
  * Teamwork Multi-Agent Runtime Engine.
- * Conforms strictly to ORIGINAL_REQUEST.md, PROJECT.md, and .opencode/commands/teamwork.md.
+ * Conforms strictly to ORIGINAL_REQUEST.md và PROJECT.md.
  *
  * Coordinates:
  * - Phase 1: 4-element scope validation (Purpose, File Scope, Testable Criteria, Working Dir).
  *   Generates triad management documents: teamwork/REQUEST.md, teamwork/PLAN.md, teamwork/PROGRESS.md.
  *   Pause gate: presents plan summary, halts and awaits user approval (confirmPrompt) before touching source code.
  * - Phase 2: Coordinates milestones with exclusive file ownership and strict concurrency ceiling (max 2 parallel).
- *   Supports both standard dependency scheduler and durable DAG task execution (Hatchet model).
+ *   Supports both standard dependency scheduler and durable DAG task execution.
  *   Uses HeadlessToolRunner with dual-gate guardrails and process sandboxing.
  *   Runs TeamworkCritic.verifyMilestone() — milestone is marked done ONLY when Critic returns PASS.
  *   Exponential jitter retry backoff for milestone failures.
@@ -77,7 +77,7 @@ export interface GoalClarificationResult {
 }
 
 /**
- * Validates the 4 mandatory elements in Phase 1 per .opencode/agents/teamwork-orchestrator.md:
+ * Validates the 4 mandatory elements in Phase 1 per PROJECT.md:
  * 1. Purpose / Goal
  * 2. Target File Scope
  * 3. Testable Acceptance Criteria

@@ -1,5 +1,5 @@
 /**
- * P1.2 — `Agent` class + event bus (port `pi-agent-core` sang web).
+ * P1.2 — `Agent` class + event bus (port agent loop sang web).
  *
  * UI chỉ việc `new Agent(...)`, `subscribe()` rồi gọi `prompt()`/`continue()`.
  * Vòng lặp thuần nằm ở `loop.ts`; class này chỉ đóng gói state + điều phối:
@@ -98,7 +98,7 @@ export class Agent {
   }
 
   /**
-   * Retry/continue sau lỗi. Pi yêu cầu message cuối là user hoặc toolResult —
+   * Retry/continue sau lỗi. Yêu cầu message cuối là user hoặc toolResult —
    * nếu cuối là assistant (đã có câu trả lời) thì không được tự resend.
    */
   continue(): Promise<AgentLoopResult> {

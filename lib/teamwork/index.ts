@@ -1,6 +1,6 @@
 /**
  * Teamwork Multi-Agent Runtime Engine.
- * OpenCode / Pi / Hermes compliant 2-phase orchestration engine.
+ * Vyen compliant 2-phase orchestration engine.
  */
 
 // Core Types
@@ -32,36 +32,36 @@ export type { TeamworkEngineConfig } from './engine';
 // Headless CLI Runner
 export * from './cli';
 
-// Git Worktree Isolation (Orca innovation)
+// Git Worktree Isolation (nội bộ)
 export * from './worktree';
 
-// Repository Dependency Graph & Impact Analyzer (Orca innovation)
+// Repository Dependency Graph & Impact Analyzer (nội bộ)
 export * from './repo-graph';
 
-// Capability-Based Permission Broker & Process Tree Supervisor (OpenMausBot innovation)
+// Capability-Based Permission Broker & Process Tree Supervisor (nội bộ)
 export { matchesGlob, PermissionBroker, ProcessTreeSupervisor } from './permission-broker';
 export type { ApprovalRequest as BrokerApprovalRequest, PermissionBrokerOptions, ManagedSpawnResult } from './permission-broker';
 
-// Durable DAG Task Orchestration (Hatchet & Orca innovation)
+// Durable DAG Task Orchestration (nội bộ)
 export * from './dag';
 
-// State Checkpointing & Resume Lifecycle (Hatchet innovation)
+// State Checkpointing & Resume Lifecycle (nội bộ)
 export * from './checkpoint';
 
-// Human-in-the-Loop Approval & Interrupt Tokens (HumanLayer & Commerce-Agents innovation)
+// Human-in-the-Loop Approval & Interrupt Tokens (nội bộ)
 export * from './hitl';
 
-// Visual Inspection & Control Loop (HumanLayer & Commerce-Agents innovation)
+// Visual Inspection & Control Loop (nội bộ)
 export * from './visual';
 
 // Strict Tool Contracts & Cryptographic Provenance (Commerce-Agents innovation)
 export * from './contracts';
 
-// Process Sandboxing, CWD Lockdown & Scoped Isolation (Arcbox innovation)
+// Process Sandboxing, CWD Lockdown & Scoped Isolation (nội bộ)
 export * from './sandbox';
 
-// Bitemporal Codebase Ledger & Point-in-Time Replay (Utopia innovation)
+// Bitemporal Codebase Ledger & Point-in-Time Replay (nội bộ)
 export * from './ledger';
 
-// Temporal Context Memory & Semantic Knowledge Ontology (Utopia & HumanLayer innovation)
+// Temporal Context Memory & Semantic Knowledge Ontology (nội bộ)
 export * from './context';

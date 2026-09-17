@@ -1,5 +1,11 @@
-const CLIENT_ID_KEY = "ai-chat-client-id";
-const LAMPORT_KEY = "ai-chat-lamport-clock";
+const CLIENT_ID_KEY = "vyen-client-id";
+const LAMPORT_KEY = "vyen-lamport-clock";
+/**
+ * Khoá Lamport thời kỳ đầu (tên cũ của dự án). CHỈ ĐỌC khi khoá mới chưa có:
+ * nếu bắt đầu lại từ 0, tab vừa nâng cấp sẽ phát revision nhỏ hơn giá trị peer
+ * đang giữ và bị use-cross-tab-chat-sync bỏ qua event.
+ */
+const LEGACY_LAMPORT_KEY = "ai-chat-lamport-clock";
 
 function createId(prefix: string) {
   return `${prefix}_${crypto.randomUUID()}`;
@@ -27,7 +33,8 @@ export function getClientId(): string {
  */
 function readLamport(): number {
   if (typeof window === "undefined") return 0;
-  const raw = window.localStorage.getItem(LAMPORT_KEY);
+  const raw =
+    window.localStorage.getItem(LAMPORT_KEY) ?? window.localStorage.getItem(LEGACY_LAMPORT_KEY);
   const parsed = raw ? Number.parseInt(raw, 10) : 0;
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
 }

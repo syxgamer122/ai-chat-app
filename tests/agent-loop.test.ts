@@ -1,6 +1,6 @@
 /**
  * P1.1 — Test agent loop thuần (vitest node, không jsdom/DOM).
- * streamFn/executeTool đều fake — assert thứ tự event + bất biến Pi.
+ * streamFn/executeTool đều fake — assert thứ tự event + bất biến loop.
  */
 import { describe, expect, it } from 'vitest';
 import {

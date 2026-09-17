@@ -1,7 +1,7 @@
 /**
  * Model KHÔNG có trong catalog + provider override.
  *
- * Lỗi thật đã gặp: gửi ảnh cho `gemma-3-12b` (crax có, catalog app chưa khai
+ * Lỗi thật đã gặp: gửi ảnh cho `gemma-3-12b` (provider có, catalog app chưa khai
  * báo) thì model trả "this model does not support image input". Nguyên nhân:
  * getModelConfig() rơi về model mặc định, mà mặc định có supportsImages=true,
  * nên vision-bridge không kích hoạt và ảnh đi thẳng lên model chữ thuần.
@@ -29,7 +29,7 @@ function resolveConfig(selectedModelId: string, providerBase?: string) {
     : baseConfig;
 }
 
-const OVERRIDE = 'https://gpt.crax.lol/v1';
+const OVERRIDE = 'https://my-provider.example.com/v1';
 
 describe('model lạ trên provider override', () => {
   it.each(['qwen3.6-plus', 'gemma-3-12b', 'model-tu-che-abc'])(
@@ -50,13 +50,13 @@ describe('model lạ trên provider override', () => {
 
 describe('model CÓ trong catalog — capability giữ nguyên', () => {
   it('model vision vẫn nhận ảnh', () => {
-    const c = resolveConfig('gpt-5-6-sol', OVERRIDE);
+    const c = resolveConfig('gpt-4o', OVERRIDE);
     expect(c.supportsImages).toBe(true);
     expect(shouldBridgeImages(c)).toBe(false);
   });
 
   it('model chữ thuần vẫn bật bridge', () => {
-    const c = resolveConfig('deepseek-v4-flash', OVERRIDE);
+    const c = resolveConfig('o1-mini', OVERRIDE);
     expect(c.supportsImages).toBe(false);
     expect(shouldBridgeImages(c)).toBe(true);
   });

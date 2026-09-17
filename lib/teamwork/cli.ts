@@ -1,6 +1,6 @@
 /**
  * Headless CLI Runner for Teamwork Multi-Agent Runtime Engine.
- * Conforms strictly to ORIGINAL_REQUEST.md R2, PROJECT.md, and .opencode/commands/teamwork.md.
+ * Conforms strictly to ORIGINAL_REQUEST.md R2 và PROJECT.md.
  *
  * Runs entirely in pure Node.js without React, DOM, or IndexedDB/Dexie dependencies.
  * Exit codes:
@@ -271,7 +271,7 @@ export async function runCli(argv: string[], options?: CliRunOptions): Promise<C
   }
 
   if (parsed.version) {
-    stdoutLines.push('teamwork-cli v1.0.0 (OpenCode / Pi / Hermes compliant)');
+    stdoutLines.push('teamwork-cli v1.0.0 (Vyen compliant)');
     return { exitCode: 0, stdout: stdoutLines.join('\n'), stderr: '' };
   }
 

@@ -1,6 +1,6 @@
 /**
  * Ngân sách spawn subagent theo hội thoại — tương đương maxSubagentSpawnsPerRun
- * của pi-subagents nhưng đặt ở mức bucket conversation.
+ * của subagent nhưng đặt ở mức bucket conversation.
  *
  * Vì sao cần: delegate KHÔNG đi qua guarded() của buildAgentTools (đường
  * emulated xử lý inline qua onDelegateCall; đường native là server tool riêng

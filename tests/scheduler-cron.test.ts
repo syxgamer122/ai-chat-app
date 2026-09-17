@@ -8,7 +8,7 @@ import {
   normalizeCronExpression,
 } from '@/lib/scheduler/cron';
 
-describe('Scheduler Cron Engine (Goose P2-9)', () => {
+describe('Scheduler Cron Engine (P2-9)', () => {
   describe('isValidCron & parseCron', () => {
     it('nhận diện các biểu thức cron hợp lệ', () => {
       expect(isValidCron('* * * * *')).toBe(true);

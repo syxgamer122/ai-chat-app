@@ -3,7 +3,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { GitWorktreeManager } from '../lib/teamwork/worktree';
 
-describe('GitWorktreeManager — Ephemeral Git Worktrees (Orca Model)', () => {
+describe('GitWorktreeManager — Ephemeral Git Worktrees', () => {
   const workspaceRoot = path.resolve(process.cwd());
   let manager: GitWorktreeManager;
   const testWorkerId = 'test-worker-wt';

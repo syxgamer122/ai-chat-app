@@ -43,7 +43,7 @@ export type ThemePreference = 'light' | 'dark' | 'system';
  *  - 'plan': agent CHỈ được explore (read/list/search) và hỏi clarifying
  *    questions. Mọi write tool (fs_write, fs_edit) bị vô hiệu hóa cả phía
  *    server lẫn client. User chuyển sang 'act' khi sẵn sàng cho agent thực thi.
- * Port từ Cline "Plan and Act" mode (Apache-2.0).
+ * Chế độ "Plan and Act" cho agent.
  */
 export type AgentMode = 'plan' | 'act';
 
@@ -131,14 +131,14 @@ export interface Settings {
    */
   visionModel: string;
   temperature: number;
-  /** Mức suy luận gửi kèm request — chỉ gateway crax dịch được giá trị này. */
+  /** Mức suy luận gửi kèm request — một số provider dịch được giá trị này. */
   thinkingLevel: ThinkingLevel;
   systemPrompt: string;
   perf: PerfSettings;
   sendOnEnter: boolean;
-  /** P3.1 (Pi steeringMode): Enter khi agent đang chạy — 'one-at-a-time' | 'all'. */
+  /** P3.1 (steering queue): Enter khi agent đang chạy — 'one-at-a-time' | 'all'. */
   steeringMode: QueueMode;
-  /** P3.1 (Pi followUpMode): Alt+Enter khi agent chạy — chỉ bắn khi agent rảnh. */
+  /** P3.1 (follow-up queue): Alt+Enter khi agent chạy — chỉ bắn khi agent rảnh. */
   followUpMode: QueueMode;
   /** Tự động nén hội thoại khi ước lượng token gần trần context của model. */
   autoCompact: boolean;
@@ -160,14 +160,14 @@ export interface Settings {
   /** Chế độ agent coding: 'plan' (chỉ explore) hoặc 'act' (đọc + ghi). */
   agentMode: AgentMode;
   /**
-   * Staging sandbox (port Plandex, MIT): fs_edit/fs_write ghi vào bộ đệm
+   * Staging sandbox: fs_edit/fs_write ghi vào bộ đệm
    * thay vì đĩa; user review cả batch trong staging panel rồi Apply/Reject.
    * Tắt → hành vi cũ: diff modal phê duyệt từng edit, ghi đĩa ngay.
    */
   stagingSandbox: boolean;
   /**
    * Auto-pilot mode: skip confirmation modals for tool calls based on
-   * approvalPolicy. Port from Goose GooseMode + Codex approval modes.
+   * approvalPolicy. Approval-mode policy (Auto/SmartApprove + các chế độ tương tự).
    */
   autoPilot: boolean;
   /**
@@ -187,24 +187,24 @@ export interface Settings {
   /** Disk skills (P0-3) bị tắt theo name — lọc khỏi chỉ mục gửi lên model. */
   disabledSkills: string[];
   /**
-   * Lead/Worker routing (port Goose P1-5): model mạnh cho N lượt đầu + khi
+   * Lead/Worker routing (P1-5): model mạnh cho N lượt đầu + khi
    * fallback, model rẻ cho thực thi. Tắt mặc định — bật trong Settings →
    * Routing. State KHÔNG lưu: tính lại từ message history mỗi lượt
    * (lib/model-routing.ts).
    */
   modelRouting: ModelRoutingConfig;
   /**
-   * Code Mode (port Goose P1-7): tool `run_code` cho phép model viết JS chạy trong
+   * Code Mode (P1-7): tool `run_code` cho phép model viết JS chạy trong
    * Node sandbox gọi MCP tools on-demand. Tắt mặc định — bật trong Cài đặt → Công cụ.
    */
   codeModeEnabled: boolean;
   apiKey?: string;
   accessCode?: string;
-  /** Mixture-of-models chains theo Category (Oh My Hermes port) */
+  /** Mixture-of-models chains theo Category  */
   modelChains?: Record<CategoryId, ChainEntry[]>;
   /** Quy tắc can thiệp gọi tool do người dùng tự viết */
   toolcallRules?: ToolcallRule[];
-  /** Ánh xạ slash command tùy biến /<tên> -> recipeId (Goose P2-10). */
+  /** Ánh xạ slash command tùy biến /<tên> -> recipeId (P2-10). */
   customSlashCommands: Record<string, string>;
 }
 

@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * Giao diện Quản lý Lịch chạy Recipe (Goose P2-9 Scheduler).
+ * Giao diện Quản lý Lịch chạy Recipe (P2-9 Scheduler).
  *
  * Cho phép người dùng:
  * - Tạo / Sửa / Bật / Tắt (Pause) / Chạy ngay (Run now) các lịch trình.

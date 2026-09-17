@@ -1,5 +1,5 @@
 /**
- * Capability Projection — Dự chiếu năng lực theo ngân sách byte và quyền hạn đóng băng (Oh My Hermes port).
+ * Capability Projection — Dự chiếu năng lực theo ngân sách byte và quyền hạn đóng băng.
  *
  * Thay thế cho trần cứng "100 MCP tool / request":
  * 1. Chỉ đưa các tool/skill liên quan trực tiếp đến request hiện tại.

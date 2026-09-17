@@ -157,7 +157,7 @@ export function parseCliArgs(argv: string[], cwd: string = process.cwd()): CliPa
         if (isNaN(num) || num <= 0) {
           result.errors.push('Option --concurrency must be a positive integer.');
         } else if (num > 2) {
-          // Strict ceiling rule from .opencode/commands/teamwork.md: Cấm 3+ song song
+          // Strict ceiling rule từ PROJECT.md: Cấm 3+ song song
           result.errors.push('Option --concurrency exceeds maximum allowed ceiling of 2.');
         } else {
           result.concurrency = num;
@@ -224,7 +224,7 @@ export async function runHeadlessCli(
   }
 
   if (parsed.version) {
-    stdoutLines.push('teamwork-cli v1.0.0 (OpenCode / Pi / Hermes compliant)');
+    stdoutLines.push('teamwork-cli v1.0.0 (Vyen compliant)');
     return { exitCode: 0, stdout: stdoutLines.join('\n'), stderr: '' };
   }
 

@@ -1,5 +1,5 @@
 /**
- * Structural Search & AST-grep Playbook — Tìm kiếm theo cấu trúc ngữ nghĩa (Oh My Hermes P2 port).
+ * Structural Search & AST-grep Playbook — Tìm kiếm theo cấu trúc ngữ nghĩa.
  *
  * Hỗ trợ:
  * 1. Khả năng tìm kiếm AST structural pattern (fallback về regex thông minh nếu thiếu CLI ast-grep).
@@ -126,6 +126,6 @@ export function searchAstCode(options: AstSearchOptions): AstSearchResult {
 }
 
 /**
- * Bí danh chuẩn hóa tool theo hợp đồng OMH P2
+ * Bí danh chuẩn hóa tool theo hợp đồng tool P2
  */
 export const code_search_ast = searchAstCode;

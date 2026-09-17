@@ -3,9 +3,9 @@
  * chuẩn OpenRouter (port từ prime-agent `openrouter-reasoning.ts`, MIT,
  * lược về bộ 4 mức của Vyen).
  *
- * Vấn đề: thinking slider trước giờ chỉ có tác dụng trên crax
- * (`supportsThinkingLevel` là regex hostname) — với OrcaRouter/Tokenin tham
- * số bị route bỏ qua. Metadata kiểu OpenRouter khai báo per-model:
+ * Vấn đề: thinking slider trước giờ chỉ có tác dụng trên một số provider
+ * (`supportsThinkingLevel` là regex hostname) — với các provider không tra
+ * metadata, tham số bị route bỏ qua. Metadata kiểu OpenRouter khai báo per-model:
  * `supported_parameters` chứa "reasoning" và object `reasoning` gồm
  * `mandatory` + `supported_efforts` → biết chính xác model nào nhận mức nào.
  *

@@ -5,10 +5,8 @@
  * của người dùng (header `x-api-base` hợp lệ hoặc `x-api-key` BYOK), MỌI lượt
  * gọi LLM phải đi qua baseUrl/key đó và model người dùng đang chọn
  * (body.model) phải được thử ĐẦU TIÊN. Chuỗi model từ biến môi trường chỉ còn
- * vai trò DỰ PHÒNG SAU model người dùng: tên kiểu 'gpt-5-4-nano' là tên thật
- * của gateway mặc định, gần như chắc chắn KHÔNG tồn tại trên provider khác —
- * nhưng khi model người dùng 404 thì còn tên kế để failover thay vì chết ngắt.
- *
+ * vai trò DỰ PHÒNG SAU model người dùng: khi model người dùng 404 trên provider
+ * thì còn tên kế để failover thay vì chết ngắt.
  * Khi KHÔNG có provider (chế độ demo trên Vercel): bỏ qua body.model hoàn
  * toàn để hành vi cũ không đổi — demo dùng catalog model của máy chủ nên
  * chuỗi env vẫn là nguồn đúng.
@@ -26,7 +24,7 @@ import { z } from 'zod';
  * từ lượt đầu thay vì rơi vào failover vô nghĩa.
  *
  * Trần 120 ký tự (nới từ 64 của compact/orchestrate cũ): model id thật của
- * gateway có dạng `vendor/model:tag` — vd `deepseek/deepseek-r1-0528:free` —
+ * một số provider có dạng `vendor/model:tag` — vd `deepseek/deepseek-r1-0528:free` —
  * dễ vượt 64, cắt ngắn hơn sẽ chặn oan model hợp lệ.
  */
 export const ACTIVE_MODEL_FIELD = z.string().min(1).max(120).regex(/^[\w.\-:~/@]+$/);
@@ -52,8 +50,8 @@ export const ACTIVE_MODEL_BODY_FIELD = ACTIVE_MODEL_FIELD.optional().catch(undef
  * Nhận giá trị ĐÃ sanitize của route (providerBase/customKey sau khi validate
  * độ dài/ký tự) — đừng nhét header thô vào đây.
  *
- * Đặc biệt: có baseUrl nhưng KHÔNG có key (gateway miễn phí, route thay key
- * bằng 'provider-no-key') vẫn là provider active: chuỗi model phải theo
+ * Đặc biệt: có baseUrl nhưng KHÔNG có key (provider không yêu cầu key, route
+ * thay key bằng 'provider-no-key') vẫn là provider active: chuỗi model phải theo
  * provider đó chứ không theo env của máy chủ.
  */
 export function isActiveProvider(

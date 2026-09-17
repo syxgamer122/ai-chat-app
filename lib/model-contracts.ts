@@ -1,5 +1,5 @@
 /**
- * Model Contracts — đặc tả hợp đồng theo exact model ID (lấy cảm hứng từ Oh My Hermes).
+ * Model Contracts — đặc tả hợp đồng theo exact model ID.
  *
  * Khác với metadata chung chung từ /v1/models, hợp đồng quy định:
  * - effortLadder + effortFloor: nâng mức effort lên sàn trước khi gửi tới provider

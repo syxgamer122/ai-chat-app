@@ -1,5 +1,5 @@
 /**
- * Sandboxed Process Supervisor (Arcbox Model).
+ * Sandboxed Process Supervisor.
  * Manages child process execution with CWD lockdown, environment scrubbing,
  * isolated temp directory redirection, execution deadlines, and clean recursive process tree teardown.
  */

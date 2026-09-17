@@ -1,5 +1,5 @@
 /**
- * Verification Receipts — lưu vết và xác thực bằng chứng thực tế từ môi trường (Oh My Hermes port).
+ * Verification Receipts — lưu vết và xác thực bằng chứng thực tế từ môi trường.
  *
  * Một biên nhận kiểm chứng (VerificationReceipt) chỉ hợp lệ và có thể tái sử dụng
  * khi cả 3 yếu tố: revision (git/staging digest), command (lệnh test), và envFingerprint (môi trường)

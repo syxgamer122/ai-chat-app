@@ -1,7 +1,6 @@
 /**
  * Core types and data models for Teamwork Multi-Agent Runtime Engine.
- * Conforms strictly to .opencode/agents/teamwork-orchestrator.md,
- * .opencode/commands/teamwork.md, and ORIGINAL_REQUEST.md.
+ * Conforms strictly to PROJECT.md và ORIGINAL_REQUEST.md.
  */
 
 export type MilestoneStatus =
@@ -270,7 +269,7 @@ export interface ProgressUpdateOptions {
 }
 
 /**
- * Worktree metadata and execution context (inspired by stablyai/orca).
+ * Worktree metadata and execution context.
  */
 export interface WorktreeContext {
   workerId: string;
@@ -288,7 +287,7 @@ export interface WorktreeInfo {
 }
 
 /**
- * Dependency graph types (inspired by stablyai/orca).
+ * Dependency graph types.
  */
 export interface DependencyNode {
   filePath: string;
@@ -305,7 +304,7 @@ export interface DisjointnessResult {
 }
 
 /**
- * Capability-based permissions and process tree supervision (inspired by milind-soni/OpenMausBot).
+ * Capability-based permissions and process tree supervision .
  */
 export interface AgentCapabilityScope {
   workerId: string;

@@ -26,7 +26,7 @@ export type ChatBroadcastEvent =
       originClientId: string;
     };
 
-const CHANNEL_NAME = "ai-chat-tree";
+const CHANNEL_NAME = "vyen-chat-tree";
 
 type DistributiveOmit<T, K extends keyof any> = T extends any ? Omit<T, K> : never;
 
@@ -37,7 +37,7 @@ export type PublishBroadcastEvent = DistributiveOmit<
   revision?: number;
 };
 
-const STORAGE_EVENT_KEY = "ai-chat-cross-tab-event";
+const STORAGE_EVENT_KEY = "vyen-cross-tab-event";
 
 export function publishStorageFallback(event: unknown) {
   if (typeof window === "undefined") {

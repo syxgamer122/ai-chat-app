@@ -28,32 +28,9 @@ import { desktopSecureStore } from '@/lib/desktop-bridge';
  */
 const KEY_GUIDES: Array<{ test: RegExp; url: string; note: string }> = [
   {
-    /* crax đã chuyển sang mô hình tài khoản: gateway trả 401 auth_required
-       nếu không có key hợp lệ. Đăng ký (hoặc vào bằng guest) rồi lấy key ở
-       Settings → API keys. Liên kết Discord để được 60 req/phút. */
-    test: /(^|\.)crax\.lol$/i,
-    url: 'https://gpt.crax.lol',
-    note: 'Nay bắt buộc key: đăng ký rồi lấy key crk_live_… ở Settings → API keys.',
-  },
-  {
     test: /(^|\.)openrouter\.ai$/i,
     url: 'https://openrouter.ai/keys',
     note: 'Chọn model đuôi :free để dùng miễn phí.',
-  },
-  {
-    test: /(^|\.)orcarouter\.ai$/i,
-    url: 'https://orcarouter.ai',
-    note: 'Model orcarouter/free chạy miễn phí; model khác cần credit.',
-  },
-  {
-    test: /(^|\.)airforce$/i,
-    url: 'https://api.airforce/signup',
-    note: '1.000 lượt/ngày, 1 lượt/phút.',
-  },
-  {
-    test: /(^|\.)tokenin\.my\.id$/i,
-    url: 'https://tokenin.my.id',
-    note: 'Nhiều model myt/*-free miễn phí, có cả API tạo video.',
   },
 ];
 
@@ -116,12 +93,10 @@ export function ProviderManager() {
     }
     const p = await db.providers.get(id);
     if (!p) return;
-    // Gateway free (Kilgore) không dùng key — bỏ qua mọi cảnh báo về key.
-    // crax KHÔNG còn thuộc nhóm này: từ bản cập nhật tài khoản, nó trả 401
-    // auth_required nên vẫn phải nhắc người dùng dán key như gateway thường.
+    // Provider nào chưa có key cũng chưa có model → nhắc dán key trước.
     if (!p.apiKey && !p.models?.length && providerNeedsApiKey(p.baseUrl)) {
-      // Gateway key cá nhân (OpenRouter, OrcaRouter…) trả 401 khi chưa có key —
-      // nói rõ để user dán key thay vì thấy "lỗi kết nối" không hiểu vì sao.
+      // Key cá nhân (OpenRouter…) trả 401 khi chưa có key — nói rõ để user
+      // dán key thay vì thấy "lỗi kết nối" không hiểu vì sao.
       setStatus(`"${p.name}" cần API key cá nhân — dán key vào ô bên dưới rồi bấm "Lưu & test".`);
       return;
     }
@@ -183,7 +158,6 @@ export function ProviderManager() {
         // 401/403 do thiếu hoặc sai key là ca phổ biến nhất — nói rõ cách sửa.
         const needsKey =
           !apiKey &&
-          providerNeedsApiKey(p.baseUrl) &&
           /40[13]|unauthor|forbidden|key/i.test(`${res.status} ${data?.error ?? ''}`);
         setStatus(
           needsKey
@@ -226,8 +200,8 @@ export function ProviderManager() {
 
   /**
    * Lưu key gõ trực tiếp trên card provider rồi thử tải model luôn. Trước đây
-   * ô nhập key chỉ nằm trong form "Sửa" (phải bấm bút chì mới thấy), nên chọn
-   * OpenRouter/OrcaRouter là bế tắc: không có chỗ nào để dán key cá nhân.
+   * ô nhập key chỉ nằm trong form "Sửa" (phải bấm bút chì mới thấy) nên với
+   * provider yêu cầu key, người dùng không có chỗ nào để dán key cá nhân.
    */
   const saveKeyInline = async (p: ProviderConfig) => {
     const next = (keyDraft[p.id] ?? '').trim();
@@ -285,7 +259,7 @@ export function ProviderManager() {
           <span>
             Máy chủ mặc định
             <span className="block text-[11px] text-zinc-600">
-              Dùng OPENAI_BASE_URL + key pool cấu hình trên server
+              Dùng API key OpenAI nhập trong phần Cài đặt
             </span>
           </span>
         </span>
@@ -319,9 +293,6 @@ export function ProviderManager() {
         const active = activeProviderId === p.id;
         const guide = keyGuideFor(p.baseUrl);
         const draft = keyDraft[p.id];
-        // Kilgore: gateway free chặn theo IP, key không có tác dụng.
-        // (crax đã chuyển sang mô hình tài khoản → needsKey = true.)
-        const needsKey = providerNeedsApiKey(p.baseUrl);
         return (
           <div
             key={p.id}
@@ -338,17 +309,9 @@ export function ProviderManager() {
                   checked={active}
                   onChange={() => void choose(p.id)}
                 />
-                <span className="min-w-0">
-                  <span className="flex items-center gap-1.5">
-                    <span className="truncate text-sm font-medium text-zinc-800">{p.name}</span>
-                    {!needsKey ? (
-                      <span
-                        title="Gateway miễn phí — không cần API key"
-                        className="flex items-center gap-0.5 rounded bg-sky-50 px-1 py-0.5 text-[10px] font-medium text-sky-700 dark:bg-sky-500/10 dark:text-sky-300"
-                      >
-                        miễn phí
-                      </span>
-                    ) : p.apiKey ? (
+                <span className="min-w-0">                    <span className="flex items-center gap-1.5">
+                      <span className="truncate text-sm font-medium text-zinc-800">{p.name}</span>
+                      {p.apiKey ? (
                       <span
                         title="Đã lưu API key"
                         className="flex items-center gap-0.5 rounded bg-emerald-50 px-1 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300"
@@ -408,12 +371,8 @@ export function ProviderManager() {
             {/*
               * Ô dán key cá nhân ngay tại chỗ — hiện khi provider đang được chọn
               * hoặc khi chưa có key. Không phải mở form "Sửa" mới nhập được.
-              *
-              * Ẩn hoàn toàn với gateway free (crax, Kilgore): các host này không
-              * đọc Authorization, giới hạn tính theo IP. Hiện ô nhập key ở đây
-              * làm người dùng tưởng dán key sẽ hết 429.
               */}
-            {needsKey && (active || !p.apiKey) && (
+            {active || !p.apiKey ? (
               <div className="mt-2 border-t border-zinc-200/70 pt-2">
                 <label
                   htmlFor={`pv-key-${p.id}`}
@@ -463,15 +422,8 @@ export function ProviderManager() {
                   </p>
                 )}
               </div>
-            )}
+            ) : null}
 
-            {/* Gateway free: nói rõ vì sao không có ô nhập key. */}
-            {!needsKey && active && (
-              <p className="mt-2 border-t border-zinc-200/70 pt-2 text-[11px] leading-relaxed text-zinc-600">
-                Dùng được ngay, không cần API key. Gateway này giới hạn theo lượt
-                dùng chung nên lúc đông có thể phải chờ vài giây.
-              </p>
-            )}
           </div>
         );
       })}
@@ -494,38 +446,31 @@ export function ProviderManager() {
           <input
             className="field-sm"
             aria-label="Tên nhà cung cấp"
-            placeholder="Tên (vd: crax-gpt)"
+            placeholder="Tên (vd: Nhà cung cấp của tôi)"
             value={editing.name}
             onChange={(e) => setEditing({ ...editing, name: e.target.value })}
           />
           <input
             className="field-sm font-mono"
             aria-label="Base URL"
-            placeholder="Base URL (vd: https://gpt.crax.lol/v1)"
+            placeholder="Base URL (vd: https://api.openai.com/v1)"
             value={editing.baseUrl}
             onChange={(e) => setEditing({ ...editing, baseUrl: e.target.value })}
           />
-          {/* Gateway free: ẩn luôn ô key trong form Sửa cho nhất quán. */}
-          {providerNeedsApiKey(editing.baseUrl) ? (
-            <input
-              className="field-sm font-mono"
-              type="password"
-              aria-label="API key"
-              placeholder={
-                isSecureKeyPointer(editing.apiKey)
-                  ? '(key đã lưu mã hoá — nhập mới để thay)'
-                  : 'API key (có thể bỏ trống)'
-              }
-              /* Key mã hoá chỉ là con trỏ "@secure:" — hiển thị trống; người
-                 dùng không gõ gì thì state vẫn giữ con trỏ, save() giữ nguyên. */
-              value={isSecureKeyPointer(editing.apiKey) ? '' : editing.apiKey}
-              onChange={(e) => setEditing({ ...editing, apiKey: e.target.value })}
-            />
-          ) : (
-            <p className="text-[11px] leading-relaxed text-zinc-600">
-              Gateway miễn phí — không cần API key.
-            </p>
-          )}
+          <input
+            className="field-sm font-mono"
+            type="password"
+            aria-label="API key"
+            placeholder={
+              isSecureKeyPointer(editing.apiKey)
+                ? '(key đã lưu mã hoá — nhập mới để thay)'
+                : 'API key (có thể bỏ trống)'
+            }
+            /* Key mã hoá chỉ là con trỏ "@secure:" — hiển thị trống; người
+               dùng không gõ gì thì state vẫn giữ con trỏ, save() giữ nguyên. */
+            value={isSecureKeyPointer(editing.apiKey) ? '' : editing.apiKey}
+            onChange={(e) => setEditing({ ...editing, apiKey: e.target.value })}
+          />
           <div className="flex flex-wrap gap-2">
             <button
               type="button"

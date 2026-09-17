@@ -1,7 +1,7 @@
 /**
  * Retry state machine cho recipe — bounded, an toàn, KHÔNG chạy shell.
  *
- * Triết lý tái dùng lib/debug-loop.ts (Plandex): không xây outer loop mù
+ * Triết lý tái dùng lib/debug-loop.ts: không xây outer loop mù
  * quáng; mọi quyết định "chạy lại hay dừng" là HÀM THUẦN nhận kết quả check
  * rồi trả action — UI/CLI chịu trách nhiệm chạy lệnh (qua shell_run có
  * phê duyệt như mọi lệnh khác).

@@ -4,17 +4,14 @@
  * Ghép 2 nguồn:
  *  - **agent-orchestrator**: orchestrator tự plan → spawn N agent có context
  *    riêng → review và tổng hợp. Ở đây "agent" không phải process (như Claude
- *    Code/Codex bên AO) mà là MỘT lượt gọi LLM bị ép vào một cấu hình khác
+ *    Code bên AO) mà là MỘT lượt gọi LLM bị ép vào một cấu hình khác
  *    nhau của lưới — đủ để có sự khác biệt thật, không đủ để cần hạ tầng.
  *  - **vectorbt**: kết quả không phải một câu trả lời mà là **lưới bản ghi**,
  *    rút gọn bằng group-by theo trục + heatmap 2 chiều.
  *
  * Tại sao phải nằm ở server route (không gọi thẳng từ trình duyệt):
- *  - Key upstream chỉ tồn tại ở server (env), giống /api/compact.
- *  - Một lượt = ~10 lượt gọi LLM; đi qua hàng đợi upstream ở đây để không
- *    phá ngân sách dùng chung của gateway free (crax/Kilgore).
- *  - Crax trả 403 cho mọi request có header `Origin` — gọi từ trình duyệt
- *    không được (cùng lý do /api/chat phải proxy).
+ *  - Key upstream của provider chỉ nên đi từ client tới server, giữ khỏi CORS/log.
+ *  - Một lượt = ~10 lượt gọi LLM — đi qua một điểm duy nhất để dễ rate-limit.
  *
  * Không thêm dependency: dùng sẵn @ai-sdk/openai + ai (generateText), zod,
  * và các module tiện ích đã có của dự án.
@@ -23,9 +20,8 @@
 import { createOpenAI } from '@ai-sdk/openai';
 import { generateText, APICallError } from 'ai';
 import { z } from 'zod';
-import { getKeyCandidates, markKeyFailure, markKeySuccess, getKeyLabel } from '@/lib/api-keys';
+import { getKeyLabel, PROVIDER_NO_KEY_SENTINEL } from '@/lib/api-keys';
 import { validateProviderBaseUrl } from '@/lib/provider-url';
-import { sharedFreeBudget, acquireUpstreamSlot } from '@/lib/upstream-queue';
 import { filterSupportedModels, markModelUnsupported } from '@/lib/model-negative-cache';
 import { ACTIVE_MODEL_BODY_FIELD, isActiveProvider, prependActiveModel } from '@/lib/aux-llm-chain';
 import { nonStreamingFetch } from '@/lib/non-streaming-fetch';
@@ -75,7 +71,7 @@ const MAX_GOAL_CHARS = 4_000;
  * người dùng đang chọn ở client (truyền qua body.model).
  */
 const ORCHESTRATE_MODEL_CHAIN: readonly string[] = Object.freeze(
-  (process.env.ORCHESTRATE_MODEL_CHAIN ?? 'qwen3.5-flash,gpt-5-4-nano,gpt-4o-mini,deepseek-v4-flash')
+  (process.env.ORCHESTRATE_MODEL_CHAIN ?? 'gpt-4o-mini,gpt-4o,o1-mini')
     .split(',')
     .map((m) => m.trim())
     .filter(Boolean),
@@ -166,7 +162,7 @@ const OrchestrateSchema = z.object({
     .default([]),
   /** Số cấu hình tối đa chạy (lưới sẽ được thu nhỏ cho vừa). */
   maxRuns: z.number().int().min(1).max(MAX_RUNS_LIMIT).default(4),
-  /** Số worker song song. Giữ nhỏ để không phá ngân sách gateway chung. */
+  /** Số worker song song. Giữ nhỏ để không nghẽn provider của người dùng. */
   concurrency: z.number().int().min(1).max(6).default(2),
   /** Bật chấm điểm từng kết quả (thêm N lượt gọi LLM). */
   judge: z.boolean().default(true),
@@ -221,12 +217,19 @@ export async function POST(req: Request) {
   }
   const body = parsed.data;
 
-  const upstreamBase = providerBase ?? process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1';
+  const upstreamBase = providerBase ?? 'https://api.openai.com/v1';
   const candidateKeys = providerBase
-    ? [customKey ?? 'provider-no-key']
+    ? [customKey ?? PROVIDER_NO_KEY_SENTINEL]
     : customKey
       ? [customKey]
-      : getKeyCandidates().keys.slice(0, 3);
+      : [];
+
+  if (!candidateKeys.length) {
+    return Response.json(
+      { ok: false as const, error: 'Chưa cấu hình Nhà cung cấp — hãy vào Cài đặt để thêm địa chỉ và API key của provider.' },
+      { status: 503 },
+    );
+  }
 
   const chain = filterSupportedModels(upstreamBase, ORCHESTRATE_MODEL_CHAIN);
   /* Model người dùng chọn được ưu tiên cho worker; chuỗi dự phòng đi sau.
@@ -235,9 +238,8 @@ export async function POST(req: Request) {
   const workerChain = prependActiveModel(body.model, chain);
   /* Provider active là nguồn duy nhất: model người dùng phải dẫn đầu TOÀN
      CỘC, không chỉ worker — planner/judge/synthesize cũng chạy theo
-     workerChain, vì tên env kiểu crax gần như chắc chắn không tồn tại trên
-     provider của người dùng. Demo giữ env chain cho các vai trò điều phối. */
-  const roleChain = isActiveProvider(providerBase, customKey) ? workerChain : chain;
+     workerChain. */
+  const roleChain = workerChain;
 
   const contextText = body.context.length
     ? body.context
@@ -249,7 +251,7 @@ export async function POST(req: Request) {
   const signal = req.signal;
 
   /**
-   * Một lượt gọi LLM: xếp hàng (gateway free) → thử key × model → text.
+   * Một lượt gọi LLM: thử key × model → text.
    * `chainOverride` cho phép worker dùng model người dùng chọn; các vai trò
    * khác mặc định theo `roleChain` (workerChain khi provider active).
    */
@@ -260,10 +262,6 @@ export async function POST(req: Request) {
     maxTokens: number;
     chainOverride?: readonly string[];
   }): Promise<string> {
-    if (sharedFreeBudget(upstreamBase)) {
-      const slot = await acquireUpstreamSlot(upstreamBase);
-      if (!slot.ok) throw new Error(`Gateway đang bận — thử lại sau ${slot.retryAfterSec}s`);
-    }
 
     const models = args.chainOverride ?? roleChain;
     let lastError = 'Không có model khả dụng.';
@@ -273,8 +271,8 @@ export async function POST(req: Request) {
       const openai = createOpenAI({
         apiKey: key,
         baseURL: upstreamBase,
-        /* Bắt buộc: crax trả SSE khi request thiếu `stream`, còn generateText
-           thì không gửi trường đó — xem lib/non-streaming-fetch.ts. */
+        /* Một số upstream trả SSE khi request thiếu `stream` — xem
+           lib/non-streaming-fetch.ts. */
         fetch: nonStreamingFetch,
       });
 
@@ -290,8 +288,7 @@ export async function POST(req: Request) {
             abortSignal: signal,
           });
           const text = res.text.trim();
-          if (!text) continue; // stream rỗng kiểu crax lúc quá tải
-          markKeySuccess(key);
+          if (!text) continue; // stream rỗng lúc quá tải
           return text;
         } catch (err) {
           if ((err as { name?: string })?.name === 'AbortError' || signal.aborted) throw new Error('Đã huỷ');
@@ -302,9 +299,6 @@ export async function POST(req: Request) {
             continue;
           }
           const st = statusOf(err);
-          if (st === undefined || st === 429 || st === 401 || st === 403 || st >= 500) {
-            markKeyFailure(key, st);
-          }
           lastError = sanitize(err);
           lastStatus = st;
           break; // key này hỏng → key kế tiếp

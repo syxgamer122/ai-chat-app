@@ -15,9 +15,9 @@ import {
   renderMemoryMarkdown,
   normalizeCategory,
   memoriesForWorkspace,
-  GOOSE_MEMORY_LIMITS,
+  AGENT_MEMORY_LIMITS,
   type AgentMemoryRecord,
-} from '@/lib/memory/goose';
+} from '@/lib/memory/agent-memory';
 
 function newMemoryId(): string {
   try {
@@ -84,7 +84,7 @@ export async function rememberAgentMemory(input: {
 
   // Trần số entry: cũ nhất của CÙNG scope bị loại.
   const sameScope = await db.agentMemories.where('scope').equals(record.scope).toArray();
-  if (sameScope.length >= GOOSE_MEMORY_LIMITS.maxEntries) {
+  if (sameScope.length >= AGENT_MEMORY_LIMITS.maxEntries) {
     const oldest = sameScope.sort((a, b) => a.createdAt - b.createdAt)[0];
     if (oldest) await db.agentMemories.delete(oldest.id);
   }
@@ -230,6 +230,6 @@ export function parseMemoryMarkdown(text: string): Array<{ id: string | null; da
 export async function buildInjectableIndex(workspaceKey: string): Promise<string> {
   const all = await listAgentMemories();
   const scoped = memoriesForWorkspace(all, workspaceKey);
-  const { buildMemoryIndexBlock } = await import('@/lib/memory/goose');
+  const { buildMemoryIndexBlock } = await import('@/lib/memory/agent-memory');
   return buildMemoryIndexBlock(scoped).block;
 }

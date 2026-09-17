@@ -1,6 +1,6 @@
 /**
  * Payload trong file này là dữ liệu THẬT, ghi lại từ request tới
- * gpt.crax.lol khi pool backend cạn: HTTP 200, SSE hợp lệ,
+ * gpt.gateway.lol khi pool backend cạn: HTTP 200, SSE hợp lệ,
  * finish_reason 'stop', nhưng nội dung là thông báo lỗi.
  */
 
@@ -11,19 +11,19 @@ import {
   looksLikePseudoError,
 } from '@/lib/pseudo-error-response';
 
-const REAL_CRAX_ERROR =
+const REAL_GATEWAY_ERROR =
   '\n\n[Notion is currently unavailable — tried 22 accounts over 0s, every account ' +
   "tried is over its usage cap for this model right now. This usually clears within a " +
   "few minutes as the account pool refreshes; try again shortly, or shorten/simplify " +
   "the prompt if it's very large. If it keeps happening, report it in the Discord.]";
 
 describe('nhận diện lỗi trá hình dưới HTTP 200', () => {
-  it('bắt được payload THẬT của crax khi pool cạn', () => {
-    expect(looksLikePseudoError(REAL_CRAX_ERROR)).toBe(true);
+  it('bắt được payload THẬT của gateway khi pool cạn', () => {
+    expect(looksLikePseudoError(REAL_GATEWAY_ERROR)).toBe(true);
   });
 
   it('bắt được ngay cả khi mới nhận một phần đầu (stream chưa xong)', () => {
-    expect(looksLikePseudoError(REAL_CRAX_ERROR.slice(0, 60))).toBe(true);
+    expect(looksLikePseudoError(REAL_GATEWAY_ERROR.slice(0, 60))).toBe(true);
   });
 
   it('id chunk "err" của gateway được nhận diện', () => {
@@ -34,7 +34,7 @@ describe('nhận diện lỗi trá hình dưới HTTP 200', () => {
   });
 
   it('trích thông điệp gọn, bỏ ngoặc vuông', () => {
-    const msg = extractPseudoErrorMessage(REAL_CRAX_ERROR);
+    const msg = extractPseudoErrorMessage(REAL_GATEWAY_ERROR);
     expect(msg.startsWith('Notion is currently unavailable')).toBe(true);
     expect(msg).not.toContain('[');
     expect(msg.length).toBeLessThanOrEqual(300);
@@ -62,7 +62,7 @@ describe('KHÔNG chặn nhầm câu trả lời hợp lệ', () => {
   });
 
   it('chỉ soi phần đầu — lỗi giả nằm sâu trong câu trả lời dài không kích hoạt', () => {
-    const long = `${'Đây là nội dung hợp lệ. '.repeat(60)}${REAL_CRAX_ERROR}`;
+    const long = `${'Đây là nội dung hợp lệ. '.repeat(60)}${REAL_GATEWAY_ERROR}`;
     expect(looksLikePseudoError(long)).toBe(false);
   });
 });

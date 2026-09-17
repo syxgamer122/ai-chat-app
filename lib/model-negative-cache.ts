@@ -2,7 +2,7 @@
  * Negative cache (upstream, model) — nhớ "gateway X không có model Y" trong
  * một khoảng TTL ngắn.
  *
- * Không có cái này, mỗi tin nhắn đều phải lặp lại lượt thử chết: crax trả
+ * Không có cái này, mỗi tin nhắn đều phải lặp lại lượt thử chết: gateway trả
  * 404/400 "unknown model" cho tên gốc (vd `gpt-5.6-sol` khi họ chỉ có bản
  * gạch), route fallback sang tên kế — nhưng tin nhắn SAU lại bắt đầu từ tên
  * gốc và đốt thêm một request oan. Với cache này, request sau bỏ qua tên đã

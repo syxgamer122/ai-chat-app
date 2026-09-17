@@ -1,6 +1,6 @@
 /**
  * Comprehensive Unit Test Suite for TeamworkCritic (Milestone 3).
- * Conforms strictly to ORIGINAL_REQUEST.md R1 & R3, PROJECT.md, and .opencode/agents/teamwork-critic.md.
+ * Conforms strictly to ORIGINAL_REQUEST.md R1 & R3 và PROJECT.md.
  *
  * Covers:
  * 1. Zero-Trust Real Command Execution & Exit Code Verification:

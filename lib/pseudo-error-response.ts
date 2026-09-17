@@ -1,7 +1,7 @@
 /**
  * Phát hiện "lỗi trá hình dưới HTTP 200" của gateway.
  *
- * Một số gateway (đo trực tiếp trên crax) KHÔNG trả mã lỗi khi backend cạn
+ * Một số gateway (đo trực tiếp trên gateway) KHÔNG trả mã lỗi khi backend cạn
  * quota — chúng trả HTTP 200, SSE hợp lệ, `finish_reason: "stop"`, nhưng nội
  * dung lại là thông báo lỗi tiếng Anh trong ngoặc vuông:
  *
@@ -24,7 +24,7 @@
  * Vì vậy mọi mẫu đều gắn với ngữ cảnh vận hành cụ thể của gateway.
  */
 const PSEUDO_ERROR_PATTERNS: readonly RegExp[] = Object.freeze([
-  // crax/Notion: "[Notion is currently unavailable — tried N accounts...]"
+  // "[Notion is currently unavailable — tried N accounts...]"
   /\[\s*notion is (currently )?unavailable/i,
   /every account tried is over its usage cap/i,
   /tried \d+ accounts over \d+s/i,
@@ -33,7 +33,7 @@ const PSEUDO_ERROR_PATTERNS: readonly RegExp[] = Object.freeze([
   /account pool refreshes/i,
 ]);
 
-/** Id mà gateway dùng để tự đánh dấu chunk lỗi (crax: "err"). */
+/** Id mà gateway dùng để tự đánh dấu chunk lỗi (vd: "err"). */
 const ERROR_IDS: readonly string[] = Object.freeze(['err', 'error']);
 
 /**

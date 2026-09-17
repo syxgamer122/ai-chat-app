@@ -61,7 +61,7 @@ export function pickMediaModels(models: readonly MediaModelChoice[]): MediaModel
  * "Họ" model = token chữ đầu tiên của id, bỏ số phiên bản.
  * qwen3.8-max -> qwen | qwen-image-3.0-pro -> qwen | gpt-5.6-sol -> gpt
  * Dùng để chỉ hiện nút tạo ảnh/video khi model đang chọn cùng họ với model
- * media của gateway (crax: media do Qwen đảm nhiệm).
+ * media của gateway .
  */
 export function modelFamily(modelId: string | null | undefined): string {
   if (!modelId) return '';

@@ -1,5 +1,5 @@
 /**
- * Memory Recall & Reviewer Gate — Chọn lọc, xếp hạng và gate kiểm duyệt ký ức (Oh My Hermes port).
+ * Memory Recall & Reviewer Gate — Chọn lọc, xếp hạng và gate kiểm duyệt ký ức.
  *
  * Nguyên tắc:
  * 1. Không bao giờ ghi status: 'active' ngầm: agent chỉ đề xuất candidate (pending).

@@ -96,7 +96,7 @@ describe('RED TEAM buildPickerSections - trạng thái trống và lệch nguồ
   });
 
   it('isBuiltinCatalog=true nhưng models là của provider: tin cờ caller, không crash', () => {
-    const models = [m('gpt-5-6-sol'), m('claude-3-5-sonnet')];
+    const models = [m('gpt-4o'), m('o1')];
     const sections = buildPickerSections(models, {
       providerId: 'custom-gateway',
       isBuiltinCatalog: true,

@@ -1,6 +1,6 @@
 /**
  * Adversarial Critic Verifier for Teamwork Multi-Agent Runtime Engine.
- * Conforms strictly to ORIGINAL_REQUEST.md R1 & R3, PROJECT.md, and .opencode/agents/teamwork-critic.md.
+ * Conforms strictly to ORIGINAL_REQUEST.md R1 & R3 và PROJECT.md.
  *
  * Implements:
  * 1. Zero-Trust Verification: Re-runs real test/build commands independently via HeadlessToolRunner.

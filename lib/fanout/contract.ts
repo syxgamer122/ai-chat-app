@@ -1,5 +1,5 @@
 /**
- * Fanout Contract & Frozen Validation — Hợp đồng song song hoá (Oh My Hermes port).
+ * Fanout Contract & Frozen Validation — Hợp đồng song song hoá.
  *
  * Nguyên tắc:
  * 1. Propose -> LLM đề xuất chia nhỏ bài toán thành các unit.

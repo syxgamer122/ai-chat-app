@@ -1,5 +1,5 @@
 /**
- * Server-side Universal Bridge Dispatcher (Goose / Pi architecture).
+ * Server-side Universal Bridge Dispatcher.
  *
  * Cho phép Web UI (trình duyệt) và Fast Desktop Shell (Edge/Chrome App Mode)
  * truy cập 100% năng lực hệ thống (filesystem, shell_run, git_*, mcp_*) mà KHÔNG
@@ -8,7 +8,7 @@
  * Tái sử dụng trọn vẹn logic đã được kiểm chứng từ `lib/ipc.cjs` và
  * `lib/mcp/ipc-handlers.cjs`:
  * - Path-guard khóa chặt thao tác vào workspace root (chống traversal).
- * - Goose-style smart truncation cho shell output (không làm phình context LLM).
+ * - Smart truncation cho shell output (không làm phình context LLM).
  * - MCP tool execution và approval workflow.
  * - Secure store và LLM fetch proxy.
  */
@@ -135,7 +135,7 @@ export function initServerBridge(): BridgeDispatcher {
     return { cancelled: true };
   });
 
-  // 4. Doctor diagnostic endpoint (Claude Code / MonkeyCode style)
+  // 4. Doctor diagnostic endpoint (terminal coding agent / Security style)
   handlers.set('vyen:doctor', async () => {
     const memory = process.memoryUsage();
     const currentWs = (await handlers.get('vyen:workspace-get')?.(null)) as { path: string | null } | undefined;
@@ -159,7 +159,7 @@ export function initServerBridge(): BridgeDispatcher {
     };
   });
 
-  // 5. Teamwork Triad Artifacts endpoint (MonkeyCode task inspection)
+  // 5. Teamwork Triad Artifacts endpoint (task inspection)
   handlers.set('vyen:teamwork-artifacts', async () => {
     const currentWs = (await handlers.get('vyen:workspace-get')?.(null)) as { path: string | null } | undefined;
     const wsRoot = currentWs?.path || defaultWorkspace;
@@ -185,15 +185,15 @@ export function initServerBridge(): BridgeDispatcher {
     };
   });
 
-  // 6. Security Audit endpoint (MonkeyCode security scanning)
+  // 6. Security Audit endpoint (security scanning)
   handlers.set('vyen:security-audit', async (_event, payload?: unknown) => {
     const currentWs = (await handlers.get('vyen:workspace-get')?.(null)) as { path: string | null } | undefined;
     const wsRoot = currentWs?.path || defaultWorkspace;
-    const { runMonkeyCodeSast } = await import('../security-sast');
+    const { runSecuritySast } = await import('../security-sast');
     const targetPath = payload && typeof payload === 'object' && 'targetPath' in payload && typeof (payload as { targetPath?: unknown }).targetPath === 'string'
       ? (payload as { targetPath: string }).targetPath
       : undefined;
-    const report = runMonkeyCodeSast(wsRoot, { targetPath });
+    const report = runSecuritySast(wsRoot, { targetPath });
     return {
       ok: report.ok,
       score: report.score,
@@ -239,7 +239,7 @@ export function initServerBridge(): BridgeDispatcher {
     });
   });
 
-  // 7. Scheduler runner (Goose P2-9): quản lý và thực thi lịch chạy recipe
+  // 7. Scheduler runner (P2-9): quản lý và thực thi lịch chạy recipe
   handlers.set('vyen:scheduler-list', async () => {
     const currentWs = (await handlers.get('vyen:workspace-get')?.(null)) as { path: string | null } | undefined;
     const wsRoot = currentWs?.path || defaultWorkspace;

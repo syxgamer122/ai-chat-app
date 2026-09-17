@@ -1,5 +1,5 @@
 /**
- * Disk Skills (port Goose SKILL.md) + project hints (.vyenhints) —
+ * Disk Skills (chuẩn SKILL.md) + project hints (.vyenhints) —
  * PROGRESSIVE DISCLOSURE: system prompt chỉ chứa BẢNG CHỈ MỤC
  * (name + description + path); nội dung SKILL.md chỉ vào context khi model
  * gọi tool skill_load. Giữ token thấp — đừng nhồi body skill vào prompt.
@@ -191,7 +191,12 @@ export function buildDiskSkillIndexBlock(entries: readonly DiskSkillEntry[]): st
 
 /* ------------------------------ .vyenhints ------------------------------ */
 
-export const HINTS_FILE_CANDIDATES = ['.vyenhints', 'AGENTS.md', 'CLAUDE.md', '.goosehints'] as const;
+/**
+ * Chỉ dùng hints của Vyen (`.vyenhints`) và chuẩn chung `AGENTS.md`.
+ * Đã bỏ các file hints của công cụ khác: chúng khiến dự án mang cấu hình
+ * của công cụ khác thay vì của Vyen.
+ */
+export const HINTS_FILE_CANDIDATES = ['.vyenhints', 'AGENTS.md'] as const;
 
 /** Chọn file hints đầu tiên CÓ nội dung theo thứ tự ưu tiên. */
 export function pickHintsContent(

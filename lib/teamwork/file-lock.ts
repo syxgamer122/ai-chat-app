@@ -1,7 +1,6 @@
 /**
  * Exclusive File Ownership & Concurrency Guard.
- * Conforms strictly to .opencode/agents/teamwork-orchestrator.md,
- * .opencode/commands/teamwork.md, and ORIGINAL_REQUEST.md.
+ * Conforms strictly to PROJECT.md và ORIGINAL_REQUEST.md.
  *
  * Rules enforced:
  * 1. Exclusive File Ownership: At any point in time, a source file can only

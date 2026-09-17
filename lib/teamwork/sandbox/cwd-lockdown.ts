@@ -1,5 +1,5 @@
 /**
- * Working Directory (CWD) Lockdown (Arcbox Model).
+ * Working Directory (CWD) Lockdown.
  * Enforces strict workspace boundary pinning, preventing child processes or file operations from escaping root.
  */
 

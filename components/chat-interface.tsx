@@ -18,7 +18,7 @@ import {
   type StoredMessage,
   type RecipeRecord,
 } from '@/lib/db';
-import { AVAILABLE_MODELS, MEDIA_MODELS } from '@/lib/models';
+import { AVAILABLE_MODELS } from '@/lib/models';
 import { deriveModelOption, toggleFavorite, upsertRecent } from '@/lib/model-meta';
 import {
   reconstructActiveThread,
@@ -49,11 +49,7 @@ import { ensurePromptSeed, savePrompt } from '@/lib/prompt-library';
 import { ensureProviderSeed } from '@/lib/providers';
 import { isSameFamilyAsMedia, pickMediaModels } from '@/lib/media-models';
 import { MediaGenerationError, generateMedia } from '@/lib/media-generate';
-import {
-  supportsMediaGeneration,
-  supportsThinkingLevel,
-  type ThinkingLevel,
-} from '@/lib/provider-url';
+import { type ThinkingLevel } from '@/lib/provider-url';
 import { estimatePromptTokens, shouldCompact, evaluateUsageTrigger, splitForCompaction } from '@/lib/context-budget';
 import { drainQueue, enqueueMessage, isQueueMode, type QueueMode } from '@/lib/message-queue';
 import { CLIENT_MAX_STEPS } from '@/lib/tool-limits';
@@ -137,13 +133,13 @@ import {
   listAgentMemories,
   removeMemoryCategory,
   removeSpecificMemory,
-} from '@/lib/memory/goose-client';
+} from '@/lib/memory/agent-memory-client';
 import {
   retrieveMatchingMemories,
   memoriesForWorkspace,
   buildMemoryIndexBlock,
   agentMemoriesAsLessons,
-} from '@/lib/memory/goose';
+} from '@/lib/memory/agent-memory';
 import {
   desktopFsList,
   desktopFsRead,
@@ -353,7 +349,7 @@ export default function ChatInterface() {
   const webSearchEnabled = useAppStore((s) => s.settings.webSearch);
   /** Tắt = model không nhận tool nào (chat thuần, không agent coding). */
   const agentToolsEnabled = useAppStore((s) => s.settings.agentTools ?? true);
-  /** Ép đường tool giả lập — gateway strip `tools` im lặng (vd crax). */
+  /** Ép đường tool giả lập — gateway strip `tools` im lặng . */
   const forceEmulatedTools = useAppStore((s) => s.settings.forceEmulatedTools ?? false);
   /** Chế độ agent: 'plan' = chỉ explore, 'act' = đọc + ghi. */
   const agentMode = useAppStore((s) => s.settings.agentMode ?? 'act');
@@ -375,28 +371,6 @@ export default function ChatInterface() {
   useEffect(() => {
     void syncActiveProviderSnapshot(activeProviderId);
   }, [activeProviderId]);
-
-  /** Provider mặc định của server (env) hỗ trợ những tính năng nào. */
-  const [serverCaps, setServerCaps] = useState<{ thinkingLevel: boolean; media: boolean }>({
-    thinkingLevel: false,
-    media: false,
-  });
-  useEffect(() => {
-    let cancelled = false;
-    fetch('/api/server-config')
-      .then((r) => (r.ok ? r.json() : null))
-      .then((j: { thinkingLevel?: boolean; media?: boolean } | null) => {
-        if (cancelled || !j) return;
-        setServerCaps({
-          thinkingLevel: Boolean(j.thinkingLevel),
-          media: Boolean(j.media),
-        });
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   const currentChat = useLiveQuery(
     () => (currentChatId ? db.chats.get(currentChatId) : undefined),
@@ -432,7 +406,7 @@ export default function ChatInterface() {
   );
   const insertPrompts = useMemo(() => {
     const prompts: SlashPrompt[] = (promptTemplates ?? []).filter((p) => p.mode !== 'skill');
-    /* Lệnh built-in chuẩn hóa theo Goose (P2-10): /plan, /mode, /summarize, /recipe, /skills, /memory, /tools, /cost */
+    /* Lệnh built-in chuẩn hóa (P2-10): /plan, /mode, /summarize, /recipe, /skills, /memory, /tools, /cost */
     const builtinCommands: SlashPrompt[] = BUILTIN_SLASH_COMMANDS.map((cmd) => ({
       id: `cmd:${cmd.name}`,
       title: cmd.name,
@@ -461,54 +435,31 @@ export default function ChatInterface() {
   }, [promptTemplates, recipeRecords, customSlashCommands]);
 
   /**
-   * Model media khả dụng cho nhà cung cấp đang chọn.
-   * crax liệt kê `qwen-image-*` trong /v1/models nhưng KHÔNG liệt kê
-   * `qwen-video` (alias chỉ dùng được qua chat SSE) — nên với gateway crax ta
-   * bổ sung thêm model media built-in vào danh sách.
+   * Model media khả dụng cho nhà cung cấp đang chọn — chỉ từ /v1/models mà
+   * provider khai báo (phát hiện qua tên model). Model media built-in đã gỡ
+   * cùng tầng gateway.
    */
-  const mediaCatalog = useMemo(() => {
-    const craxLike = activeProvider
-      ? supportsMediaGeneration(activeProvider.baseUrl)
-      : serverCaps.media;
-
-    const fromProvider = (activeProvider?.models ?? []).map((m) => ({
-      id: m.id,
-      label: m.name || m.id,
-    }));
-    if (!craxLike) return fromProvider;
-
-    const known = new Set(fromProvider.map((m) => m.id));
-    return [
-      ...fromProvider,
-      ...MEDIA_MODELS.filter((m) => !known.has(m.id)).map((m) => ({ id: m.id, label: m.name })),
-    ];
-  }, [activeProvider, serverCaps.media]);
+  const mediaCatalog = useMemo(
+    () =>
+      (activeProvider?.models ?? []).map((m) => ({
+        id: m.id,
+        label: m.name || m.id,
+      })),
+    [activeProvider],
+  );
 
   const MODELS: ModelOption[] = useMemo(() => {
     if (activeProvider?.models?.length) {
-      const base = activeProvider.models.map((m) => deriveModelOption(m));
-      // Bổ sung model media built-in mà /v1/models của gateway không khai báo.
-      const known = new Set(base.map((m) => m.id));
-      const extra = mediaCatalog
-        .filter((m) => !known.has(m.id))
-        .map((m) => {
-          const cfg = MEDIA_MODELS.find((c) => c.id === m.id);
-          return cfg ? deriveModelOption(cfg) : { id: m.id, label: m.label };
-        });
-      return [...base, ...extra];
+      return activeProvider.models.map((m) => deriveModelOption(m));
     }
-    // Provider của server: bỏ model media nếu gateway env không hỗ trợ.
-    return AVAILABLE_MODELS.filter((m) => serverCaps.media || m.media === undefined).map((m) =>
-      deriveModelOption(m),
-    );
-  }, [activeProvider, mediaCatalog, serverCaps.media]);
+    return AVAILABLE_MODELS.map((m) => deriveModelOption(m));
+  }, [activeProvider]);
 
   /**
    * Nút "Tạo ảnh" / "Tạo video" cạnh nút mic. Chỉ hiện khi model đang chọn
-   * cùng họ với model media của gateway — ví dụ crax: chọn qwen3.8-max /
-   * qwen3.7-max thì hiện 2 nút dùng qwen-image-3.0-pro và qwen-video.
+   * cùng họ với model media của provider.
    *
-   * `direct`: có key ở phía trình duyệt → gọi thẳng gateway, không qua
+   * `direct`: có key ở phía trình duyệt → gọi thẳng provider, không qua
    * /api/chat, nên không bị giới hạn thời gian chạy của serverless function
    * (video mất 2-5 phút, vượt xa hạn mức của Vercel Hobby).
    */
@@ -845,7 +796,7 @@ export default function ChatInterface() {
   const switchLockRef = useRef(false);
 
   /* ------------------------------------------------------------------ */
-  /* Lead/Worker routing (port Goose P1-5)                               */
+  /* Lead/Worker routing (P1-5)                               */
   /* ------------------------------------------------------------------ */
   /** Role của lượt ĐANG chạy — onFinish gắn vào usage annotation làm badge. */
   const routingRoleRef = useRef<RoutingRole | null>(null);
@@ -941,7 +892,7 @@ export default function ChatInterface() {
         sessionWorkspacePath.endsWith(currentWsNameOrPath)),
   );
 
-  /* Nhánh git cho status line (mượn ý @rokiy/pi-ui): đọc 1 LẦN khi workspace
+  /* Nhánh git cho status line (mượn ý UI): đọc 1 LẦN khi workspace
      bật kết nối qua desktop bridge; web thuần không có bridge thì thôi, không
      hiện, không báo lỗi. Đổi nhánh giữa phiên hiếm khi quan trọng tới mức
      phải theo dõi liên tục. */
@@ -1486,7 +1437,7 @@ export default function ChatInterface() {
         return JSON.stringify(res);
       }
 
-      /* chat_recall (Goose P2-8): tra cứu full-text toàn bộ lịch sử trò chuyện */
+      /* chat_recall (P2-8): tra cứu full-text toàn bộ lịch sử trò chuyện */
       if (toolCall.toolName === 'chat_recall') {
         if (isToolDenied('chat_recall', toolPermissions)) {
           return JSON.stringify({ error: 'Tool "chat_recall" is denied by policy.', denied: true });
@@ -1618,7 +1569,7 @@ export default function ChatInterface() {
             const rel = String(args.path ?? '');
             /* Staging overlay: nếu file đang staged, trả nội dung staged thay
                vì đĩa. Agent tự thấy kết quả sửa của mình → tránh doom-loop
-               "sửa rồi đọc lại vẫn cũ". Port từ Plandex sandbox model. */
+               "sửa rồi đọc lại vẫn cũ". Theo mô hình staging sandbox. */
             const normRel = normalizePathKey(rel);
             const stagedEntry = stagingRef.current[normRel];
             if (stagedEntry && !isImagePath(rel)) {
@@ -1912,7 +1863,7 @@ export default function ChatInterface() {
 
             /* Auto-debug loop: khi lệnh fail + safe command → track attempts và
                chèn retry guidance vào result để model tự sửa và retry. Port từ
-               Plandex `plandex debug` (MIT). */
+               Vòng debug tự động. */
             const exitCode = result.code;
             const failed = exitCode !== null && exitCode !== 0;
             if (failed && isSafeDebugCommand(command)) {
@@ -2124,7 +2075,7 @@ export default function ChatInterface() {
           }
 
           /* ------------------------------------------------------------------ */
-          /* Structured memory (Goose port P1-4) — CRUD thẳng Dexie + mirror.    */
+          /* Structured memory (P1-4) — CRUD thẳng Dexie + mirror.    */
           /* ------------------------------------------------------------------ */
 
           case 'remember_memory': {
@@ -2326,7 +2277,7 @@ export default function ChatInterface() {
     },
   });
 
-  /* Recipe checks (port Goose): onFinish ủy quyền sang callback được gán sau
+  /* Recipe checks : onFinish ủy quyền sang callback được gán sau
      (runRecipeChecks định nghĩa ở dưới submitTurn) qua ref để giữ thứ tự hook
      ổn định. Trả true nghĩa là run recipe đã xử lý lượt này — queue drains
      phía dưới bỏ qua. */
@@ -2367,7 +2318,7 @@ export default function ChatInterface() {
      * Key của "Máy chủ mặc định" (settings.apiKey) CHỈ đi tới baseUrl của
      * server env. Khi có provider preset active, chỉ gửi key của chính provider
      * đó — không fallback sang settings.apiKey, vì như vậy là gửi credential
-     * của gateway A tới gateway B do người dùng tự khai.
+     * của provider A tới provider B do người dùng tự khai.
      */
     headers: buildApiHeaders(),
     body: {
@@ -2529,7 +2480,7 @@ export default function ChatInterface() {
         const anns = (message.annotations ?? []) as Array<Record<string, unknown>>;
         const lastModel = [...anns].reverse().find((a) => typeof a?.model === 'string')?.model;
         /* durationMs + est cho dòng thống kê dưới câu trả lời (mượn ý
-           @rokiy/pi-ui): est = true khi completion là ước lượng chars/4 chứ
+           UI): est = true khi completion là ước lượng chars/4 chứ
            không phải số gateway báo, để UI khỏi hiện chi phí bịa. onFinish
            chỉ chạy sau khi stream kết thúc, không phải trong render —
            Date.now() tại đây là điểm đo endedAt chính đáng. */
@@ -2579,7 +2530,7 @@ export default function ChatInterface() {
       if (finishReason !== 'tool-calls' && finishRef.current !== 'error') {
         succeedRun();
 
-        /* Recipe active (port Goose): agent vừa xong một attempt → chạy shell
+        /* Recipe active : agent vừa xong một attempt → chạy shell
            checks, quyết pass/retry/stop. Chiếu quyền flow (queue drains bỏ
            qua) để vòng retry không đua với steering queued. */
         {
@@ -4844,7 +4795,7 @@ export default function ChatInterface() {
         }
       }
 
-      /* Ghi nhớ dài hạn: nạp Recall Pack theo ngân sách token từ ký ức đã duyệt (OMH P1-D) */
+      /* Ghi nhớ dài hạn: nạp Recall Pack theo ngân sách token từ ký ức đã duyệt (P1-D) */
       try {
         const recallPack = await queryRecallPack({
           taskText: userText || '',
@@ -4939,7 +4890,7 @@ export default function ChatInterface() {
         };
       }
 
-      /* Recipe đang chạy (port Goose): MỌI lượt của run — kể cả prompt retry —
+      /* Recipe đang chạy : MỌI lượt của run — kể cả prompt retry —
          đều mang body.recipe để server inject instructions + áp tool policy.
          Model override của recipe chỉ áp khi model đó nằm trong danh sách
          provider hiện tại (tránh gửi tên model gateway không có). */
@@ -5028,7 +4979,7 @@ export default function ChatInterface() {
   }, [attachments, isLoading, mediaBusy, currentChat, currentChatId, draftId, setCurrentChatId, append, pin, generateTitle, messages, webSearchEnabled, promptTemplates, agentToolsEnabled, forceEmulatedTools, agentMode, stagingEnabled, beginRun, currentRun, setRepairable, MODELS, isRoutableModel, routingBodyFor, approvalPolicy]);
 
   /* ---------------------------------------------------------------- */
-  /* Recipe runner (port Goose): attempt → checks → retry/pass/stop.   */
+  /* Recipe runner : attempt → checks → retry/pass/stop.   */
   /* ---------------------------------------------------------------- */
   const recipeActiveRun = useRecipeUiStore((s) => s.activeRun);
   const lastRecipeRunIdRef = useRef<string | null>(null);
@@ -5307,12 +5258,12 @@ export default function ChatInterface() {
 
   /**
    * Router gửi tin (P3.1): idle → submitTurn như cũ; đang chạy → hàng đợi.
-   * Enter không opts → mặc định STEERING (Pi: inject ngay khi turn xong);
+   * Enter không opts → mặc định STEERING (inject ngay khi turn xong);
    * Alt+Enter truyền queueAs:'follow-up' (chỉ bắn khi agent rảnh).
    */
   const onSubmit = useCallback(
     async (draft: string, opts?: { queueAs?: 'steer' | 'follow-up' }): Promise<boolean> => {
-      /* Intercept Slash Commands chuẩn hoá (Goose P2-10) khi agent rảnh */
+      /* Intercept Slash Commands chuẩn hoá (P2-10) khi agent rảnh */
       const trimmed = draft.trim();
       if (!isLoading && trimmed.startsWith('/')) {
         const slash = parseSlashCommand(trimmed, customSlashCommands);
@@ -5436,7 +5387,7 @@ export default function ChatInterface() {
    * Hai đường đi, chọn theo `action.direct`:
    * - `direct` = gateway cho phép cross-origin VÀ có key phía client → fetch
    *   thẳng từ tab, không đụng giới hạn thời gian của serverless.
-   * - ngược lại → qua /api/chat. Đây là đường của crax (crax trả 403 cho mọi
+   * - ngược lại → qua /api/chat. Đây là đường an toàn cho gateway chặn origin (trả 403 cho mọi
    *   request có `Origin`, và không dùng API key), và nó KỊP: video đo được
    *   120-126s, dưới ngân sách 290s của route.
    *
@@ -5531,7 +5482,7 @@ export default function ChatInterface() {
           setAssistant({ content: '_Đã hủy._', reasoning: undefined } as Partial<Message>);
         } else if (err instanceof MediaGenerationError && err.originBlocked) {
           /**
-           * Gateway chỉ allowlist origin của chính họ (crax: 403 "Origin not
+           * Gateway chỉ allowlist origin của chính họ (vd 403 "Origin not
            * allowed"), hoặc trình duyệt chặn CORS. Bỏ 2 tin nhắn vừa thêm rồi
            * gửi lại qua /api/chat — server không gửi Origin nên không bị chặn.
            *
@@ -5883,10 +5834,7 @@ export default function ChatInterface() {
         ctxUsed={contextUsage?.tokens}
         ctxMax={contextUsage?.max}
         thinkingLevel={
-          (activeProvider ? supportsThinkingLevel(activeProvider.baseUrl) : serverCaps.thinkingLevel) ||
-          !!modelReasoningCap
-            ? thinkingLevel
-            : undefined
+          !!modelReasoningCap ? thinkingLevel : undefined
         }
         thinkingSupportedLevels={modelReasoningCap ? modelReasoningCap.efforts : null}
         onThinkingLevelChange={handleThinkingLevelChange}
@@ -5951,7 +5899,7 @@ export default function ChatInterface() {
         />
       </div>
 
-      {/* Đề nghị kết nối lại workspace gắn với phiên (Goose P2-8) */}
+      {/* Đề nghị kết nối lại workspace gắn với phiên (P2-8) */}
       {sessionWorkspacePath && !isWorkspaceMatched && !dismissedReconnect && (
         <div className="mx-auto mb-2 w-full max-w-thread px-4">
           <div className="flex items-center justify-between gap-2 rounded-none border border-[#495059] bg-[#161d27] px-3 py-2 font-mono text-xs text-[#ebe7e4]">
@@ -5999,7 +5947,7 @@ export default function ChatInterface() {
       )}
 
       {/* P0-3: chip "hints loaded" — bấm để xem nguyên văn ngữ cảnh dự án
-          (.vyenhints/AGENTS.md/CLAUDE.md) đã nạp vào system prompt. */}
+          (.vyenhints/AGENTS.md) đã nạp vào system prompt. */}
       {hintsChip && (
         <div className="mx-auto mb-2 w-full max-w-thread px-4">
           <div className="rounded-none border border-[#495059] bg-[#1b2430] font-mono text-[11.5px] text-[#9fa4ab]">
@@ -6024,7 +5972,7 @@ export default function ChatInterface() {
         </div>
       )}
 
-      {/* OMH P1-D: 🧠 recalled N memories banner */}
+      {/* P1-D: 🧠 recalled N memories banner */}
       {activeRecallPack && activeRecallPack.items.length > 0 && (
         <div className="mx-auto mb-2 w-full max-w-thread px-4">
           <div className="flex items-center justify-between gap-2 rounded-lg border border-sky-200/80 bg-sky-50/90 px-3 py-1.5 text-xs text-sky-800 shadow-sm dark:border-sky-900/60 dark:bg-sky-950/50 dark:text-sky-300">

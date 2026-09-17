@@ -1,5 +1,5 @@
 /**
- * Comprehensive Unit Tests for AutonomousCliAgent (Claude Code & Codex architecture).
+ * Comprehensive Unit Tests for AutonomousCliAgent (terminal coding agent).
  */
 
 import { describe, it, expect } from 'vitest';
@@ -11,7 +11,7 @@ import {
   startInteractiveCli,
 } from '../lib/cli/interactive-agent';
 
-describe('AutonomousCliAgent (Claude Code / Codex Architecture)', () => {
+describe('AutonomousCliAgent (terminal coding agent)', () => {
   const workspaceRoot = process.cwd();
 
   it('khởi tạo agent thành công với cấu hình mặc định', () => {
@@ -65,7 +65,7 @@ describe('AutonomousCliAgent (Claude Code / Codex Architecture)', () => {
     expect(agent.getHistory().length).toBe(2);
   });
 
-  it('chạy luồng streaming turn với tool security_audit (MonkeyCode SAST)', async () => {
+  it('chạy luồng streaming turn với tool security_audit (SAST)', async () => {
     const agent = new AutonomousCliAgent({
       workspaceRoot,
       mockMode: true,

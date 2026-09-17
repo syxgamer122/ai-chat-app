@@ -1,5 +1,5 @@
 /**
- * Disposable Scoped Temporary Directory Isolation (Arcbox Model).
+ * Disposable Scoped Temporary Directory Isolation.
  * Redirects TMP/TEMP per worker execution and guarantees clean teardown.
  */
 

@@ -555,7 +555,7 @@ export function McpSettingsPanel() {
             className={inputClass}
           />
           <span className="mt-1 block text-[10px] text-zinc-500">
-            Port Goose available_tools: chỉ nạp các tool trong danh sách này để giảm bớt token và giới hạn phạm vi.
+            available_tools: chỉ nạp các tool trong danh sách này để giảm bớt token và giới hạn phạm vi.
           </span>
         </label>
 

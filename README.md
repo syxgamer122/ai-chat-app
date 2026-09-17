@@ -17,11 +17,11 @@
 - **Agent coding trong trình duyệt**: bấm 📁 kết nối thư mục làm việc (File System Access API — Chrome/Edge), agent liệt kê/đọc/tìm/sửa file trực tiếp trên máy bạn; **ghi file luôn qua modal diff phê duyệt** (duyệt mới ghi đĩa). fs_* tools chạy client-side (`onToolCall` + auto-resubmit), server không bao giờ chạm vào file.
 - **Tìm kiếm web**: bật nút 🌐 trong composer — lượt gửi kế tiếp tự tra cứu DuckDuckGo/SearXNG (top nguồn + đọc nguyên văn tối đa 2 trang), chèn vào ngữ cảnh kèm yêu cầu trích dẫn link. Dán URL trực tiếp trong tin nhắn sẽ được ưu tiên đọc nguyên trang. Proxy qua `/api/web` có chắn SSRF từng hop redirect.
 - **Thư viện prompt "/"**: gõ `/` trong ô nhập để chèn prompt mẫu (có sẵn 5 mẫu tiếng Việt, thêm/sửa/xoá trong Settings; filter không phân biệt dấu — gõ "tom tat" ra "Tóm tắt"). Menu "/" còn liệt kê cả **recipe** (icon chef-hat) — chọn sẽ mở panel Recipes thay vì chèn text.
-- **Recipes (port Goose)**: workflow đóng gói tái sử dụng — tham số, tool policy, model settings, kiểm chứng shell + retry, structured output JSON, sub-recipe. Lưu trong Dexie hoặc file `.vyen/recipes/*.yaml` trong workspace; chia sẻ qua liên kết `?recipe=` (chỉ mở preview, không tự chạy). Chạy headless: `npx tsx bin/vyen.ts run --recipe fix-tests.yaml --params path=src --output json` — exit code ≠ 0 khi checks còn fail (dùng CI được).
-- **Skills (SKILL.md, port Goose)**: kỹ năng dạng file trong `.vyen/skills/` của workspace và `~/.vyen/skills/` (desktop). Agent chỉ thấy bảng chỉ mục (tên + mô tả); nội dung nạp khi agent gọi `skill_load` — tiết kiệm token. Quản lý + tạo mới trong Settings → Skills.
-- **`.vyenhints`**: ngữ cảnh dự án nạp tự động vào system prompt (fallback `AGENTS.md` → `CLAUDE.md` → `.goosehints`, trần 8.000 ký tự), chip "hints loaded" trên UI bấm xem nguyên văn.
-- **Bộ nhớ có cấu trúc (port Goose)**: `remember_memory` / `retrieve_memories` / `remove_memory_category` / `remove_specific_memory` — fact dài hạn theo category + tags + scope local/global (tối đa 2.000 ký tự/entry). Chỉ inject chỉ mục vào prompt (trần 4.000 ký tự); mirror ra `.vyen/memory/<category>.md` + `~/.vyen/memory/` để đọc/sửa tay; quản lý trong Settings → Ghi nhớ.
-- **Lead/Worker routing (port Goose)**: model mạnh chạy vài lượt đầu (lập kế hoạch) rồi model rẻ thực thi; tool lỗi liên tiếp / build-test fail / bạn phàn nàn ("sai rồi", "làm lại"…) thì tự quay lại model mạnh `fallbackTurns` lượt. Lỗi 429/5xx của gateway và việc bạn TỪ CHỐI phê duyệt không tính là thất bại. Vai trò từng lượt hiện badge `lead`/`worker` dưới câu trả lời; cấu hình trong Settings → Routing. Lệnh `/plan <mục tiêu>` lập kế hoạch bằng planner model ở chế độ chỉ-đọc, duyệt xong bấm "Duyệt & thực hiện" để chuyển sang Act.
+- **Recipes**: workflow đóng gói tái sử dụng — tham số, tool policy, model settings, kiểm chứng shell + retry, structured output JSON, sub-recipe. Lưu trong Dexie hoặc file `.vyen/recipes/*.yaml` trong workspace; chia sẻ qua liên kết `?recipe=` (chỉ mở preview, không tự chạy). Chạy headless: `npx tsx bin/vyen.ts run --recipe fix-tests.yaml --params path=src --output json` — exit code ≠ 0 khi checks còn fail (dùng CI được).
+- **Skills (SKILL.md)**: kỹ năng dạng file trong `.vyen/skills/` của workspace và `~/.vyen/skills/` (desktop). Agent chỉ thấy bảng chỉ mục (tên + mô tả); nội dung nạp khi agent gọi `skill_load` — tiết kiệm token. Quản lý + tạo mới trong Settings → Skills.
+- **`.vyenhints`**: ngữ cảnh dự án nạp tự động vào system prompt (fallback `AGENTS.md`, trần 8.000 ký tự), chip "hints loaded" trên UI bấm xem nguyên văn.
+- **Bộ nhớ có cấu trúc**: `remember_memory` / `retrieve_memories` / `remove_memory_category` / `remove_specific_memory` — fact dài hạn theo category + tags + scope local/global (tối đa 2.000 ký tự/entry). Chỉ inject chỉ mục vào prompt (trần 4.000 ký tự); mirror ra `.vyen/memory/<category>.md` + `~/.vyen/memory/` để đọc/sửa tay; quản lý trong Settings → Ghi nhớ.
+- **Lead/Worker routing**: model mạnh chạy vài lượt đầu (lập kế hoạch) rồi model rẻ thực thi; tool lỗi liên tiếp / build-test fail / bạn phàn nàn ("sai rồi", "làm lại"…) thì tự quay lại model mạnh `fallbackTurns` lượt. Lỗi 429/5xx của gateway và việc bạn TỪ CHỐI phê duyệt không tính là thất bại. Vai trò từng lượt hiện badge `lead`/`worker` dưới câu trả lời; cấu hình trong Settings → Routing. Lệnh `/plan <mục tiêu>` lập kế hoạch bằng planner model ở chế độ chỉ-đọc, duyệt xong bấm "Duyệt & thực hiện" để chuyển sang Act.
 - **Auto-backup**: nhắc định kỳ theo chu kỳ tuỳ chọn; desktop Chrome/Edge chọn được thư mục để app **tự ghi file .json ngầm** khi đến kỳ (File System Access API).
 - **PWA cài lên thiết bị**: Android/Chrome bấm "Cài đặt ứng dụng" hoặc nút trong Settings; iOS Safari → Chia sẻ → Thêm vào Màn hình chính. Có trang offline khi mất mạng.
 - **32 model chat** (GPT/Claude/DeepSeek/Gemini/MiniMax/Grok/Qwen/Kimi) qua gateway tương thích OpenAI, kèm 5 model sinh ảnh/video riêng.
@@ -39,12 +39,12 @@ Vyen đọc tự do nhưng ghi có kỷ luật: mọi thao tác ghi file / chạ
 ### Duyệt & tự động hóa
 
 - **Auto-pilot** (nút trong ô nhập, bấm để xoay chính sách): `always` luôn hỏi; `smart` tự duyệt thao tác chỉ-đọc và lệnh an toàn (npm test/lint, git status...); `never` tự duyệt gần như mọi thứ. Lệnh destructive (`rm -rf /`, `mkfs`, `shutdown`...) **luôn bị chặn tự duyệt** — bắt hiện xác nhận kể cả ở chế độ tự động nhất. Có thể ghi đè riêng từng nhóm tool (fs/shell/git/...) thành auto/ask/deny.
-- **Staging sandbox** (kiểu Plandex): `fs_edit`/`fs_write` ghi vào bộ đệm thay vì đĩa — agent vẫn tự thấy kết quả sửa của mình (`fs_read` đọc overlay trước), bạn review cả batch (diff từng file, thống kê ± dòng) rồi **Apply tất cả** (tạo checkpoint rồi mới ghi đĩa) hoặc reject từng file. Chưa Apply thì đĩa chưa bao giờ bị đụng.
+- **Staging sandbox** : `fs_edit`/`fs_write` ghi vào bộ đệm thay vì đĩa — agent vẫn tự thấy kết quả sửa của mình (`fs_read` đọc overlay trước), bạn review cả batch (diff từng file, thống kê ± dòng) rồi **Apply tất cả** (tạo checkpoint rồi mới ghi đĩa) hoặc reject từng file. Chưa Apply thì đĩa chưa bao giờ bị đụng.
 - **Goal loop**: đặt mục tiêu (vd "sửa cho test pass"), agent tự chạy tiếp từng lượt cho tới khi phát marker hoàn thành `<goal-complete>` — mặc định 5 lượt, tối đa 10, tự dừng sớm khi nhận ra không tiến triển (3 câu trả lời y hệt nhau).
 
 ### Shell & Git (bản desktop)
 
-- **`shell_run`**: chạy lệnh trong workspace (cmd.exe/sh) sau khi bạn duyệt, timeout mặc định 120s (tối đa 600s). Output vượt 2000 dòng hoặc 50KB bị cắt giữ phần cuối (chứa lỗi), bản full lưu vào temp file kèm `savedTo` — agent đọc lại được bằng chính `fs_read` (ngoại lệ duy nhất ngoài workspace, chỉ file do app ghi trong phiên hiện tại; kiểu Goose).
+- **`shell_run`**: chạy lệnh trong workspace (cmd.exe/sh) sau khi bạn duyệt, timeout mặc định 120s (tối đa 600s). Output vượt 2000 dòng hoặc 50KB bị cắt giữ phần cuối (chứa lỗi), bản full lưu vào temp file kèm `savedTo` — agent đọc lại được bằng chính `fs_read` (ngoại lệ duy nhất ngoài workspace, chỉ file do app ghi trong phiên hiện tại).
 - **Auto-debug**: lệnh test/build/lint thất bại trả kèm `retryGuidance` hướng dẫn agent sửa rồi chạy lại — tối đa 3 lần thử, dừng khi không tiến triển; lệnh destructive không bao giờ tự retry.
 - **Bộ tool git**: `git_status` / `git_diff` / `git_log` đọc tự do, `git_add` xem như an toàn (không cần duyệt riêng), `git_commit` phải duyệt message trước khi tạo commit.
 
@@ -54,9 +54,9 @@ Vyen đọc tự do nhưng ghi có kỷ luật: mọi thao tác ghi file / chạ
 - **LLM fetch qua Web/bridge**: bản desktop (launcher Edge/Chrome `--app`) gọi gateway trực tiếp từ Web (không gắn header Origin lạ) nên các gateway chặn origin của trình duyệt thường không còn là rào cản (đang dùng cho tạo ảnh; response buffer, trần 10MB/300s, header qua allowlist).
 - **Kho key mã hoá opt-in**: bật "Lưu API key mã hoá" trong Cài đặt → Nhà cung cấp để key nằm trong Credential Manager của hệ điều hành (safeStorage — DPAPI/Keychain/libsecret); IndexedDB chỉ giữ con trỏ `@secure:`, key thật không bao giờ ghi plaintext. Vault lỗi/thiếu → từ chối lưu mã hoá rõ ràng, không lặng lẽ hạ cấp.
 
-### MCP & Tool Router (Port Goose P1-7)
+### MCP & Tool Router
 
-- Trong bản desktop, thêm MCP server (stdio/SSE/streamable-http) tại Settings; tool của server hiện diện trong model dạng `mcp__<server>__<tool>`. Mỗi lần gọi đi qua hộp thoại phê duyệt **4 cấp**: Cho phép lần này / Luôn cho phép (nhớ cho phiên làm việc) / Từ chối lần này / Luôn từ chối. Hỗ trợ **whitelist `available_tools`** cho từng server (port Goose) để giảm bớt token ngữ cảnh và khoanh vùng công cụ cho phép. Ảnh do MCP trả về cũng được mô tả qua pipeline vision (tối đa 4 ảnh mỗi kết quả).
+- Trong bản desktop, thêm MCP server (stdio/SSE/streamable-http) tại Settings; tool của server hiện diện trong model dạng `mcp__<server>__<tool>`. Mỗi lần gọi đi qua hộp thoại phê duyệt **4 cấp**: Cho phép lần này / Luôn cho phép (nhớ cho phiên làm việc) / Từ chối lần này / Luôn từ chối. Hỗ trợ **whitelist `available_tools`** cho từng server để giảm bớt token ngữ cảnh và khoanh vùng công cụ cho phép. Ảnh do MCP trả về cũng được mô tả qua pipeline vision (tối đa 4 ảnh mỗi kết quả).
 - **Tool Router**: Giải quyết triệt để vấn đề trần cứng 100 tool khi kết nối nhiều server MCP (~200+ tools):
   - Lập chỉ mục `name + description + parameters` của toàn bộ công cụ (cả native và MCP).
   - Thuật toán xếp hạng cục bộ **BM25** (tách từ identifier camelCase/snake_case + fold dấu tiếng Việt) tự động chọn **top-30** công cụ liên quan nhất tới câu hỏi của người dùng vào ngữ cảnh.
@@ -66,9 +66,9 @@ Vyen đọc tự do nhưng ghi có kỷ luật: mọi thao tác ghi file / chạ
 - **Code Mode (Thực thi JS gọi MCP on-demand)**:
   - Cung cấp công cụ `run_code(code)` cho phép LLM viết mã JavaScript thực thi trực tiếp trong môi trường sandbox Node.js của bridge.
   - Tự động inject `mcp.call(serverId, toolName, args)` để model điều phối kịch bản gọi nhiều tool MCP và xử lý dữ liệu phức tạp mà không cần nhiều lượt LLM round-trip.
-  - Output cắt ngắn tối đa 24.000 ký tự (quy chuẩn Vyen / Goose), tuân thủ kiểm duyệt an toàn, tắt mặc định (bật trong Cài đặt → Công cụ).
+  - Output cắt ngắn tối đa 24.000 ký tự (quy chuẩn Vyen), tuân thủ kiểm duyệt an toàn, tắt mặc định (bật trong Cài đặt → Công cụ).
 
-### Phân quyền công cụ & 4 chế độ chuẩn (Port Goose P1-6)
+### Phân quyền công cụ & 4 chế độ chuẩn
 
 - **4 chế độ hoạt động**:
   - `Manual` (`always`): Luôn hỏi trước khi chạy bất kỳ tool nào (an toàn tối đa).
@@ -77,7 +77,7 @@ Vyen đọc tự do nhưng ghi có kỷ luật: mọi thao tác ghi file / chạ
   - `Chat Only` (`chat_only`): Vô hiệu hóa hoàn toàn toàn bộ công cụ (kể cả `fs_read`), dùng cho viết lách, giải thích và phân tích thuần túy.
 - **Bảng phân quyền chi tiết per-tool**: Bảng trong Cài đặt cho phép gán quyền `auto` (Tự duyệt), `ask` (Luôn hỏi), `deny` (Chặn), hoặc `default` (theo policy) cho từng công cụ độc lập thuộc 8 nhóm (`fs`, `shell`, `git`, `mcp`, `web`, `plan`, `delegate`, `memory`), hỗ trợ tìm kiếm và nút Đặt lại mặc định. Lưu trữ đồng bộ Zustand persist + Dexie v14 (`toolPermissions`). Tool bị đặt `deny` lập tức trả lỗi `denied by policy`, không mở modal duyệt.
 
-### Session Management & ChatRecall (Port Goose P2-8)
+### Session Management & ChatRecall
 
 - **Gắn phiên với thư mục làm việc**: Tự động liên kết `workspacePath` vào metadata phiên chat (`db.chats`). Khi mở lại phiên cũ từ Sidebar hoặc URL (`/?chatId=...`), giao diện hiển thị banner thông minh đề nghị kết nối lại đúng thư mục dự án tương ứng.
 - **Đổi tên linh hoạt (Rename)**: Đổi tên phiên trực tiếp trên Sidebar (hỗ trợ double-click để sửa inline hoặc chọn qua menu hành động), và trong giao diện CLI qua lệnh slash `/rename <tên mới>`.
@@ -86,7 +86,7 @@ Vyen đọc tự do nhưng ghi có kỷ luật: mọi thao tác ghi file / chạ
   - **CLI**: Tiếp tục phiên gần nhất qua `npm run cli -- session -r` hoặc theo tên/ID qua `npm run cli -- session -r --name <tên>`. Tự động lưu tiến trình sau mỗi lượt hội thoại vào `.vyen/sessions/` (hoặc `~/.vyen/sessions/`).
 - **Tìm kiếm toàn cục `chat_recall(query, limit)`**: Công cụ client cho phép mô hình AI tra cứu toàn bộ lịch sử các phiên thảo luận trong Dexie. Sử dụng bộ phân tích từ khóa tiếng Việt không dấu/có dấu (foldText) để trích xuất ngữ cảnh liên quan và trả về đoạn snippet phù hợp nhất (ví dụ: "tìm hội thoại tuần trước về React hooks").
 
-### Scheduler: Chạy Recipe Theo Lịch Cron (Port Goose P2-9)
+### Scheduler: Chạy Recipe Theo Lịch Cron
 
 - **Biểu thức Cron tiêu chuẩn**: Hỗ trợ 5 trường cron (`phút giờ ngày tháng thứ`), bước nhảy `*/n`, khoảng, danh sách và alias (`@hourly`, `@daily`, `@weekly`). Tự động giải nghĩa bằng câu tiếng Việt và hiển thị mốc chạy tiếp theo.
 - **Thực thi ngầm qua Node bridge & CLI**: Bộ timer tick mỗi 30 giây chạy headless, tự động tạo chat session mới chứa kết quả thực thi và liên kết danh sách `sessions[]` vào lịch trình.
@@ -100,7 +100,7 @@ Vyen đọc tự do nhưng ghi có kỷ luật: mọi thao tác ghi file / chạ
 ### Làm việc quy mô lớn
 
 - **Subagent delegate**: agent chính giao task độc lập cho subagent chạy với context riêng (không thấy lịch sử chat), không thể đệ quy (subagent không có `delegate`), giới hạn mặc định 10 turns (tối đa 25). Subagent vẫn dùng được tool trên máy bạn (fs/shell/git/MCP) nhờ relay: server phát annotation xuống renderer, renderer thực thi rồi POST kết quả về `/api/chat/subagent-relay`. Hoạt động cả đường native function-calling lẫn emulated.
-- **Sub-recipes (port Goose)**: session chạy recipe có `sub_recipes` thì mỗi sub-recipe trở thành một tool `subrecipe__<name>` (schema sinh từ parameters, giá trị gắn cứng không đè được) + tool `subrecipe__batch` chạy nhiều cái **song song cap 3** (kết quả JSON từng lane hiển thị card subagent, Stop hủy được cả lô). `return_mode`: `summary` (mặc định, ≤ 2.000 ký tự) hoặc `full`. Sub-recipe là leaf worker — không delegate, không lồng sub-recipe (chống đệ quy).
+- **Sub-recipes**: session chạy recipe có `sub_recipes` thì mỗi sub-recipe trở thành một tool `subrecipe__<name>` (schema sinh từ parameters, giá trị gắn cứng không đè được) + tool `subrecipe__batch` chạy nhiều cái **song song cap 3** (kết quả JSON từng lane hiển thị card subagent, Stop hủy được cả lô). `return_mode`: `summary` (mặc định, ≤ 2.000 ký tự) hoặc `full`. Sub-recipe là leaf worker — không delegate, không lồng sub-recipe (chống đệ quy).
 - **Orchestrator sweep**: mở panel orchestrator, nhập mục tiêu — hệ thống tự phân rã thành lưới N cấu hình chạy song song (bấm Dừng là thật sự ngưng tiêu token), chấm điểm xếp hạng từng bản, vẽ heatmap theo trục và tổng hợp một đáp án cuối. Bấm **"Thêm vào hội thoại"** để ghi đáp án vào hội thoại như một message assistant (có gắn nhãn nguồn orchestrator).
 - **Plan & checklist**: task lớn được phân rã bằng `plan_create`/`plan_update`; UI hiện checklist tiến độ (Chờ/Đang làm/Xong/Lỗi/Bỏ qua) kèm progress bar. **Plan Mode** khoá agent ở chế độ khảo sát — chỉ đọc/liệt kê/tìm và hỏi làm rõ, tool ghi bị vô hiệu cho tới khi bạn chuyển sang Act.
 - **Self-improvement lessons**: agent tự lưu bài học sau khi sửa bug khó / phát hiện pattern hay bằng `lesson_save` (3 loại: rule / pattern / gotcha, tối đa 400 ký tự); các bài học được inject vào system prompt của các phiên sau.
@@ -111,7 +111,7 @@ Vyen đọc tự do nhưng ghi có kỷ luật: mọi thao tác ghi file / chạ
 - **Lead/Worker routing**: state machine tính lại từ toàn bộ lịch sử mỗi lượt (không lưu state riêng — sống sót qua reload), client chỉ override field `model` của request như đường media/recipe; server không cần biết. `/plan` chạy planner model đúng một lượt rồi nhả về routing thường.
 - **Thanh trượt suy luận**: 4 mức low/medium/high/max; mức nào khả dụng đọc từ metadata `/v1/models` (chuẩn OpenRouter) nên model không hỗ trợ không nhận tham số rác.
 - **Ngân sách tool**: tối đa 32 lần gọi tool mỗi lượt (đếm theo hội thoại, không reset khi client resubmit), tự chặn gọi trùng tham số và phát hiện doom-loop để bảo model đổi hướng; kết quả tool bị cắt ở 24.000 ký tự.
-- **Sinh ảnh/video**: nút trong ô nhập gọi thẳng gateway để tạo ảnh hoặc video ngay trong khung chat, tự fallback qua server khi gateway chặn CORS. Trên bản desktop (launcher Edge/Chrome), tạo ảnh gọi gateway trực tiếp từ Web nên gateway chặn origin kiểu crax vẫn gọi được.
+- **Sinh ảnh/video**: nút trong ô nhập gọi thẳng nhà cung cấp để tạo ảnh hoặc video ngay trong khung chat, tự fallback qua server khi nhà cung cấp chặn CORS.
 - **Emulated tool-calling**: model không hỗ trợ function calling vẫn dùng được toàn bộ tool — schema render thành text trong system prompt, model trả khối `<tool_call>` JSON, server parse + thực thi + vòng lặp (trần 10 vòng, 5 call/vòng, chống model tự bịa kết quả tool).
 
 ## Tech stack
@@ -198,7 +198,7 @@ lib/             — logic agent thuần, test được trong node:
                   recipes/ (schema zod, template one-pass, retry state
                   machine, structured output, share link, sub-recipe tools),
                   skills/ (SKILL.md front-matter + chỉ mục + hints),
-                  memory/ (goose: bộ nhớ cấu trúc + mirror markdown)
+                  memory/ (bộ nhớ cấu trúc + mirror markdown)
 
 lib/db.ts                   — Dexie schema + hooks (tokenize, sanitize) +
                               appendMessage (allocator nguyên tử seq/branchOrder)

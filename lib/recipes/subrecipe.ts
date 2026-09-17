@@ -1,5 +1,5 @@
 /**
- * Sub-recipes (port Goose): mỗi sub-recipe của session trở thành MỘT tool
+ * Sub-recipes: mỗi sub-recipe của session trở thành MỘT tool
  * `subrecipe__<name>` với JSON schema sinh từ `parameters` của nó, cộng một
  * tool `subrecipe__batch` chạy nhiều sub-recipe song song (runPool cap 3 —
  * Promise.allSettled semantics đã có sẵn ở orchestrator/scheduler).

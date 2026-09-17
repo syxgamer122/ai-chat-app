@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * Bảng phân quyền chi tiết từng công cụ (P1-6 Port Goose).
+ * Bảng phân quyền chi tiết từng công cụ (P1-6).
  *
  * Tính năng:
  * - Bảng phân quyền chi tiết per-tool: auto | ask | deny (hoặc default)

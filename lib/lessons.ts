@@ -2,7 +2,7 @@
  * Self-Improvement Lessons — agent rút bài học sau mỗi fix/success/failure,
  * lưu persistent và inject vào system prompt cho các phiên sau.
  *
- * Port mô hình Claude Code /reflect + AGENTS.md (Addy Osmani) + Qwen-mem về
+ * Mô hình /reflect + AGENTS.md + memory về
  * mô hình Vyen: dùng bảng memories sẵn có trong Dexie, thêm category prefix
  * để phân biệt lesson với fact thông thường.
  *

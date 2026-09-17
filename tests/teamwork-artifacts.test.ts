@@ -27,7 +27,7 @@ describe('Artifacts Engine — REQUEST.md', () => {
     repoContext: {
       latestCommit: 'abc1234 feat: baseline harness setup',
       gitStatus: 'clean (working tree clean)',
-      workingDirectory: 'c:/Users/huumanh/Downloads/ai-chat-app',
+      workingDirectory: 'C:/projects/vyen',
     },
     constraints: {
       process: '2 Phase (Scope & Plan -> Execution & Critic)',
@@ -60,7 +60,7 @@ describe('Artifacts Engine — REQUEST.md', () => {
     expect(md).toContain('## Bối cảnh Repo');
     expect(md).toContain('- Commit gần nhất: abc1234 feat: baseline harness setup');
     expect(md).toContain('- Trạng thái git: clean (working tree clean)');
-    expect(md).toContain('- Thư mục làm việc: c:/Users/huumanh/Downloads/ai-chat-app');
+    expect(md).toContain('- Thư mục làm việc: C:/projects/vyen');
     expect(md).toContain('## Ràng buộc');
     expect(md).toContain('- Quy trình: 2 Phase');
     expect(md).toContain('- Concurrency: Tuần tự mặc định; tối đa 2 song song khi file hoàn toàn độc lập');

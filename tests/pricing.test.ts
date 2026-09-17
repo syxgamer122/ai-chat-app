@@ -7,9 +7,9 @@ describe('findModelPrice — match fragment dài nhất', () => {
     expect(p).toEqual({ in: 0.15, out: 0.6 });
   });
 
-  it('prefix vendor không cản trở match ("openai/gpt-4o", "crax/claude-sonnet-4")', () => {
+  it('prefix vendor không cản trở match ("openai/gpt-4o", "gw/claude-sonnet-4")', () => {
     expect(findModelPrice('openai/gpt-4o')?.in).toBe(2.5);
-    expect(findModelPrice('crax/claude-sonnet-4')?.out).toBe(15.0);
+    expect(findModelPrice('gw/claude-sonnet-4')?.out).toBe(15.0);
   });
 
   it('model local/free không nhận diện → null (không bịa tiền)', () => {

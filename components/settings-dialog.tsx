@@ -380,9 +380,9 @@ function MemoriesSection() {
  * chỉ phần này re-render khi snapshot provider đổi (danh sách model được nạp
  * lại sau mỗi lần "Kiểm tra kết nối"), thay vì cả dialog cài đặt.
  *
- * Vyen KHÔNG tự đoán model nào nhìn được ảnh: gateway BYOK chỉ trả id/tên qua
+ * Vyen KHÔNG tự đoán model nào nhìn được ảnh: provider BYOK chỉ trả id/tên qua
  * /v1/models, không có metadata capability. Đoán sai thì mọi lượt fs_read ảnh
- * đều thất bại kèm lỗi mơ hồ của gateway — nên để người dùng tự chọn.
+ * đều thất bại kèm lỗi mơ hồ của provider — nên để người dùng tự chọn.
  */
 function VisionModelSection() {
   const visionModel = useAppStore((s) => s.settings.visionModel ?? '');
@@ -395,12 +395,12 @@ function VisionModelSection() {
      tải /v1/models → không có gì để chọn. /api/vision đòi provider active nên
      đường này chắc chắn không dùng được, khoá select cho rõ ràng. */
   const noModels = activeProviderId === SERVER_PROVIDER_ID || models.length === 0;
-  /* Model đã lưu nhưng không có trong danh sách hiện tại (đổi provider, gateway
+  /* Model đã lưu nhưng không có trong danh sách hiện tại (đổi provider, provider
      bỏ model, snapshot chưa nạp): vẫn hiện thành một option để select không
      "nói dối" là đang tắt — và KHÔNG reset về '' vì đó là âm thầm xoá lựa chọn
      của người dùng. */
   const orphanModel = Boolean(visionModel) && !models.some((m) => m.id === visionModel);
-  /* Id gateway chứa ký tự mà mọi route LLM từ chối (khoảng trắng, '@'...) —
+  /* Id provider chứa ký tự mà mọi route LLM từ chối (khoảng trắng, '@'...) —
      client không gửi được nên tính năng ảnh coi như tắt. Nói thẳng ở đây, kẻo
      người dùng thấy đã chọn model mà ảnh vẫn không đọc được. */
   const unusableModel = Boolean(visionModel) && !isApiModelId(visionModel);
@@ -752,7 +752,7 @@ function CustomSlashCommandsSection() {
       {/* Danh sách lệnh built-in chuẩn */}
       <div className="rounded-xl border border-zinc-200 bg-zinc-50/50 p-3 dark:border-zinc-800 dark:bg-zinc-900/30">
         <h4 className="mb-2 text-xs font-semibold text-zinc-700 dark:text-zinc-300">
-          Lệnh hệ thống mặc định (Goose Standard)
+          Lệnh hệ thống mặc định
         </h4>
         <div className="grid grid-cols-1 gap-2 text-xs sm:grid-cols-2">
           {BUILTIN_SLASH_COMMANDS.map((cmd) => (
@@ -1249,11 +1249,11 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                   >
                     <span className="min-w-0">
                       <span className="block text-sm font-medium text-zinc-700">
-                        Đường tool giả lập (gateway không hỗ trợ tools)
+                        Đường tool giả lập (provider không hỗ trợ tools)
                       </span>
                       <span className="mt-0.5 block text-[11px] leading-relaxed text-zinc-600">
                         Bật khi model cố gọi công cụ nhưng JSON hiện ra dạng chữ trong câu trả lời
-                        (gateway âm thầm bỏ qua tham số tools). Tool sẽ chạy qua protocol text thay vì
+                        (provider âm thầm bỏ qua tham số tools). Tool sẽ chạy qua protocol text thay vì
                         function calling gốc.
                       </span>
                     </span>
@@ -1292,7 +1292,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                   </label>
                 )}
 
-                {/* Chế độ hoạt động & phê duyệt chuẩn (P1-6 Port Goose) */}
+                {/* Chế độ hoạt động & phê duyệt chuẩn (P1-6) */}
                 {(settings.agentTools ?? true) && (
                   <>
                     <div className="rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-900">
@@ -1494,7 +1494,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
               {activeProviderId === SERVER_PROVIDER_ID && (
                 <div>
                   <label htmlFor="server-api-key" className="mb-1.5 block text-sm font-medium text-zinc-700">
-                    API Key — chỉ cho Máy chủ mặc định
+                    API Key — dùng cho model OpenAI chính gốc
                   </label>
                   <input
                     id="server-api-key"
@@ -1505,7 +1505,8 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                     className="field font-mono"
                   />
                   <p className="mt-1 text-[11px] leading-relaxed text-zinc-600">
-                    Chỉ lưu trong phiên này, không ghi vào bộ nhớ máy.
+                    Chỉ lưu trong phiên này, không ghi vào bộ nhớ máy. Key này được gửi
+                    thẳng tới api.openai.com khi gọi model OpenAI.
                   </p>
                 </div>
               )}
@@ -1516,20 +1517,6 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                   Lưu nhiều nhà cung cấp chuẩn OpenAI-compatible, tải danh sách model và chuyển
                   nhanh mà không cần cấu hình lại server.
                 </p>
-                <ul className="mb-2.5 list-disc space-y-1 pl-4 text-[11px] leading-relaxed text-zinc-600">
-                  <li>
-                    <strong className="font-medium text-zinc-800">crax-gpt:</strong> key tại{' '}
-                    <a
-                      href="https://gpt.crax.lol"
-                      target="_blank"
-                      rel="noreferrer noopener nofollow"
-                      className="text-brand underline-offset-2 hover:underline"
-                    >
-                      gpt.crax.lol
-                    </a>{' '}
-                    — vào Settings → API keys lấy key <code className="claude-inline-code">crk_live_…</code>.
-                  </li>
-                </ul>
                 <ProviderManager />
               </div>
 

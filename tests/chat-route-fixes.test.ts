@@ -18,8 +18,8 @@ import { looksLikePseudoError } from '@/lib/pseudo-error-response';
 const ROUTE_PATH = path.resolve(__dirname, '../app/api/chat/route.ts');
 const source = fs.readFileSync(ROUTE_PATH, 'utf8');
 
-/** Lỗi trá hình THẬT của crax (HTTP 200 + finish 'stop' + nội dung lỗi). */
-const REAL_CRAX_ERROR =
+/** Lỗi trá hình THẬT của gateway (HTTP 200 + finish 'stop' + nội dung lỗi). */
+const REAL_GATEWAY_ERROR =
   '\n\n[Notion is currently unavailable — tried 22 accounts over 0s, every account ' +
   "tried is over its usage cap for this model right now. This usually clears within a " +
   "few minutes as the account pool refreshes; try again shortly, or shorten/simplify " +
@@ -70,7 +70,7 @@ describe('A3/A5 — đường emulated vẫn đủ server tools + MCP tools', ()
  * Đảo điều kiện (xoá một trong ba lệnh dọn khỏi khối `if (poll)`) → describe
  * này ĐỎ: prefix thiếu hoặc thứ tự sai.
  */
-describe('A4 — nhánh Pollinations dọn đủ timer + ghi công key', () => {
+describe('A4 — nhánh Pollinations dọn đủ timer trước writeFinish', () => {
   const blockMatch = source.match(
     /const poll = pollinationsMarkdown\(lastUser, targetModel\);\s*\n\s*if \(poll\) \{([\s\S]*?)\n\s*return;/,
   );
@@ -79,16 +79,15 @@ describe('A4 — nhánh Pollinations dọn đủ timer + ghi công key', () => {
     expect(blockMatch).not.toBeNull();
   });
 
-  it.skipIf(!blockMatch)('đủ clearIdle + clearTimeout(budgetTimer) + markKeySuccess TRƯỚC writeFinish', () => {
+  it.skipIf(!blockMatch)('đủ clearIdle + clearTimeout(budgetTimer) TRƯỚC writeFinish', () => {
     const block = blockMatch![1];
-    for (const token of ['clearIdle();', 'clearTimeout(budgetTimer);', 'markKeySuccess(apiKey);']) {
+    for (const token of ['clearIdle();', 'clearTimeout(budgetTimer);']) {
       expect(block).toContain(token);
     }
-    // Thứ tự: cả ba lệnh dọn phải chạy trước khi stream khép lại.
+    // Thứ tự: cả hai lệnh dọn phải chạy trước khi stream khép lại.
     const finishAt = block.indexOf("writeFinish('stop')");
     expect(finishAt).toBeGreaterThan(block.indexOf('clearIdle();'));
     expect(finishAt).toBeGreaterThan(block.indexOf('clearTimeout(budgetTimer);'));
-    expect(finishAt).toBeGreaterThan(block.indexOf('markKeySuccess(apiKey);'));
   });
 });
 
@@ -276,13 +275,13 @@ describe('A22 — sniff 40 ký tự đầu + cửa sổ 600 ký tự giữa lu�
     );
   });
 
-  it('hành vi thật: payload crax thật khớp trong đúng cửa sổ hold — hạ hold sẽ hở lỗ', () => {
+  it('hành vi thật: payload gateway thật khớp trong đúng cửa sổ hold — hạ hold sẽ hở lỗ', () => {
     expect(Number.isFinite(hold)).toBe(true);
     // Tiền tố ngắn nhất mà lib nhận diện được — đây là mức tối thiểu mà
     // route PHẢI tiếp tục soi trước khi nhả token.
     let minMatch = -1;
-    for (let i = 1; i <= REAL_CRAX_ERROR.length; i++) {
-      if (looksLikePseudoError(REAL_CRAX_ERROR.slice(0, i))) {
+    for (let i = 1; i <= REAL_GATEWAY_ERROR.length; i++) {
+      if (looksLikePseudoError(REAL_GATEWAY_ERROR.slice(0, i))) {
         minMatch = i;
         break;
       }

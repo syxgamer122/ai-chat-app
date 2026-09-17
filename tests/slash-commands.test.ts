@@ -5,7 +5,7 @@ import {
   BUILTIN_SLASH_COMMANDS,
 } from '@/lib/slash-commands';
 
-describe('Slash Commands Engine (Goose P2-10)', () => {
+describe('Slash Commands Engine (P2-10)', () => {
   it('định nghĩa đầy đủ 8 lệnh slash built-in chuẩn', () => {
     const names = BUILTIN_SLASH_COMMANDS.map((c) => c.name);
     expect(names).toContain('plan');

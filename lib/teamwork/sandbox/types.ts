@@ -1,5 +1,5 @@
 /**
- * Types and interfaces for Process Sandboxing & Isolation (Arcbox Model).
+ * Types and interfaces for Process Sandboxing & Isolation.
  */
 
 export interface ScrubConfig {

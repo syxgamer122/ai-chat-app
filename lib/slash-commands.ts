@@ -1,5 +1,5 @@
 /**
- * Hệ thống Slash Commands chuẩn hoá cho Vyen (Goose P2-10).
+ * Hệ thống Slash Commands chuẩn hoá cho Vyen (P2-10).
  *
  * Cung cấp danh mục các lệnh slash chuẩn hỗ trợ cả Web UI và CLI:
  * - /plan <mục tiêu>               — Lập kế hoạch bằng planner model
@@ -58,7 +58,7 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommandDef[] = [
   {
     name: 'memory',
     syntax: '/memory',
-    description: 'Xem và quản lý bộ nhớ dài hạn (Goose memory)',
+    description: 'Xem và quản lý bộ nhớ dài hạn ',
     aliases: ['memories'],
     category: 'system',
   },

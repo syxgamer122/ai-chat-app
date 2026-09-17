@@ -1,5 +1,5 @@
 /**
- * Template engine tối giản cho recipe (Goose dùng jinja — Vyen chỉ cần một
+ * Template engine tối giản cho recipe (không cần engine nặng — Vyen chỉ cần một
  * tập con nhỏ, KHÔNG eval JS):
  *   {{ param }}        thay bằng giá trị tham số (cho phép space trong braces)
  *   {{ recipe_dir }}   thư mục chứa file recipe trong workspace

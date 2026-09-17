@@ -1,6 +1,6 @@
 /**
  * Comprehensive Unit Test Suite for Rate Limit & 429 Handling (Milestone 3).
- * Conforms strictly to ORIGINAL_REQUEST.md R3, PROJECT.md, and .opencode/agents/teamwork-orchestrator.md.
+ * Conforms strictly to ORIGINAL_REQUEST.md R3 và PROJECT.md.
  *
  * Covers:
  * 1. 429 Error Detection (isRateLimitError):

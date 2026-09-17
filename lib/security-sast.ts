@@ -1,6 +1,6 @@
 /**
- * Chaitin MonkeyCode Advanced Static Application Security Testing (SAST) Engine.
- * Conforms to MonkeyCode security architecture (https://github.com/chaitin/MonkeyCode).
+ * Static Application Security Testing (SAST) Engine.
+ * Không phụ thuộc dịch vụ ngoài — luật quét viết cho Vyen.
  *
  * Provides comprehensive AST & pattern-based vulnerability detection across 8 security domains:
  * 1. Command Injection (CWE-78)
@@ -12,7 +12,7 @@
  * 7. Server-Side Request Forgery / SSRF (CWE-918)
  * 8. Insecure Cryptography & Pseudo-Randomness (CWE-327 / CWE-338)
  *
- * Computes standardized MonkeyCode Security Score (0-100) and letter grades (A/B/C/F).
+ * Tính Security Score (0-100) kèm xếp hạng chữ (A/B/C/F).
  */
 
 import fs from 'node:fs';
@@ -102,7 +102,7 @@ const IGNORE_DIRS = new Set([
   'coverage',
   '.cache',
   'fixtures',
-  '.opencode',
+  '.vyen',
 ]);
 
 const BINARY_EXTS = new Set([
@@ -130,10 +130,10 @@ const BINARY_EXTS = new Set([
 ]);
 
 /**
- * All SAST Detection Rules conforming to Chaitin MonkeyCode.
+ * Toàn bộ luật phát hiện của SAST engine.
  * Linear-time matching without backtracking risks.
  */
-export const MONKEYCODE_RULES: SastRule[] = [
+export const SAST_RULES: SastRule[] = [
   // 1. Command Injection (CWE-78)
   {
     id: 'CMD-INJ-001',
@@ -204,7 +204,7 @@ export const MONKEYCODE_RULES: SastRule[] = [
     description: 'Detected hardcoded OpenAI API key token.',
     remediation: 'Store API key in environment variables or OS safeStorage vault. Revoke exposed keys.',
     match: (line, _idx, _content, relPath) => {
-      if (relPath.includes('test') || relPath.endsWith('security-sast.ts') || relPath.includes('opencode.json')) return false;
+      if (relPath.includes('test') || relPath.endsWith('security-sast.ts') || relPath.includes('vyen-secrets.json')) return false;
       const m = line.match(/sk-[a-zA-Z0-9]{20,}/);
       if (m && !m[0].includes('placeholder') && !m[0].includes('example') && !m[0].includes('sk-ant')) return true;
       return false;
@@ -413,15 +413,15 @@ export const MONKEYCODE_RULES: SastRule[] = [
 ];
 
 /**
- * MonkeyCode SAST Scanner Engine.
+ * SAST Scanner Engine.
  */
-export class MonkeyCodeSastScanner {
+export class SecuritySastScanner {
   private workspaceRoot: string;
   private rules: SastRule[];
 
   constructor(workspaceRoot: string = process.cwd(), customRules?: SastRule[]) {
     this.workspaceRoot = path.resolve(workspaceRoot);
-    this.rules = customRules || MONKEYCODE_RULES;
+    this.rules = customRules || SAST_RULES;
   }
 
   public scan(options?: SastScanOptions): SastReport {
@@ -432,7 +432,7 @@ export class MonkeyCodeSastScanner {
       ? path.resolve(this.workspaceRoot, options.targetPath)
       : this.workspaceRoot;
 
-    // 1. Check Git tracked sensitive files (MonkeyCode Environment Guard)
+    // 1. Check Git tracked sensitive files (Environment Guard)
     try {
       const gitCheck = spawnSync('git', ['ls-files', '.env', '.env.local', '*.pem', 'id_rsa'], {
         cwd: this.workspaceRoot,
@@ -623,7 +623,7 @@ export class MonkeyCodeSastScanner {
   public formatReport(report: SastReport): string {
     const lines: string[] = [
       '================================================================================',
-      '=== Vyen Security & Code Audit (MonkeyCode Standard) ===',
+      '=== Vyen Security & Code Audit (Security Standard) ===',
       '================================================================================',
       `Workspace:      ${report.workspaceRoot}`,
       `Checked Files:  ${report.checkedFiles}`,
@@ -659,12 +659,12 @@ export class MonkeyCodeSastScanner {
 }
 
 /**
- * Helper function to run MonkeyCode SAST scan directly.
+ * Helper function to run Security SAST scan directly.
  */
-export function runMonkeyCodeSast(
+export function runSecuritySast(
   workspaceRoot: string = process.cwd(),
   options?: SastScanOptions,
 ): SastReport {
-  const scanner = new MonkeyCodeSastScanner(workspaceRoot);
+  const scanner = new SecuritySastScanner(workspaceRoot);
   return scanner.scan(options);
 }

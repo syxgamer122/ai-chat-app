@@ -3,7 +3,7 @@
  *
  * VÌ SAO CẦN — lỗi thật đã đo được:
  * Chuẩn OpenAI quy định thiếu trường `stream` thì mặc định là `false`. Gateway
- * crax làm NGƯỢC LẠI: không có `stream` thì nó trả về SSE
+ * gateway làm NGƯỢC LẠI: không có `stream` thì nó trả về SSE
  * (`data: {...chunk}`), trong khi `stream: false` tường minh mới trả JSON.
  *
  * AI SDK `generateText` không gửi `stream` (vì mặc định đã là false theo
@@ -11,7 +11,7 @@
  * luôn trả `all_models_failed`, tức tính năng NÉN NGỮ CẢNH hỏng hoàn toàn —
  * hội thoại dài sẽ tràn context thay vì được nén.
  *
- * Kiểm chứng bằng request thật tới gpt.crax.lol:
+ * Kiểm chứng bằng request thật tới upstream:
  *   không có `stream`     -> body bắt đầu bằng "data: {"   (SSE)
  *   `"stream": false`     -> body bắt đầu bằng "{"          (JSON)
  *

@@ -8,29 +8,29 @@
 ## Feature Inventory Mapping
 | # | Feature | Source | Tier 1 (Coverage) | Tier 2 (BVA) | Tier 3 (Cross) | Tier 4 (Scenario) |
 |---|---------|--------|:-----------------:|:------------:|:--------------:|:-----------------:|
-| 1 | DAG Topological Sort | Hatchet & Orca | 5 | 5 | ✓ | ✓ |
-| 2 | Concurrency Limiter & Semaphore | Hatchet & Orca | 5 | 5 | ✓ | ✓ |
-| 3 | Exponential Jitter Backoff | Hatchet & Orca | 5 | 5 | ✓ | ✓ |
-| 4 | State Checkpointing | Hatchet & Orca | 5 | 5 | ✓ | ✓ |
-| 5 | Pause & Resume Lifecycle | Hatchet & Orca | 5 | 5 | ✓ | ✓ |
-| 6 | Task Idempotency Tokens | Hatchet & Orca | 5 | 5 | ✓ | ✓ |
-| 7 | HITL Approval Gates | HumanLayer & Commerce-Agents | 5 | 5 | ✓ | ✓ |
-| 8 | Interrupt Tokens | HumanLayer & Commerce-Agents | 5 | 5 | ✓ | ✓ |
-| 9 | Visual Diff Inspection | HumanLayer & Commerce-Agents | 5 | 5 | ✓ | ✓ |
-| 10 | ASCII / Unicode Flow Sketches | HumanLayer & Commerce-Agents | 5 | 5 | ✓ | ✓ |
-| 11 | Code-Shape AST Outlining | HumanLayer & Commerce-Agents | 5 | 5 | ✓ | ✓ |
-| 12 | Cybernetic Control Loop | HumanLayer | 5 | 5 | ✓ | ✓ |
-| 13 | Typed Zod Tool Contracts | Commerce-Agents | 5 | 5 | ✓ | ✓ |
-| 14 | Provenance-Gated Writes | Commerce-Agents | 5 | 5 | ✓ | ✓ |
-| 15 | Dual-Gate Guardrails | Commerce-Agents | 5 | 5 | ✓ | ✓ |
-| 16 | Environment Variable Scrubbing | Arcbox | 5 | 5 | ✓ | ✓ |
-| 17 | CWD Lockdown & Temp Isolation | Arcbox | 5 | 5 | ✓ | ✓ |
-| 18 | Process Tree Teardown & Deadlines | Arcbox | 5 | 5 | ✓ | ✓ |
-| 19 | Bitemporal Context Ledger | Utopia | 5 | 5 | ✓ | ✓ |
-| 20 | Historical State Replay | Utopia | 5 | 5 | ✓ | ✓ |
-| 21 | Non-Destructive Compensating Rollback | Utopia | 5 | 5 | ✓ | ✓ |
-| 22 | 3-Tier Progressive Context Query | Utopia & HumanLayer | 5 | 5 | ✓ | ✓ |
-| 23 | Semantic Knowledge Ontology | Utopia | 5 | 5 | ✓ | ✓ |
+| 1 | DAG Topological Sort | DAG & song song hoá | 5 | 5 | ✓ | ✓ |
+| 2 | Concurrency Limiter & Semaphore | DAG & song song hoá | 5 | 5 | ✓ | ✓ |
+| 3 | Exponential Jitter Backoff | DAG & song song hoá | 5 | 5 | ✓ | ✓ |
+| 4 | State Checkpointing | DAG & song song hoá | 5 | 5 | ✓ | ✓ |
+| 5 | Pause & Resume Lifecycle | DAG & song song hoá | 5 | 5 | ✓ | ✓ |
+| 6 | Task Idempotency Tokens | DAG & song song hoá | 5 | 5 | ✓ | ✓ |
+| 7 | HITL Approval Gates | Human-in-the-loop | 5 | 5 | ✓ | ✓ |
+| 8 | Interrupt Tokens | Human-in-the-loop | 5 | 5 | ✓ | ✓ |
+| 9 | Visual Diff Inspection | Human-in-the-loop | 5 | 5 | ✓ | ✓ |
+| 10 | ASCII / Unicode Flow Sketches | Human-in-the-loop | 5 | 5 | ✓ | ✓ |
+| 11 | Code-Shape AST Outlining | Human-in-the-loop | 5 | 5 | ✓ | ✓ |
+| 12 | Cybernetic Control Loop | Human-in-the-loop | 5 | 5 | ✓ | ✓ |
+| 13 | Typed Zod Tool Contracts | Hợp đồng công cụ | 5 | 5 | ✓ | ✓ |
+| 14 | Provenance-Gated Writes | Hợp đồng công cụ | 5 | 5 | ✓ | ✓ |
+| 15 | Dual-Gate Guardrails | Hợp đồng công cụ | 5 | 5 | ✓ | ✓ |
+| 16 | Environment Variable Scrubbing | Sandbox | 5 | 5 | ✓ | ✓ |
+| 17 | CWD Lockdown & Temp Isolation | Sandbox | 5 | 5 | ✓ | ✓ |
+| 18 | Process Tree Teardown & Deadlines | Sandbox | 5 | 5 | ✓ | ✓ |
+| 19 | Bitemporal Context Ledger | Ledger bitemporal | 5 | 5 | ✓ | ✓ |
+| 20 | Historical State Replay | Ledger bitemporal | 5 | 5 | ✓ | ✓ |
+| 21 | Non-Destructive Compensating Rollback | Ledger bitemporal | 5 | 5 | ✓ | ✓ |
+| 22 | 3-Tier Progressive Context Query | Ledger & ngữ cảnh | 5 | 5 | ✓ | ✓ |
+| 23 | Semantic Knowledge Ontology | Ledger bitemporal | 5 | 5 | ✓ | ✓ |
 | 24 | TeamworkEngine DAG Integration | Core Vyen Integration | 5 | 5 | ✓ | ✓ |
 | 25 | ToolRunner Contract & Sandbox Integration | Core Vyen Integration | 5 | 5 | ✓ | ✓ |
 | 26 | CLI & Headless Runner Upgrades | Core Vyen Integration | 5 | 5 | ✓ | ✓ |

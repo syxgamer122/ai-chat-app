@@ -298,7 +298,7 @@ describe('P1-6: Tool permissions & 4 modes', () => {
     });
   });
 
-  describe('MCP available_tools whitelist (Port Goose)', () => {
+  describe('MCP available_tools whitelist', () => {
     it('filters MCP tool list to only allowed tools when whitelist is defined', () => {
       const serverConfig = {
         id: 'filesystem',

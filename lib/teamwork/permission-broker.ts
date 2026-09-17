@@ -1,6 +1,6 @@
 /**
  * Capability-Based Permission Broker & Process Tree Supervisor for Teamwork Harness.
- * Reverse-engineered and adapted from milind-soni/OpenMausBot's local broker architecture.
+ * Kiến trúc permission broker cục bộ.
  *
  * Core capabilities:
  * 1. Granular Capability Scopes: Grants per-worker read/write file globs and command patterns.

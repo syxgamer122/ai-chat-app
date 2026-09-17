@@ -1,6 +1,6 @@
 /**
  * POST /api/vision — mô tả MỘT ảnh data-URL bằng model vision của PROVIDER
- * ACTIVE của người dùng (gateway tương thích OpenAI).
+ * ACTIVE của người dùng (provider tương thích OpenAI).
  *
  * Phục vụ agent coding: khi fs_read trúng file ảnh trong workspace, client
  * đọc bytes thành data URL rồi gọi route này để lấy bản mô tả text thay cho
@@ -17,7 +17,6 @@ import { z } from 'zod';
 import { describeImageDataUrl } from '@/lib/vision-bridge';
 import { ACTIVE_MODEL_BODY_FIELD } from '@/lib/aux-llm-chain';
 import { validateProviderBaseUrl } from '@/lib/provider-url';
-import { sharedFreeBudget, acquireUpstreamSlot } from '@/lib/upstream-queue';
 import {
   checkRateLimit,
   rateLimitHeaders,
@@ -107,8 +106,8 @@ export async function POST(req: Request) {
     );
   }
 
-  /* BYOK: đọc headers provider active như /api/title (không dùng getKeyCandidates
-     — vision không có provider active thì 503, không rơi về pool key server). */
+  /* BYOK: đọc headers provider active như /api/title — vision không có
+     provider active thì 503. */
   const rawCustomKey = req.headers.get('x-api-key')?.trim();
   const rawProviderBase = req.headers.get('x-api-base')?.trim() || undefined;
   const providerBaseCheck = rawProviderBase
@@ -116,7 +115,7 @@ export async function POST(req: Request) {
     : undefined;
   /* Base CÓ nhưng sai định dạng → 400 như /api/compact và /api/orchestrate.
      Bỏ qua im lặng là lỗi BẢO MẬT: providerBase thành undefined nhưng key của
-     người dùng vẫn được gửi tới OPENAI_BASE_URL (hoặc api.openai.com) — tức
+     người dùng vẫn được gửi tới api.openai.com — tức
      một host KHÁC ý định của họ. */
   if (providerBaseCheck && !providerBaseCheck.ok) {
     return fail(`Địa chỉ Nhà cung cấp không hợp lệ: ${providerBaseCheck.error}`, 400);
@@ -136,29 +135,12 @@ export async function POST(req: Request) {
     );
   }
 
-  const upstreamBase = providerBase ?? process.env.OPENAI_BASE_URL;
-  /* Gateway free ngân sách CHUNG theo IP server: mô tả ảnh phải xếp hàng
-     giống /api/chat và /api/compact. Bỏ qua hàng đợi ở đây là nhảy hàng —
-     một lượt fs_read trúng ảnh sẽ đẩy lượt chat của người khác vào 429.
-     Xếp hàng đặt SAU mọi lớp kiểm tra: chiếm slot rồi mới phát hiện request
-     rác là ném ngân sách của người khác đi.
-     Ghi chú: describeImageDataUrl có thể retry tới 3 lượt fetch nhưng chỉ
-     chiếm 1 slot — chấp nhận như /api/chat (một request retry nội bộ). */
-  if (upstreamBase && sharedFreeBudget(upstreamBase)) {
-    const slot = await acquireUpstreamSlot(upstreamBase);
-    if (!slot.ok) {
-      return fail(
-        `Gateway đang đông (giới hạn chung của nhà cung cấp free) — thử lại sau ~${slot.retryAfterSec} giây nhé.`,
-        429,
-        { 'Retry-After': String(slot.retryAfterSec) },
-      );
-    }
-  }
+  const upstreamBase = providerBase ?? 'https://api.openai.com/v1';
 
   try {
     const description = await describeImageDataUrl(parsed.data.dataUrl, {
-      // Provider khai base nhưng không kèm key → vẫn thử với key ảo (giống
-      // /api/title): gateway không cần key thì chạy được, cần key thì trả 401
+      // Provider khai base nhưng không kèm key → vẫn thử với key ảo:
+      // provider không cần key thì chạy được, cần key thì trả 401
       // và mô tả thành null — client nhận lỗi rõ ràng.
       apiKey: customKey ?? 'provider-no-key',
       baseUrl: upstreamBase,

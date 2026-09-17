@@ -164,7 +164,7 @@ export async function requireWorkspace(): Promise<{ ok: true; deps: FsDeps } | {
 
 function sanitizeFsError(e: unknown): string {
   const msg = e instanceof Error ? e.message : String(e ?? '');
-  /* Dùng chung registry (lib/secret-registry.ts — port OpenHands SecretRegistry).
+  /* Dùng chung registry (lib/secret-registry.ts — SecretRegistry).
      Bản regex ở đây từng là biến thể THỨ NĂM của cùng một quy tắc và đã drift
      so với 4 route: nó có thêm nhánh `key` bắt cả `key=value` vô hại. */
   return redactSecretText(msg).slice(0, 200);

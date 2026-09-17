@@ -1,6 +1,6 @@
 /**
  * Comprehensive Unit Test Suite for Completion Summary Generator (Milestone 3).
- * Conforms strictly to ORIGINAL_REQUEST.md R3, PROJECT.md, and .opencode/commands/teamwork.md.
+ * Conforms strictly to ORIGINAL_REQUEST.md R3 và PROJECT.md.
  *
  * Covers:
  * 1. Strict Line Count Invariant (<= 20 lines):
