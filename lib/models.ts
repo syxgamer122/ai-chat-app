@@ -150,11 +150,6 @@ const MODEL_BY_PROVIDER_NAME: ReadonlyMap<string, ModelConfig> = (() => {
 
 export const ALLOWED_MODEL_IDS: ReadonlySet<string> = new Set(MODEL_BY_ID.keys());
 
-/** Model sinh ảnh/video built-in — dùng cho 2 nút media cạnh nút mic. */
-export const MEDIA_MODELS: readonly ModelConfig[] = Object.freeze(
-  AVAILABLE_MODELS.filter((m) => m.media !== undefined),
-);
-
 export function mediaKindOf(modelId: string | null | undefined): MediaKind | undefined {
   return findModelConfig(modelId)?.media;
 }

@@ -5427,7 +5427,7 @@ export default function ChatInterface() {
         onThinkingLevelChange={handleThinkingLevelChange}
         thinkingDisabled={isLoading}
         thinkingMandatory={modelReasoningCap?.mandatory ?? false}
-        run={{ streaming: isLoading, mediaBusy: false, webBusy }}
+        run={{ streaming: isLoading, webBusy }}
         hasMessages={hasMessages}
         canCompact={canCompactNow}
         compactBusy={compactBusy}

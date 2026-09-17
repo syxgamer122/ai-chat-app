@@ -47,7 +47,7 @@ interface StatusLineProps {
   /** Model bắt buộc luôn suy luận (metadata reasoning.mandatory). */
   thinkingMandatory?: boolean;
 
-  run: { streaming: boolean; mediaBusy: boolean; webBusy: boolean };
+  run: { streaming: boolean; webBusy: boolean };
 
   hasMessages: boolean;
   canCompact?: boolean;
@@ -106,14 +106,12 @@ export const StatusLine = memo(function StatusLine({
 }: StatusLineProps) {
   const meter = ctxUsed !== undefined && ctxMax ? computeMeter(ctxUsed, ctxMax) : null;
 
-  const runLabel = run.mediaBusy
-    ? 'media'
-    : run.webBusy
-      ? 'web'
-      : run.streaming
-        ? 'running'
-        : 'idle';
-  const runTone = run.mediaBusy || run.webBusy || run.streaming
+  const runLabel = run.webBusy
+    ? 'web'
+    : run.streaming
+      ? 'running'
+      : 'idle';
+  const runTone = run.webBusy || run.streaming
     ? 'text-[#6a9fcc]'
     : 'text-[#9fa4ab]';
 

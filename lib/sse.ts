@@ -1,6 +1,6 @@
 /**
- * Bộ đọc SSE dùng chung cho cả client (lib/media-generate.ts) và edge route
- * (app/api/chat/route.ts). Module thuần, không import gì.
+ * Bộ đọc SSE dùng chung cho cả client và edge route (app/api/chat/route.ts).
+ * Module thuần, không import gì.
  *
  * Trước đây mỗi bên có một bản sao gần giống nhau; tách ra để sửa một lần là
  * đúng cho cả hai, và để test được phần dễ sai nhất: gom byte giữa các chunk.
