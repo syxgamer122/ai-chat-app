@@ -65,3 +65,9 @@ export * from './ledger';
 
 // Temporal Context Memory & Semantic Knowledge Ontology (nội bộ)
 export * from './context';
+
+// Token Discipline & History Invariants (nội bộ)
+export * from './token-discipline';
+
+// Native Zero-Dependency MCP Client (nội bộ)
+export * from './mcp-client';

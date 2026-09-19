@@ -172,6 +172,52 @@ export interface GitStatusResult {
   status: string;
 }
 
+export interface BackgroundProcessRecord {
+  processId: string;
+  command: string;
+  pid?: number;
+  child?: child_process.ChildProcess;
+  status: 'running' | 'completed' | 'failed' | 'stopped';
+  exitCode: number | null;
+  startTime: number;
+  endTime?: number;
+  stdout: string;
+  stderr: string;
+  cwd: string;
+  error?: string;
+}
+
+export interface ProcessStartOptions {
+  cwd?: string;
+  env?: Record<string, string>;
+  id?: string;
+  timeoutMs?: number;
+}
+
+export interface ProcessStatusResult {
+  processId: string;
+  pid?: number;
+  status: 'running' | 'completed' | 'failed' | 'stopped' | 'unknown';
+  exitCode: number | null;
+  uptimeMs: number;
+  command?: string;
+  error?: string;
+}
+
+export interface ProcessOutputResult {
+  processId: string;
+  stdout: string;
+  stderr: string;
+  status: string;
+  exitCode: number | null;
+}
+
+export interface ProcessStopResult {
+  processId: string;
+  stopped: boolean;
+  error?: string;
+}
+
 /**
  * Commits a single staged file to disk within workspaceRoot.
  */
@@ -183,6 +229,11 @@ export async function commitStagedFile(
   await fsp.mkdir(path.dirname(absPath), { recursive: true });
   await fsp.writeFile(absPath, staged.content, 'utf8');
 }
+
+/**
+ * Global background process registry for headless execution sessions.
+ */
+export const defaultProcessRegistry = new Map<string, BackgroundProcessRecord>();
 
 /**
  * Headless Tool Runner executing filesystem, shell, and git operations
@@ -203,6 +254,7 @@ export class HeadlessToolRunner {
   public enableSandbox: boolean;
   public envScrubber?: EnvScrubber;
   public cwdGuard?: CwdGuard;
+  public readonly backgroundProcesses: Map<string, BackgroundProcessRecord>;
   private readonly onApprovalRequest?: (command: string) => Promise<boolean>;
 
   constructor(env: HeadlessToolEnvironment) {
@@ -218,6 +270,7 @@ export class HeadlessToolRunner {
     this.milestoneId = env.milestoneId;
     this.onApprovalRequest = env.onApprovalRequest;
     this.stagingStore = emptyStagingStore();
+    this.backgroundProcesses = new Map<string, BackgroundProcessRecord>();
 
     this.provenanceTracker = env.provenanceTracker || new ProvenanceTracker();
     this.dualGate = env.dualGate || new DualGateController();
@@ -1025,6 +1078,214 @@ export class HeadlessToolRunner {
   }
 
   /* ------------------------------------------------------------------ */
+  /* Background Process Management                                       */
+  /* ------------------------------------------------------------------ */
+
+  /**
+   * Starts a long-running or asynchronous command in the background.
+   */
+  public async process_start(
+    command: string,
+    options?: ProcessStartOptions,
+  ): Promise<{ processId: string; pid?: number; status: 'running' | 'completed' | 'failed'; error?: string }> {
+    if (!command || typeof command !== 'string' || !command.trim()) {
+      throw new Error('process_start requires a non-empty command string.');
+    }
+
+    if (isAlwaysBlocked(command)) {
+      throw new Error(
+        `Command blocked by auto-pilot safety policy: dangerous command pattern detected ("${command.slice(0, 100)}")`,
+      );
+    }
+
+    if (this.permissionBroker) {
+      const targetWorker = this.activeWorkerId || 'anonymous';
+      const perm = await this.permissionBroker.checkExecPermission(targetWorker, command);
+      if (!perm.granted) {
+        throw new Error(perm.reason || `Permission Denied: execution of "${command}" is unauthorized.`);
+      }
+    }
+
+    const execCwd = options?.cwd ? resolveWithin(this.workspaceRoot, options.cwd) : this.workspaceRoot;
+    const processId = options?.id || `proc-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+
+    const isWin = process.platform === 'win32';
+    const shellExe = isWin ? process.env.ComSpec || 'cmd.exe' : '/bin/sh';
+    const shellArgs = isWin ? ['/d', '/s', '/c', command] : ['-c', command];
+
+    let effectiveEnv: Record<string, string> = { ...(process.env as Record<string, string>), ...options?.env };
+    if (this.envScrubber) {
+      effectiveEnv = EnvScrubber.scrub(effectiveEnv);
+    }
+
+    const child = child_process.spawn(shellExe, shellArgs, {
+      cwd: execCwd,
+      windowsHide: true,
+      windowsVerbatimArguments: isWin,
+      env: effectiveEnv as NodeJS.ProcessEnv,
+      detached: !isWin,
+    });
+
+    const record: BackgroundProcessRecord = {
+      processId,
+      command,
+      pid: child.pid,
+      child,
+      status: 'running',
+      exitCode: null,
+      startTime: Date.now(),
+      stdout: '',
+      stderr: '',
+      cwd: execCwd,
+    };
+
+    this.backgroundProcesses.set(processId, record);
+    defaultProcessRegistry.set(processId, record);
+
+    const maxChars = 500_000;
+    child.stdout?.on('data', (d: Buffer) => {
+      record.stdout = (record.stdout + d.toString()).slice(-maxChars);
+    });
+
+    child.stderr?.on('data', (d: Buffer) => {
+      record.stderr = (record.stderr + d.toString()).slice(-maxChars);
+    });
+
+    child.on('error', (err: Error) => {
+      record.status = 'failed';
+      record.error = err.message;
+      record.endTime = Date.now();
+    });
+
+    child.on('exit', (code: number | null) => {
+      if (record.status === 'running') {
+        record.status = code === 0 ? 'completed' : 'failed';
+      }
+      record.exitCode = code;
+      record.endTime = Date.now();
+    });
+
+    if (options?.timeoutMs && options.timeoutMs > 0) {
+      setTimeout(() => {
+        if (record.status === 'running') {
+          void this.process_stop(processId, 'SIGKILL');
+        }
+      }, options.timeoutMs);
+    }
+
+    return { processId, pid: child.pid, status: 'running' };
+  }
+
+  /**
+   * Inspects status, pid, exitCode, uptime of a background process.
+   */
+  public process_status(processId: string): ProcessStatusResult {
+    const record = this.backgroundProcesses.get(processId) || defaultProcessRegistry.get(processId);
+    if (!record) {
+      return {
+        processId,
+        status: 'unknown',
+        exitCode: null,
+        uptimeMs: 0,
+        error: `Process with ID "${processId}" not found.`,
+      };
+    }
+
+    const uptimeMs = (record.endTime ?? Date.now()) - record.startTime;
+    return {
+      processId,
+      pid: record.pid,
+      status: record.status,
+      exitCode: record.exitCode,
+      uptimeMs,
+      command: record.command,
+      error: record.error,
+    };
+  }
+
+  /**
+   * Retrieves buffered stdout and stderr of a background process.
+   */
+  public process_output(
+    processId: string,
+    options?: { tail?: number; clear?: boolean },
+  ): ProcessOutputResult {
+    const record = this.backgroundProcesses.get(processId) || defaultProcessRegistry.get(processId);
+    if (!record) {
+      return {
+        processId,
+        stdout: '',
+        stderr: '',
+        status: 'unknown',
+        exitCode: null,
+      };
+    }
+
+    let stdout = record.stdout;
+    let stderr = record.stderr;
+
+    if (options?.tail && options.tail > 0) {
+      if (stdout) {
+        const outLines = stdout.trimEnd().split(/\r?\n/);
+        stdout = outLines.slice(-options.tail).join('\n');
+      }
+      if (stderr) {
+        const errLines = stderr.trimEnd().split(/\r?\n/);
+        stderr = errLines.slice(-options.tail).join('\n');
+      }
+    }
+
+    if (options?.clear) {
+      record.stdout = '';
+      record.stderr = '';
+    }
+
+    return {
+      processId,
+      stdout,
+      stderr,
+      status: record.status,
+      exitCode: record.exitCode,
+    };
+  }
+
+  /**
+   * Stops a running background process utilizing SandboxedProcessManager.killProcessTree.
+   */
+  public async process_stop(
+    processId: string,
+    signal: NodeJS.Signals = 'SIGTERM',
+  ): Promise<ProcessStopResult> {
+    const record = this.backgroundProcesses.get(processId) || defaultProcessRegistry.get(processId);
+    if (!record) {
+      return { processId, stopped: false, error: `Process with ID "${processId}" not found.` };
+    }
+
+    if (record.status !== 'running') {
+      return { processId, stopped: true };
+    }
+
+    if (record.pid) {
+      SandboxedProcessManager.killProcessTree(record.pid, signal);
+    }
+
+    record.status = 'stopped';
+    record.endTime = Date.now();
+    return { processId, stopped: true };
+  }
+
+  /**
+   * Terminates all background processes currently tracked by this runner.
+   */
+  public async cleanupAllProcesses(): Promise<void> {
+    for (const [id, rec] of this.backgroundProcesses) {
+      if (rec.status === 'running') {
+        await this.process_stop(id, 'SIGKILL');
+      }
+    }
+  }
+
+  /* ------------------------------------------------------------------ */
   /* Git Operations                                                      */
   /* ------------------------------------------------------------------ */
 
@@ -1324,4 +1585,112 @@ export class HeadlessToolRunner {
     await walk(dir);
     return results;
   }
+}
+
+/**
+ * Starts a long-running or asynchronous command in the background.
+ */
+export async function process_start(
+  command: string,
+  options?: ProcessStartOptions & { workspaceRoot?: string },
+): Promise<{ processId: string; pid?: number; status: 'running' | 'completed' | 'failed'; error?: string }> {
+  const runner = new HeadlessToolRunner({ workspaceRoot: options?.workspaceRoot || process.cwd() });
+  return runner.process_start(command, options);
+}
+
+/**
+ * Inspects status, pid, exitCode, uptime of a background process.
+ */
+export function process_status(processId: string): ProcessStatusResult {
+  const record = defaultProcessRegistry.get(processId);
+  if (!record) {
+    return {
+      processId,
+      status: 'unknown',
+      exitCode: null,
+      uptimeMs: 0,
+      error: `Process with ID "${processId}" not found.`,
+    };
+  }
+  const uptimeMs = (record.endTime ?? Date.now()) - record.startTime;
+  return {
+    processId,
+    pid: record.pid,
+    status: record.status,
+    exitCode: record.exitCode,
+    uptimeMs,
+    command: record.command,
+    error: record.error,
+  };
+}
+
+/**
+ * Retrieves buffered stdout and stderr of a background process.
+ */
+export function process_output(
+  processId: string,
+  options?: { tail?: number; clear?: boolean },
+): ProcessOutputResult {
+  const record = defaultProcessRegistry.get(processId);
+  if (!record) {
+    return {
+      processId,
+      stdout: '',
+      stderr: '',
+      status: 'unknown',
+      exitCode: null,
+    };
+  }
+
+  let stdout = record.stdout;
+  let stderr = record.stderr;
+
+  if (options?.tail && options.tail > 0) {
+    if (stdout) {
+      const outLines = stdout.trimEnd().split(/\r?\n/);
+      stdout = outLines.slice(-options.tail).join('\n');
+    }
+    if (stderr) {
+      const errLines = stderr.trimEnd().split(/\r?\n/);
+      stderr = errLines.slice(-options.tail).join('\n');
+    }
+  }
+
+  if (options?.clear) {
+    record.stdout = '';
+    record.stderr = '';
+  }
+
+  return {
+    processId,
+    stdout,
+    stderr,
+    status: record.status,
+    exitCode: record.exitCode,
+  };
+}
+
+/**
+ * Stops a running background process utilizing SandboxedProcessManager.killProcessTree.
+ */
+export async function process_stop(
+  processId: string,
+  signal: NodeJS.Signals = 'SIGTERM',
+): Promise<ProcessStopResult> {
+  const record = defaultProcessRegistry.get(processId);
+  if (!record) {
+    return { processId, stopped: false, error: `Process with ID "${processId}" not found.` };
+  }
+
+  if (record.status !== 'running') {
+    return { processId, stopped: true };
+  }
+
+  if (record.pid) {
+    SandboxedProcessManager.killProcessTree(record.pid, signal);
+  }
+
+  record.status = 'stopped';
+  record.endTime = Date.now();
+  return { processId, stopped: true };
 }

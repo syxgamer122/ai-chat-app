@@ -23,6 +23,12 @@ export interface SlashCommandDef {
 
 export const BUILTIN_SLASH_COMMANDS: SlashCommandDef[] = [
   {
+    name: 'boost',
+    syntax: '/boost <mục tiêu>',
+    description: 'Chạy tác vụ trong Git Worktree cô lập tạm thời, xem diff và xác nhận merge',
+    category: 'agent',
+  },
+  {
     name: 'plan',
     syntax: '/plan <mục tiêu>',
     description: 'Lập kế hoạch khảo sát bằng planner model ở chế độ chỉ-đọc',
@@ -79,6 +85,7 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommandDef[] = [
 ];
 
 export type ParsedSlashCommand =
+  | { kind: 'boost'; target: string }
   | { kind: 'plan'; target: string }
   | { kind: 'mode'; mode: 'always' | 'smart' | 'never' | 'chat_only' }
   | { kind: 'summarize' }
@@ -119,6 +126,10 @@ export function parseSlashCommand(
 
   const command = match[1].toLowerCase();
   const args = (match[2] ?? '').trim();
+
+  if (command === 'boost') {
+    return { kind: 'boost', target: args };
+  }
 
   if (command === 'plan') {
     return { kind: 'plan', target: args };

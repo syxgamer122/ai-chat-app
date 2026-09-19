@@ -33,6 +33,14 @@ describe('Slash Commands Engine (P2-10)', () => {
   });
 
   describe('parseSlashCommand', () => {
+    it('parse /boost với mục tiêu', () => {
+      const res = parseSlashCommand('/boost tối ưu hóa bundle Next.js');
+      expect(res).toEqual({
+        kind: 'boost',
+        target: 'tối ưu hóa bundle Next.js',
+      });
+    });
+
     it('parse /plan với mục tiêu', () => {
       const res = parseSlashCommand('/plan tối ưu hóa bundle Next.js');
       expect(res).toEqual({

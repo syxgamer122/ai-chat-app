@@ -8,6 +8,7 @@
  * - 1: Unrecoverable failure, Critic rejection, rate-limit halt (429), syntax error, or rejected plan.
  */
 
+import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline';
 import { FileCheckpointStore } from './checkpoint';
@@ -17,6 +18,7 @@ import { HitlPolicy } from './hitl';
 import { AppendOnlyLedger } from './ledger';
 import { PointInTimeReplayEngine } from './ledger/replay';
 import { IntegrityMode, TeamworkRunSummary } from './types';
+import { GitWorktreeManager } from './worktree';
 
 export interface CliParsedArgs {
   goal?: string;
@@ -24,6 +26,7 @@ export interface CliParsedArgs {
   autoApprove: boolean;
   dryRun: boolean;
   worktrees: boolean;
+  boost: boolean;
   repoGraph: boolean;
   integrityMode: IntegrityMode;
   concurrency: number;
@@ -46,6 +49,7 @@ export function parseCliArgs(argv: string[], cwd: string = process.cwd()): CliPa
     autoApprove: false,
     dryRun: false,
     worktrees: false,
+    boost: false,
     repoGraph: false,
     integrityMode: 'development',
     concurrency: 2,
@@ -101,6 +105,20 @@ export function parseCliArgs(argv: string[], cwd: string = process.cwd()): CliPa
       result.dryRun = true;
     } else if (arg === '--worktrees') {
       result.worktrees = true;
+    } else if (arg === '--boost' || arg === '/boost') {
+      result.boost = true;
+    } else if (arg.startsWith('/boost ')) {
+      result.boost = true;
+      const val = arg.slice('/boost '.length).trim();
+      if (val) {
+        result.goal = val;
+      }
+    } else if (arg.startsWith('--boost=')) {
+      result.boost = true;
+      const val = arg.slice('--boost='.length).trim();
+      if (val) {
+        result.goal = val;
+      }
     } else if (arg === '--repo-graph') {
       result.repoGraph = true;
     } else if (arg === '--dag') {
@@ -196,8 +214,23 @@ export function parseCliArgs(argv: string[], cwd: string = process.cwd()): CliPa
     } else if (arg.startsWith('-')) {
       result.errors.push(`Unknown option: "${arg}".`);
     } else if (!result.goal) {
-      result.goal = arg;
+      if (arg.startsWith('/boost ')) {
+        result.boost = true;
+        result.goal = arg.slice('/boost '.length).trim();
+      } else if (arg === '/boost') {
+        result.boost = true;
+      } else {
+        result.goal = arg;
+      }
     }
+  }
+
+  if (result.goal?.startsWith('/boost ')) {
+    result.boost = true;
+    result.goal = result.goal.slice('/boost '.length).trim();
+  } else if (result.goal === '/boost') {
+    result.boost = true;
+    result.goal = undefined;
   }
 
   if (!result.help && !result.version && !result.ledgerReplay && (!result.goal || !result.goal.trim())) {
@@ -211,6 +244,7 @@ export interface CliRunOptions {
   userConfirm?: boolean;
   workspaceRoot?: string;
   engine?: TeamworkEngine;
+  engineFactory?: (workspaceRoot: string) => TeamworkEngine;
 }
 
 export interface CliRunResult {
@@ -264,6 +298,7 @@ export async function runCli(argv: string[], options?: CliRunOptions): Promise<C
     stdoutLines.push('  --approval <mode>     HITL approval gate policy: smart | always | never (default: smart)');
     stdoutLines.push('  --ledger-replay <id>  Inspect and replay bitemporal ledger history for milestone/entity');
     stdoutLines.push('  --worktrees           Execute workers in isolated Git worktrees');
+    stdoutLines.push('  --boost, /boost       Execute task in isolated Git Worktree with diff review & merge gate');
     stdoutLines.push('  --repo-graph          Analyze workspace dependency graph for targeted verification');
     stdoutLines.push('  --help, -h            Show help');
     stdoutLines.push('  --version, -v         Show version');
@@ -321,15 +356,42 @@ export async function runCli(argv: string[], options?: CliRunOptions): Promise<C
     }
   }
 
+  let boostManager: GitWorktreeManager | undefined;
+  let boostWorkerId: string | undefined;
+  let effectiveWorkspace = workspaceRoot;
+
+  if (parsed.boost) {
+    boostManager = new GitWorktreeManager({
+      workspaceRoot,
+      baseWorktreeDir: path.join(os.tmpdir(), 'teamwork-boost-worktrees'),
+      branchPrefix: 'teamwork/boost',
+    });
+
+    if (!boostManager.isGitRepo()) {
+      stderrLines.push('Error: Cannot run --boost outside of a git repository.');
+      return { exitCode: 1, stdout: stdoutLines.join('\n'), stderr: stderrLines.join('\n') };
+    }
+
+    try {
+      boostWorkerId = `boost-${Date.now()}`;
+      const boostContext = await boostManager.createWorktree(boostWorkerId);
+      effectiveWorkspace = boostContext.worktreePath;
+      stdoutLines.push(`[Boost Mode] Running in isolated Git Worktree at: "${effectiveWorkspace}"`);
+    } catch (wtErr) {
+      stderrLines.push(`Error creating boost worktree: ${String(wtErr)}`);
+      return { exitCode: 1, stdout: stdoutLines.join('\n'), stderr: stderrLines.join('\n') };
+    }
+  }
+
   const lockManager = new FileLockManager({
     concurrencyCap: parsed.concurrency,
-    workspaceRoot,
+    workspaceRoot: effectiveWorkspace,
   });
 
   // Durable checkpoint store. Without this the engine could never persist a checkpoint,
   // which made `--resume <id>` a silent no-op.
   const checkpointStore = new FileCheckpointStore({
-    workspaceRoot,
+    workspaceRoot: effectiveWorkspace,
     directory: '.teamwork/checkpoints',
   });
 
@@ -339,10 +401,17 @@ export async function runCli(argv: string[], options?: CliRunOptions): Promise<C
     return promptConfirmation('[Phase 1 Pause Gate] Approve proposed plan to proceed to Phase 2?');
   };
 
-  const engine =
-    options?.engine ||
-    new TeamworkEngine({
-      workspaceRoot,
+  let engine: TeamworkEngine;
+  if (options?.engineFactory) {
+    engine = options.engineFactory(effectiveWorkspace);
+  } else if (options?.engine) {
+    engine = options.engine;
+    if (parsed.boost && (engine as any).workspaceRoot !== effectiveWorkspace) {
+      (engine as any).workspaceRoot = effectiveWorkspace;
+    }
+  } else {
+    engine = new TeamworkEngine({
+      workspaceRoot: effectiveWorkspace,
       integrityMode: parsed.integrityMode,
       concurrencyCap: parsed.concurrency,
       useWorktrees: parsed.worktrees,
@@ -376,6 +445,7 @@ export async function runCli(argv: string[], options?: CliRunOptions): Promise<C
         }
       },
     });
+  }
 
   stdoutLines.push(`[Phase 1] Analyzing goal: "${parsed.goal}"`);
 
@@ -392,15 +462,24 @@ export async function runCli(argv: string[], options?: CliRunOptions): Promise<C
     });
 
     if (parsed.dryRun) {
+      if (parsed.boost && boostManager && boostWorkerId) {
+        await boostManager.removeWorktree(boostWorkerId, { force: true, deleteBranch: true });
+      }
       stdoutLines.push('[Dry Run] Planning phase complete. Exiting without modifying source files.');
       return { exitCode: 0, stdout: stdoutLines.join('\n'), stderr: '', summary };
     }
 
     if (summary.status === 'BLOCKED_429') {
+      if (parsed.boost && boostManager && boostWorkerId) {
+        await boostManager.removeWorktree(boostWorkerId, { force: true, deleteBranch: true });
+      }
       return { exitCode: 1, stdout: stdoutLines.join('\n'), stderr: stderrLines.join('\n') || summary.summaryText, summary };
     }
 
     if (summary.status === 'FAILED') {
+      if (parsed.boost && boostManager && boostWorkerId) {
+        await boostManager.removeWorktree(boostWorkerId, { force: true, deleteBranch: true });
+      }
       if (summary.summaryText.includes('rejected')) {
         stderrLines.push('[Phase 1] User rejected the proposed plan. Aborting execution.');
       } else if (!stderrLines.some((l) => l.includes('Critic verification failed'))) {
@@ -410,10 +489,55 @@ export async function runCli(argv: string[], options?: CliRunOptions): Promise<C
       return { exitCode: 1, stdout: stdoutLines.join('\n'), stderr: stderrLines.join('\n'), summary };
     }
 
+    // Boost completion: Show diff stat and prompt for merge confirmation
+    if (parsed.boost && boostManager && boostWorkerId) {
+      const statRes = boostManager.getDiffStat(boostWorkerId, `teamwork(boost): ${parsed.goal}`);
+      stdoutLines.push('[Boost Diff Stat]');
+      if (statRes.success && statRes.stat) {
+        stdoutLines.push(statRes.stat);
+      } else {
+        stdoutLines.push('No file modifications detected.');
+      }
+
+      let shouldMerge = false;
+      if (parsed.autoApprove) {
+        shouldMerge = true;
+      } else if (options?.userConfirm !== undefined) {
+        shouldMerge = options.userConfirm;
+      } else {
+        shouldMerge = await promptConfirmation('[Boost Merge Gate] Apply and merge boost changes into main workspace?');
+      }
+
+      if (shouldMerge) {
+        const mergeRes = await boostManager.mergeWorktree(boostWorkerId, {
+          commitMessage: `teamwork(boost): ${parsed.goal}`,
+          autoCommit: true,
+        });
+        if (mergeRes.success) {
+          stdoutLines.push(`[Boost Merge Gate] Successfully merged boost changes (commit ${mergeRes.mergedCommit || 'HEAD'}).`);
+        } else {
+          stderrLines.push(`[Boost Merge Gate] Merge failed: ${mergeRes.error}`);
+          await boostManager.removeWorktree(boostWorkerId, { force: true, deleteBranch: true });
+          return { exitCode: 1, stdout: stdoutLines.join('\n'), stderr: stderrLines.join('\n'), summary };
+        }
+      } else {
+        stdoutLines.push('[Boost Merge Gate] Boost changes rejected. Discarding worktree without merging.');
+      }
+
+      await boostManager.removeWorktree(boostWorkerId, { force: true, deleteBranch: true });
+    }
+
     stdoutLines.push(summary.summaryText);
     stdoutLines.push(`[Checkpoint] Saved run ID: "${checkpointRunId}" (resume with --resume "${checkpointRunId}")`);
     return { exitCode: 0, stdout: stdoutLines.join('\n'), stderr: '', summary };
   } catch (err: unknown) {
+    if (parsed.boost && boostManager && boostWorkerId) {
+      try {
+        await boostManager.removeWorktree(boostWorkerId, { force: true, deleteBranch: true });
+      } catch {
+        // Best-effort cleanup
+      }
+    }
     const errMsg = err instanceof Error ? err.message : String(err);
     stderrLines.push(`Error: ${errMsg}`);
     return { exitCode: 1, stdout: stdoutLines.join('\n'), stderr: stderrLines.join('\n') };

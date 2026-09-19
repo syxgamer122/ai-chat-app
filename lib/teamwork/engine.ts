@@ -55,6 +55,18 @@ import {
 import { FlowSketchGenerator, ShowMeBuilder, VisualDiffVisualizer } from './visual';
 import { GitWorktreeManager } from './worktree';
 
+// Token Discipline & History Invariants
+export {
+  slimToolResults,
+  trimHistory,
+  isToolResultMessage,
+  getToolCallIdFromResult,
+  getDeclaredToolCallIds,
+  type HistoryMessage,
+  type SlimToolResultsOptions,
+  type TrimHistoryOptions,
+} from './token-discipline';
+
 export interface TeamworkGoalInput {
   purpose: string;
   files: string[];

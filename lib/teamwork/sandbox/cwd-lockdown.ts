@@ -29,16 +29,18 @@ export class CwdGuard {
     const rootAbs = path.resolve(workspaceRoot);
     const resolvedCwd = targetCwd ? path.resolve(rootAbs, targetCwd) : rootAbs;
 
-    // Windows drive-letter / UNC paths phải bị chặn trên MỌI nền tảng:
+    // Windows drive-letter / UNC paths phải bị chặn trên POSIX:
     // trên POSIX, `path.resolve` biến chúng thành một tên thư mục hợp lệ
     // (`C:\Windows\System32`) nên dễ bỏ lọt traversal encoded. Test B8 yêu cầu
     // đúng hành vi này.
-    const raw = targetCwd ?? '';
-    const isWindowsAbsolute =
-      /^[a-zA-Z]:[\\/]+/.test(raw) || // C:\... / C:\\... / C:/...
-      /^\\\\[^\/\\]+[\\/]/.test(raw); // \\server\share\...
-    if (isWindowsAbsolute) {
-      throw new CwdLockdownViolationError(rootAbs, targetCwd ?? resolvedCwd);
+    if (process.platform !== 'win32') {
+      const raw = targetCwd ?? '';
+      const isWindowsAbsolute =
+        /^[a-zA-Z]:[\\/]+/.test(raw) || // C:\... / C:\\... / C:/...
+        /^\\\\[^\/\\]+[\\/]/.test(raw); // \\server\share\...
+      if (isWindowsAbsolute) {
+        throw new CwdLockdownViolationError(rootAbs, targetCwd ?? resolvedCwd);
+      }
     }
 
     // Normalize Windows drive letters for comparison

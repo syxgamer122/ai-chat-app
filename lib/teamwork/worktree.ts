@@ -241,6 +241,30 @@ export class GitWorktreeManager {
   }
 
   /**
+   * Generates diff stat for changes made in the worker's worktree.
+   */
+  public getDiffStat(workerId: string, commitMessage?: string): { success: boolean; stat: string; error?: string } {
+    const context = this.activeWorktrees.get(workerId);
+    if (!context) {
+      return { success: false, stat: '', error: `No active worktree found for worker "${workerId}".` };
+    }
+
+    // Auto-commit any uncommitted changes first so branch head captures all modifications
+    this.commitWorktreeChanges(workerId, commitMessage || 'teamwork: pending changes for diff review');
+
+    const diffRes = this.execGit(
+      ['diff', '--stat', `${context.baseCommit}..${context.branchName}`],
+      this.workspaceRoot
+    );
+
+    if (diffRes.code !== 0) {
+      return { success: false, stat: '', error: diffRes.stderr };
+    }
+
+    return { success: true, stat: diffRes.stdout.trim() };
+  }
+
+  /**
    * Merges the passing worker's branch into the target branch or workspace.
    */
   public async mergeWorktree(
@@ -277,7 +301,8 @@ export class GitWorktreeManager {
     }
 
     // 3. Apply changes cleanly to target or merge branch
-    const mergeRes = this.execGit(['merge', '--no-ff', '-m', `Merge ${context.branchName} into main`, context.branchName], this.workspaceRoot);
+    const mergeMsg = options?.commitMessage || `Merge ${context.branchName}`;
+    const mergeRes = this.execGit(['merge', '--no-ff', '-m', mergeMsg, context.branchName], this.workspaceRoot);
     if (mergeRes.code !== 0) {
       // If fast-forward or direct merge has collision, abort
       this.execGit(['merge', '--abort'], this.workspaceRoot);

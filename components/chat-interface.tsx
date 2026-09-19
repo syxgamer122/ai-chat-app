@@ -5175,6 +5175,15 @@ export default function ChatInterface() {
       if (!isLoading && trimmed.startsWith('/')) {
         const slash = parseSlashCommand(trimmed, customSlashCommands);
         if (slash) {
+          if (slash.kind === 'boost') {
+            if (!slash.target) {
+              showNotice('Gõ theo mẫu: /boost <mục tiêu tác vụ>', 5000);
+              return false;
+            }
+            showNotice(`Đã kích hoạt chế độ Boost trong Git Worktree cô lập: "${slash.target}"`, 4000);
+            return submitTurn(`[Chế độ Boost Worktree] Hãy thực thi tác vụ sau trong Git Worktree cô lập:\n\n${slash.target}`);
+          }
+
           if (slash.kind === 'plan') {
             if (!slash.target) {
               showNotice('Gõ theo mẫu: /plan <mục tiêu cần lập kế hoạch>', 5000);
