@@ -19,6 +19,16 @@ import fsp from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { z } from 'zod';
+import { getZeroMemStore, ZeroMemStore } from '@/lib/zeromem';
+import {
+  CodeSkeletonizer,
+  SarsedPatcher,
+  SarsedVerifier,
+  SarsedSymbolIndex,
+  type PatchResult,
+  type VerificationResult,
+  type FileSkeleton,
+} from '@/lib/sarsed';
 
 import {
   ApprovalPolicy,
@@ -1141,5 +1151,177 @@ export class HeadlessToolRunner {
         }
       });
     });
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Zero-Mem Operations                                                */
+  /* ------------------------------------------------------------------ */
+
+  /**
+   * Access the deterministic Zero-Mem store for this workspace.
+   */
+  public getZeroMemStore(): ZeroMemStore {
+    return getZeroMemStore(path.basename(this.workspaceRoot));
+  }
+
+  /**
+   * Deterministic zero-token retrieval of past conversation traces & entity context.
+   */
+  public async zeroMemQuery(query: string, options: { maxResults?: number; mode?: 'hybrid' | 'lexical' | 'graph'; episodeId?: string } = {}) {
+    const store = this.getZeroMemStore();
+    return store.query({
+      query,
+      maxResults: options.maxResults,
+      mode: options.mode,
+      episodeId: options.episodeId,
+    });
+  }
+
+  /**
+   * Append raw trace to Zero-Mem with zero-token entity extraction.
+   */
+  public async zeroMemLog(content: string, role: 'user' | 'assistant' | 'tool' = 'tool', toolName?: string) {
+    const store = this.getZeroMemStore();
+    return store.appendTrace({
+      sessionId: 'headless-teamwork',
+      role,
+      content,
+      toolName,
+    });
+  }
+
+  /**
+   * Retrieve Zero-Mem statistics and estimated token savings.
+   */
+  public zeroMemStats() {
+    return this.getZeroMemStore().getStats();
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Sarsed-Code Operations                                             */
+  /* ------------------------------------------------------------------ */
+
+  /**
+   * Extract token-efficient AST skeleton of a workspace file.
+   */
+  public async codeSkeleton(relPath: string, options: { preserveComments?: boolean } = {}): Promise<FileSkeleton> {
+    const absPath = resolveWithin(this.workspaceRoot, relPath);
+    const normKey = normalizeStagingPath(relPath);
+    let content: string;
+    if (this.stagingEnabled && this.stagingStore[normKey]) {
+      content = this.stagingStore[normKey].content;
+    } else {
+      content = await fsp.readFile(absPath, 'utf8');
+    }
+    const skeletonizer = new CodeSkeletonizer();
+    return skeletonizer.skeletonize(relPath, content, options);
+  }
+
+  /**
+   * Search symbols across workspace files.
+   */
+  public async codeSymbols(query?: string, kind?: any) {
+    const files = await this.collectTextFiles(this.workspaceRoot, 100);
+    const indexer = new SarsedSymbolIndex();
+    indexer.indexFiles(files);
+    return indexer.findSymbols({ name: query, kind });
+  }
+
+  /**
+   * Apply atomic multi-hunk semantic patch with indentation auto-alignment.
+   */
+  public async codePatch(
+    relPath: string,
+    hunks: Array<{ search: string; replace: string; lineHint?: number }>,
+    atomic: boolean = true,
+  ): Promise<PatchResult> {
+    const absPath = resolveWithin(this.workspaceRoot, relPath);
+    const normKey = normalizeStagingPath(relPath);
+    let diskOriginal = '';
+    try {
+      diskOriginal = await fsp.readFile(absPath, 'utf8');
+    } catch {
+      // file might not exist on disk yet
+    }
+
+    const stagedEntry = this.stagingEnabled ? this.stagingStore[normKey] : undefined;
+    const baseContent = stagedEntry ? stagedEntry.content : diskOriginal;
+    const patcher = new SarsedPatcher();
+
+    const res = patcher.applyPatch(relPath, baseContent, {
+      file: relPath,
+      hunks,
+      atomic,
+    });
+
+    if (res.success && res.modifiedContent !== undefined) {
+      if (this.stagingEnabled) {
+        this.stagingStore = stageFile(
+          this.stagingStore,
+          relPath,
+          stagedEntry ? stagedEntry.original : diskOriginal,
+          res.modifiedContent,
+        );
+      } else {
+        await fsp.writeFile(absPath, res.modifiedContent, 'utf8');
+      }
+    }
+
+    return res;
+  }
+
+  /**
+   * Run verification command and return structured diagnostics.
+   */
+  public async codeVerify(command: string = 'npm test', touchedFiles?: string[]): Promise<VerificationResult> {
+    const startTime = Date.now();
+    const runRes = await this.shellRun(command, undefined, 60_000);
+    const verifier = new SarsedVerifier();
+
+    const output = `${runRes.stdout}\n${runRes.stderr}`.trim();
+    const allDiags = verifier.parseDiagnostics(output);
+    const relevantDiags = touchedFiles ? verifier.filterByFiles(allDiags, touchedFiles) : allDiags;
+
+    const errorCount = relevantDiags.filter((d) => d.severity === 'error').length;
+    const warningCount = relevantDiags.filter((d) => d.severity === 'warning').length;
+
+    return {
+      ok: runRes.code === 0 && errorCount === 0,
+      command,
+      exitCode: runRes.code ?? 1,
+      diagnostics: relevantDiags,
+      errorCount,
+      warningCount,
+      output,
+      durationMs: Date.now() - startTime,
+    };
+  }
+
+  /**
+   * Helper to collect text files for symbol indexing.
+   */
+  private async collectTextFiles(dir: string, maxFiles: number): Promise<Array<{ path: string; content: string }>> {
+    const results: Array<{ path: string; content: string }> = [];
+    const walk = async (currDir: string) => {
+      if (results.length >= maxFiles) return;
+      const entries = await fsp.readdir(currDir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (results.length >= maxFiles) return;
+        if (entry.name.startsWith('.') || entry.name === 'node_modules') continue;
+        const full = path.join(currDir, entry.name);
+        if (entry.isDirectory()) {
+          await walk(full);
+        } else if (entry.isFile() && /\.(ts|tsx|js|jsx|py|go|rs)$/i.test(entry.name)) {
+          try {
+            const content = await fsp.readFile(full, 'utf8');
+            results.push({ path: path.relative(this.workspaceRoot, full).replace(/\\/g, '/'), content });
+          } catch {
+            // ignore read error
+          }
+        }
+      }
+    };
+    await walk(dir);
+    return results;
   }
 }

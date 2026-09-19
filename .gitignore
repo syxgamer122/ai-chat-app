@@ -14,6 +14,8 @@ gui-test-screenshots
 # Thư mục làm việc của agent (ghi chú, memory) — không phải mã nguồn
 .workbuddy-ai/
 .agents/
+.opencode/
+opencode.json
 
 # State runtime của teamwork engine (worktree cách ly, audit)
 .teamwork/

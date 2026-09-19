@@ -2,6 +2,7 @@ import Dexie, { type Table } from 'dexie';
 import { tokenize } from '@/lib/search-utils';
 import type { MemoryRecord, MemoryReviewEntry } from '@/lib/memory/types';
 import type { AgentMemoryRecord } from '@/lib/memory/agent-memory';
+import type { ZeroMemTrace, ZeroMemEntity, ZeroMemRelation } from '@/lib/zeromem/types';
 
 /**
  * IndexedDB KHÔNG index được `null`. Message gốc phải mang sentinel này,
@@ -321,6 +322,9 @@ export class ChatAppDatabase extends Dexie {
   agentMemories!: Table<AgentMemoryRecord, string>;
   toolPermissions!: Table<StoredToolPermissionRecord, string>;
   schedules!: Table<ScheduleRecord, string>;
+  zeromemTraces!: Table<ZeroMemTrace, string>;
+  zeromemEntities!: Table<ZeroMemEntity, string>;
+  zeromemRelations!: Table<ZeroMemRelation, string>;
 
   constructor() {
     super('ai_chat_app_db');
@@ -611,6 +615,30 @@ export class ChatAppDatabase extends Dexie {
       agentMemories: 'id, category, scope, workspaceKey, createdAt, *tags',
       toolPermissions: 'toolName, permission, updatedAt',
       schedules: 'id, recipeId, cron, enabled, lastRunAt, lastStatus, createdAt, updatedAt',
+    });
+
+    // v17: Zero-Mem (sarsvankelsion/zero-mem) — zero-token memory operations: traces, entities, relations
+    this.version(17).stores({
+      chats: 'id, createdAt, updatedAt, pinned, activeLeafId, workspacePath, *titleTokens',
+      messages:
+        'id, chatId, role, createdAt, seq, parentId, ' +
+        '[chatId+parentId], [chatId+createdAt], [chatId+seq], ' +
+        '[chatId+parentId+branchOrder], *tokens',
+      prompts: 'id, updatedAt',
+      kv: 'key',
+      providers: 'id, updatedAt',
+      memories: 'id, createdAt',
+      wsSnapshots: 'id, chatId, createdAt',
+      memoryCandidates: 'id, status, createdAt, digest, [scope.kind+scope.ref]',
+      memoryRecords: 'id, status, createdAt, reviewDueAt, digest, [scope.kind+scope.ref]',
+      memoryReviews: 'id, candidateId, action, reviewedAt',
+      recipes: 'id, title, updatedAt, source',
+      agentMemories: 'id, category, scope, workspaceKey, createdAt, *tags',
+      toolPermissions: 'toolName, permission, updatedAt',
+      schedules: 'id, recipeId, cron, enabled, lastRunAt, lastStatus, createdAt, updatedAt',
+      zeromemTraces: 'id, sessionId, episodeId, timestamp, *entityIds',
+      zeromemEntities: 'id, name, kind, scope, createdAt',
+      zeromemRelations: 'id, sourceId, targetId, relationType, createdAt',
     });
 
     this.messages.hook('creating', (_primKey, obj) => {

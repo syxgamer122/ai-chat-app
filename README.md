@@ -97,6 +97,50 @@ Vyen đọc tự do nhưng ghi có kỷ luật: mọi thao tác ghi file / chạ
   - `vyen schedule run <id>`: Chạy ngay lập tức một lịch trình.
   - `vyen schedule daemon`: Chạy tiến trình scheduler daemon (tick mỗi 30s) trong terminal.
 
+### Zero-Mem: Bộ nhớ Không Tiêu hao Token (Port sarsvankelsion/zero-mem)
+
+- **Zero-Token Memory Operations**: Loại bỏ hoàn toàn các lượt gọi LLM tốn kém để tóm tắt hoặc tổ chức bộ nhớ. Toàn bộ chu trình trích xuất thực thể, liên kết đồ thị, và xếp hạng truy xuất diễn ra bằng thuật toán nội bộ nhanh dưới 2ms và tiêu tốn **0 token**.
+- **Raw Trace Source of Record**: Bảo tồn nguyên văn toàn bộ chuỗi nhật ký hội thoại và kết quả tool dưới dạng nguồn chân lý bất biến (append-only), chống biến dạng hoặc mất mát thông tin do tóm tắt.
+- **Kiến trúc Dual-View**:
+  - **Entity-Context Graph**: Đồ thị quan hệ định hướng với trọng số giữa các thực thể code (files, functions, classes, interfaces, diagnostics, tools, concepts) với thuật toán lan truyền kích hoạt (spreading activation).
+  - **Temporal Hierarchy & Exponential Decay**: Phân cấp Phiên -> Episode (Milestone/Task) -> Lượt; áp dụng suy giảm thời gian hàm mũ và điểm thưởng liên tục cho episode đang hoạt động (+25%).
+- **Deterministic Multi-Stage Retrieval**:
+  - Xếp hạng từ vựng BM25 tiếng Việt và mã nguồn + Lan truyền năng lượng đồ thị + Suy giảm thời gian.
+  - Đóng gói theo ngân sách token và format thẻ `<zero-mem-evidence>` tự động nhúng vào ngữ cảnh nhắc lệnh.
+- **Bộ công cụ Zero-Mem**:
+  - `zeromem_query(query, max_results, mode, episode_id)`: Truy xuất ngữ cảnh chính xác cao.
+  - `zeromem_log(content, role, tool_name, episode_id)`: Ghi nhận trace và tự động trích xuất thực thể đồ thị.
+  - `zeromem_inspect(target, entity_id)`: Kiểm tra hàng xóm quan hệ trên đồ thị hoặc cây episodes.
+  - `zeromem_stats()`: Đo lường footprint bộ nhớ và số token LLM đã tiết kiệm được.
+- **Lưu trữ bền vững**: Schema Dexie v17 với 3 bảng `zeromemTraces`, `zeromemEntities`, `zeromemRelations`.
+
+### Sarsed-Code: Harness Lập trình Tự hành & Sửa lỗi Khép kín (Port sarsvankelsion/sarsed-code)
+
+- **AST Code Skeletonizer (Nén ngữ cảnh 80-90%)**:
+  - Trích xuất khung xương cấu trúc mã nguồn cho đa ngôn ngữ (TypeScript, JavaScript, Python, Go, Rust).
+  - Giữ nguyên vẹn 100% imports, exports, interface, type definition, function signature và docstrings; thu gọn phần thân cài đặt `{ ... }` thành comment `/* implementation ... */`.
+  - Cho phép agent khảo sát toàn diện các module hàng nghìn dòng mà chỉ tốn vài trăm token prompt.
+- **Chỉ mục Ký hiệu & Call Hierarchy Workspace**:
+  - Lập chỉ mục định nghĩa hàm, lớp, interface, kiểu dữ liệu toàn bộ workspace.
+  - Truy vết tham chiếu chéo (cross-file references) và phân tích cây phân cấp gọi hàm (call hierarchy).
+- **Sarsed Transactional Semantic Patcher**:
+  - Vá mã nguồn đa khối (multi-hunk) giao dịch nguyên tử: hoặc toàn bộ các khối patch thành công, hoặc rollback hoàn toàn về trạng thái sạch ban đầu.
+  - Tự động căn chỉnh thụt lề (Indentation Auto-Alignment) và nhận diện tab/spaces.
+  - Bảo toàn line ending gốc (CRLF/LF) và hỗ trợ line-hint định vị khối.
+- **Bộ phân tích Chẩn đoán Đa công cụ (Diagnostic Engine)**:
+  - Phân tích cú pháp đầu ra stdout/stderr từ `tsc`, `eslint`, `vitest`, `mypy/python`, `cargo/rust` thành đối tượng `CodeDiagnostic` có cấu trúc.
+  - Tương thích đường dẫn Windows drive-letter.
+- **Vòng lặp Tự sửa Khép kín SARS (Sense-Analyze-Refactor-Synthesize)**:
+  - **Sense**: Tự động chạy lệnh kiểm chứng sau mỗi lần sửa mã.
+  - **Analyze**: Bắt vết chẩn đoán lỗi trên các dòng bị ảnh hưởng.
+  - **Refactor**: Đề xuất khối patch sửa lỗi đích danh theo dòng và mã lỗi.
+  - **Synthesize**: Áp dụng patch và kiểm chứng lại trước khi báo cáo hoàn thành.
+- **Bộ công cụ Sarsed**:
+  - `code_skeleton(file_path, content, preserve_comments)`
+  - `code_symbols(query, kind, file_path)`
+  - `code_patch(file_path, hunks, atomic)`
+  - `code_verify(command, raw_output, touched_files)`
+
 ### Làm việc quy mô lớn
 
 - **Subagent delegate**: agent chính giao task độc lập cho subagent chạy với context riêng (không thấy lịch sử chat), không thể đệ quy (subagent không có `delegate`), giới hạn mặc định 10 turns (tối đa 25). Subagent vẫn dùng được tool trên máy bạn (fs/shell/git/MCP) nhờ relay: server phát annotation xuống renderer, renderer thực thi rồi POST kết quả về `/api/chat/subagent-relay`. Hoạt động cả đường native function-calling lẫn emulated.
