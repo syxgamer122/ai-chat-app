@@ -67,6 +67,19 @@ export const TOOL_CATEGORY_MAP: Record<string, ToolCategory> = {
   plan_create: 'plan',
   plan_update: 'plan',
   delegate: 'delegate',
+  /* Zero-Mem: ghi/đọc bộ nhớ dài hạn → nhóm memory. */
+  zeromem_query: 'memory',
+  zeromem_log: 'memory',
+  zeromem_inspect: 'memory',
+  zeromem_stats: 'memory',
+  /*
+   * Sarsed: khảo sát (skeleton/symbols) và phân tích chẩn đoán là CHỈ ĐỌC →
+   * fs_read; riêng code_patch ghi file → fs_write để chính sách quyền quản được.
+   */
+  code_skeleton: 'fs_read',
+  code_symbols: 'fs_read',
+  code_patch: 'fs_write',
+  code_verify: 'fs_read',
 };
 
 /**
@@ -142,6 +155,39 @@ export interface ToolCatalogEntry {
  */
 export const TOOL_CATALOG: readonly ToolCatalogEntry[] = [
   // fs_read
+  /*
+   * Sarsed-Code (port sarsvankelsion/sarsed-code) — khảo sát mã nguồn.
+   * Trước đây nhóm này chỉ nằm trong `lib/sarsed/tools.ts`, KHÔNG có mặt trong
+   * catalog nên `CLIENT_TOOL_DEFS` cũng không khai báo và agent của app không
+   * bao giờ gọi được — tính năng tồn tại trên giấy.
+   */
+  {
+    name: 'code_skeleton',
+    kind: 'client',
+    category: 'fs_read',
+    shortLabel: 'khung xương AST',
+    description: 'Nén file mã nguồn thành khung xương AST (giữ chữ ký hàm, thu gọn thân), giảm 80–90% token.',
+    aliases: [],
+    desktopOnly: false,
+  },
+  {
+    name: 'code_symbols',
+    kind: 'client',
+    category: 'fs_read',
+    shortLabel: 'chỉ mục ký hiệu',
+    description: 'Lập chỉ mục và tra ký hiệu (hàm, lớp, interface) trong workspace, lọc theo tên/loại/file.',
+    aliases: [],
+    desktopOnly: false,
+  },
+  {
+    name: 'code_verify',
+    kind: 'client',
+    category: 'fs_read',
+    shortLabel: 'phân tích lỗi',
+    description: 'Phân tích output tsc/eslint/vitest/mypy/cargo thành chẩn đoán có cấu trúc (file, dòng, mã lỗi).',
+    aliases: [],
+    desktopOnly: false,
+  },
   {
     name: 'fs_list',
     kind: 'client',
@@ -179,6 +225,15 @@ export const TOOL_CATALOG: readonly ToolCatalogEntry[] = [
     desktopOnly: false,
   },
   // fs_write
+  {
+    name: 'code_patch',
+    kind: 'client',
+    category: 'fs_write',
+    shortLabel: 'vá nguyên tử',
+    description: 'Vá nhiều khối SEARCH/REPLACE kiểu all-or-nothing, tự căn thụt lề; vẫn qua phê duyệt như fs_edit.',
+    aliases: [],
+    desktopOnly: false,
+  },
   {
     name: 'fs_edit',
     kind: 'client',
@@ -387,6 +442,46 @@ export const TOOL_CATALOG: readonly ToolCatalogEntry[] = [
     category: 'memory',
     shortLabel: 'tra bộ nhớ cấu trúc',
     description: 'Tra nội dung bộ nhớ có cấu trúc theo từ khoá/category/tags, trả tối đa 8 entry.',
+    aliases: [],
+    desktopOnly: false,
+  },
+  /*
+   * Zero-Mem (port sarsvankelsion/zero-mem) — bộ nhớ 0 token.
+   * Cùng lý do như nhóm Sarsed ở trên: trước đây không có trong catalog.
+   */
+  {
+    name: 'zeromem_inspect',
+    kind: 'client',
+    category: 'memory',
+    shortLabel: 'soi bộ nhớ 0-token',
+    description: 'Kiểm tra quan hệ thực thể trên đồ thị, danh sách episode, hoặc liệt kê thực thể theo loại.',
+    aliases: [],
+    desktopOnly: false,
+  },
+  {
+    name: 'zeromem_log',
+    kind: 'client',
+    category: 'memory',
+    shortLabel: 'ghi bộ nhớ 0-token',
+    description: 'Ghi một dòng nhật ký thô và tự trích xuất thực thể vào đồ thị, không gọi LLM.',
+    aliases: [],
+    desktopOnly: false,
+  },
+  {
+    name: 'zeromem_query',
+    kind: 'client',
+    category: 'memory',
+    shortLabel: 'tra bộ nhớ 0-token',
+    description: 'Truy xuất ngữ cảnh từ nhật ký thô + đồ thị thực thể + episode, chạy cục bộ không tốn token.',
+    aliases: [],
+    desktopOnly: false,
+  },
+  {
+    name: 'zeromem_stats',
+    kind: 'client',
+    category: 'memory',
+    shortLabel: 'thống kê bộ nhớ',
+    description: 'Báo cáo dung lượng bộ nhớ Zero-Mem và số token đã tiết kiệm được.',
     aliases: [],
     desktopOnly: false,
   },

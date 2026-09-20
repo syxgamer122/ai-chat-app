@@ -12,10 +12,8 @@ import {
   listAgentMemories,
   removeMemoryCategory,
   removeSpecificMemory,
-  resolveWorkspaceKey,
   syncCategoryMirror,
   importMirrorEdits,
-
 } from '@/lib/memory/agent-memory-client';
 import { db } from '@/lib/db';
 import type { AgentMemoryRecord } from '@/lib/memory/agent-memory';
@@ -71,10 +69,11 @@ export function AgentMemorySection() {
   };
 
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between gap-2">
-        <h3 className="text-sm font-semibold text-zinc-800">Bộ nhớ có cấu trúc</h3>
-        <div className="flex items-center gap-1.5">
+    <div className="space-y-3 font-mono">
+      <div>
+        <div className="flex items-center justify-between gap-2">
+          <h4 className="field-label text-[15px]">Sổ tay có cấu trúc (bạn tự viết)</h4>
+          <div className="flex items-center gap-1.5">
           <button
             type="button"
             onClick={async () => {
@@ -82,7 +81,7 @@ export function AgentMemorySection() {
               setNotice(r.applied ? `Đã áp ${r.applied} thay đổi từ file mirror.` : 'File mirror không có thay đổi mới.');
               await reload();
             }}
-            className="border border-zinc-300 px-2 py-1 text-[11px] text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            className="rounded-none border border-border-hairline bg-surface-raised px-2 py-1 text-[11px] text-text-primary hover:bg-panel-bg"
           >
             Đọc lại file mirror
           </button>
@@ -100,14 +99,20 @@ export function AgentMemorySection() {
               URL.revokeObjectURL(url);
             }}
             disabled={!records.length}
-            className="flex items-center gap-1 border border-zinc-300 px-2 py-1 text-[11px] text-zinc-700 hover:bg-zinc-100 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            className="flex items-center gap-1 rounded-none border border-border-hairline bg-surface-raised px-2 py-1 text-[11px] text-text-primary hover:bg-panel-bg disabled:opacity-40"
           >
             <Download size={11} aria-hidden="true" /> Export JSON
           </button>
         </div>
       </div>
 
-      <p className="text-xs leading-relaxed text-zinc-600">
+        <p className="mt-1 text-[11px] leading-relaxed text-text-muted">
+          Khác mục &ldquo;Duyệt đề xuất ghi nhớ&rdquo; ở trên: entry ở đây do <strong className="font-semibold text-text-primary">bạn</strong>{' '}
+          tự tạo nên không qua bước duyệt.
+        </p>
+      </div>
+
+      <p className="text-xs leading-relaxed text-text-muted">
         {records.length} entry · mỗi entry tối đa 2.000 ký tự. Scope <em>toàn cục</em> dùng cho mọi dự án;{' '}
         <em>local</em> chỉ workspace hiện tại. Desktop mirror ra{' '}
         <code className="claude-inline-code">.vyen/memory/&lt;category&gt;.md</code> và{' '}
@@ -149,11 +154,11 @@ export function AgentMemorySection() {
 
       <ul className="space-y-1.5">
         {filtered.map((r) => (
-          <li key={r.id} className="border border-zinc-200 px-2.5 py-2 text-xs dark:border-zinc-800">
+          <li key={r.id} className="border border-border-hairline bg-surface-raised px-2.5 py-2 text-xs">
             <div className="flex items-start gap-2">
-              <span className="flex-none font-mono text-[10.5px] text-zinc-500">
+              <span className="flex-none font-mono text-[10.5px] text-text-muted">
                 {r.category}
-                <span className="ml-1 text-zinc-400">{r.scope === 'global' ? '· toàn cục' : '· local'}</span>
+                <span className="ml-1 text-[#757d89]">{r.scope === 'global' ? '· toàn cục' : '· local'}</span>
               </span>
               <span className="min-w-0 flex-1">
                 {editingId === r.id ? (
@@ -165,10 +170,10 @@ export function AgentMemorySection() {
                     className="claude-input w-full text-xs"
                   />
                 ) : (
-                  <span className="block whitespace-pre-wrap text-zinc-700 dark:text-zinc-300">{r.data}</span>
+                  <span className="block whitespace-pre-wrap text-text-primary">{r.data}</span>
                 )}
                 {r.tags.length > 0 && (
-                  <span className="mt-0.5 block text-[10.5px] text-zinc-400">{r.tags.join(', ')}</span>
+                  <span className="mt-0.5 block text-[10.5px] text-[#757d89]">{r.tags.join(', ')}</span>
                 )}
               </span>
               <span className="flex flex-none items-center gap-1">
@@ -177,14 +182,14 @@ export function AgentMemorySection() {
                     <button
                       type="button"
                       onClick={() => void saveEdit(r)}
-                      className="border border-zinc-300 px-1.5 py-0.5 text-[10.5px] dark:border-zinc-700"
+                      className="rounded-none border border-border-hairline bg-panel-bg px-1.5 py-0.5 text-[10.5px] text-text-primary"
                     >
                       Lưu
                     </button>
                     <button
                       type="button"
                       onClick={() => setEditingId(null)}
-                      className="border border-zinc-300 px-1.5 py-0.5 text-[10.5px] dark:border-zinc-700"
+                      className="rounded-none border border-border-hairline bg-panel-bg px-1.5 py-0.5 text-[10.5px] text-text-primary"
                     >
                       Huỷ
                     </button>
@@ -197,7 +202,7 @@ export function AgentMemorySection() {
                         setEditingId(r.id);
                         setDraft(r.data);
                       }}
-                      className="border border-zinc-300 px-1.5 py-0.5 text-[10.5px] dark:border-zinc-700"
+                      className="rounded-none border border-border-hairline bg-panel-bg px-1.5 py-0.5 text-[10.5px] text-text-primary hover:bg-panel-soft"
                     >
                       Sửa
                     </button>
@@ -208,7 +213,7 @@ export function AgentMemorySection() {
                         await removeSpecificMemory(r.id);
                         await reload();
                       }}
-                      className="border border-zinc-300 px-1.5 py-0.5 text-[10.5px] text-red-600 dark:border-zinc-700"
+                      className="rounded-none border border-border-hairline bg-panel-bg px-1.5 py-0.5 text-[10.5px] text-status-error hover:bg-[#e8704f]/10"
                     >
                       <Trash2 size={10} aria-hidden="true" />
                     </button>
@@ -219,7 +224,7 @@ export function AgentMemorySection() {
           </li>
         ))}
         {filtered.length === 0 && (
-          <li className="text-xs text-zinc-500">
+          <li className="text-xs text-text-muted">
             {records.length === 0
               ? 'Chưa có bộ nhớ cấu trúc. Agent ghi qua tool remember_memory, hoặc bạn thêm từ phiên chat.'
               : 'Không entry nào khớp bộ lọc hiện tại.'}
@@ -228,7 +233,7 @@ export function AgentMemorySection() {
       </ul>
 
       {categories.length > 0 && (
-        <div className="flex items-center gap-2 border-t border-zinc-200 pt-2 dark:border-zinc-800">
+        <div className="flex items-center gap-2 border-t border-border-hairline pt-2">
           <button
             type="button"
             onClick={async () => {
@@ -237,14 +242,14 @@ export function AgentMemorySection() {
               setNotice(`Đã xoá ${removed} entry thuộc "${target}".`);
               await reload();
             }}
-            className="border border-red-300 px-2 py-1 text-[11px] text-red-600 hover:bg-red-50 dark:border-red-900 dark:hover:bg-red-950"
+            className="rounded-none border border-status-error/40 bg-surface-raised px-2 py-1 text-[11px] text-status-error hover:bg-[#e8704f]/10"
           >
             Xoá cả category &quot;{categoryFilter || categories[0]}&quot;
           </button>
         </div>
       )}
 
-      {notice && <p role="status" className="text-[11px] text-sky-700 dark:text-sky-300">{notice}</p>}
+      {notice && <p role="status" className="text-[11px] text-accent-steel">{notice}</p>}
     </div>
   );
 }

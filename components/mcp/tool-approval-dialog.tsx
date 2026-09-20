@@ -18,8 +18,10 @@
  * người dùng không trả lời — main tự từ chối sau 120 giây).
  */
 
-import { useEffect, useState } from 'react';
-import { ShieldAlert, Terminal } from 'lucide-react';
+import { Z_CLASS } from '@/lib/ui-z';
+import { useEffect, useRef, useState } from 'react';
+import { ShieldAlert, Terminal, AlertCircle } from 'lucide-react';
+import { useFocusTrap } from '@/lib/hooks/use-focus-trap';
 import {
   onMcpApprovalRequested,
   onMcpApprovalResolved,
@@ -48,6 +50,7 @@ function formatArgs(args: Record<string, unknown>): string {
 export function McpToolApprovalDialog() {
   const [queue, setQueue] = useState<VyenMcpApprovalRequest[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const offRequested = onMcpApprovalRequested((req) => {
@@ -65,9 +68,9 @@ export function McpToolApprovalDialog() {
   }, []);
 
   const current = queue[0];
-  if (!current) return null;
 
   const decide = async (decision: VyenMcpPermissionDecision) => {
+    if (!current) return;
     setError(null);
     // Lạc quan: bỏ khỏi hàng đợi ngay để modal trống không kẹt lại giữa
     // lượt quyết định nối tiếp nhau.
@@ -79,62 +82,72 @@ export function McpToolApprovalDialog() {
     }
   };
 
+  useFocusTrap(containerRef, {
+    active: Boolean(current),
+    onEscape: () => void decide('deny_once'),
+  });
+
+  if (!current) return null;
+
   return (
-    <div className="fixed inset-0 z-[80] flex items-center justify-center p-4">
+    <div
+      ref={containerRef}
+      className={`fixed inset-0 ${Z_CLASS.approvalCritical} flex items-center justify-center p-4`}
+    >
       <div className="absolute inset-0 bg-black/50" aria-hidden="true" />
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby="mcp-approval-title"
-        className="pi-frame relative w-full max-w-lg overflow-hidden rounded-none border border-[#495059] bg-[#212730] font-mono text-[#ebe7e4]"
+        className="pi-frame relative w-full max-w-lg overflow-hidden rounded-none border border-border-hairline bg-panel-bg font-mono text-text-primary"
       >
         <span className="pi-corner-tl" />
         <span className="pi-corner-tr" />
         <span className="pi-corner-bl" />
         <span className="pi-corner-br" />
 
-        <div className="flex items-start gap-3 border-b border-[#495059] bg-[#161d27] px-4 py-3">
-          <ShieldAlert className="mt-0.5 h-5 w-5 flex-shrink-0 text-[#e8993a]" />
+        <div className="flex items-start gap-3 border-b border-border-hairline bg-surface-raised px-4 py-3">
+          <ShieldAlert className="mt-0.5 h-5 w-5 flex-shrink-0 text-status-warning" />
           <div className="min-w-0">
-            <h2 id="mcp-approval-title" className="font-pixel text-[16px] font-semibold text-[#ebe7e4] [image-rendering:pixelated]">
-              <span className="text-[#6a9fcc] font-bold mr-1">$</span>mcp approval
+            <h2 id="mcp-approval-title" className="font-pixel text-[16px] font-semibold text-text-primary [image-rendering:pixelated]">
+              <span className="text-accent-steel font-bold mr-1">$</span>mcp approval
             </h2>
-            <p className="mt-0.5 text-[11px] leading-relaxed text-[#9fa4ab]">
+            <p className="mt-0.5 text-[11px] leading-relaxed text-text-muted">
               Công cụ này do server bên ngoài cung cấp. Chỉ cho phép nếu bạn tin server này.
             </p>
           </div>
         </div>
 
         <div className="space-y-3 px-4 py-3">
-          <div className="flex items-center gap-2 rounded-none border border-[#495059] bg-[#161b22] px-3 py-2">
-            <Terminal className="h-4 w-4 flex-shrink-0 text-[#6a9fcc]" />
-            <code className="min-w-0 flex-1 truncate text-xs font-medium text-[#ebe7e4]">
+          <div className="flex items-center gap-2 rounded-none border border-border-hairline bg-[#161b22] px-3 py-2">
+            <Terminal className="h-4 w-4 flex-shrink-0 text-accent-steel" />
+            <code className="min-w-0 flex-1 truncate text-xs font-medium text-text-primary">
               {current.toolName}
             </code>
-            <span className="flex-shrink-0 rounded-none border border-[#495059] bg-[#212730] px-1.5 py-0.5 text-[10px] text-[#9fa4ab]">
+            <span className="flex-shrink-0 rounded-none border border-border-hairline bg-panel-bg px-1.5 py-0.5 text-[10px] text-text-muted">
               {current.serverId}
             </span>
           </div>
 
           <div>
-            <div className="mb-1 text-[11px] font-medium text-[#9fa4ab]">Tham số</div>
-            <pre className="max-h-48 overflow-auto rounded-none border border-[#495059] bg-[#1c2128] px-3 py-2 text-[11px] leading-relaxed text-[#7ea3c7]">
+            <div className="mb-1 text-[11px] font-medium text-text-muted">Tham số</div>
+            <pre className="max-h-48 overflow-auto rounded-none border border-border-hairline bg-surface-code px-3 py-2 text-[11px] leading-relaxed text-[#7ea3c7]">
               {formatArgs(current.arguments)}
             </pre>
           </div>
 
           {queue.length > 1 && (
-            <p className="text-[11px] text-[#9fa4ab]">
+            <p className="text-[11px] text-text-muted">
               Còn {queue.length - 1} yêu cầu khác đang chờ sau yêu cầu này.
             </p>
           )}
 
           {error && (
-            <p className="rounded-none border border-[#e8704f]/40 bg-[#241313] px-3 py-2 text-[11px] text-[#e8704f]">{error}</p>
+            <p className="rounded-none border border-status-error/40 bg-[#241313] px-3 py-2 text-[11px] text-status-error">{error}</p>
           )}
         </div>
 
-        <div className="flex flex-wrap gap-2 border-t border-[#495059] bg-[#1c2128] px-4 py-3">
+        <div className="flex flex-wrap gap-2 border-t border-border-hairline bg-surface-code px-4 py-3">
           {DECISIONS.map((d) => (
             <button
               key={d.value}
@@ -143,7 +156,7 @@ export function McpToolApprovalDialog() {
               className={
                 d.primary
                   ? 'rounded-none bg-[#6a9fcc] px-3.5 py-1.5 text-xs font-semibold text-[#0d1116] transition-colors hover:bg-[#89b8e0]'
-                  : 'rounded-none border border-[#495059] bg-[#212730] px-3 py-1.5 text-xs font-medium text-[#ebe7e4] transition-colors hover:border-[#757d89] hover:bg-[#252f3d]'
+                  : 'rounded-none border border-border-hairline bg-panel-bg px-3 py-1.5 text-xs font-medium text-text-primary transition-colors hover:border-border-hover hover:bg-panel-soft'
               }
             >
               {d.label}

@@ -111,23 +111,6 @@ export interface StoredToolInvocation {
   result?: unknown;
 }
 
-/** Mẫu prompt cho thư viện "/" trong composer. */
-export interface PromptTemplate {
-  id: string;
-  title: string;
-  content: string;
-  createdAt: number;
-  updatedAt: number;
-  /**
-   * 'insert' (mặc định): chèn nội dung vào ô nhập qua menu "/".
-   * 'skill': KHÔNG chèn — tự kích hoạt khi tin nhắn khớp tên/mô tả
-   * (pattern SKILL.md của fx/Grok Build), body inject vào system lượt đó.
-   * Không index trường mới → không cần bump schema Dexie.
-   */
-  mode?: 'insert' | 'skill';
-  /** Khi nào dùng skill này — nguồn từ khóa cho matcher phía client. */
-  description?: string;
-}
 
 /** Nhà cung cấp API (provider preset) — chuẩn OpenAI-compatible. */
 export interface ProviderPresetRecord {
@@ -310,7 +293,6 @@ export function sanitizeToolInvocations(
 export class ChatAppDatabase extends Dexie {
   chats!: Table<ChatSession, string>;
   messages!: Table<StoredMessage, string>;
-  prompts!: Table<PromptTemplate, string>;
   kv!: Table<KVEntry, string>;
   providers!: Table<ProviderPresetRecord, string>;
   memories!: Table<StoredMemory, string>;
@@ -625,6 +607,45 @@ export class ChatAppDatabase extends Dexie {
         '[chatId+parentId], [chatId+createdAt], [chatId+seq], ' +
         '[chatId+parentId+branchOrder], *tokens',
       prompts: 'id, updatedAt',
+      kv: 'key',
+      providers: 'id, updatedAt',
+      memories: 'id, createdAt',
+      wsSnapshots: 'id, chatId, createdAt',
+      memoryCandidates: 'id, status, createdAt, digest, [scope.kind+scope.ref]',
+      memoryRecords: 'id, status, createdAt, reviewDueAt, digest, [scope.kind+scope.ref]',
+      memoryReviews: 'id, candidateId, action, reviewedAt',
+      recipes: 'id, title, updatedAt, source',
+      agentMemories: 'id, category, scope, workspaceKey, createdAt, *tags',
+      toolPermissions: 'toolName, permission, updatedAt',
+      schedules: 'id, recipeId, cron, enabled, lastRunAt, lastStatus, createdAt, updatedAt',
+      zeromemTraces: 'id, sessionId, episodeId, timestamp, *entityIds',
+      zeromemEntities: 'id, name, kind, scope, createdAt',
+      zeromemRelations: 'id, sourceId, targetId, relationType, createdAt',
+    });
+
+    /*
+     * v18: XOÁ bảng `prompts` — rác còn sót từ bản web chat cũ.
+     *
+     * Bảng này chứa "thư viện prompt" của một trợ lý chat đa dụng (5 mẫu seed:
+     * "Dịch Trung - Việt", "Sửa lỗi chính tả", "Tóm tắt văn bản"...), không
+     * liên quan gì tới coding agent. Nó sống sót qua lần dọn trước vì được tái
+     * sử dụng cho mục "Skills cũ (trình duyệt)" trong Cài đặt — mục đó nay đã
+     * gỡ cùng `lib/prompt-library.ts`.
+     *
+     * Dexie xoá bảng khi bảng không còn xuất hiện trong `.stores()` của version
+     * mới nhất, nên chỉ cần khai báo lại danh sách KHÔNG có `prompts`.
+     *
+     * Ba bảng `zeromem*` được GIỮ LẠI: chúng đã có người ghi thật qua
+     * `lib/zeromem/persistence.ts` (trước đó khai báo nhưng không ai ghi).
+     * `memories`, `memoryCandidates/Records/Reviews` cũng giữ — đã kiểm chứng
+     * là còn được dùng trong luồng đề xuất/duyệt ghi nhớ.
+     */
+    this.version(18).stores({
+      chats: 'id, createdAt, updatedAt, pinned, activeLeafId, workspacePath, *titleTokens',
+      messages:
+        'id, chatId, role, createdAt, seq, parentId, ' +
+        '[chatId+parentId], [chatId+createdAt], [chatId+seq], ' +
+        '[chatId+parentId+branchOrder], *tokens',
       kv: 'key',
       providers: 'id, updatedAt',
       memories: 'id, createdAt',

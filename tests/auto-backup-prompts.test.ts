@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { isBackupDue } from '@/lib/auto-backup';
-import { filterPrompts } from '@/lib/prompt-library';
+import { filterPrompts } from '@/lib/slash-commands';
 
 const DAY = 86_400_000;
 const NOW = 1_700_000_000_000;

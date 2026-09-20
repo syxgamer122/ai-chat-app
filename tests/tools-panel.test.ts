@@ -47,7 +47,7 @@ const EXPECTED_LABELS: Record<ToolCategory, { label: string; icon: string }> = {
 /** Tên riêng không dấu được giữ nguyên; ngoài danh sách này phải có dấu. */
 const ASCII_PROPER_NOUNS = new Set(['Git', 'Web', 'Subagent']);
 
-describe('buildPanelSections - panel gồm đủ 8 nhóm, đúng thứ tự, đếm đủ 29', () => {
+describe('buildPanelSections - panel gồm đủ 8 nhóm, đúng thứ tự, đếm đủ catalog', () => {
   const sections = buildPanelSections();
 
   it('đủ 8 category theo đúng thứ tự ALL_TOOL_CATEGORIES', () => {
@@ -56,11 +56,10 @@ describe('buildPanelSections - panel gồm đủ 8 nhóm, đúng thứ tự, đ�
     expect(sections.map((s) => s.category)).toEqual([...ALL_TOOL_CATEGORIES]);
   });
 
-  it('tổng số tool của các section bằng đúng 30 entry của catalog', () => {
+  it('tổng số tool của các section bằng đúng số entry của catalog', () => {
     // Đột biến bị chặn: builder lọc thiếu/nhầm tool (ví dụ quên nhóm rỗng,
-    // hoặc gom theo group sai) → tổng khác 30 là đỏ.
+    // hoặc gom theo group sai) → tổng khác catalog là đỏ.
     const total = sections.reduce((acc, s) => acc + s.tools.length, 0);
-    expect(total).toBe(30);
     expect(total).toBe(TOOL_CATALOG.length);
   });
 
@@ -92,14 +91,14 @@ describe('buildPanelSections - panel gồm đủ 8 nhóm, đúng thứ tự, đ�
 describe('filterPanelSections - lọc theo tên, mô tả, shortLabel', () => {
   const sections = buildPanelSections();
 
-  it('query rỗng hoặc chỉ khoảng trắng trả nguyên 8 nhóm, đủ 30 tool', () => {
+  it('query rỗng hoặc chỉ khoảng trắng trả nguyên 8 nhóm, đủ mọi tool', () => {
     // Đột biến bị chặn: bỏ nhánh `if (!q) return sections` (để query rỗng
     // vẫn chạy includes('') - may mắn vẫn khớp hết) HOẶC điều kiện trim sai →
     // test '   ' (chỉ whitespace) trả thiếu nhóm là đỏ.
     for (const q of ['', '   ']) {
       const out = filterPanelSections(sections, q);
       expect(out).toHaveLength(ALL_TOOL_CATEGORIES.length);
-      expect(out.reduce((acc, s) => acc + s.tools.length, 0)).toBe(30);
+      expect(out.reduce((acc, s) => acc + s.tools.length, 0)).toBe(TOOL_CATALOG.length);
     }
   });
 
@@ -291,16 +290,28 @@ describe('TOOL_CATEGORY_ICON_COMPONENTS - icon map dùng chung cho hai UI', () =
     }
   });
 
-  it('tools-panel và settings-dialog import map chung, không tự viết bản riêng', () => {
-    // Đột biến bị chặn: một trong hai file quay lại khai báo local
-    // Record<string, LucideIcon> riêng → hai expect dưới đỏ, map lại drift.
-    for (const rel of ['../components/tools-panel.tsx', '../components/settings-dialog.tsx']) {
+  it('hai UI dùng chung map icon, không tự dựng bản riêng', () => {
+    /*
+     * Đột biến bị chặn: một UI quay lại khai báo map component icon riêng →
+     * thêm nhóm mới là phải sửa nhiều nơi và chúng lệch nhau.
+     *
+     * Danh sách file đã SỬA so với bản cũ: trước đây test trỏ vào
+     * `settings-dialog.tsx`, nhưng map ở đó đã chết từ lâu (import không dùng).
+     * Trong khi đó `tool-permissions-table.tsx` — UI thứ hai thật sự vẽ icon
+     * nhóm — lại tự dựng `GROUP_ICONS` và KHÔNG bị test nào bắt. Nay trỏ đúng
+     * file và bắt luôn cả `GROUP_ICONS`.
+     */
+    const CONSUMERS = [
+      '../components/tools-panel.tsx',
+      '../components/tool-permissions-table.tsx',
+    ];
+    for (const rel of CONSUMERS) {
       const code = fs.readFileSync(path.resolve(__dirname, rel), 'utf8');
       expect(code, `${rel} phải import từ tool-category-icons`).toMatch(
         /TOOL_CATEGORY_ICON_COMPONENTS\s*\}?\s*from\s*'@\/components\/tool-category-icons'/,
       );
       expect(code, `${rel} không được tự khai báo map icon local`).not.toMatch(
-        /TOOL_CATEGORY_ICON_COMPONENTS\s*:\s*Record</,
+        /(GROUP_ICONS|TOOL_CATEGORY_ICON_COMPONENTS)\s*:\s*Record<[^>]*(LucideIcon|ComponentType)/,
       );
     }
   });

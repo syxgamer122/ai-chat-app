@@ -80,19 +80,19 @@ export function DiskSkillsSection() {
   }, [newName, newDesc, rescan]);
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-3 font-mono">
       <div className="flex items-center justify-between gap-2">
-        <h3 className="text-sm font-semibold text-zinc-800">Kỹ năng (SKILL.md)</h3>
+        <h3 className="text-sm font-semibold text-text-primary">Kỹ năng (SKILL.md)</h3>
         <button
           type="button"
           onClick={() => void rescan()}
-          className="flex items-center gap-1.5 border border-zinc-300 px-2 py-1 text-[11px] text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+          className="flex items-center gap-1.5 rounded-none border border-border-hairline bg-surface-raised px-2 py-1 text-[11px] text-text-primary hover:bg-panel-bg"
         >
           <RefreshCw size={11} className={scanning ? 'animate-spin' : undefined} aria-hidden="true" />
           Quét lại
         </button>
       </div>
-      <p className="text-xs leading-relaxed text-zinc-600">
+      <p className="text-xs leading-relaxed text-text-muted">
         Kỹ năng dạng file <code className="claude-inline-code">SKILL.md</code> trong{' '}
         <code className="claude-inline-code">.vyen/skills/</code> của workspace và{' '}
         <code className="claude-inline-code">~/.vyen/skills/</code> (desktop). Agent chỉ thấy{' '}
@@ -109,29 +109,29 @@ export function DiskSkillsSection() {
                 type="checkbox"
                 checked={!disabled}
                 onChange={() => toggle(e.name)}
-                className="mt-0.5 h-4 w-4 accent-sky-600"
+                className="mt-0.5 h-4 w-4 rounded-none accent-[#6a9fcc]"
               />
               <label htmlFor={`skill-toggle-${e.source}-${e.name}`} className="min-w-0 flex-1 cursor-pointer">
-                <span className="block text-xs font-medium text-zinc-800">
+                <span className="block text-xs font-medium text-text-primary">
                   {e.name}
-                  <span className="ml-1.5 font-normal text-zinc-400">{e.source === 'workspace' ? 'workspace' : 'toàn cục'}</span>
-                  {e.version && <span className="ml-1.5 font-mono text-[10px] text-zinc-400">v{e.version}</span>}
+                  <span className="ml-1.5 font-normal text-[#757d89]">{e.source === 'workspace' ? 'workspace' : 'toàn cục'}</span>
+                  {e.version && <span className="ml-1.5 font-mono text-[10px] text-[#757d89]">v{e.version}</span>}
                 </span>
-                <span className="block truncate text-[11px] text-zinc-500">{e.description}</span>
+                <span className="block truncate text-[11px] text-text-muted">{e.description}</span>
               </label>
             </li>
           );
         })}
         {!scanning && entries.length === 0 && (
-          <li className="text-xs text-zinc-500">
+          <li className="text-xs text-text-muted">
             Chưa tìm thấy skill nào. Kết nối workspace rồi bấm Quét lại, hoặc tạo skill mới bên dưới.
           </li>
         )}
-        {scanning && <li className="text-xs text-zinc-500">Đang quét…</li>}
+        {scanning && <li className="text-xs text-text-muted">Đang quét…</li>}
       </ul>
 
       {errors.length > 0 && (
-        <div role="status" className="border border-amber-300 bg-amber-50 px-2.5 py-2 text-[11px] text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300">
+        <div role="status" className="rounded-none border border-status-warning/40 bg-surface-raised px-2.5 py-2 text-[11px] text-status-warning">
           {errors.slice(0, 3).map((e) => (
             <div key={e.source} className="truncate">
               {e.source}: {e.error}
@@ -140,8 +140,8 @@ export function DiskSkillsSection() {
         </div>
       )}
 
-      <div className="space-y-2 border-t border-zinc-200 pt-3 dark:border-zinc-800">
-        <div className="flex items-center gap-1.5 text-xs font-semibold text-zinc-800">
+      <div className="space-y-2 border-t border-border-hairline pt-3">
+        <div className="flex items-center gap-1.5 text-xs font-semibold text-text-primary">
           <FolderPlus size={13} aria-hidden="true" />
           Tạo skill mới
         </div>
@@ -166,11 +166,11 @@ export function DiskSkillsSection() {
         <button
           type="button"
           onClick={() => void createSkill()}
-          className="border border-zinc-300 px-2.5 py-1.5 text-xs text-zinc-800 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
+          className="rounded-none border border-border-hairline bg-surface-raised px-2.5 py-1.5 text-xs text-text-primary hover:bg-panel-bg"
         >
           Scaffold .vyen/skills/…/SKILL.md
         </button>
-        {notice && <p role="status" className="text-[11px] text-sky-700 dark:text-sky-300">{notice}</p>}
+        {notice && <p role="status" className="text-[11px] text-accent-steel">{notice}</p>}
       </div>
     </div>
   );

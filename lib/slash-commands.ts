@@ -13,12 +13,60 @@
  * - Custom slash commands          — Cho phép ánh xạ /<tên> -> recipeId
  */
 
+import { foldText } from '@/lib/search-utils';
+
 export interface SlashCommandDef {
   name: string;
   syntax: string;
   description: string;
   aliases?: string[];
   category: 'agent' | 'session' | 'system';
+}
+
+/**
+ * Item trong menu "/" sau khi lọc.
+ *
+ * `kind` quyết định hành vi khi chọn:
+ *  - `'command'` — lệnh hệ thống (/plan, /mode...): Enter gửi thẳng, không chèn text.
+ *  - `'recipe'`  — workflow: mở panel Recipes thay vì chèn text.
+ *  - `'prompt'`  — văn bản mẫu chèn vào ô nhập.
+ *
+ * (Trước đây kiểu này nằm trong `lib/prompt-library.ts` — đã gỡ cùng thư viện
+ * prompt chat phổ thông của bản web chat cũ.)
+ */
+export interface FilterablePrompt {
+  id: string;
+  title: string;
+  content: string;
+  kind?: 'prompt' | 'recipe' | 'command';
+}
+
+/**
+ * Lọc item menu "/" theo từ khoá, có fold dấu tiếng Việt — gõ "tom tat" ra
+ * "Tóm tắt". Ưu tiên: khớp đầu tên > khớp trong tên > khớp trong nội dung.
+ */
+export function filterPrompts<T extends FilterablePrompt>(
+  prompts: T[],
+  query: string,
+  limit = 8,
+): T[] {
+  const q = foldText(query.trim());
+  if (!q) return prompts.slice(0, limit);
+
+  const scored: Array<{ p: T; score: number }> = [];
+  for (const p of prompts) {
+    const title = foldText(p.title);
+    const content = foldText(p.content);
+    let score = -1;
+    if (title.startsWith(q)) score = 0;
+    else if (title.includes(q)) score = 1;
+    else if (content.includes(q)) score = 2;
+    if (score >= 0) scored.push({ p, score });
+  }
+  return scored
+    .sort((a, b) => a.score - b.score)
+    .slice(0, limit)
+    .map((s) => s.p);
 }
 
 export const BUILTIN_SLASH_COMMANDS: SlashCommandDef[] = [

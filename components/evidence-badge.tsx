@@ -11,11 +11,11 @@ interface EvidenceBadgeProps {
 }
 
 const variantStyles: Record<string, string> = {
-  default: 'border-[#495059] bg-[#161d27] text-[#9fa4ab]',
-  running: 'border-[#6a9fcc]/40 bg-[#6a9fcc]/10 text-[#6a9fcc] animate-pulse',
-  warning: 'border-[#e8993a]/40 bg-[#e8993a]/10 text-[#e8993a]',
-  success: 'border-[#5db87a]/40 bg-[#5db87a]/10 text-[#5db87a] font-semibold',
-  danger: 'border-[#e8704f]/40 bg-[#e8704f]/10 text-[#e8704f]',
+  default: 'border-border-hairline bg-surface-raised text-text-muted',
+  running: 'border-accent-steel/40 bg-[#6a9fcc]/10 text-accent-steel animate-pulse',
+  warning: 'border-status-warning/40 bg-[#e8993a]/10 text-status-warning',
+  success: 'border-status-success/40 bg-[#5db87a]/10 text-status-success font-semibold',
+  danger: 'border-status-error/40 bg-[#e8704f]/10 text-status-error',
 };
 
 export function EvidenceBadge({ level = 'prepared', className = '', size = 'sm' }: EvidenceBadgeProps) {
@@ -41,7 +41,7 @@ export function EvidenceBadge({ level = 'prepared', className = '', size = 'sm' 
       {safeLevel === 'verified' && <CheckCircle2 className="h-3 w-3 flex-shrink-0" />}
       {safeLevel === 'running' && <Play className="h-3 w-3 flex-shrink-0" />}
       {safeLevel === 'reported_done' && <AlertTriangle className="h-3 w-3 flex-shrink-0" />}
-      {safeLevel === 'prepared' && <Circle className="h-2.5 w-2.5 flex-shrink-0 text-[#9fa4ab]" />}
+      {safeLevel === 'prepared' && <Circle className="h-2.5 w-2.5 flex-shrink-0 text-text-muted" />}
       {(safeLevel === 'blocked' || safeLevel === 'failed') && <XCircle className="h-3 w-3 flex-shrink-0" />}
       <span>{info.badgeText}</span>
     </span>

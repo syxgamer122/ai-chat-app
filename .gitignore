@@ -32,3 +32,9 @@ temp-test-profile/
 # Chỉ .vyen/recipes và .vyen/skills là tài nguyên được commit — neo "/" đầu dòng
 # để không vô tình bỏ qua cả thư mục .vyen ở nơi khác.
 /.vyen/sessions/
+
+# Thư mục tạm do tests/sast.test.ts sinh ra (dọn ở finally, đây là lưới an toàn)
+tmp-sast-test-dir/
+# File tạm do tests/web-bridge.test.ts và tests/interactive-agent.test.ts sinh ra
+# (dọn ở finally, đây là lưới an toàn khi môi trường chặn xoá)
+tmp-test-*

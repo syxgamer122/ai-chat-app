@@ -12,7 +12,7 @@ export function MessageStatusBadge({
 }: MessageStatusBadgeProps) {
   if (status === "streaming") {
     return (
-      <span className="animate-pulse text-[11px] text-[#9fa4ab]">
+      <span className="animate-pulse text-[11px] text-text-muted">
         Đang tạo…
       </span>
     );
@@ -20,7 +20,7 @@ export function MessageStatusBadge({
 
   if (status === "aborted") {
     return (
-      <span className="text-[11px] font-medium text-[#e8993a]">
+      <span className="text-[11px] font-medium text-status-warning">
         Đã dừng giữa chừng
       </span>
     );
@@ -28,7 +28,7 @@ export function MessageStatusBadge({
 
   if (status === "error") {
     return (
-      <span className="text-[11px] font-medium text-[#e8704f]">
+      <span className="text-[11px] font-medium text-status-error">
         Có lỗi khi tạo nội dung
       </span>
     );

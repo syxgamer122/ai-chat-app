@@ -4,6 +4,7 @@
 
 import { describe, it, expect } from 'vitest';
 import path from 'node:path';
+import os from 'node:os';
 import fs from 'node:fs';
 import {
   SecuritySastScanner,
@@ -98,30 +99,36 @@ describe('Chaitin Security SAST Security Engine', () => {
   });
 
   it('tính điểm an ninh chính xác theo trọng số mức độ nghiêm trọng', () => {
-    const testDir = path.join(process.cwd(), 'tmp-sast-test-dir');
-    fs.mkdirSync(testDir, { recursive: true });
+    /*
+     * Dùng thư mục tạm RIÊNG cho mỗi lần chạy (mkdtempSync) thay vì đường dẫn
+     * cố định trong repo root. Lý do: đường dẫn cố định khiến một lần chạy đứt
+     * giữa chừng để lại `vuln.ts`, và lần chạy SAU sẽ quét thấy nó ngay ở bước
+     * "file sạch" → test đỏ dù code không sai. Thư mục riêng cũng không còn làm
+     * bẩn repo và không bị `tsc --noEmit` quét nhầm file cố tình lỗi.
+     */
+    const testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vyen-sast-'));
+    try {
+      // File sạch: đạt điểm 100 và Grade A
+      fs.writeFileSync(path.join(testDir, 'clean.ts'), 'export const hello = "world";\n', 'utf8');
+      const cleanReport = runSecuritySast(testDir);
+      expect(cleanReport.score).toBe(100);
+      expect(cleanReport.grade).toBe('A');
+      expect(cleanReport.ok).toBe(true);
 
-    // File sạch: đạt điểm 100 và Grade A
-    fs.writeFileSync(path.join(testDir, 'clean.ts'), 'export const hello = "world";\n', 'utf8');
-    const cleanReport = runSecuritySast(testDir);
-    expect(cleanReport.score).toBe(100);
-    expect(cleanReport.grade).toBe('A');
-    expect(cleanReport.ok).toBe(true);
-
-    // File chứa 1 lỗ hổng Critical (Command Injection): bị trừ 25 điểm -> Score <= 75, Grade F
-    fs.writeFileSync(
-      path.join(testDir, 'vuln.ts'),
-      'export function run(cmd: string) { execSync(`rm -rf ${cmd}`); }\n',
-      'utf8'
-    );
-    const vulnReport = runSecuritySast(testDir);
-    expect(vulnReport.ok).toBe(false);
-    expect(vulnReport.summary.critical).toBeGreaterThanOrEqual(1);
-    expect(vulnReport.score).toBeLessThanOrEqual(75);
-    expect(vulnReport.grade).toBe('F');
-
-    // Dọn dẹp
-    fs.rmSync(testDir, { recursive: true, force: true });
+      // File chứa 1 lỗ hổng Critical (Command Injection): bị trừ 25 điểm -> Score <= 75, Grade F
+      fs.writeFileSync(
+        path.join(testDir, 'vuln.ts'),
+        'export function run(cmd: string) { execSync(`rm -rf ${cmd}`); }\n',
+        'utf8'
+      );
+      const vulnReport = runSecuritySast(testDir);
+      expect(vulnReport.ok).toBe(false);
+      expect(vulnReport.summary.critical).toBeGreaterThanOrEqual(1);
+      expect(vulnReport.score).toBeLessThanOrEqual(75);
+      expect(vulnReport.grade).toBe('F');
+    } finally {
+      fs.rmSync(testDir, { recursive: true, force: true });
+    }
   });
 
   it('tạo text report chuẩn hóa với đầy đủ thông tin remediation', () => {

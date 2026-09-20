@@ -17,18 +17,12 @@ import {
   RotateCcw,
   Search,
   FolderOpen,
-  Terminal,
-  GitBranch,
-  Server,
-  Globe,
-  ListChecks,
-  Users,
-  Bookmark,
   Shield,
   ShieldAlert,
   ShieldCheck,
   ShieldQuestion,
 } from 'lucide-react';
+import { TOOL_CATEGORY_ICON_COMPONENTS } from '@/components/tool-category-icons';
 import { useAppStore, PERMISSION_OPTIONS, type PermissionOverride } from '@/lib/store';
 import { isMcpAvailable, listMcpTools } from '@/lib/mcp/bridge';
 import { mcpToolKey, type McpToolInfo } from '@/lib/mcp/tool-mapper';
@@ -36,22 +30,27 @@ import {
   getAllToolRows,
   TOOL_PERMISSION_GROUPS,
   type ToolPermissionGroup,
-  type ToolRowItem,
   type AdditionalMcpToolItem,
   saveToolPermissionToDb,
-  loadToolPermissionsFromDb,
   resetToolPermissionsInDb,
 } from '@/lib/tool-permissions';
 
-const GROUP_ICONS: Record<ToolPermissionGroup, React.ComponentType<{ className?: string; size?: number }>> = {
-  fs: FolderOpen,
-  shell: Terminal,
-  git: GitBranch,
-  mcp: Server,
-  web: Globe,
-  plan: ListChecks,
-  delegate: Users,
-  memory: Bookmark,
+/*
+ * Nhóm quyền → TÊN icon (không phải component). Tên icon tra tiếp qua
+ * TOOL_CATEGORY_ICON_COMPONENTS — nguồn duy nhất, dùng chung với tools-panel.
+ *
+ * Trước đây file này tự dựng `GROUP_ICONS` ánh xạ thẳng sang component, tức bản
+ * sao thứ ba của cùng một bảng; thêm nhóm mới là phải nhớ sửa cả ba nơi.
+ */
+const GROUP_ICON_NAMES: Record<ToolPermissionGroup, string> = {
+  fs: 'folder-open',
+  shell: 'terminal',
+  git: 'git-branch',
+  mcp: 'server',
+  web: 'globe',
+  plan: 'list-checks',
+  delegate: 'users',
+  memory: 'bookmark',
 };
 
 export function ToolPermissionsTable() {
@@ -133,25 +132,25 @@ export function ToolPermissionsTable() {
     switch (perm) {
       case 'auto':
         return (
-          <span className="inline-flex items-center gap-1 rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400">
+          <span className="inline-flex items-center gap-1 rounded-none border border-status-success/30 bg-[#5db87a]/15 px-1.5 py-0.5 text-[10px] font-medium text-status-success">
             <ShieldCheck size={11} /> Tự duyệt
           </span>
         );
       case 'ask':
         return (
-          <span className="inline-flex items-center gap-1 rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-950/40 dark:text-amber-400">
+          <span className="inline-flex items-center gap-1 rounded-none border border-status-warning/30 bg-[#e8993a]/15 px-1.5 py-0.5 text-[10px] font-medium text-status-warning">
             <ShieldQuestion size={11} /> Luôn hỏi
           </span>
         );
       case 'deny':
         return (
-          <span className="inline-flex items-center gap-1 rounded bg-red-50 px-1.5 py-0.5 text-[10px] font-medium text-red-700 dark:bg-red-950/40 dark:text-red-400">
+          <span className="inline-flex items-center gap-1 rounded-none border border-status-error/30 bg-[#e8704f]/15 px-1.5 py-0.5 text-[10px] font-medium text-status-error">
             <ShieldAlert size={11} /> Chặn
           </span>
         );
       default:
         return (
-          <span className="inline-flex items-center gap-1 rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
+          <span className="inline-flex items-center gap-1 rounded-none border border-border-hairline/40 bg-panel-bg px-1.5 py-0.5 text-[10px] font-medium text-text-muted">
             <Shield size={11} /> Mặc định
           </span>
         );
@@ -159,7 +158,7 @@ export function ToolPermissionsTable() {
   };
 
   return (
-    <div className="space-y-3 rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-900">
+    <div className="space-y-3 rounded-none border border-border-hairline bg-surface-raised p-3 font-mono">
       {/* Header controls: Search, Group Filter, Reset */}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-1 flex-wrap items-center gap-2">
@@ -167,7 +166,7 @@ export function ToolPermissionsTable() {
           <div className="relative min-w-[160px] flex-1 max-w-xs">
             <Search
               size={13}
-              className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-400"
+              className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-[#757d89]"
             />
             <input
               id={searchInputId}
@@ -203,18 +202,18 @@ export function ToolPermissionsTable() {
         <div className="flex items-center gap-1">
           {resetConfirm ? (
             <div className="flex items-center gap-1.5">
-              <span className="text-[11px] text-amber-600 dark:text-amber-400">Xác nhận reset?</span>
+              <span className="text-[11px] text-status-warning">Xác nhận reset?</span>
               <button
                 type="button"
                 onClick={() => void handleReset()}
-                className="rounded bg-red-600 px-2 py-1 text-[11px] font-medium text-white hover:bg-red-700"
+                className="rounded-none bg-[#e8704f] px-2 py-1 text-[11px] font-semibold text-[#0d1116] hover:bg-[#e8704f]/85"
               >
                 Reset
               </button>
               <button
                 type="button"
                 onClick={() => setResetConfirm(false)}
-                className="rounded border border-zinc-300 px-2 py-1 text-[11px] text-zinc-600 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                className="rounded-none border border-border-hairline bg-panel-bg px-2 py-1 text-[11px] text-text-primary hover:bg-panel-soft"
               >
                 Hủy
               </button>
@@ -223,7 +222,7 @@ export function ToolPermissionsTable() {
             <button
               type="button"
               onClick={() => setResetConfirm(true)}
-              className="inline-flex items-center gap-1 rounded border border-zinc-200 px-2.5 py-1 text-[11px] font-medium text-zinc-600 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+              className="inline-flex items-center gap-1 rounded-none border border-border-hairline bg-panel-bg px-2.5 py-1 text-[11px] font-medium text-text-primary hover:bg-panel-soft"
               title="Đặt lại toàn bộ quyền về mặc định"
             >
               <RotateCcw size={12} /> Đặt lại mặc định
@@ -233,50 +232,50 @@ export function ToolPermissionsTable() {
       </div>
 
       {/* Bảng phân quyền */}
-      <div className="max-h-[380px] overflow-y-auto rounded border border-zinc-200 text-xs dark:border-zinc-800">
+      <div className="max-h-[380px] overflow-y-auto rounded-none border border-border-hairline text-xs">
         <table className="w-full border-collapse text-left">
-          <thead className="sticky top-0 z-10 bg-zinc-50 font-medium text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
-            <tr className="border-b border-zinc-200 dark:border-zinc-700">
+          <thead className="sticky top-0 z-10 bg-panel-bg font-medium text-text-primary">
+            <tr className="border-b border-border-hairline">
               <th className="px-3 py-2">Công cụ</th>
               <th className="px-3 py-2">Nhóm</th>
               <th className="px-3 py-2">Mô tả</th>
               <th className="px-3 py-2 text-right">Quyền</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
+          <tbody className="divide-y divide-[#495059]">
             {filteredRows.map((row) => {
               const currentVal = toolPermissions[row.name] ?? 'default';
-              const Icon = GROUP_ICONS[row.group] ?? FolderOpen;
+              const Icon = TOOL_CATEGORY_ICON_COMPONENTS[GROUP_ICON_NAMES[row.group]] ?? FolderOpen;
               const selectId = `perm-select-${row.name}`;
 
               return (
                 <tr
                   key={row.name}
-                  className="hover:bg-zinc-50/70 transition-colors dark:hover:bg-zinc-800/40"
+                  className="hover:bg-panel-bg/60 transition-colors"
                 >
                   <td className="px-3 py-2 font-mono text-[11.5px]">
                     <div className="flex items-center gap-1.5">
-                      <span className="font-semibold text-zinc-900 dark:text-zinc-100">
+                      <span className="font-semibold text-text-primary">
                         {row.name}
                       </span>
                       {row.desktopOnly && (
                         <span
-                          className="rounded bg-zinc-100 px-1 py-0.2 text-[9.5px] text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400"
+                          className="rounded-none bg-panel-bg border border-border-hairline px-1 py-0.2 text-[9.5px] text-text-muted"
                           title="Chỉ khả dụng trên bản Desktop"
                         >
                           desktop
                         </span>
                       )}
                     </div>
-                    <div className="text-[10px] text-zinc-400">{row.shortLabel}</div>
+                    <div className="text-[10px] text-[#757d89]">{row.shortLabel}</div>
                   </td>
                   <td className="px-3 py-2">
-                    <span className="inline-flex items-center gap-1 text-[11px] text-zinc-600 dark:text-zinc-400">
-                      <Icon size={12} className="text-zinc-500" />
+                    <span className="inline-flex items-center gap-1 text-[11px] text-text-muted">
+                      <Icon size={12} className="text-[#757d89]" />
                       {row.group}
                     </span>
                   </td>
-                  <td className="max-w-[280px] px-3 py-2 text-[11px] text-zinc-500 leading-snug dark:text-zinc-400">
+                  <td className="max-w-[280px] px-3 py-2 text-[11px] text-text-muted leading-snug">
                     {row.description}
                   </td>
                   <td className="px-3 py-2 text-right">
@@ -306,7 +305,7 @@ export function ToolPermissionsTable() {
             })}
             {filteredRows.length === 0 && (
               <tr>
-                <td colSpan={4} className="px-3 py-6 text-center text-zinc-400">
+                <td colSpan={4} className="px-3 py-6 text-center text-[#757d89]">
                   Không tìm thấy tool nào khớp với bộ lọc.
                 </td>
               </tr>
@@ -315,7 +314,7 @@ export function ToolPermissionsTable() {
         </table>
       </div>
 
-      <div className="flex items-center justify-between text-[11px] text-zinc-500">
+      <div className="flex items-center justify-between text-[11px] text-text-muted">
         <span>Hiển thị {filteredRows.length} / {allRows.length} công cụ</span>
         <span>Mọi thay đổi được lưu tự động (Zustand + Dexie v14)</span>
       </div>

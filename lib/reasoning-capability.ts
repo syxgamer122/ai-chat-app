@@ -75,6 +75,31 @@ function distance(a: ThinkingLevel, b: ThinkingLevel): number {
 }
 
 /**
+ * Có nên HIỆN điều khiển mức suy luận cho model này không?
+ *
+ * Đây là chỗ sửa lỗi "thinking slider giả với mọi model". Nhiều gateway trả
+ * metadata kiểu OpenRouter với `reasoning: {}` cho MỌI model; `parseModelReasoning`
+ * biến nó thành `{ efforts: [], mandatory: false }` — khác `null`, nên trước đây
+ * `modelReasoningCap` truthy và menu vẫn hiện. Rồi tầng UI coi `efforts.length === 0`
+ * là "hỗ trợ cả 4 mức" (`thinking-menu.tsx` — `isLevelSupported`) nên hiện đủ
+ * Thấp/Trung bình/Cao/Tối đa cho một model thực chất chỉ bật/tắt suy luận.
+ *
+ * Quy tắc:
+ *  - Không có metadata (`null`) → ẩn: không biết gì thì không giả vờ biết.
+ *  - `efforts.length > 0` → hiện: model chọn được mức thật.
+ *  - `mandatory === true` → hiện: cần nói rõ model luôn suy luận, không tắt được.
+ *  - `{ efforts: [], mandatory: false }` (toggle-only) → **ẩn**: không có mức nào
+ *    để chọn, slider 4 mức chỉ là trang trí.
+ */
+export function shouldShowThinkingControl(
+  cap: ReasoningCapability | null | undefined,
+): boolean {
+  if (!cap) return false;
+  return cap.efforts.length > 0 || cap.mandatory;
+}
+
+
+/**
  * Chọn mức sẽ gửi upstream: đúng mức yêu cầu nếu được hỗ trợ, ngược lại mức
  * GẦN NHẤT theo thang low→max. Toggle-only (efforts rỗng) hoặc danh sách trống
  * → gửi nguyên mức yêu cầu.

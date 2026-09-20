@@ -12,6 +12,9 @@ describe('DESIGN.md — Vyen Harness × Pixel/Minecraft Identity verification', 
   const PALETTE_TOKENS = new Set([
     '#0d1116', '#161d27', '#212730', '#252f3d',
     '#495059', '#757d89',
+    /* #5d666f — bậc viền CONTROL, chèn giữa hairline (#495059) và hover
+       (#757d89) để tách viền ô nhập/nút khỏi viền khung. Xem DESIGN.md mục 2. */
+    '#5d666f',
     '#ebe7e4', '#9fa4ab',
     '#6a9fcc', '#4b607c',
     '#5db87a', '#e8993a', '#e8704f',
@@ -45,6 +48,30 @@ describe('DESIGN.md — Vyen Harness × Pixel/Minecraft Identity verification', 
     '../components/chat/status-line.tsx',
     '../components/chat/tool-trace.tsx',
     '../components/chat/orchestrator-badge.tsx',
+    '../components/settings-dialog.tsx',
+    /* Các section + tab tách ra từ settings-dialog.tsx — cùng thuộc bề mặt
+       Settings nên phải chịu chung hợp đồng, nếu không chúng sẽ lệch chuẩn dần. */
+    '../components/settings/memories-section.tsx',
+    '../components/settings/vision-model-section.tsx',
+    '../components/settings/slash-commands-section.tsx',
+    '../components/settings/auto-backup-section.tsx',
+    '../components/settings/appearance-tab.tsx',
+    '../components/settings/providers-tab.tsx',
+    '../components/settings/safety-tab.tsx',
+    '../components/settings/extensions-tab.tsx',
+    '../components/settings/memory-tab.tsx',
+    '../components/settings/data-tab.tsx',
+    '../components/settings/section-loading.tsx',
+    '../components/tool-permissions-table.tsx',
+    '../components/provider-manager.tsx',
+    '../components/mcp/mcp-settings-panel.tsx',
+    '../components/scheduler/scheduler-panel.tsx',
+    '../components/routing-settings-panel.tsx',
+    '../components/settings-skills.tsx',
+    '../components/settings-agent-memory.tsx',
+    '../components/usage-stats.tsx',
+    '../components/hud/agent-hud.tsx',
+    '../components/chat-error-boundary.tsx',
     '../app/globals.css',
     '../app/layout.tsx',
   ];
@@ -147,14 +174,38 @@ describe('DESIGN.md — Vyen Harness × Pixel/Minecraft Identity verification', 
     for (const rel of TOKENIZED_COMPONENTS) {
       const code = fs.readFileSync(path.resolve(__dirname, rel), 'utf8');
       const hexes = code.match(/#[0-9a-fA-F]{3,8}\b/g) ?? [];
-      expect(hexes.length).toBeGreaterThan(0);
-
+      /*
+       * KHÔNG bắt buộc phải còn hex: dùng class token ngữ nghĩa
+       * (`bg-panel-bg`, `border-border-hairline`) là trạng thái TỐT HƠN hex thô.
+       * Assertion cũ `expect(hexes.length).toBeGreaterThan(0)` vô tình chặn luôn
+       * việc migrate sang token. Hợp đồng đúng là: hex nào còn lại cũng phải
+       * thuộc bảng màu.
+       */
       const offPalette = [...new Set(hexes.map((h) => h.toLowerCase()))].filter(
         (h) => !PALETTE_TOKENS.has(h),
       );
       expect(offPalette, `${rel} dùng màu ngoài bảng: ${offPalette.join(', ')}`).toEqual([]);
     }
   });
+
+  it('bề mặt UI dùng class token ngữ nghĩa thay vì hex thô', () => {
+    /*
+     * Chốt hướng: mọi file trong hợp đồng phải dùng token (`bg-panel-bg`,
+     * `text-text-muted`...). Ngưỡng đặt ở mức tối thiểu để không chặn các file
+     * còn ít hex hợp lệ (ví dụ màu gradient của sọc active).
+     */
+    const missing: string[] = [];
+    for (const rel of TOKENIZED_COMPONENTS) {
+      if (rel === '../app/globals.css' || rel === '../app/layout.tsx') continue;
+      const code = fs.readFileSync(path.resolve(__dirname, rel), 'utf8');
+      const tokenUses = (code.match(
+        /\b(?:bg|text|border)-(?:bg-deep|surface-raised|panel-bg|panel-soft|surface-code|text-primary|text-muted|accent-steel|border-hairline|border-subtle|border-control|border-hover|status-(?:success|warning|error))\b/g,
+      ) ?? []).length;
+      if (tokenUses === 0) missing.push(rel);
+    }
+    expect(missing, `chưa dùng token ngữ nghĩa: ${missing.join(', ')}`).toEqual([]);
+  });
+
 
   it('bề mặt chat + composer không dùng họ màu Tailwind (red-500, zinc-400...)', () => {
     for (const rel of TOKENIZED_COMPONENTS) {
@@ -180,7 +231,8 @@ describe('DESIGN.md — Vyen Harness × Pixel/Minecraft Identity verification', 
   });
 
   it('nút có nhãn trong thanh composer nới vùng chạm lên mốc 44px của mobile', () => {
-    // Nút cao 36px (h-8 ở base 18px) nên cần thêm 8px; `after:-inset-6px` cho 48px.
+    // Base 16px: nút cao 32px (h-8) nên `after:-inset-[6px]` cho đúng 44px —
+    // mốc vùng chạm tối thiểu của WCAG 2.5.5 trên mobile.
     for (const rel of ['../components/thinking-menu.tsx', '../components/model-selector.tsx']) {
       const code = fs.readFileSync(path.resolve(__dirname, rel), 'utf8');
       const trigger = code.split('aria-haspopup')[1]?.split('>')[0] ?? '';

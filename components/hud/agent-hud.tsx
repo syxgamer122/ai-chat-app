@@ -20,8 +20,9 @@ export function AgentHud({ className = '' }: AgentHudProps) {
 
   return (
     <div
+      role="status"
       aria-label="Agent Telemetry HUD"
-      className={`border-b border-border/50 bg-background/90 backdrop-blur-md px-3 py-2 text-xs font-mono text-muted-foreground transition-all duration-200 ${className}`}
+      className={`border-b border-border-hairline/50 bg-surface-raised/90 backdrop-blur-md px-3 py-2 text-xs font-mono text-text-muted transition-all duration-200 ${className}`}
     >
       <div className="flex flex-col gap-1.5 max-h-48 overflow-y-auto pr-1">
         {laneList.map((lane) => (
@@ -42,27 +43,27 @@ function HudRow({ lane }: { lane: HudLane }) {
       : `$${lane.costUsd.toFixed(4)}`;
 
   const evidenceColorMap = {
-    default: 'bg-muted text-muted-foreground border-border/60',
-    running: 'bg-blue-500/10 text-blue-400 border-blue-500/30 animate-pulse',
-    warning: 'bg-amber-500/10 text-amber-400 border-amber-500/30',
-    success: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30 font-semibold',
-    danger: 'bg-red-500/10 text-red-400 border-red-500/30',
+    default: 'bg-panel-soft text-text-muted border-border-hairline/60',
+    running: 'bg-[#6a9fcc]/10 text-accent-steel border-accent-steel/30 animate-pulse',
+    warning: 'bg-[#e8993a]/10 text-status-warning border-status-warning/30',
+    success: 'bg-[#5db87a]/10 text-status-success border-status-success/30 font-semibold',
+    danger: 'bg-[#e8704f]/10 text-status-error border-status-error/30',
   };
 
   return (
-    <div className="flex flex-wrap items-center justify-between gap-2 rounded border border-border/40 bg-card/40 px-2.5 py-1.5 hover:border-border/80 transition-colors">
+    <div className="flex flex-wrap items-center justify-between gap-2 rounded-none border border-border-hairline/40 bg-panel-bg/60 px-2.5 py-1.5 hover:border-border-hairline transition-colors">
       {/* Left: Model, Category, Effort */}
       <div className="flex items-center gap-2 min-w-0">
-        <span className="flex items-center gap-1 font-medium text-foreground">
-          <Cpu className="h-3.5 w-3.5 text-primary" />
+        <span className="flex items-center gap-1 font-medium text-text-primary">
+          <Cpu className="h-3.5 w-3.5 text-accent-steel" />
           <span className="truncate max-w-[120px] sm:max-w-[180px]">{catInfo.label}</span>
         </span>
-        <span className="text-muted-foreground/60">/</span>
-        <span className="text-muted-foreground">
+        <span className="text-text-muted/60">/</span>
+        <span className="text-text-muted">
           {lane.model}:{lane.effort}
         </span>
         {lane.kind !== 'main' && (
-          <span className="rounded bg-secondary/80 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-secondary-foreground">
+          <span className="rounded-none bg-panel-soft px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-text-primary">
             {lane.kind}
           </span>
         )}
@@ -72,20 +73,20 @@ function HudRow({ lane }: { lane: HudLane }) {
       <div className="flex items-center gap-3 text-[11px]">
         {/* Parallel shot badge */}
         {Boolean(lane.parallelShots && lane.parallelShots > 1) && (
-          <span className="inline-flex items-center gap-1 rounded bg-amber-500/15 border border-amber-500/30 px-1.5 py-0.5 text-amber-400 font-semibold">
+          <span className="inline-flex items-center gap-1 rounded-none bg-[#e8993a]/15 border border-status-warning/30 px-1.5 py-0.5 text-status-warning font-semibold">
             <Zap className="h-3 w-3" />
             parallel shot ×{lane.parallelShots}
           </span>
         )}
 
         {/* Turn */}
-        <span className="hidden sm:inline-flex items-center gap-1 text-muted-foreground">
+        <span className="hidden sm:inline-flex items-center gap-1 text-text-muted">
           <Activity className="h-3 w-3" />
           T{lane.turn}
         </span>
 
         {/* Tokens */}
-        <span className="hidden md:inline-flex items-center gap-1 text-muted-foreground">
+        <span className="hidden md:inline-flex items-center gap-1 text-text-muted">
           <Coins className="h-3 w-3" />
           {lane.tokensIn + lane.tokensOut > 0 ? (
             <span>
@@ -98,20 +99,20 @@ function HudRow({ lane }: { lane: HudLane }) {
 
         {/* Cost */}
         <span className="inline-flex items-center gap-1 font-medium">
-          <span className={lane.costUsd === 'unknown' ? 'text-muted-foreground italic' : 'text-foreground'}>
+          <span className={lane.costUsd === 'unknown' ? 'text-text-muted italic' : 'text-text-primary'}>
             {costDisplay}
           </span>
         </span>
 
         {/* Elapsed */}
-        <span className="hidden sm:inline-flex items-center gap-1 text-muted-foreground">
+        <span className="hidden sm:inline-flex items-center gap-1 text-text-muted">
           <Clock className="h-3 w-3" />
           {lane.elapsedSec}s
         </span>
 
         {/* Evidence ladder badge */}
         <span
-          className={`inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[11px] ${
+          className={`inline-flex items-center gap-1 rounded-none border px-2 py-0.5 text-[11px] ${
             evidenceColorMap[evidenceInfo.variant]
           }`}
         >

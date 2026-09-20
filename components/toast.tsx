@@ -5,9 +5,10 @@
  * ở ~10 chỗ (tệp quá lớn, stream gián đoạn, lỗi chuyển nhánh…) nhưng chưa bao
  * giờ được render — mọi thông báo lỗi đều bị mất. Component này lấp chỗ đó.
  *
- * Nguồn notice giờ là lib/notice-store (leaf store): ToastHost tự订阅, ChatInterface
+ * Nguồn notice giờ là lib/notice-store (leaf store): ToastHost tự subscribe, ChatInterface
  * chỉ import showNotice() để gọi — một toast không còn re-render cây chat.
  */
+import { Z_CLASS } from '@/lib/ui-z';
 import React, { useEffect } from 'react';
 import { AlertTriangle, X } from 'lucide-react';
 import { clearNotice, useNotice } from '@/lib/notice-store';
@@ -24,16 +25,16 @@ export function Toast({ message, onClose }: ToastProps) {
     <div
       role="status"
       aria-live="polite"
-      className="pointer-events-none fixed inset-x-0 bottom-[calc(7rem+env(safe-area-inset-bottom))] z-50 flex justify-center px-4"
+      className={`pointer-events-none fixed inset-x-0 bottom-[calc(7rem+env(safe-area-inset-bottom))] ${Z_CLASS.toast} flex justify-center px-4`}
     >
-      <div className="pointer-events-auto flex max-w-md items-start gap-2.5 rounded-none border border-[#e8993a]/40 bg-[#212730] p-3 text-xs font-mono text-[#ebe7e4] animate-slide-up">
-        <AlertTriangle size={14} className="mt-0.5 flex-shrink-0 text-amber-600 dark:text-amber-400" />
+      <div className="pointer-events-auto flex max-w-md items-start gap-2.5 rounded-none border border-status-warning/40 bg-panel-bg p-3 text-xs font-mono text-text-primary animate-slide-up">
+        <AlertTriangle size={14} className="mt-0.5 flex-shrink-0 text-status-warning" />
         <p className="min-w-0 flex-1">{message}</p>
         <button
           type="button"
           onClick={onClose}
           aria-label="Đóng thông báo"
-          className="-mr-1 -mt-0.5 flex-shrink-0 rounded-none p-0.5 text-amber-700/70 transition-colors hover:bg-amber-100 hover:text-amber-900 dark:text-amber-400/70 dark:hover:bg-amber-500/10 dark:hover:text-amber-300"
+          className="-mr-1 -mt-0.5 flex-shrink-0 rounded-none p-0.5 text-status-warning transition-colors hover:bg-[#e8993a]/10"
         >
           <X size={13} />
         </button>

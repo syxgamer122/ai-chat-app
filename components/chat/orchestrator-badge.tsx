@@ -79,20 +79,20 @@ export const OrchestratorBadge = memo(function OrchestratorBadge({
   /* Cùng hệ chip với tool-trace (DESIGN.md): góc vuông, hairline #495059,
      nền panel, một theme dark duy nhất. Không glow/shimmer — nhãn tĩnh. */
   const chipClass =
-    'flex max-w-full items-center gap-1.5 rounded-none border border-[#495059] bg-[#212730] px-2.5 py-1 font-mono text-[11px] transition-colors duration-100 text-[#9fa4ab]';
+    'flex max-w-full items-center gap-1.5 rounded-none border border-border-hairline bg-panel-bg px-2.5 py-1 font-mono text-[11px] transition-colors duration-100 text-text-muted';
   const inner = (
     <>
-      <span className="flex-shrink-0 font-semibold text-[#ebe7e4]">Kết quả Orchestrator</span>
+      <span className="flex-shrink-0 font-semibold text-text-primary">Kết quả Orchestrator</span>
       {meta.length > 0 && (
-        <span className="flex-shrink-0 text-[#9fa4ab]">{meta.join(' · ')}</span>
+        <span className="flex-shrink-0 text-text-muted">{meta.join(' · ')}</span>
       )}
       {goal && (
-        <span className="min-w-0 max-w-[220px] truncate text-[#9fa4ab]">
+        <span className="min-w-0 max-w-[220px] truncate text-text-muted">
           {goal}
         </span>
       )}
-      {canExpand && expanded && <ChevronDown size={11} className="flex-shrink-0 text-[#9fa4ab]" aria-hidden />}
-      {canExpand && !expanded && <ChevronRight size={11} className="flex-shrink-0 text-[#9fa4ab]" aria-hidden />}
+      {canExpand && expanded && <ChevronDown size={11} className="flex-shrink-0 text-text-muted" aria-hidden />}
+      {canExpand && !expanded && <ChevronRight size={11} className="flex-shrink-0 text-text-muted" aria-hidden />}
     </>
   );
 
@@ -104,7 +104,7 @@ export const OrchestratorBadge = memo(function OrchestratorBadge({
           onClick={() => setExpanded((prev) => !prev)}
           aria-expanded={expanded}
           title={goal ?? undefined}
-          className={`${chipClass} cursor-pointer hover:border-[#757d89] hover:text-[#ebe7e4]`}
+          className={`${chipClass} cursor-pointer hover:border-border-hover hover:text-text-primary`}
         >
           {inner}
         </button>
@@ -113,15 +113,15 @@ export const OrchestratorBadge = memo(function OrchestratorBadge({
       )}
 
       {expanded && (
-        <div className="mt-1.5 rounded-none border border-[#495059] bg-[#161d27] px-2.5 py-1.5 font-mono text-[11px] text-[#9fa4ab]">
+        <div className="mt-1.5 rounded-none border border-border-hairline bg-surface-raised px-2.5 py-1.5 font-mono text-[11px] text-text-muted">
           {goal && (
             <p className="whitespace-pre-wrap break-words" title={goal}>
-              <span className="font-medium text-[#ebe7e4]">Mục tiêu:</span> {goal}
+              <span className="font-medium text-text-primary">Mục tiêu:</span> {goal}
             </p>
           )}
           {timeText && (
             <p>
-              <span className="font-medium text-[#ebe7e4]">Thời gian:</span> {timeText}
+              <span className="font-medium text-text-primary">Thời gian:</span> {timeText}
             </p>
           )}
         </div>

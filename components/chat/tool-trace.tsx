@@ -171,10 +171,10 @@ function ToolChip({ ev }: { ev: ToolEvent }) {
     <div
       className={`my-1 rounded-none border font-mono text-xs ${
         ev.isError
-          ? 'border-[#e8704f]/40 bg-[#e8704f]/10'
+          ? 'border-status-error/40 bg-[#e8704f]/10'
           : ev.done
-            ? 'border-[#495059] bg-[#212730]'
-            : 'border-[#6a9fcc] bg-[#212730]'
+            ? 'border-border-hairline bg-panel-bg'
+            : 'border-accent-steel bg-panel-bg'
       }`}
     >
       <button
@@ -188,14 +188,14 @@ function ToolChip({ ev }: { ev: ToolEvent }) {
         }`}
       >
         <div className="flex items-center gap-2 min-w-0">
-          <span className="text-[#6a9fcc] font-bold text-[11px]">$</span>
-          <div className="flex items-center gap-1 font-semibold text-[#ebe7e4]">
-            <Icon size={12} className="text-[#6a9fcc]" />
+          <span className="text-accent-steel font-bold text-[11px]">$</span>
+          <div className="flex items-center gap-1 font-semibold text-text-primary">
+            <Icon size={12} className="text-accent-steel" />
             <span>{label}</span>
           </div>
 
           {displayParam && (
-            <span className="truncate text-[#9fa4ab] text-[11px] max-w-[280px] sm:max-w-[420px]">
+            <span className="truncate text-text-muted text-[11px] max-w-[280px] sm:max-w-[420px]">
               {displayParam}
             </span>
           )}
@@ -204,25 +204,25 @@ function ToolChip({ ev }: { ev: ToolEvent }) {
         <div className="flex items-center gap-1.5 flex-shrink-0 text-[11px]">
           {ev.done ? (
             ev.isError ? (
-              <span className="flex items-center gap-1 text-[#e8704f]">
+              <span className="flex items-center gap-1 text-status-error">
                 <XCircle size={12} />
                 <span>error</span>
               </span>
             ) : (
-              <span className="flex items-center gap-1 text-[#5db87a]">
+              <span className="flex items-center gap-1 text-status-success">
                 <Check size={12} />
                 <span>done</span>
               </span>
             )
           ) : (
-            <span className="flex items-center gap-1 text-[#e8993a]">
-              <Loader2 size={12} className="animate-spin text-[#6a9fcc]" />
+            <span className="flex items-center gap-1 text-status-warning">
+              <Loader2 size={12} className="animate-spin text-accent-steel" />
               <span>running</span>
             </span>
           )}
 
           {hasOutput && (
-            <span className="ml-1 text-[#9fa4ab]">
+            <span className="ml-1 text-text-muted">
               {expanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
             </span>
           )}
@@ -230,19 +230,19 @@ function ToolChip({ ev }: { ev: ToolEvent }) {
       </button>
 
       {expanded && hasOutput && (
-        <div className="border-t border-[#495059] bg-[#161d27] px-3 py-2 text-[11.5px] leading-relaxed">
-          <div className="flex items-center justify-between pb-1.5 text-[10px] text-[#9fa4ab]">
+        <div className="border-t border-border-hairline bg-surface-raised px-3 py-2 text-[11.5px] leading-relaxed">
+          <div className="flex items-center justify-between pb-1.5 text-[10px] text-text-muted">
             <span>OUTPUT</span>
             <button
               type="button"
               onClick={onCopy}
-              className="flex items-center gap-1 hover:text-[#ebe7e4]"
+              className="flex items-center gap-1 hover:text-text-primary"
             >
-              {copied ? <Check size={10} className="text-[#5db87a]" /> : <Copy size={10} />}
+              {copied ? <Check size={10} className="text-status-success" /> : <Copy size={10} />}
               <span>{copied ? 'copied' : 'copy'}</span>
             </button>
           </div>
-          <pre className="max-h-60 overflow-y-auto whitespace-pre-wrap font-mono text-[#ebe7e4]">
+          <pre className="max-h-60 overflow-y-auto whitespace-pre-wrap font-mono text-text-primary">
             {ev.summary.split('\n').map((line, idx) => {
               const isAdded = line.startsWith('+');
               const isRemoved = line.startsWith('-');

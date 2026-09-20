@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseModelReasoning, resolveNearestEffort } from '@/lib/reasoning-capability';
+import { parseModelReasoning, resolveNearestEffort, shouldShowThinkingControl } from '@/lib/reasoning-capability';
 import { normalizeProviderModels, type ThinkingLevel } from '@/lib/provider-url';
 
 describe('parseModelReasoning — metadata kiểu OpenRouter', () => {
@@ -53,6 +53,45 @@ describe('resolveNearestEffort — chọn mức gần nhất trên thang low→m
     expect(resolveNearestEffort('max', { efforts: [], mandatory: true })).toBe('max');
     expect(resolveNearestEffort('max', null)).toBe('max');
     expect(resolveNearestEffort('max', undefined)).toBe('max');
+  });
+});
+
+describe('shouldShowThinkingControl — chống hiện slider giả', () => {
+  /*
+   * Bối cảnh: nhiều gateway trả `reasoning: {}` cho MỌI model. `parseModelReasoning`
+   * biến nó thành `{ efforts: [], mandatory: false }` — khác `null` — nên trước đây
+   * slider vẫn hiện đủ 4 mức dù chọn mức nào cũng không có tác dụng. Đây là lỗi
+   * "fake với mọi model".
+   */
+  it('không có metadata (null/undefined) -> ẩn', () => {
+    expect(shouldShowThinkingControl(null)).toBe(false);
+    expect(shouldShowThinkingControl(undefined)).toBe(false);
+  });
+
+  it('gateway khai reasoning rỗng cho mọi model -> ẨN (đây là ca lỗi chính)', () => {
+    // Mô phỏng đúng thứ `parseModelReasoning` trả về cho `reasoning: {}`.
+    const cap = parseModelReasoning({
+      supported_parameters: ['reasoning'],
+      reasoning: {},
+    });
+    expect(cap).toEqual({ efforts: [], mandatory: false });
+    expect(shouldShowThinkingControl(cap)).toBe(false);
+  });
+
+  it('model chọn được mức -> hiện', () => {
+    expect(shouldShowThinkingControl({ efforts: ['low', 'high'], mandatory: false })).toBe(true);
+    expect(
+      shouldShowThinkingControl({ efforts: ['low', 'medium', 'high', 'max'], mandatory: false }),
+    ).toBe(true);
+  });
+
+  it('model bắt buộc suy luận -> hiện (để giải thích không tắt được)', () => {
+    expect(shouldShowThinkingControl({ efforts: [], mandatory: true })).toBe(true);
+    expect(shouldShowThinkingControl({ efforts: ['high'], mandatory: true })).toBe(true);
+  });
+
+  it('toggle-only không bắt buộc -> ẩn (không có mức nào để chọn)', () => {
+    expect(shouldShowThinkingControl({ efforts: [], mandatory: false })).toBe(false);
   });
 });
 

@@ -19,6 +19,8 @@ import {
   type RecipeRecord,
 } from '@/lib/db';
 import { AVAILABLE_MODELS } from '@/lib/models';
+import { shouldShowThinkingControl } from '@/lib/reasoning-capability';
+import { ApprovalQueue } from '@/lib/approval-queue';
 import { deriveModelOption, toggleFavorite, upsertRecent } from '@/lib/model-meta';
 import {
   reconstructActiveThread,
@@ -101,6 +103,7 @@ import {
   requireWorkspace,
   restoreWorkspaceRoot,
   type FsDeps,
+  type FsEntry,
 } from '@/lib/fs-access';
 import { isVyenDesktop } from '@/lib/desktop-bridge';
 import { useRecipeUiStore, type ActiveRecipeRun } from '@/lib/recipes/run-store';
@@ -111,8 +114,7 @@ import {
   formatStructuredLine,
   readRecipeRecord,
 } from '@/lib/recipes';
-import { BUILTIN_SLASH_COMMANDS, parseSlashCommand } from '@/lib/slash-commands';
-import type { RetryCheckOutcome } from '@/lib/recipes/retry';
+import { BUILTIN_SLASH_COMMANDS, parseSlashCommand } from '@/lib/slash-commands';import type { RetryCheckOutcome } from '@/lib/recipes/retry';
 import {
   scanDiskSkills,
   buildHintsBlock,
@@ -247,8 +249,20 @@ import { DiffConfirm, type DiffConfirmState } from '@/components/diff-confirm';
 import { ShellConfirm } from '@/components/shell-confirm';
 import type { StagingPanelState } from '@/components/staging-panel';
 import { McpToolApprovalDialog } from '@/components/mcp/tool-approval-dialog';
-import { toSkills } from '@/lib/prompt-library';
-import { matchActiveSkills } from '@/lib/skills';
+import {
+  executeZeromemInspect,
+  executeZeromemLog,
+  executeZeromemQuery,
+  executeZeromemStats,
+  getZeroMemStore,
+} from '@/lib/zeromem/tools';
+import { hydrateZeroMem, persistZeroMem } from '@/lib/zeromem/persistence';
+import {
+  executeCodePatch,
+  executeCodeSkeleton,
+  executeCodeSymbols,
+  executeCodeVerify,
+} from '@/lib/sarsed/tools';
 import { gatherPdfContexts } from '@/lib/use-pdf-context';
 import { gatherLiveContext } from '@/lib/live-tools';
 import { addMemory, listMemories } from '@/lib/db';
@@ -294,6 +308,94 @@ const MAX_FILES = 4;
 /* ------------------------------------------------------------------ */
 /* Main ChatInterface Orchestrator                                     */
 /* ------------------------------------------------------------------ */
+/**
+ * Khoá workspace cho bộ nhớ Zero-Mem — ổn định theo THƯ MỤC dự án chứ không
+ * theo phiên chat, để mở phiên mới trong cùng dự án vẫn thấy bộ nhớ cũ.
+ */
+function currentZeroMemKey(): string {
+  try {
+    const info = getWorkspaceInfo();
+    if (info.connected && info.name) return info.name;
+  } catch {
+    /* chưa kết nối workspace — rơi về khoá phiên */
+  }
+  return useAppStore.getState().currentChatId ?? 'default';
+}
+
+/** Đọc nguyên văn một file trong workspace (đường desktop hoặc trình duyệt). */
+async function readWorkspaceText(relPath: string): Promise<string> {
+  if (isVyenDesktop()) {
+    const r = await desktopFsReadFull(relPath);
+    if (r.status === 'ok') return r.content;
+    throw new Error(r.status === 'missing' ? 'Không tìm thấy file' : 'File quá lớn để đọc toàn bộ');
+  }
+  const ws = await requireWorkspace();
+  if (!ws.ok) throw new Error(ws.error);
+  const r = await fsReadFull(ws.deps, relPath);
+  if (r.status === 'ok') return r.content;
+  if (r.status === 'error') throw new Error(r.message);
+  throw new Error(r.status === 'missing' ? 'Không tìm thấy file' : 'File quá lớn để đọc toàn bộ');
+}
+
+/** Thư mục bỏ qua khi lập chỉ mục ký hiệu — trùng quy ước của fs_search. */
+const SYMBOL_INDEX_SKIP_DIRS = new Set([
+  'node_modules', '.git', 'dist', 'build', '.next', 'out', 'coverage',
+  '.turbo', '.cache', 'vendor', '__pycache__', '.venv', 'target',
+]);
+/** Đuôi file được đưa vào chỉ mục ký hiệu. */
+const SYMBOL_INDEX_EXTS = /\.(?:ts|tsx|js|jsx|mjs|cjs|py|go|rs)$/;
+/** Trần an toàn cho một lần lập chỉ mục — tránh quét cạn workspace lớn. */
+const SYMBOL_INDEX_MAX_FILES = 200;
+const SYMBOL_INDEX_MAX_BYTES = 600_000;
+
+/**
+ * Lập chỉ mục ký hiệu cho `code_symbols` bằng cách đi bộ workspace CÓ TRẦN.
+ *
+ * Trước đây `code_symbols` không có nguồn dữ liệu nào ở phía client nên chỉ trả
+ * về rỗng — khai báo tool mà không dùng được. Đi bộ có trần giữ chi phí ở mức
+ * chấp nhận được (tối đa 200 file / 600KB, bỏ qua thư mục build & phụ thuộc).
+ */
+async function collectWorkspaceSources(): Promise<Array<{ path: string; content: string }>> {
+  const out: Array<{ path: string; content: string }> = [];
+  let bytes = 0;
+
+  const listDir = async (rel: string): Promise<FsEntry[]> => {
+    if (isVyenDesktop()) return desktopFsList(rel);
+    const ws = await requireWorkspace();
+    if (!ws.ok) throw new Error(ws.error);
+    return fsList(ws.deps, rel);
+  };
+
+  const walk = async (rel: string, depth: number): Promise<void> => {
+    if (depth > 6 || out.length >= SYMBOL_INDEX_MAX_FILES || bytes >= SYMBOL_INDEX_MAX_BYTES) return;
+    let entries: FsEntry[];
+    try {
+      entries = await listDir(rel);
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      if (out.length >= SYMBOL_INDEX_MAX_FILES || bytes >= SYMBOL_INDEX_MAX_BYTES) return;
+      const child = rel ? `${rel}/${e.name}` : e.name;
+      if (e.type === 'dir') {
+        if (SYMBOL_INDEX_SKIP_DIRS.has(e.name)) continue;
+        await walk(child, depth + 1);
+      } else if (SYMBOL_INDEX_EXTS.test(e.name)) {
+        try {
+          const content = await readWorkspaceText(child);
+          bytes += content.length;
+          out.push({ path: child, content });
+        } catch {
+          /* file nhị phân / quá lớn / đọc lỗi — bỏ qua, không chặn chỉ mục */
+        }
+      }
+    }
+  };
+
+  await walk('', 0);
+  return out;
+}
+
 export default function ChatInterface() {
   const currentChatId = useAppStore((s) => s.currentChatId);
   const setCurrentChatId = useAppStore((s) => s.setCurrentChatId);
@@ -376,11 +478,6 @@ export default function ChatInterface() {
       }
     });
   }, []);
-  const promptTemplates = useLiveQuery(
-    () => db.prompts.orderBy('updatedAt').reverse().toArray(),
-    [],
-    [],
-  );
   const recipeRecords = useLiveQuery(
     () => db.recipes.orderBy('updatedAt').reverse().toArray(),
     [],
@@ -843,73 +940,90 @@ export default function ChatInterface() {
     };
   }, [workspace?.connected, workspace?.name]);
 
-  /* B6: hàng đợi diff — model gọi 2 fs_write/fs_edit trong cùng step thì
-     promise thứ nhất không bao giờ resolve nếu ghi đè slot. Queue + ref
-     mở/đóng: xong cái hiện tại mới shift cái kế. */
+  /* ------------------------------------------------------------------ */
+  /* Hàng đợi PHÊ DUYỆT dùng chung cho diff và shell                     */
+  /* ------------------------------------------------------------------ */
+  /*
+   * Vì sao gộp hai hàng đợi làm một: trước đây diff và shell mỗi loại có hàng
+   * đợi riêng, nên khi agent gọi SONG SONG một fs_edit và một shell_run trong
+   * cùng một step, cả hai modal cùng render ở z-[80] — chồng lên nhau, modal
+   * dưới không bấm được nút nào.
+   *
+   * Logic trọng tài nằm ở `lib/approval-queue.ts` — đơn vị thuần, có test hành
+   * vi thật (tests/approval-queue.test.ts). Ở đây chỉ còn phần nối vào React.
+   */
   const [diffState, setDiffState] = useState<DiffConfirmState | null>(null);
-  const diffOpenRef = useRef(false);
-  const diffQueueRef = useRef<DiffConfirmState[]>([]);
+  type ShellConfirmState = { command: string; cwd?: string; open: true; resolve: (v: boolean) => void };
+  const [shellState, setShellState] = useState<ShellConfirmState | null>(null);
+
   /* Run lifecycle nằm ở phía DƯỚI file (phụ thuộc useChat), nên modal — vốn
      được định nghĩa trước — đi qua ref. */
   const awaitUserRef = useRef<() => void>(() => {});
   const resumeRef = useRef<() => void>(() => {});
 
-  const showDiffModal = useCallback(
-    (s: Omit<DiffConfirmState, 'open' | 'resolve'>): Promise<boolean> =>
-      new Promise((resolve) => {
-        const item: DiffConfirmState = { ...s, open: true, resolve };
+  type ApprovalItem =
+    | { kind: 'diff'; state: DiffConfirmState }
+    | { kind: 'shell'; state: ShellConfirmState };
+
+  /*
+   * Khởi tạo MỘT LẦN. Callback chỉ chạm setter (ổn định) và ref (ổn định), nên
+   * instance không bao giờ giữ giá trị cũ của lượt render nào.
+   */
+  const [approvalQueue] = useState(
+    () =>
+      new ApprovalQueue<ApprovalItem>({
         /* Run đậu lại chờ người dùng: KHÔNG được tính là stalled, nếu không
            modal mở 2 phút là bị reconciler kết luận "stream đứt" và giết run. */
-        awaitUserRef.current();
-        if (diffOpenRef.current) {
-          diffQueueRef.current.push(item);
-          return;
-        }
-        diffOpenRef.current = true;
-        setDiffState(item);
+        onRequest: () => awaitUserRef.current(),
+        /* Dọn state của loại kia trước khi hiện → không bao giờ chồng đôi. */
+        onPresent: (item) => {
+          if (!item) {
+            setDiffState(null);
+            setShellState(null);
+            return;
+          }
+          if (item.kind === 'diff') {
+            setShellState(null);
+            setDiffState(item.state);
+          } else {
+            setDiffState(null);
+            setShellState(item.state);
+          }
+        },
+        onDrained: () => resumeRef.current(),
       }),
-    [],
   );
-  const closeDiffModal = useCallback(() => {
-    const next = diffQueueRef.current.shift();
-    if (next) {
-      setDiffState(next);
-      return;
-    }
-    diffOpenRef.current = false;
-    setDiffState(null);
-    resumeRef.current();
-  }, []);
-  // Shell approval — tương tự diff queue để không ghi đè khi model gọi
-  // liên tiếp 2 shell_run trong cùng step.
-  type ShellConfirmState = { command: string; cwd?: string; open: true; resolve: (v: boolean) => void };
-  const [shellState, setShellState] = useState<ShellConfirmState | null>(null);
-  const shellOpenRef = useRef(false);
-  const shellQueueRef = useRef<ShellConfirmState[]>([]);
+
+  const showApproval = useCallback(
+    (make: (resolve: (approved: boolean) => void) => ApprovalItem): Promise<boolean> =>
+      new Promise((resolve) => {
+        approvalQueue.request(make(resolve), resolve);
+      }),
+    [approvalQueue],
+  );
+
+  const showDiffModal = useCallback(
+    (s: Omit<DiffConfirmState, 'open' | 'resolve'>): Promise<boolean> =>
+      showApproval((resolve) => ({ kind: 'diff', state: { ...s, open: true, resolve } })),
+    [showApproval],
+  );
   const showShellModal = useCallback(
     (s: Omit<ShellConfirmState, 'open' | 'resolve'>): Promise<boolean> =>
-      new Promise((resolve) => {
-        const item: ShellConfirmState = { ...s, open: true, resolve };
-        awaitUserRef.current();
-        if (shellOpenRef.current) {
-          shellQueueRef.current.push(item);
-          return;
-        }
-        shellOpenRef.current = true;
-        setShellState(item);
-      }),
-    [],
+      showApproval((resolve) => ({ kind: 'shell', state: { ...s, open: true, resolve } })),
+    [showApproval],
   );
-  const closeShellModal = useCallback(() => {
-    const next = shellQueueRef.current.shift();
-    if (next) {
-      setShellState(next);
-      return;
-    }
-    shellOpenRef.current = false;
-    setShellState(null);
-    resumeRef.current();
-  }, []);
+
+  /*
+   * Đóng modal đang hiện rồi mở mục kế tiếp; hết hàng đợi thì nhả chốt và cho
+   * run chạy tiếp. Dùng chung cho cả hai loại vì sau khi gộp, "đóng" không còn
+   * phụ thuộc loại modal nào đang mở.
+   */
+  const closeApproval = useCallback(() => {
+    approvalQueue.close();
+  }, [approvalQueue]);
+
+  const closeDiffModal = closeApproval;
+  const closeShellModal = closeApproval;
 
   /* ------------------------------------------------------------------ */
   /* MCP tools — danh sách tool từ các server người dùng đã kết nối       */
@@ -2088,6 +2202,180 @@ export default function ChatInterface() {
             } catch (e) {
               return JSON.stringify({ ok: false, error: `Lỗi đề xuất ghi nhớ: ${e instanceof Error ? e.message : String(e)}` });
             }
+          }
+
+          /* ---------------------------------------------------------------- */
+          /* Zero-Mem — bộ nhớ 0 token                                        */
+          /* ---------------------------------------------------------------- */
+          /*
+           * Store sống ở tầng module (lib/zeromem/tools.ts) nên không mất khi
+           * component re-render. Bản lưu bền nằm ở Dexie: hydrate lần đầu dùng,
+           * persist sau mỗi lần ghi.
+           */
+
+          case 'zeromem_query': {
+            const store = getZeroMemStore(currentZeroMemKey());
+            await hydrateZeroMem(store);
+            const pack = await executeZeromemQuery(
+              {
+                query: String(args.query ?? ''),
+                ...(typeof args.max_results === 'number' ? { max_results: args.max_results } : {}),
+                ...(args.mode ? { mode: args.mode as 'hybrid' | 'lexical' | 'graph' } : {}),
+                ...(typeof args.episode_id === 'string' ? { episode_id: args.episode_id } : {}),
+              },
+              currentZeroMemKey(),
+            );
+            return JSON.stringify(pack);
+          }
+
+          case 'zeromem_log': {
+            const store = getZeroMemStore(currentZeroMemKey());
+            await hydrateZeroMem(store);
+            const res = await executeZeromemLog(
+              {
+                content: String(args.content ?? ''),
+                ...(args.role ? { role: args.role as 'user' | 'assistant' | 'tool' | 'system' } : {}),
+                ...(typeof args.tool_name === 'string' ? { tool_name: args.tool_name } : {}),
+                ...(typeof args.episode_id === 'string' ? { episode_id: args.episode_id } : {}),
+              },
+              currentZeroMemKey(),
+              currentChat?.id || 'session-default',
+            );
+            await persistZeroMem(store);
+            return JSON.stringify(res);
+          }
+
+          case 'zeromem_inspect': {
+            const store = getZeroMemStore(currentZeroMemKey());
+            await hydrateZeroMem(store);
+            const res = await executeZeromemInspect(
+              {
+                target: args.target as 'graph' | 'episodes' | 'entities',
+                ...(typeof args.entity_id === 'string' ? { entity_id: args.entity_id } : {}),
+                ...(args.kind ? { kind: args.kind as 'symbol' | 'file' | 'error' | 'tool' | 'concept' | 'rule' } : {}),
+              },
+              currentZeroMemKey(),
+            );
+            return JSON.stringify(res);
+          }
+
+          case 'zeromem_stats': {
+            const store = getZeroMemStore(currentZeroMemKey());
+            await hydrateZeroMem(store);
+            return JSON.stringify(await executeZeromemStats(currentZeroMemKey()));
+          }
+
+          /* ---------------------------------------------------------------- */
+          /* Sarsed-Code — khảo sát, vá nguyên tử, phân tích chẩn đoán        */
+          /* ---------------------------------------------------------------- */
+
+          case 'code_skeleton': {
+            const res = await executeCodeSkeleton(
+              {
+                file_path: String(args.file_path ?? ''),
+                ...(typeof args.content === 'string' ? { content: args.content } : {}),
+                ...(typeof args.preserve_comments === 'boolean'
+                  ? { preserve_comments: args.preserve_comments }
+                  : {}),
+              },
+              async (p) => readWorkspaceText(p),
+            );
+            return JSON.stringify(res);
+          }
+
+          case 'code_symbols': {
+            /* Lập chỉ mục có trần từ workspace rồi tra — xem
+               collectWorkspaceSources() để biết giới hạn. */
+            const sources = await collectWorkspaceSources();
+            const res = await executeCodeSymbols(
+              {
+                ...(typeof args.query === 'string' ? { query: args.query } : {}),
+                ...(args.kind ? { kind: args.kind as 'function' | 'class' | 'interface' | 'type' | 'variable' | 'method' | 'enum' } : {}),
+                ...(typeof args.file_path === 'string' ? { file_path: args.file_path } : {}),
+              },
+              () => sources,
+            );
+            return JSON.stringify({ ...res, indexedFiles: sources.length });
+          }
+
+          case 'code_patch': {
+            /*
+             * Vá NGUYÊN TỬ nhưng KHÔNG ghi thẳng ra đĩa: gọi patcher ở chế độ
+             * chỉ-tính (không truyền fileIO.write) rồi đẩy kết quả vào đúng
+             * luồng phê duyệt đang có — staging nếu bật, ngược lại modal diff.
+             * Ghi thẳng sẽ phá mô hình an toàn "mọi thay đổi đĩa đều qua duyệt".
+             */
+            const targetPath = String(args.file_path ?? '');
+            let original: string;
+            try {
+              original = await readWorkspaceText(targetPath);
+            } catch (e) {
+              return JSON.stringify({
+                ok: false,
+                error: `Không đọc được ${targetPath}: ${e instanceof Error ? e.message : String(e)}`,
+              });
+            }
+            const hunks = Array.isArray(args.hunks) ? args.hunks : [];
+            const patched = await executeCodePatch({
+              file_path: targetPath,
+              hunks: hunks.map((h) => ({
+                search: String((h as { search?: unknown }).search ?? ''),
+                replace: String((h as { replace?: unknown }).replace ?? ''),
+                ...(typeof (h as { line_hint?: unknown }).line_hint === 'number'
+                  ? { line_hint: (h as { line_hint: number }).line_hint }
+                  : {}),
+              })),
+              atomic: args.atomic !== false,
+              original_content: original,
+            });
+            if (!patched.ok || patched.modifiedContent === undefined) {
+              return JSON.stringify({
+                ok: false,
+                hunksApplied: patched.hunksApplied,
+                totalHunks: patched.totalHunks,
+                error: patched.error,
+                note: 'Patch NGUYÊN TỬ: không khối nào được áp vì có khối không khớp. Đọc lại file rồi copy nguyên văn đoạn SEARCH.',
+              });
+            }
+            if (stagingEnabled) {
+              updateStaging(stageFile(stagingRef.current, targetPath, original, patched.modifiedContent));
+              return JSON.stringify({
+                ok: true,
+                staged: true,
+                hunksApplied: patched.hunksApplied,
+                totalHunks: patched.totalHunks,
+                diff: patched.diff,
+              });
+            }
+            const approved = await autoApproveDiff({
+              path: targetPath,
+              oldText: original,
+              newText: patched.modifiedContent,
+            });
+            if (!approved) {
+              return JSON.stringify({
+                ok: false,
+                approved: false,
+                note: 'Người dùng TỪ CHỐI bản vá. Hỏi họ muốn điều chỉnh gì trước khi thử lại.',
+              });
+            }
+            return JSON.stringify({
+              ok: true,
+              applied: true,
+              hunksApplied: patched.hunksApplied,
+              totalHunks: patched.totalHunks,
+            });
+          }
+
+          case 'code_verify': {
+            const res = await executeCodeVerify({
+              ...(typeof args.command === 'string' ? { command: args.command } : {}),
+              ...(typeof args.raw_output === 'string' ? { raw_output: args.raw_output } : {}),
+              ...(Array.isArray(args.touched_files)
+                ? { touched_files: args.touched_files.map((f) => String(f)) }
+                : {}),
+            });
+            return JSON.stringify(res);
           }
 
           default:
@@ -4648,23 +4936,6 @@ export default function ChatInterface() {
       }
       if (modelOverride) options.body = { model: modelOverride };
 
-      /* Skills 2 tầng: matcher từ khóa (fold dấu) chọn tối đa 2 skill khớp
-         tin nhắn → body inject vào system LƯỢT NÀY qua per-call body. Không
-         khớp thì không đốt token nào — khác catalog-thường-trực của fx. */
-      if (!modelOverride && promptTemplates.length > 0 && userText) {
-        const active = matchActiveSkills(toSkills(promptTemplates), userText);
-        if (active.length > 0) {
-          options.body = {
-            ...options.body,
-            skills: active.map((s) => ({
-              name: s.name,
-              ...(s.description ? { description: s.description } : {}),
-              body: s.body,
-            })),
-          };
-        }
-      }
-
       /* Tìm kiếm web (toggle Globe): tra cứu TRƯỚC khi submit rồi gửi kèm qua
          per-call body — useChat gộp options.body lên config body mỗi lần gọi,
          nên không đụng stale closure như đường state→ref của compaction.
@@ -4883,7 +5154,7 @@ export default function ChatInterface() {
     }
     /* beginRun/currentRun/setRepairable là hàm ổn định (useCallback rỗng bên
        trong hook), nên thêm vào đây không làm submitTurn bị tạo lại. */
-  }, [attachments, isLoading, currentChat, currentChatId, draftId, setCurrentChatId, append, pin, generateTitle, messages, webSearchEnabled, promptTemplates, agentToolsEnabled, forceEmulatedTools, agentMode, stagingEnabled, beginRun, currentRun, setRepairable, MODELS, isRoutableModel, routingBodyFor, approvalPolicy]);
+  }, [attachments, isLoading, currentChat, currentChatId, draftId, setCurrentChatId, append, pin, generateTitle, messages, webSearchEnabled, agentToolsEnabled, forceEmulatedTools, agentMode, stagingEnabled, beginRun, currentRun, setRepairable, MODELS, isRoutableModel, routingBodyFor, approvalPolicy]);
 
   /* ---------------------------------------------------------------- */
   /* Recipe runner : attempt → checks → retry/pass/stop.   */
@@ -5414,15 +5685,10 @@ export default function ChatInterface() {
       <StatusLine
         onOpenSidebar={onOpenSidebar}
         sidebarCollapsed={isSidebarCollapsed}
+        /* Chỉ để hiển thị TĨNH model đang dùng — chọn model đã chuyển xuống
+           composer, xem khối <Composer> bên dưới. */
         models={MODELS}
         model={model}
-        onModelChange={handleModelChange}
-        modelSelectorDisabled={isLoading}
-        modelProviderId={activeProviderId}
-        modelCatalogBuiltin={!activeProvider?.models?.length}
-        modelFavorites={modelFavorites}
-        modelRecents={recentModels}
-        onToggleModelFavorite={handleToggleModelFavorite}
         agentMode={agentMode}
         onToggleAgentMode={onToggleAgentMode}
         agentModeDisabled={isLoading}
@@ -5430,7 +5696,13 @@ export default function ChatInterface() {
         ctxUsed={contextUsage?.tokens}
         ctxMax={contextUsage?.max}
         thinkingLevel={
-          !!modelReasoningCap ? thinkingLevel : undefined
+          /*
+           * Chỉ truyền `thinkingLevel` khi model THỰC SỰ có mức để chọn (hoặc
+           * bắt buộc suy luận). Trước đây chỉ cần `modelReasoningCap` truthy là
+           * hiện, nên gateway trả `reasoning: {}` cho mọi model khiến slider
+           * xuất hiện ở tất cả model dù chọn mức nào cũng vô nghĩa.
+           */
+          shouldShowThinkingControl(modelReasoningCap) ? thinkingLevel : undefined
         }
         thinkingSupportedLevels={modelReasoningCap ? modelReasoningCap.efforts : null}
         onThinkingLevelChange={handleThinkingLevelChange}
@@ -5451,7 +5723,7 @@ export default function ChatInterface() {
         <div
           className={[
             'pointer-events-none fixed top-1/2 z-50 -translate-y-1/2',
-            'rounded-full border border-[#495059] bg-[#212730] px-3.5 py-1.5 font-mono text-xs text-[#ebe7e4]',
+            'rounded-full border border-border-hairline bg-panel-bg px-3.5 py-1.5 font-mono text-xs text-text-primary',
             'animate-pop-in',
             swipeDirection === 'left' ? 'right-4' : 'left-4',
           ].join(' ')}
@@ -5495,27 +5767,29 @@ export default function ChatInterface() {
         />
       </div>
 
-      {/* Đề nghị kết nối lại workspace gắn với phiên (P2-8) */}
-      {sessionWorkspacePath && !isWorkspaceMatched && !dismissedReconnect && (
-        <div className="mx-auto mb-2 w-full max-w-thread px-4">
-          <div className="flex items-center justify-between gap-2 rounded-none border border-[#495059] bg-[#161d27] px-3 py-2 font-mono text-xs text-[#ebe7e4]">
+      {/* Status Rail: nhóm các dải trạng thái & ngữ cảnh phiên làm việc */}
+      <aside aria-label="Trạng thái phiên làm việc" className="w-full flex-none">
+        {/* Đề nghị kết nối lại workspace gắn với phiên (P2-8) */}
+        {sessionWorkspacePath && !isWorkspaceMatched && !dismissedReconnect && (
+          <div className="mx-auto mb-2 w-full max-w-thread px-4">
+          <div className="flex items-center justify-between gap-2 rounded-none border border-border-hairline bg-surface-raised px-3 py-2 font-mono text-xs text-text-primary">
             <div className="flex items-center gap-2 min-w-0">
-              <span className="text-[#6a9fcc] flex-none">📁</span>
-              <span className="text-[#9fa4ab] flex-none">Phiên này gắn với thư mục:</span>
-              <span className="truncate font-semibold text-[#6a9fcc]">{sessionWorkspacePath}</span>
+              <span className="text-accent-steel flex-none">📁</span>
+              <span className="text-text-muted flex-none">Phiên này gắn với thư mục:</span>
+              <span className="truncate font-semibold text-accent-steel">{sessionWorkspacePath}</span>
             </div>
             <div className="flex items-center gap-2 flex-none">
               <button
                 type="button"
                 onClick={pickFolder}
-                className="bg-[#212730] hover:bg-[#2e3744] text-[#6a9fcc] border border-[#495059] px-2.5 py-1 text-[11px] transition-colors cursor-pointer"
+                className="bg-panel-bg hover:bg-[#2e3744] text-accent-steel border border-border-hairline px-2.5 py-1 text-[11px] transition-colors cursor-pointer"
               >
                 Kết nối lại
               </button>
               <button
                 type="button"
                 onClick={() => setDismissedReconnect(true)}
-                className="text-[#9fa4ab] hover:text-[#ebe7e4] px-1.5 py-1 text-[11px] transition-colors cursor-pointer"
+                className="text-text-muted hover:text-text-primary px-1.5 py-1 text-[11px] transition-colors cursor-pointer"
               >
                 Bỏ qua
               </button>
@@ -5546,21 +5820,21 @@ export default function ChatInterface() {
           (.vyenhints/AGENTS.md) đã nạp vào system prompt. */}
       {hintsChip && (
         <div className="mx-auto mb-2 w-full max-w-thread px-4">
-          <div className="rounded-none border border-[#495059] bg-[#1b2430] font-mono text-[11.5px] text-[#9fa4ab]">
+          <div className="rounded-none border border-border-hairline bg-[#1b2430] font-mono text-[11.5px] text-text-muted">
             <button
               type="button"
               onClick={() => setShowHints((v) => !v)}
               aria-expanded={showHints}
-              className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left transition-colors hover:bg-[#161d27] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[#6a9fcc]"
+              className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left transition-colors hover:bg-surface-raised focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[#6a9fcc]"
             >
-              <span className="text-[#6a9fcc]">hints loaded</span>
+              <span className="text-accent-steel">hints loaded</span>
               <span className="truncate">{hintsChip.file}</span>
               <span className="ml-auto flex-none text-[10.5px] text-[#5c6470]">
                 {showHints ? 'thu gọn' : 'xem nội dung'}
               </span>
             </button>
             {showHints && (
-              <pre className="max-h-64 overflow-auto whitespace-pre-wrap border-t border-[#495059] bg-[#12181f] px-3 py-2 text-[11px] leading-relaxed">
+              <pre className="max-h-64 overflow-auto whitespace-pre-wrap border-t border-border-hairline bg-[#12181f] px-3 py-2 text-[11px] leading-relaxed">
                 {hintsChip.content}
               </pre>
             )}
@@ -5571,21 +5845,21 @@ export default function ChatInterface() {
       {/* P1-D: 🧠 recalled N memories banner */}
       {activeRecallPack && activeRecallPack.items.length > 0 && (
         <div className="mx-auto mb-2 w-full max-w-thread px-4">
-          <div className="flex items-center justify-between gap-2 rounded-lg border border-sky-200/80 bg-sky-50/90 px-3 py-1.5 text-xs text-sky-800 shadow-sm dark:border-sky-900/60 dark:bg-sky-950/50 dark:text-sky-300">
+          <div className="flex items-center justify-between gap-2 rounded-none border border-border-hairline bg-surface-raised px-3 py-1.5 text-xs text-text-primary">
             <button
               type="button"
               onClick={() => setShowRecalledDetail((v) => !v)}
-              className="flex items-center gap-1.5 font-medium hover:underline text-[12px]"
+              className="flex items-center gap-1.5 font-medium hover:underline text-[12px] text-text-primary"
             >
               <span>🧠 Đã nhớ {activeRecallPack.items.length} ghi chú</span>
-              <span className="text-[10px] text-sky-600 dark:text-sky-400">
+              <span className="text-[10px] text-accent-steel">
                 ({showRecalledDetail ? 'thu gọn' : 'xem chi tiết'})
               </span>
             </button>
             <button
               type="button"
               onClick={() => setActiveRecallPack(null)}
-              className="rounded p-0.5 text-sky-500 hover:text-sky-700 dark:hover:text-sky-300"
+              className="rounded-none p-0.5 text-text-muted hover:text-text-primary"
               aria-label="Đóng thông báo ghi nhớ"
             >
               <X size={13} />
@@ -5593,21 +5867,21 @@ export default function ChatInterface() {
           </div>
 
           {showRecalledDetail && (
-            <div className="mt-1.5 rounded-lg border border-sky-200 bg-white p-2.5 text-xs shadow-sm dark:border-sky-900 dark:bg-zinc-900">
-              <div className="mb-1.5 text-[11px] font-semibold text-zinc-700 dark:text-zinc-300">
+            <div className="mt-1.5 rounded-none border border-border-hairline bg-panel-bg p-2.5 text-xs">
+              <div className="mb-1.5 text-[11px] font-semibold text-text-primary">
                 Ghi chú đã nạp vào ngữ cảnh ({activeRecallPack.budget.usedTokens}/{activeRecallPack.budget.limitTokens} tokens):
               </div>
               <ul className="space-y-1.5">
                 {activeRecallPack.items.map((item) => (
-                  <li key={item.id} className="flex items-start gap-1.5 text-[11px] text-zinc-700 dark:text-zinc-300">
-                    <span className="text-sky-500 font-bold">•</span>
+                  <li key={item.id} className="flex items-start gap-1.5 text-[11px] text-text-primary">
+                    <span className="text-accent-steel font-bold">•</span>
                     <span className="flex-1 leading-relaxed">{item.text}</span>
-                    <span className="shrink-0 text-[10px] text-zinc-400">[{item.why}]</span>
+                    <span className="shrink-0 text-[10px] text-text-muted">[{item.why}]</span>
                   </li>
                 ))}
               </ul>
               {activeRecallPack.budget.droppedIds.length > 0 && (
-                <div className="mt-1.5 border-t border-zinc-100 pt-1 text-[10px] text-zinc-400 italic dark:border-zinc-800">
+                <div className="mt-1.5 border-t border-border-hairline pt-1 text-[10px] text-text-muted italic">
                   Đã cắt {activeRecallPack.budget.droppedIds.length} ghi chú do giới hạn ngân sách token.
                 </div>
               )}
@@ -5615,11 +5889,22 @@ export default function ChatInterface() {
           )}
         </div>
       )}
+      </aside>
 
       <Composer
         onSubmit={onSubmit}
         isStreaming={isLoading}
         onStop={handleStop}
+        /* Chọn model — chuyển từ status line xuống đây (nơi tay đang gõ). */
+        models={MODELS}
+        model={model}
+        onModelChange={handleModelChange}
+        modelSelectorDisabled={isLoading}
+        modelProviderId={activeProviderId}
+        modelCatalogBuiltin={!activeProvider?.models?.length}
+        modelFavorites={modelFavorites}
+        modelRecents={recentModels}
+        onToggleModelFavorite={handleToggleModelFavorite}
         attachments={composerAttachments}
         onAddFiles={addFiles}
         slashPrompts={insertPrompts}

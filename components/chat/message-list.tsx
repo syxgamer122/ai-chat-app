@@ -69,19 +69,19 @@ function ThinkingIndicator() {
 
   const slowTone = elapsedSec >= 30;
   const tone = slowTone
-    ? 'text-[#e8704f]'
+    ? 'text-status-error'
     : elapsedSec >= 10
-      ? 'text-[#e8993a]'
-      : 'text-[#9fa4ab]';
+      ? 'text-status-warning'
+      : 'text-text-muted';
 
   return (
     <div className="mx-auto flex max-w-thread items-start gap-3 px-4 py-3 md:px-4">
       <p className="flex min-w-0 items-baseline gap-2 py-1 font-mono text-xs" role="status">
-        <span className="text-[#9fa4ab]">$</span>
-        <span className="text-[#ebe7e4]">đang soạn câu trả lời</span>
+        <span className="text-text-muted">$</span>
+        <span className="text-text-primary">đang soạn câu trả lời</span>
         <span className={`tabular-nums ${tone}`}>{elapsedSec >= 1 ? `${elapsedSec.toFixed(1)}s` : ''}</span>
         {slowTone && (
-          <span className="text-[#e8704f]">model nặng có thể chờ 30-60s</span>
+          <span className="text-status-error">model nặng có thể chờ 30-60s</span>
         )}
         <span className="terminal-cursor" aria-hidden="true" />
       </p>
@@ -331,10 +331,10 @@ export const MessageList = memo(function MessageList({
       >
         {!hasMessages ? (
           <div className="mx-auto flex h-full max-w-thread flex-col justify-center px-4 pb-16 pt-8">
-            <h1 className="font-pixel text-[24px] tracking-[0.05em] text-[#ebe7e4] [image-rendering:pixelated]">
-              VYEN<span className="text-[#6a9fcc]">_</span>
+            <h1 className="font-pixel text-[24px] tracking-[0.05em] text-text-primary [image-rendering:pixelated]">
+              VYEN<span className="text-accent-steel">_</span>
             </h1>
-            <p className="mt-2 font-mono text-xs text-[#9fa4ab] leading-relaxed">
+            <p className="mt-2 font-mono text-xs text-text-muted leading-relaxed">
               Agent harness tối giản: session tree, core tools, tự mở rộng theo workflow của bạn.
             </p>
 
@@ -344,7 +344,7 @@ export const MessageList = memo(function MessageList({
                   key={prompt}
                   type="button"
                   onClick={() => onSelectSuggestion(prompt)}
-                  className="rounded-none border border-[#495059] bg-[#212730] px-3 py-2 text-left font-mono text-xs text-[#ebe7e4] transition-colors duration-150 hover:border-[#757d89] hover:bg-[#252f3d]"
+                  className="rounded-none border border-border-hairline bg-panel-bg px-3 py-2 text-left font-mono text-xs text-text-primary transition-colors duration-150 hover:border-border-hover hover:bg-panel-soft"
                 >
                   {prompt}
                 </button>
@@ -384,16 +384,16 @@ export const MessageList = memo(function MessageList({
                     {compaction && compactionBannerBeforeId === m.id && (
                       <div className="mb-2">
                         {compaction.summary ? (
-                          <details className="rounded-none border border-[#4b607c] bg-[#161d27] px-3 py-1.5 font-mono text-xs text-[#e8993a]">
-                            <summary className="cursor-pointer select-none font-medium text-[#6a9fcc]">
+                          <details className="rounded-none border border-[#4b607c] bg-surface-raised px-3 py-1.5 font-mono text-xs text-status-warning">
+                            <summary className="cursor-pointer select-none font-medium text-accent-steel">
                               Đã nén {compaction.compactedCount} tin nhắn trước đó. Bấm để xem tóm tắt
                             </summary>
-                            <div className="mt-1.5 max-h-48 overflow-y-auto whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-[#e8993a]">
+                            <div className="mt-1.5 max-h-48 overflow-y-auto whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-status-warning">
                               {compaction.summary}
                             </div>
                           </details>
                         ) : (
-                          <div className="rounded-none border border-[#4b607c] bg-[#161d27] px-3 py-1.5 font-mono text-xs text-[#e8993a]">
+                          <div className="rounded-none border border-[#4b607c] bg-surface-raised px-3 py-1.5 font-mono text-xs text-status-warning">
                             Đã lược bỏ {compaction.compactedCount} tin nhắn cũ
                           </div>
                         )}
@@ -456,7 +456,7 @@ export const MessageList = memo(function MessageList({
           type="button"
           onClick={onScrollToBottom}
           aria-label="Xuống tin nhắn mới nhất"
-          className="absolute bottom-6 left-1/2 -translate-x-1/2 rounded-full border border-[#495059] bg-[#212730] p-2 text-[#6a9fcc] transition-colors hover:border-[#757d89] hover:bg-[#252f3d] hover:text-[#ebe7e4]"
+          className="absolute bottom-6 left-1/2 -translate-x-1/2 rounded-full border border-border-hairline bg-panel-bg p-2 text-accent-steel transition-colors hover:border-border-hover hover:bg-panel-soft hover:text-text-primary"
         >
           <ArrowDown size={16} />
         </button>

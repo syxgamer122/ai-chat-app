@@ -215,22 +215,52 @@ describe('runEmulatedLoop — e2e với upstream giả lập', () => {
   });
 
   it('batch 3 server tool song song → TOOL_RESULT đúng thứ tự source', async () => {
+    /*
+     * Chứng cứ SONG SONG đo bằng ĐỘ CHỒNG LẤN, không bằng wall-clock.
+     *
+     * Bản cũ chứng minh song song bằng cách so thứ tự `done`: weather sleep 5ms
+     * phải xong trước web_search sleep 60ms. Cách đó PHỤ THUỘC THỜI GIAN THỰC —
+     * khi máy tải nặng (chạy full suite) thứ tự về đích lệch đi và test đỏ dù
+     * code đúng. Đã đo: 6/6 xanh khi chạy riêng, đỏ trong full suite. Comment cũ
+     * ghi "không flaky theo timing CI" là nhận định SAI.
+     *
+     * Cách mới đếm số request đang bay cùng lúc (`maxInFlight`). Chạy song song
+     * thì các tool chồng lấn ⇒ maxInFlight ≥ 2. Chạy tuần tự thì tool trước phải
+     * xong hẳn mới tới tool sau ⇒ maxInFlight luôn = 1. Tải máy chỉ làm việc
+     * chồng lấn RÕ HƠN, không bao giờ làm mất tín hiệu — nên không flaky.
+     *
+     * (Không đếm cứng số request: `weather` gọi fetch HAI lần — geocoding rồi
+     * open-meteo — nên tổng là 4, không phải 3.)
+     */
+    let inFlight = 0;
+    let maxInFlight = 0;
+    /** Giữ request "đang bay" đủ lâu để quan sát được chồng lấn. */
+    const tracked = async <T,>(produce: () => T): Promise<T> => {
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      try {
+        await sleep(10);
+        return produce();
+      } finally {
+        inFlight -= 1;
+      }
+    };
+
     let completionCount = 0;
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: string | URL) => {
         const url = String(input);
         if (url.includes('duckduckgo')) {
-          await sleep(60);
-          return new Response(SEARCH_FIXTURE, { headers: { 'content-type': 'text/html' } });
+          return tracked(
+            () => new Response(SEARCH_FIXTURE, { headers: { 'content-type': 'text/html' } }),
+          );
         }
         if (url.includes('geocoding') || url.includes('open-meteo')) {
-          await sleep(5);
-          return WEATHER_FETCH(url);
+          return tracked(() => WEATHER_FETCH(url));
         }
         if (url.includes('open.er-api') || url.includes('er-api')) {
-          await sleep(20);
-          return jsonResponse({ rates: { USD: 1, VND: 25000 } });
+          return tracked(() => jsonResponse({ rates: { USD: 1, VND: 25000 } }));
         }
         if (url.includes('/chat/completions')) {
           completionCount += 1;
@@ -254,19 +284,21 @@ describe('runEmulatedLoop — e2e với upstream giả lập', () => {
 
     expect(result.status).toBe('done');
     expect(result.totalCalls).toBe(3);
+    /* Bằng chứng song song: có ít nhất hai request cùng bay. */
+    expect(maxInFlight).toBeGreaterThanOrEqual(2);
     // Preflight tuần tự theo source: start theo đúng thứ tự gọi.
     const starts = events.annotations
       .filter((a) => (a.tool as { phase?: string })?.phase === 'start')
       .map((a) => (a.tool as { name: string }).name);
     expect(starts).toEqual(['web_search', 'weather', 'exchange_rates']);
-    /* Chứng cứ SONG SONG đúng bản chất (không flaky theo timing CI): `done`
-       bắn theo thứ tự HOÀN THÀNH — weather (5ms) phải xong trước web_search
-       (60ms). Chạy tuần tự thì done sẽ theo thứ tự source. */
+    /* Thứ tự `done` KHÔNG còn được khẳng định: các request chồng lấn nên về đích
+       theo lịch trình event loop. Chỉ cần cả ba đều xong — tính song song đã
+       được chứng minh bằng maxInFlight ở trên. */
     const done = events.annotations
       .filter((a) => (a.tool as { phase?: string })?.phase === 'done')
       .map((a) => (a.tool as { name: string }).name);
-    expect(done).toEqual(['weather', 'exchange_rates', 'web_search']);
-    // Sanity chống treo: 3 call tuần tự cũng chỉ ~85ms, vượt 5s là có vấn đề khác.
+    expect([...done].sort()).toEqual(['exchange_rates', 'weather', 'web_search']);
+    // Sanity chống treo.
     expect(elapsed).toBeLessThan(5000);
     // TOOL_RESULT gắn đúng tên, đúng thứ tự source trong transcript round sau.
     expect(events.text).toContain('Xong');

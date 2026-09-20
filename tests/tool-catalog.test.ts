@@ -29,12 +29,16 @@ import {
 /** 30 tên mong đợi, viết tường minh để bắt cả thêm lẫn xoá tool một cách vô ý. */
 const EXPECTED_NAMES = [
   'fs_list', 'fs_read', 'fs_search', 'skill_load', 'fs_edit', 'fs_write',
+  /* Sarsed-Code: khảo sát AST (fs_read) + vá nguyên tử (fs_write). */
+  'code_skeleton', 'code_symbols', 'code_verify', 'code_patch',
   'shell_run', 'bg_run', 'bg_status', 'bg_stop',
   'git_status', 'git_diff', 'git_log', 'git_add', 'git_commit',
   'web_search', 'web_fetch', 'weather', 'exchange_rates',
   'memory_search', 'memory_save', 'lesson_save',
   'remember_memory', 'retrieve_memories', 'remove_memory_category', 'remove_specific_memory',
   'chat_recall',
+  /* Zero-Mem: bộ nhớ 0 token. */
+  'zeromem_query', 'zeromem_log', 'zeromem_inspect', 'zeromem_stats',
   'plan_create', 'plan_update',
   'delegate',
 ].sort();
@@ -47,9 +51,9 @@ const EXPECTED_DESKTOP_ONLY = [
 
 const EMOJI_RE = /\p{Extended_Pictographic}/u;
 
-describe('TOOL_CATALOG - đủ 30 tool, không thừa không thiếu', () => {
-  it('tập tên khớp đúng 30 tên mong đợi', () => {
-    expect(TOOL_CATALOG).toHaveLength(30);
+describe('TOOL_CATALOG - đủ 38 tool, không thừa không thiếu', () => {
+  it('tập tên khớp đúng 38 tên mong đợi', () => {
+    expect(TOOL_CATALOG).toHaveLength(38);
     expect(TOOL_CATALOG.map((t) => t.name).sort()).toEqual(EXPECTED_NAMES);
   });
 
@@ -67,13 +71,13 @@ describe('TOOL_CATALOG - đủ 30 tool, không thừa không thiếu', () => {
     expect(TOOL_CATALOG.map((t) => t.name)).toEqual(expected.map((t) => t.name));
   });
 
-  it('kind: đúng 6 server + 24 client', () => {
+  it('kind: đúng 6 server + 32 client', () => {
     const server = TOOL_CATALOG.filter((t) => t.kind === 'server');
     const client = TOOL_CATALOG.filter((t) => t.kind === 'client');
     expect(server.map((t) => t.name).sort()).toEqual(
       ['exchange_rates', 'memory_save', 'memory_search', 'weather', 'web_fetch', 'web_search'],
     );
-    expect(client).toHaveLength(24);
+    expect(client).toHaveLength(32);
   });
 
   it('desktopOnly: đúng 9 tool cần desktop bridge, phần còn lại chạy được trên web', () => {

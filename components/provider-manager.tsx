@@ -245,20 +245,20 @@ export function ProviderManager() {
     });
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-3 font-mono">
       {/* Máy chủ mặc định */}
       <label
-        className={`flex cursor-pointer items-center justify-between gap-2 rounded-xl border px-3 py-2.5 transition-colors ${
+        className={`flex cursor-pointer items-center justify-between gap-2 rounded-none border px-3 py-2.5 transition-colors ${
           activeProviderId === SERVER_PROVIDER_ID
-            ? 'border-brand/50 bg-brand/5'
-            : 'border-zinc-200 bg-surface-raised hover:bg-zinc-50'
+            ? 'border-accent-steel/60 bg-[#6a9fcc]/10'
+            : 'border-border-hairline bg-surface-raised hover:bg-panel-bg'
         }`}
       >
-        <span className="flex items-center gap-2 text-sm text-zinc-800">
-          <Server size={15} className="text-zinc-500" />
+        <span className="flex items-center gap-2 text-sm text-text-primary">
+          <Server size={15} className="text-text-muted" />
           <span>
             Máy chủ mặc định
-            <span className="block text-[11px] text-zinc-600">
+            <span className="block text-[11px] text-text-muted">
               Dùng API key OpenAI nhập trong phần Cài đặt
             </span>
           </span>
@@ -266,7 +266,7 @@ export function ProviderManager() {
         <input
           type="radio"
           name="provider"
-          className="accent-brand"
+          className="rounded-none accent-[#6a9fcc]"
           checked={activeProviderId === SERVER_PROVIDER_ID}
           onChange={() => void choose(SERVER_PROVIDER_ID)}
         />
@@ -275,10 +275,10 @@ export function ProviderManager() {
       {/* Giai đoạn 2: opt-in lưu key mã hoá — chỉ hiện trên desktop có
           safeStorage. Ảnh hưởng lần LƯU key kế tiếp (ô key bên dưới / form Sửa). */}
       {vaultAvailable && (
-        <label className="flex cursor-pointer items-start gap-2 rounded-xl border border-zinc-200 bg-surface-raised px-3 py-2 text-[11px] leading-relaxed text-zinc-700">
+        <label className="flex cursor-pointer items-start gap-2 rounded-none border border-border-hairline bg-surface-raised px-3 py-2 text-[11px] leading-relaxed text-text-primary">
           <input
             type="checkbox"
-            className="mt-0.5 accent-brand"
+            className="mt-0.5 rounded-none accent-[#6a9fcc]"
             checked={secureVaultOn}
             onChange={(e) => setSecureVaultOn(e.target.checked)}
           />
@@ -296,8 +296,8 @@ export function ProviderManager() {
         return (
           <div
             key={p.id}
-            className={`rounded-xl border px-3 py-2.5 transition-colors ${
-              active ? 'border-brand/50 bg-brand/5' : 'border-zinc-200 bg-surface-raised'
+            className={`rounded-none border px-3 py-2.5 transition-colors ${
+              active ? 'border-accent-steel/60 bg-[#6a9fcc]/10' : 'border-border-hairline bg-surface-raised'
             }`}
           >
             <div className="flex items-center justify-between gap-2">
@@ -305,29 +305,30 @@ export function ProviderManager() {
                 <input
                   type="radio"
                   name="provider"
-                  className="accent-brand"
+                  className="rounded-none accent-[#6a9fcc]"
                   checked={active}
                   onChange={() => void choose(p.id)}
                 />
-                <span className="min-w-0">                    <span className="flex items-center gap-1.5">
-                      <span className="truncate text-sm font-medium text-zinc-800">{p.name}</span>
-                      {p.apiKey ? (
+                <span className="min-w-0">
+                  <span className="flex items-center gap-1.5">
+                    <span className="truncate text-sm font-medium text-text-primary">{p.name}</span>
+                    {p.apiKey ? (
                       <span
                         title="Đã lưu API key"
-                        className="flex items-center gap-0.5 rounded bg-emerald-50 px-1 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300"
+                        className="flex items-center gap-0.5 rounded-none border border-status-success/30 bg-[#5db87a]/15 px-1 py-0.5 text-[10px] font-medium text-status-success"
                       >
                         <KeyRound size={9} /> có key
                       </span>
                     ) : (
                       <span
                         title="Chưa có API key"
-                        className="flex items-center gap-0.5 rounded bg-amber-50 px-1 py-0.5 text-[10px] font-medium text-amber-800 dark:bg-amber-500/10 dark:text-amber-300"
+                        className="flex items-center gap-0.5 rounded-none border border-status-warning/30 bg-[#e8993a]/15 px-1 py-0.5 text-[10px] font-medium text-status-warning"
                       >
                         <KeyRound size={9} /> chưa key
                       </span>
                     )}
                   </span>
-                  <span className="block truncate text-[11px] text-zinc-600">
+                  <span className="block truncate text-[11px] text-text-muted">
                     {p.baseUrl} · {p.models?.length ?? 0} model
                   </span>
                 </span>
@@ -339,7 +340,7 @@ export function ProviderManager() {
                   title="Kiểm tra kết nối + tải danh sách model"
                   onClick={() => void testAndLoadModels(p)}
                   disabled={busyId === p.id}
-                  className="rounded-lg p-1.5 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-brand disabled:opacity-40"
+                  className="rounded-none p-1.5 text-text-muted transition-colors hover:bg-panel-bg hover:text-accent-steel disabled:opacity-40"
                 >
                   {busyId === p.id ? (
                     <Loader2 size={14} className="animate-spin" />
@@ -352,7 +353,7 @@ export function ProviderManager() {
                   aria-label={`Sửa ${p.name}`}
                   title="Sửa"
                   onClick={() => setEditing(p)}
-                  className="rounded-lg p-1.5 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900"
+                  className="rounded-none p-1.5 text-text-muted transition-colors hover:bg-panel-bg hover:text-text-primary"
                 >
                   <Pencil size={14} />
                 </button>
@@ -361,7 +362,7 @@ export function ProviderManager() {
                   aria-label={`Xóa ${p.name}`}
                   title="Xóa"
                   onClick={() => void remove(p)}
-                  className="rounded-lg p-1.5 text-zinc-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10 dark:hover:text-red-400"
+                  className="rounded-none p-1.5 text-text-muted transition-colors hover:bg-[#e8704f]/10 hover:text-status-error"
                 >
                   <Trash2 size={14} />
                 </button>
@@ -373,10 +374,10 @@ export function ProviderManager() {
               * hoặc khi chưa có key. Không phải mở form "Sửa" mới nhập được.
               */}
             {active || !p.apiKey ? (
-              <div className="mt-2 border-t border-zinc-200/70 pt-2">
+              <div className="mt-2 border-t border-border-hairline pt-2">
                 <label
                   htmlFor={`pv-key-${p.id}`}
-                  className="mb-1 block text-[11px] font-medium text-zinc-700"
+                  className="mb-1 block text-[11px] font-medium text-text-primary"
                 >
                   API key cá nhân {p.apiKey ? '(đã lưu — nhập mới để thay)' : '(dán vào đây)'}
                 </label>
@@ -400,20 +401,20 @@ export function ProviderManager() {
                     type="button"
                     onClick={() => void saveKeyInline(p)}
                     disabled={busyId === p.id || draft === undefined || draft.trim() === p.apiKey}
-                    className="flex flex-shrink-0 items-center gap-1 rounded-lg bg-brand px-2.5 py-1.5 text-xs font-medium text-[#0d1116] transition-colors hover:bg-brand-hover/85 disabled:opacity-40"
+                    className="flex flex-shrink-0 items-center gap-1 rounded-none bg-[#6a9fcc] px-2.5 py-1.5 text-xs font-semibold text-[#0d1116] transition-colors hover:bg-[#6a9fcc]/85 disabled:opacity-40"
                   >
                     {busyId === p.id ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
                     Lưu &amp; test
                   </button>
                 </div>
                 {guide && (
-                  <p className="mt-1 text-[11px] leading-relaxed text-zinc-600">
+                  <p className="mt-1 text-[11px] leading-relaxed text-text-muted">
                     Lấy key tại{' '}
                     <a
                       href={guide.url}
                       target="_blank"
                       rel="noreferrer noopener nofollow"
-                      className="inline-flex items-center gap-0.5 text-brand underline-offset-2 hover:underline"
+                      className="inline-flex items-center gap-0.5 text-accent-steel underline-offset-2 hover:underline"
                     >
                       {new URL(guide.url).hostname}
                       <ExternalLink size={9} />
@@ -429,16 +430,16 @@ export function ProviderManager() {
       })}
 
       {editing ? (
-        <div className="space-y-2 rounded-xl border border-brand/40 bg-brand/[0.03] p-3">
+        <div className="space-y-2 rounded-none border border-accent-steel/40 bg-surface-raised p-3">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-zinc-800">
+            <span className="text-xs font-medium text-text-primary">
               {providers.some((x) => x.id === editing.id) ? 'Sửa nhà cung cấp' : 'Thêm nhà cung cấp'}
             </span>
             <button
               type="button"
               onClick={() => setEditing(null)}
               aria-label="Đóng biểu mẫu nhà cung cấp"
-              className="rounded-lg p-1 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900"
+              className="rounded-none p-1 text-text-muted transition-colors hover:bg-panel-bg hover:text-text-primary"
             >
               <X size={14} />
             </button>
@@ -475,7 +476,7 @@ export function ProviderManager() {
             <button
               type="button"
               onClick={() => void save()}
-              className="flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-xs font-medium text-[#0d1116] transition-colors hover:bg-brand-hover/85"
+              className="flex items-center gap-1.5 rounded-none bg-[#6a9fcc] px-3 py-1.5 text-xs font-semibold text-[#0d1116] transition-colors hover:bg-[#6a9fcc]/85"
             >
               <Check size={13} /> Lưu
             </button>
@@ -488,7 +489,7 @@ export function ProviderManager() {
                 })
               }
               disabled={busyId === editing.id}
-              className="flex items-center gap-1.5 rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 transition-colors hover:bg-zinc-100 disabled:opacity-40"
+              className="flex items-center gap-1.5 rounded-none border border-border-hairline bg-panel-bg px-3 py-1.5 text-xs font-medium text-text-primary transition-colors hover:bg-panel-soft disabled:opacity-40"
             >
               {busyId === editing.id ? (
                 <Loader2 size={13} className="animate-spin" />
@@ -503,13 +504,13 @@ export function ProviderManager() {
         <button
           type="button"
           onClick={startNew}
-          className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-zinc-300 py-2 text-xs font-medium text-zinc-600 transition-colors hover:border-brand/50 hover:text-brand"
+          className="flex w-full items-center justify-center gap-1.5 rounded-none border border-dashed border-border-hairline bg-surface-raised py-2 text-xs font-medium text-text-primary transition-colors hover:border-accent-steel hover:text-accent-steel"
         >
           <Plus size={14} /> Thêm nhà cung cấp
         </button>
       )}
 
-      {status && <p role="status" className="text-[11px] text-zinc-600">{status}</p>}
+      {status && <p role="status" className="text-[11px] text-text-muted">{status}</p>}
     </div>
   );
 }

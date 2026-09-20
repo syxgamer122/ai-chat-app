@@ -16,7 +16,8 @@
 - **Voice input**: bấm nút mic trong ô nhập, nói tiếng Việt — chữ hiện realtime, chạy 100% client (Web Speech API).
 - **Agent coding trong trình duyệt**: bấm 📁 kết nối thư mục làm việc (File System Access API — Chrome/Edge), agent liệt kê/đọc/tìm/sửa file trực tiếp trên máy bạn; **ghi file luôn qua modal diff phê duyệt** (duyệt mới ghi đĩa). fs_* tools chạy client-side (`onToolCall` + auto-resubmit), server không bao giờ chạm vào file.
 - **Tìm kiếm web**: bật nút 🌐 trong composer — lượt gửi kế tiếp tự tra cứu DuckDuckGo/SearXNG (top nguồn + đọc nguyên văn tối đa 2 trang), chèn vào ngữ cảnh kèm yêu cầu trích dẫn link. Dán URL trực tiếp trong tin nhắn sẽ được ưu tiên đọc nguyên trang. Proxy qua `/api/web` có chắn SSRF từng hop redirect.
-- **Thư viện prompt "/"**: gõ `/` trong ô nhập để chèn prompt mẫu (có sẵn 5 mẫu tiếng Việt, thêm/sửa/xoá trong Settings; filter không phân biệt dấu — gõ "tom tat" ra "Tóm tắt"). Menu "/" còn liệt kê cả **recipe** (icon chef-hat) — chọn sẽ mở panel Recipes thay vì chèn text.
+- **Menu lệnh "/"**: gõ `/` trong ô nhập để chèn lệnh hệ thống (`/plan`, `/mode`, `/summarize`, `/recipe`, `/skills`, `/memory`, `/tools`, `/cost`) hoặc **recipe** (icon chef-hat) — chọn recipe sẽ mở panel Recipes thay vì chèn text. Lọc không phân biệt dấu. Quản lý lệnh tuỳ biến trong Settings → Mở rộng.
+  > Thư viện prompt mẫu của bản web chat cũ (5 mẫu "Dịch Trung - Việt", "Sửa lỗi chính tả"... cùng mục "Skills cũ" trong Cài đặt) **đã được gỡ** ở schema v18 — đó là rác của một trợ lý chat đa dụng, không thuộc coding agent.
 - **Recipes**: workflow đóng gói tái sử dụng — tham số, tool policy, model settings, kiểm chứng shell + retry, structured output JSON, sub-recipe. Lưu trong Dexie hoặc file `.vyen/recipes/*.yaml` trong workspace; chia sẻ qua liên kết `?recipe=` (chỉ mở preview, không tự chạy). Chạy headless: `npx tsx bin/vyen.ts run --recipe fix-tests.yaml --params path=src --output json` — exit code ≠ 0 khi checks còn fail (dùng CI được).
 - **Skills (SKILL.md)**: kỹ năng dạng file trong `.vyen/skills/` của workspace và `~/.vyen/skills/` (desktop). Agent chỉ thấy bảng chỉ mục (tên + mô tả); nội dung nạp khi agent gọi `skill_load` — tiết kiệm token. Quản lý + tạo mới trong Settings → Skills.
 - **`.vyenhints`**: ngữ cảnh dự án nạp tự động vào system prompt (fallback `AGENTS.md`, trần 8.000 ký tự), chip "hints loaded" trên UI bấm xem nguyên văn.
@@ -77,6 +78,17 @@ Vyen đọc tự do nhưng ghi có kỷ luật: mọi thao tác ghi file / chạ
   - `Chat Only` (`chat_only`): Vô hiệu hóa hoàn toàn toàn bộ công cụ (kể cả `fs_read`), dùng cho viết lách, giải thích và phân tích thuần túy.
 - **Bảng phân quyền chi tiết per-tool**: Bảng trong Cài đặt cho phép gán quyền `auto` (Tự duyệt), `ask` (Luôn hỏi), `deny` (Chặn), hoặc `default` (theo policy) cho từng công cụ độc lập thuộc 8 nhóm (`fs`, `shell`, `git`, `mcp`, `web`, `plan`, `delegate`, `memory`), hỗ trợ tìm kiếm và nút Đặt lại mặc định. Lưu trữ đồng bộ Zustand persist + Dexie v14 (`toolPermissions`). Tool bị đặt `deny` lập tức trả lỗi `denied by policy`, không mở modal duyệt.
 
+### Cấu trúc Cài đặt (Settings)
+
+Hệ thống Cài đặt được tổ chức lại theo 6 nhóm chức năng trực quan, hỗ trợ tìm kiếm tức thì và phím tắt điều hướng chuẩn APG:
+
+1. **Giao diện & trải nghiệm (`appearance`)**: Cấu hình tham số mô hình (temperature, system prompt), phong cách nhập liệu (Enter để gửi, Steering/Follow-up), nén ngữ cảnh tự động, hiệu ứng chuyển động và tần suất vẽ lại (throttle).
+2. **Model & Nhà cung cấp (`providers`)**: Quản lý API key cá nhân (BYOK), kho key mã hoá OS (`safeStorage`), endpoint nhà cung cấp, vision model, access code và routing thông minh (Lead/Worker).
+3. **Quyền & An toàn (`safety`)**: Chế độ phê duyệt (hợp nhất 1 nguồn sự thật: Manual / Smart / Autonomous / Chat Only), Staging Sandbox, bảng phân quyền chi tiết per-tool (thu gọn), Code Mode (`run_code`) và đường tool giả lập.
+4. **Mở rộng (`extensions`)**: Cấu hình máy chủ MCP (`stdio`/`SSE`), Skills trên đĩa (`.vyen/skills/`) và quản lý lệnh slash tuỳ biến.
+5. **Bộ nhớ (`memory`)**: Hợp nhất luồng quản lý ký ức 3 giai đoạn: Đề xuất đang chờ duyệt (Reviewer Gate) → Ký ức đã duyệt → Bộ nhớ chủ động có cấu trúc (`agent-memory`).
+6. **Dữ liệu & Tự động hoá (`data`)**: Tự động sao lưu (nhắc định kỳ hoặc ghi file ngầm FSA), sao lưu & phục hồi (JSON/Markdown), thống kê token và scheduler lịch chạy.
+
 ### Session Management & ChatRecall
 
 - **Gắn phiên với thư mục làm việc**: Tự động liên kết `workspacePath` vào metadata phiên chat (`db.chats`). Khi mở lại phiên cũ từ Sidebar hoặc URL (`/?chatId=...`), giao diện hiển thị banner thông minh đề nghị kết nối lại đúng thư mục dự án tương ứng.
@@ -112,7 +124,7 @@ Vyen đọc tự do nhưng ghi có kỷ luật: mọi thao tác ghi file / chạ
   - `zeromem_log(content, role, tool_name, episode_id)`: Ghi nhận trace và tự động trích xuất thực thể đồ thị.
   - `zeromem_inspect(target, entity_id)`: Kiểm tra hàng xóm quan hệ trên đồ thị hoặc cây episodes.
   - `zeromem_stats()`: Đo lường footprint bộ nhớ và số token LLM đã tiết kiệm được.
-- **Lưu trữ bền vững**: Schema Dexie v17 với 3 bảng `zeromemTraces`, `zeromemEntities`, `zeromemRelations`.
+- **Lưu trữ bền vững**: Schema Dexie v18 với 3 bảng `zeromemTraces`, `zeromemEntities`, `zeromemRelations`. Ghi qua `lib/zeromem/persistence.ts` (chỉ chạy ở trình duyệt — `lib/zeromem/store.ts` giữ runtime-agnostic để CLI headless dùng được); nạp lại bằng cách replay trace nên đồ thị tái dựng y hệt nguồn.
 
 ### Sarsed-Code: Harness Lập trình Tự hành & Sửa lỗi Khép kín (Port sarsvankelsion/sarsed-code)
 

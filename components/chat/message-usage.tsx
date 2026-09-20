@@ -13,7 +13,7 @@ export function MessageUsage({ annotations }: { annotations?: unknown }) {
   if (!text) return null;
   return (
     <p
-      className="mt-1 font-mono text-[10px] tabular-nums text-[#9fa4ab]"
+      className="mt-1 font-mono text-[10px] tabular-nums text-text-muted"
       title={
         stats.estimated
           ? 'Gateway không báo usage: token ước lượng từ độ dài trả lời'
@@ -23,7 +23,7 @@ export function MessageUsage({ annotations }: { annotations?: unknown }) {
       {stats.routingRole && (
         <span
           className={`mr-1 ${
-            stats.routingRole === 'worker' ? 'text-[#9fa4ab]' : 'text-[#6a9fcc]'
+            stats.routingRole === 'worker' ? 'text-text-muted' : 'text-accent-steel'
           }`}
           title={
             stats.routingRole === 'planner'

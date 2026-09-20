@@ -1,8 +1,10 @@
 'use client';
 
+import { Z_CLASS } from '@/lib/ui-z';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { X } from 'lucide-react';
 import { TOOL_CATEGORY_ICON_COMPONENTS } from '@/components/tool-category-icons';
+import { useFocusTrap } from '@/lib/hooks/use-focus-trap';
 import {
   ALL_TOOL_CATEGORIES,
   TOOL_CATALOG,
@@ -97,58 +99,39 @@ export function ToolsPanel({ open, onClose }: { open: boolean; onClose: () => vo
   const sections = useMemo(() => filterPanelSections(buildPanelSections(), query), [query]);
   const shown = sections.reduce((acc, s) => acc + s.tools.length, 0);
 
+  const containerRef = useRef<HTMLDivElement>(null);
   const closeBtnRef = useRef<HTMLButtonElement | null>(null);
-  const restoreFocusRef = useRef<HTMLElement | null>(null);
 
-  useEffect(() => {
-    if (!open) return;
-    // Mở: focus nút đóng để Enter/Escape thao tác ngay; đóng: trả focus về
-    // phần tử đã mở panel (nút Tác vụ trong composer). Cùng chuẩn StagingPanel.
-    restoreFocusRef.current =
-      document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    closeBtnRef.current?.focus();
-    return () => {
-      restoreFocusRef.current?.focus();
-    };
-  }, [open]);
-
-  // Escape nghe ở document (không phải onKeyDown trên container): focus có thể
-  // rơi vào vùng không focusable. Không nghe khi đóng để không cướp Escape.
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
-      e.preventDefault();
-      onClose();
-    };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [open, onClose]);
+  useFocusTrap(containerRef, {
+    active: open,
+    onEscape: onClose,
+  });
 
   if (!open) return null;
 
   return (
     <div
+      ref={containerRef}
       role="dialog"
       aria-modal="true"
-      aria-label="Công cụ & quyền"
-      className="fixed inset-0 z-[100] flex justify-end bg-black/60"
+      aria-labelledby="tools-panel-title"
+      className={`fixed inset-0 ${Z_CLASS.navigation} flex justify-end bg-black/60`}
       onClick={onClose}
     >
       <aside
-        className="flex h-full w-[min(30rem,100vw)] flex-col overflow-hidden rounded-none border border-[#495059] bg-[#212730] font-mono"
+        className="flex h-full w-[min(30rem,100vw)] flex-col overflow-hidden rounded-none border border-border-hairline bg-panel-bg font-mono"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-start justify-between gap-2 border-b border-[#495059] bg-[#161d27] px-4 py-3">
+        <div className="flex items-start justify-between gap-2 border-b border-border-hairline bg-surface-raised px-4 py-3">
           <div className="min-w-0">
-            <div className="flex items-center gap-2 text-[15px] font-semibold text-[#ebe7e4]">
-              <span className="font-bold text-[#6a9fcc]">$</span>
-              <span className="text-[#6a9fcc]">tools</span>
+            <h2 id="tools-panel-title" className="flex items-center gap-2 text-[15px] font-semibold text-text-primary">
+              <span className="font-bold text-accent-steel">$</span>
+              <span className="text-accent-steel">tools</span>
               <span>
                 · {TOOL_CATALOG.length} tool · {ALL_TOOL_CATEGORIES.length} nhóm
               </span>
-            </div>
-            <div className="text-[11px] text-[#9fa4ab]">
+            </h2>
+            <div className="text-[11px] text-text-muted">
               Toàn bộ tool AI đang có, nhóm theo loại, kèm quyền chạy.
             </div>
           </div>
@@ -163,7 +146,7 @@ export function ToolsPanel({ open, onClose }: { open: boolean; onClose: () => vo
           </button>
         </div>
 
-        <div className="border-b border-[#495059] px-3 py-2">
+        <div className="border-b border-border-hairline px-3 py-2">
           <input
             type="text"
             value={query}
@@ -173,7 +156,7 @@ export function ToolsPanel({ open, onClose }: { open: boolean; onClose: () => vo
             className="field-sm"
           />
           {query.trim() && (
-            <div role="status" className="mt-1 px-1 text-[10.5px] text-[#9fa4ab]">
+            <div role="status" className="mt-1 px-1 text-[10.5px] text-text-muted">
               {shown} / {TOOL_CATALOG.length} tool
             </div>
           )}
@@ -186,14 +169,14 @@ export function ToolsPanel({ open, onClose }: { open: boolean; onClose: () => vo
               <section
                 key={section.category}
                 aria-label={section.label}
-                className="border-b border-[#495059] last:border-b-0"
+                className="border-b border-border-hairline last:border-b-0"
               >
-                <div className="flex items-center gap-2 bg-[#161d27] px-3 py-2">
-                  {Icon && <Icon size={13} className="flex-none text-[#6a9fcc]" aria-hidden="true" />}
-                  <span className="flex-none text-[12px] font-semibold text-[#ebe7e4]">
+                <div className="flex items-center gap-2 bg-surface-raised px-3 py-2">
+                  {Icon && <Icon size={13} className="flex-none text-accent-steel" aria-hidden="true" />}
+                  <span className="flex-none text-[12px] font-semibold text-text-primary">
                     {section.label}
                   </span>
-                  <span className="flex-none text-[11px] text-[#9fa4ab]">
+                  <span className="flex-none text-[11px] text-text-muted">
                     {section.tools.length} tool
                   </span>
                   <span className="min-w-1 flex-1" />
@@ -226,25 +209,25 @@ export function ToolsPanel({ open, onClose }: { open: boolean; onClose: () => vo
                 </div>
                 <ul>
                   {section.tools.map((tool) => (
-                    <li key={tool.name} className="border-t border-[#495059] px-3 py-2">
+                    <li key={tool.name} className="border-t border-border-hairline px-3 py-2">
                       <div className="flex items-baseline gap-2">
-                        <span className="flex-none text-[12px] text-[#ebe7e4]">{tool.name}</span>
-                        <span className="min-w-0 flex-1 truncate text-[11px] text-[#9fa4ab]">
+                        <span className="flex-none text-[12px] text-text-primary">{tool.name}</span>
+                        <span className="min-w-0 flex-1 truncate text-[11px] text-text-muted">
                           {tool.shortLabel}
                         </span>
                         {tool.desktopOnly && (
                           <span
                             title="Chỉ chạy ở bản desktop, cần desktop bridge đang kết nối"
-                            className="flex-none text-[10.5px] text-[#9fa4ab]"
+                            className="flex-none text-[10.5px] text-text-muted"
                           >
                             chỉ bản desktop
                           </span>
                         )}
                       </div>
-                      <p className="mt-0.5 text-[11px] leading-relaxed text-[#9fa4ab]">
+                      <p className="mt-0.5 text-[11px] leading-relaxed text-text-muted">
                         {tool.description}
                       </p>
-                      <p className="text-[10.5px] text-[#9fa4ab]">
+                      <p className="text-[10.5px] text-text-muted">
                         {tool.kind === 'client' ? 'chạy trên máy người dùng' : 'chạy trên backend'}
                       </p>
                     </li>
@@ -254,14 +237,14 @@ export function ToolsPanel({ open, onClose }: { open: boolean; onClose: () => vo
             );
           })}
           {sections.length === 0 && (
-            <div role="status" className="px-3 py-8 text-center text-[11.5px] text-[#9fa4ab]">
+            <div role="status" className="px-3 py-8 text-center text-[11.5px] text-text-muted">
               Không có tool khớp &quot;{query.trim()}&quot;.
             </div>
           )}
         </div>
 
-        <div className="border-t border-[#495059] bg-[#161d27] px-4 py-2.5">
-          <p className="text-[10.5px] leading-relaxed text-[#9fa4ab]">
+        <div className="border-t border-border-hairline bg-surface-raised px-4 py-2.5">
+          <p className="text-[10.5px] leading-relaxed text-text-muted">
             Chặn: tool trong nhóm trả lỗi ngay và không chạy (áp dụng cho tool chạy trên máy bạn;
             tool backend như tìm web vẫn chạy). Quyền nhóm đè chính sách duyệt chung của
             Auto-pilot; lệnh nguy hiểm (rm -rf /, mkfs) luôn phải hỏi.

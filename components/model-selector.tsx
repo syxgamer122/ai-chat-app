@@ -272,22 +272,22 @@ export function ModelSelector({
         onPointerEnter={() => setCursor(idx)}
         className={`group relative flex min-h-11 cursor-pointer flex-col justify-center rounded-none px-2 py-1 text-left transition-colors ${
           active
-            ? 'pi-active-indicator bg-[#252f3d] text-[#ebe7e4]'
+            ? 'pi-active-indicator bg-panel-soft text-text-primary'
             : focused
-              ? 'bg-[#252f3d] text-[#ebe7e4]'
-              : 'hover:bg-[#161d27] text-[#ebe7e4]'
+              ? 'bg-panel-soft text-text-primary'
+              : 'hover:bg-surface-raised text-text-primary'
         }`}
       >
         <div className="flex min-w-0 items-center gap-1.5">
           <span className="min-w-0 truncate text-xs font-mono">{m.label}</span>
-          <span className="flex flex-none items-center gap-1 text-[#9fa4ab]" aria-hidden="true">
+          <span className="flex flex-none items-center gap-1 text-text-muted" aria-hidden="true">
             {m.caps?.includes('vision') && <Eye size={12} className="flex-none" />}
             {m.caps?.includes('pdf') && <FileText size={12} className="flex-none" />}
             {m.caps?.includes('reasoning') && <Brain size={12} className="flex-none" />}
           </span>
           <span className="min-w-1 flex-1" aria-hidden="true" />
           {m.ctx !== undefined && !m.media && (
-            <span className="flex-none text-[10.5px] tabular-nums text-[#9fa4ab]">
+            <span className="flex-none text-[10.5px] tabular-nums text-text-muted">
               {fmtCtx(m.ctx)}
             </span>
           )}
@@ -307,15 +307,15 @@ export function ModelSelector({
                min-h-11 (44px) nên không đụng sao của hàng kế bên. */
             className={`relative flex h-6 w-6 flex-none items-center justify-center rounded-none transition-colors after:absolute after:-inset-2 after:content-[''] ${
               favorited
-                ? 'text-[#6a9fcc]'
-                : 'text-[#9fa4ab] opacity-100 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:group-focus-within:opacity-100'
+                ? 'text-accent-steel'
+                : 'text-text-muted opacity-100 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:group-focus-within:opacity-100'
             }`}
           >
             <Star size={13} className={favorited ? 'fill-[#6a9fcc]' : ''} aria-hidden="true" />
           </button>
-          {active && <Check size={13} className="flex-shrink-0 text-[#6a9fcc]" aria-hidden="true" />}
+          {active && <Check size={13} className="flex-shrink-0 text-accent-steel" aria-hidden="true" />}
         </div>
-        {m.hint && <p className="mt-0.5 truncate text-[10px] leading-tight text-[#9fa4ab]">{m.hint}</p>}
+        {m.hint && <p className="mt-0.5 truncate text-[10px] leading-tight text-text-muted">{m.hint}</p>}
       </div>
     );
   };
@@ -353,10 +353,10 @@ export function ModelSelector({
         aria-controls={open ? listId : undefined}
         aria-label={`Model: ${selectionLabel}`}
         title={triggerTitle}
-        className="relative flex h-8 max-w-full items-center gap-1.5 rounded-none border border-[#495059] bg-[#161d27] px-2.5 font-mono text-[12px] font-medium text-[#ebe7e4] transition-colors after:absolute after:-inset-[6px] after:content-[''] hover:border-[#757d89] hover:bg-[#212730] disabled:opacity-40"
+        className="relative flex h-8 max-w-full items-center gap-1.5 rounded-none border border-border-hairline bg-surface-raised px-2.5 font-mono text-[12px] font-medium text-text-primary transition-colors after:absolute after:-inset-[6px] after:content-[''] hover:border-border-hover hover:bg-panel-bg disabled:opacity-40"
       >
         <span className="min-w-0 max-w-[30vw] truncate sm:max-w-[160px]">{selectionLabel}</span>
-        <ChevronDown size={12} className="flex-none text-[#9fa4ab]" aria-hidden="true" />
+        <ChevronDown size={12} className="flex-none text-text-muted" aria-hidden="true" />
       </button>
 
       {open &&
@@ -372,12 +372,12 @@ export function ModelSelector({
               width: pos.width,
               maxHeight: pos.maxHeight,
             }}
-            className="surface-panel z-50 flex animate-pop-in flex-col overflow-hidden rounded-none border border-[#495059] bg-[#212730]"
+            className="surface-panel z-50 flex animate-pop-in flex-col overflow-hidden rounded-none border border-border-hairline bg-panel-bg"
           >
             {/* Ô tìm kiếm + số lượng model */}
-            <div className="flex flex-none items-center gap-2 border-b border-[#495059] p-2">
-              <div className="flex min-w-0 flex-1 items-center gap-2 rounded-none border border-[#495059] bg-[#0d1116] px-2.5 py-1.5 transition-colors focus-within:border-[#6a9fcc]">
-                <Search size={12} aria-hidden="true" className="shrink-0 text-[#9fa4ab]" />
+            <div className="flex flex-none items-center gap-2 border-b border-border-hairline p-2">
+              <div className="flex min-w-0 flex-1 items-center gap-2 rounded-none border border-border-hairline bg-bg-deep px-2.5 py-1.5 transition-colors focus-within:border-accent-steel">
+                <Search size={12} aria-hidden="true" className="shrink-0 text-text-muted" />
                 <input
                   ref={searchRef}
                   value={query}
@@ -387,10 +387,10 @@ export function ModelSelector({
                   }}
                   aria-label="Tìm model"
                   placeholder="Tìm model: tên hoặc id"
-                  className="w-full bg-transparent font-mono text-[12px] text-[#ebe7e4] outline-none placeholder:text-[#9fa4ab]"
+                  className="w-full bg-transparent font-mono text-[12px] text-text-primary outline-none placeholder:text-text-muted"
                 />
               </div>
-              <span className="flex-none text-[10.5px] tabular-nums text-[#9fa4ab]">
+              <span className="flex-none text-[10.5px] tabular-nums text-text-muted">
                 {selectableModels.length} model
               </span>
             </div>
@@ -406,14 +406,14 @@ export function ModelSelector({
             >
               {ordered.length === 0 && (
                 <div className="flex flex-col items-center gap-2 px-2.5 py-6 text-center">
-                  <p className="text-xs text-[#9fa4ab]">Không có model nào khớp “{query}”.</p>
+                  <p className="text-xs text-text-muted">Không có model nào khớp “{query}”.</p>
                   <button
                     type="button"
                     onClick={() => {
                       setQuery('');
                       searchRef.current?.focus();
                     }}
-                    className="rounded-none border border-[#495059] bg-[#161d27] px-2.5 py-1 text-[11px] text-[#ebe7e4] transition-colors hover:border-[#757d89] hover:bg-[#212730]"
+                    className="rounded-none border border-border-hairline bg-surface-raised px-2.5 py-1 text-[11px] text-text-primary transition-colors hover:border-border-hover hover:bg-panel-bg"
                   >
                     Xóa tìm kiếm
                   </button>
@@ -421,7 +421,7 @@ export function ModelSelector({
               )}
               {quickSections.map((s) => (
                 <div key={s.key} className="mb-1.5">
-                  <p className="px-2 pb-1 pt-1.5 text-[10.5px] font-semibold uppercase tracking-wide text-[#6a9fcc]">
+                  <p className="px-2 pb-1 pt-1.5 text-[10.5px] font-semibold uppercase tracking-wide text-accent-steel">
                     {s.label}
                   </p>
                   {s.rows.map((row) => renderRow(row, s.key))}
@@ -432,7 +432,7 @@ export function ModelSelector({
                   <div key={ci} className="min-w-0">
                     {col.map((g) => (
                       <div key={g.key} className="mb-1.5">
-                        <p className="sticky top-0 z-10 bg-[#161d27]/95 px-2 pb-1 pt-1.5 text-[10.5px] font-semibold uppercase tracking-wide text-[#6a9fcc]">
+                        <p className="sticky top-0 z-10 bg-surface-raised/95 px-2 pb-1 pt-1.5 text-[10.5px] font-semibold uppercase tracking-wide text-accent-steel">
                           {g.label}
                         </p>
                         {g.rows.map((row) => renderRow(row, g.key))}
@@ -443,8 +443,8 @@ export function ModelSelector({
               </div>
             </div>
 
-            <div className="flex-none border-t border-[#495059] px-2.5 py-1.5">
-              <p className="hidden text-[10px] text-[#9fa4ab] sm:block">
+            <div className="flex-none border-t border-border-hairline px-2.5 py-1.5">
+              <p className="hidden text-[10px] text-text-muted sm:block">
                 ↑↓ di chuyển · Enter chọn · Shift+Enter yêu thích · Esc
               </p>
             </div>

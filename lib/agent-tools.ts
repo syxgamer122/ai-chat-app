@@ -30,6 +30,22 @@ import { MAX_TOOL_CALLS_PER_TURN, TOOL_RESULT_MAX_CHARS } from '@/lib/tool-limit
 import { redactSecretsDeep } from '@/lib/secret-registry';
 import { isMcpToolKey } from '@/lib/mcp/tool-mapper';
 import { TOOL_CATALOG } from '@/lib/tool-catalog';
+/*
+ * Schema của nhóm tool Zero-Mem và Sarsed-Code lấy thẳng từ module thực thi —
+ * khai báo lại ở đây sẽ lệch nhau ngay lần sửa đầu tiên.
+ */
+import {
+  zeromemQuerySchema,
+  zeromemLogSchema,
+  zeromemInspectSchema,
+  zeromemStatsSchema,
+} from '@/lib/zeromem/tools';
+import {
+  codeSkeletonSchema,
+  codeSymbolsSchema,
+  codePatchSchema,
+  codeVerifySchema,
+} from '@/lib/sarsed/tools';
 
 export type AgentToolSet = ReturnType<typeof buildAgentTools>;
 
@@ -1020,6 +1036,75 @@ export const CLIENT_TOOL_DEFS = {
       query: z.string().min(1).max(300).describe('Từ khóa hoặc cụm từ cần tìm trong lịch sử chat'),
       limit: z.number().min(1).max(20).optional().describe('Số kết quả tối đa cần lấy (mặc định: 5)'),
     }),
+  }),
+
+  /* ------------------------------------------------------------------ */
+  /* Zero-Mem — bộ nhớ không tiêu hao token (port sarsvankelsion/zero-mem) */
+  /* ------------------------------------------------------------------ */
+  /*
+   * Trước đây nhóm tool này chỉ tồn tại trong `lib/zeromem/tools.ts` mà KHÔNG
+   * được khai báo ở đây, nên agent của app không bao giờ gọi được — README
+   * quảng cáo tính năng nhưng người dùng không chạm tới. Khai báo tại đây đưa
+   * chúng vào catalog thật.
+   *
+   * Dùng lại schema từ chính module thực thi để hai bên không lệch nhau.
+   */
+
+  zeromem_query: tool({
+    description:
+      'Truy xuất ngữ cảnh từ bộ nhớ Zero-Mem (0 token, chạy cục bộ): tìm trong nhật ký thô đã ghi, ' +
+      'đồ thị thực thể và phân cấp episode. Dùng khi cần nhớ lại việc đã làm ở lượt/phiên trước mà ' +
+      'không muốn đọc lại toàn bộ hội thoại. Ghi trước bằng zeromem_log thì truy xuất mới có dữ liệu.',
+    parameters: zeromemQuerySchema,
+  }),
+  zeromem_log: tool({
+    description:
+      'Ghi một dòng nhật ký thô vào bộ nhớ Zero-Mem và tự động trích xuất thực thể + liên kết đồ thị ' +
+      '(không tốn token, không gọi LLM). Gọi sau khi hoàn thành một bước quan trọng để lượt sau truy ' +
+      'xuất lại được.',
+    parameters: zeromemLogSchema,
+  }),
+  zeromem_inspect: tool({
+    description:
+      'Soi cấu trúc bộ nhớ Zero-Mem: quan hệ của một thực thể trên đồ thị, danh sách episode theo thời ' +
+      'gian, hoặc liệt kê thực thể theo loại. Dùng để kiểm tra bộ nhớ đã ghi đúng chưa.',
+    parameters: zeromemInspectSchema,
+  }),
+  zeromem_stats: tool({
+    description:
+      'Báo cáo dung lượng bộ nhớ Zero-Mem và số token LLM đã tiết kiệm được nhờ truy xuất cục bộ.',
+    parameters: zeromemStatsSchema,
+  }),
+
+  /* ------------------------------------------------------------------ */
+  /* Sarsed-Code — harness sửa lỗi khép kín (port sarsvankelsion/sarsed-code) */
+  /* ------------------------------------------------------------------ */
+
+  code_skeleton: tool({
+    description:
+      'Nén khung xương AST của một file mã nguồn: giữ nguyên imports/exports/interface/type/chữ ký hàm/' +
+      'docstring, thu gọn thân hàm thành comment. Giảm 80–90% token so với đọc cả file. Dùng để khảo sát ' +
+      'file dài trước khi quyết định đọc chi tiết bằng fs_read.',
+    parameters: codeSkeletonSchema,
+  }),
+  code_symbols: tool({
+    description:
+      'Tra chỉ mục ký hiệu toàn workspace: hàm, lớp, interface, kiểu dữ liệu, biến — lọc theo tên, loại ' +
+      'hoặc file. Dùng để định vị định nghĩa mà không phải đọc từng file.',
+    parameters: codeSymbolsSchema,
+  }),
+  code_patch: tool({
+    description:
+      'Vá mã nguồn theo khối SEARCH/REPLACE một cách NGUYÊN TỬ: hoặc mọi khối áp dụng thành công, hoặc ' +
+      'hoàn tác toàn bộ về trạng thái sạch. Tự căn chỉnh thụt lề và giữ nguyên kiểu xuống dòng. ' +
+      'Khác fs_edit ở chỗ hỗ trợ nhiều khối all-or-nothing và có line_hint để định vị khối trùng nhau.',
+    parameters: codePatchSchema,
+  }),
+  code_verify: tool({
+    description:
+      'Phân tích đầu ra thô của tsc/eslint/vitest/mypy/cargo thành chẩn đoán có cấu trúc (file, dòng, ' +
+      'mã lỗi). Dùng sau khi chạy shell_run để biết chính xác lỗi nằm ở đâu thay vì đọc log dài.',
+    parameters: codeVerifySchema,
   }),
 } as const;
 

@@ -91,7 +91,7 @@ export function ShimmerLine() {
   if (!fx) return null;
   return (
     <span aria-hidden="true" className="absolute inset-0 overflow-hidden rounded-[inherit]">
-      <span className="w-1/3 animate-fx-sweep absolute inset-y-0 bg-gradient-to-r from-transparent via-white/15 to-transparent dark:via-white/10" />
+      <span className="w-1/3 animate-fx-sweep absolute inset-y-0 bg-gradient-to-r from-transparent via-white/10 to-transparent" />
     </span>
   );
 }

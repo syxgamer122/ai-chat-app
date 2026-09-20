@@ -109,10 +109,10 @@ export function RoutingSettingsPanel() {
 
   return (
     <div className="space-y-4 text-xs font-mono">
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-700/50 pb-2.5">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border-hairline pb-2.5">
         <div>
-          <h3 className="text-sm font-semibold text-zinc-200">Mixture-of-Models Routing</h3>
-          <p className="text-[11px] text-zinc-400">
+          <h3 className="text-sm font-semibold text-text-primary">Mixture-of-Models Routing</h3>
+          <p className="text-[11px] text-[#757d89]">
             Cấu hình chuỗi dự phòng model:effort theo từng hạng mục công việc.
           </p>
         </div>
@@ -135,7 +135,7 @@ export function RoutingSettingsPanel() {
             type="button"
             onClick={handleResetDefaults}
             title="Khôi phục mặc định"
-            className="btn-secondary px-2 py-1 text-[11px] text-zinc-400 hover:text-red-400"
+            className="btn-secondary px-2 py-1 text-[11px] text-[#757d89] hover:text-status-error"
           >
             <RotateCcw size={12} />
           </button>
@@ -143,7 +143,7 @@ export function RoutingSettingsPanel() {
       </div>
 
       {importStatus && (
-        <p className="rounded bg-primary/10 border border-primary/30 p-2 text-primary text-[11px]">
+        <p className="border border-accent-steel/30 bg-[#6a9fcc]/10 p-2 text-[11px] text-accent-steel">
           {importStatus}
         </p>
       )}
@@ -158,10 +158,10 @@ export function RoutingSettingsPanel() {
               key={cat}
               type="button"
               onClick={() => setActiveCat(cat)}
-              className={`rounded px-2.5 py-1 text-[11px] transition-colors ${
+              className={`rounded-none px-2.5 py-1 text-[11px] transition-colors ${
                 isSelected
-                  ? 'bg-primary text-primary-foreground font-semibold'
-                  : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200'
+                  ? 'bg-[#6a9fcc] font-semibold text-[#0d1116]'
+                  : 'bg-panel-bg text-text-muted hover:bg-panel-soft hover:text-text-primary'
               }`}
             >
               {desc.label}
@@ -171,33 +171,33 @@ export function RoutingSettingsPanel() {
       </div>
 
       {/* Active Category Description */}
-      <div className="rounded border border-zinc-700/60 bg-zinc-900/50 p-2.5">
-        <div className="font-semibold text-zinc-300 mb-0.5">
+      <div className="border border-border-hairline bg-surface-raised p-2.5">
+        <div className="mb-0.5 font-semibold text-text-primary">
           {CATEGORY_DESCRIPTIONS[activeCat]?.label}
         </div>
-        <div className="text-[11px] text-zinc-400 leading-relaxed">
+        <div className="text-[11px] leading-relaxed text-[#757d89]">
           {CATEGORY_DESCRIPTIONS[activeCat]?.description}
         </div>
       </div>
 
       {/* Chain list for active category */}
       <div className="space-y-2">
-        <div className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider">
+        <div className="text-[11px] font-semibold uppercase tracking-wider text-[#757d89]">
           Chuỗi ưu tiên (Fallback Chain) — vị trí 1 thử trước
         </div>
 
         {currentChain.map((entry, idx) => (
           <div
             key={idx}
-            className="flex items-center gap-2 rounded border border-zinc-700 bg-zinc-800/80 p-2"
+            className="flex items-center gap-2 border border-border-hairline bg-surface-raised p-2"
           >
-            <span className="w-5 text-center font-bold text-zinc-500">#{idx + 1}</span>
+            <span className="w-5 text-center font-bold text-text-muted">#{idx + 1}</span>
 
             {/* Model select */}
             <select
               value={entry.model}
               onChange={(e) => handleModelChange(idx, e.target.value)}
-              className="flex-1 rounded border border-zinc-600 bg-zinc-900 px-2 py-1 text-xs text-zinc-200 focus:outline-none focus:ring-1 focus:ring-primary"
+              className="flex-1 rounded-none border border-border-hairline bg-bg-deep px-2 py-1 text-xs text-text-primary focus:outline-none focus:ring-1 focus:ring-[#6a9fcc]"
             >
               {AVAILABLE_MODELS.map((m) => (
                 <option key={m.id} value={m.id}>
@@ -210,7 +210,7 @@ export function RoutingSettingsPanel() {
             <select
               value={entry.effort}
               onChange={(e) => handleEffortChange(idx, e.target.value as Effort)}
-              className="w-24 rounded border border-zinc-600 bg-zinc-900 px-2 py-1 text-xs text-zinc-200 focus:outline-none focus:ring-1 focus:ring-primary"
+              className="w-24 rounded-none border border-border-hairline bg-bg-deep px-2 py-1 text-xs text-text-primary focus:outline-none focus:ring-1 focus:ring-[#6a9fcc]"
             >
               {EFFORT_LEVELS.map((eff) => (
                 <option key={eff} value={eff}>
@@ -225,7 +225,7 @@ export function RoutingSettingsPanel() {
                 type="button"
                 disabled={idx === 0}
                 onClick={() => handleMove(idx, 'up')}
-                className="p-1 text-zinc-400 hover:text-zinc-100 disabled:opacity-30"
+                className="p-1 text-[#757d89] hover:text-text-primary disabled:opacity-30"
                 title="Di chuyển lên"
               >
                 <ArrowUp size={13} />
@@ -234,7 +234,7 @@ export function RoutingSettingsPanel() {
                 type="button"
                 disabled={idx === currentChain.length - 1}
                 onClick={() => handleMove(idx, 'down')}
-                className="p-1 text-zinc-400 hover:text-zinc-100 disabled:opacity-30"
+                className="p-1 text-[#757d89] hover:text-text-primary disabled:opacity-30"
                 title="Di chuyển xuống"
               >
                 <ArrowDown size={13} />
@@ -243,7 +243,7 @@ export function RoutingSettingsPanel() {
                 type="button"
                 disabled={currentChain.length <= 1}
                 onClick={() => handleRemove(idx)}
-                className="p-1 text-zinc-400 hover:text-red-400 disabled:opacity-30"
+                className="p-1 text-[#757d89] hover:text-status-error disabled:opacity-30"
                 title="Xóa model khỏi chuỗi"
               >
                 <Trash2 size={13} />
@@ -255,14 +255,14 @@ export function RoutingSettingsPanel() {
         <button
           type="button"
           onClick={handleAdd}
-          className="btn-secondary w-full py-1.5 text-xs flex items-center justify-center gap-1.5 text-zinc-300"
+          className="btn-secondary flex w-full items-center justify-center gap-1.5 py-1.5 text-xs text-text-primary"
         >
           <Plus size={14} />
           Thêm model dự phòng vào chuỗi
         </button>
       </div>
 
-      <div className="border-t border-zinc-700/50 pt-3">
+      <div className="border-t border-border-hairline pt-3">
         <LeadWorkerRoutingSection />
       </div>
     </div>
@@ -287,14 +287,14 @@ function RoutingModelSelect({
   const orphan = Boolean(value) && !options.some((o) => o.id === value);
   return (
     <div className="flex-1">
-      <label htmlFor={id} className="mb-1 block text-[11px] font-semibold text-zinc-400">
+      <label htmlFor={id} className="mb-1 block text-[11px] font-semibold text-[#757d89]">
         {label}
       </label>
       <select
         id={id}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full rounded border border-zinc-600 bg-zinc-900 px-2 py-1 text-xs text-zinc-200 focus:outline-none focus:ring-1 focus:ring-primary"
+        className="w-full rounded-none border border-border-hairline bg-bg-deep px-2 py-1 text-xs text-text-primary focus:outline-none focus:ring-1 focus:ring-[#6a9fcc]"
       >
         <option value="">— Theo model chính —</option>
         {orphan && <option value={value}>{value} (không còn trong danh sách)</option>}
@@ -337,7 +337,7 @@ function LeadWorkerRoutingSection() {
     hint: string,
   ) => (
     <div className="flex-1">
-      <label htmlFor={id} className="mb-1 block text-[11px] font-semibold text-zinc-400">
+      <label htmlFor={id} className="mb-1 block text-[11px] font-semibold text-[#757d89]">
         {label}
       </label>
       <input
@@ -351,9 +351,9 @@ function LeadWorkerRoutingSection() {
           const v = Number(e.target.value);
           if (Number.isFinite(v)) patch({ [key]: v } as Partial<ModelRoutingConfig>);
         }}
-        className="w-full rounded border border-zinc-600 bg-zinc-900 px-2 py-1 text-xs text-zinc-200 focus:outline-none focus:ring-1 focus:ring-primary"
+        className="w-full rounded-none border border-border-hairline bg-bg-deep px-2 py-1 text-xs text-text-primary focus:outline-none focus:ring-1 focus:ring-[#6a9fcc]"
       />
-      <p className="mt-0.5 text-[10px] leading-relaxed text-zinc-500">{hint}</p>
+      <p className="mt-0.5 text-[10px] leading-relaxed text-text-muted">{hint}</p>
     </div>
   );
 
@@ -361,19 +361,19 @@ function LeadWorkerRoutingSection() {
     <div className="space-y-2.5">
       <div className="flex items-start justify-between gap-2">
         <div>
-          <h3 className="text-sm font-semibold text-zinc-200">Lead/Worker Routing</h3>
-          <p className="text-[11px] text-zinc-400">
+          <h3 className="text-sm font-semibold text-text-primary">Lead/Worker Routing</h3>
+          <p className="text-[11px] text-[#757d89]">
             Model mạnh chạy vài lượt đầu (lập kế hoạch) rồi model rẻ thực thi; thất bại liên tiếp
-            thì tự quay lại model mạnh. Lệnh <code className="text-[#6a9fcc]">/plan</code> dùng
+            thì tự quay lại model mạnh. Lệnh <code className="text-accent-steel">/plan</code> dùng
             planner model riêng.
           </p>
         </div>
-        <label className="flex flex-none cursor-pointer items-center gap-1.5 pt-1 text-[11px] text-zinc-300">
+        <label className="flex flex-none cursor-pointer items-center gap-1.5 pt-1 text-[11px] text-text-primary">
           <input
             type="checkbox"
             checked={modelRouting.enabled}
             onChange={(e) => patch({ enabled: e.target.checked })}
-            className="h-3.5 w-3.5 accent-[#6a9fcc]"
+            className="h-3.5 w-3.5 rounded-none accent-[#6a9fcc]"
           />
           Bật
         </label>
@@ -423,12 +423,12 @@ function LeadWorkerRoutingSection() {
         )}
       </div>
 
-      <p className="text-[10.5px] leading-relaxed text-zinc-500">
+      <p className="text-[10.5px] leading-relaxed text-text-muted">
         &ldquo;Thất bại&rdquo; = tool trả lỗi / lệnh build-test exit ≠ 0 / bạn phàn nàn
         (&ldquo;sai rồi&rdquo;, &ldquo;làm lại&rdquo;, &ldquo;wrong&rdquo;…). Lỗi mạng 429/5xx
         của gateway KHÔNG được tính — đã có retry im lặng riêng. Việc bạn TỪ CHỐI một phê duyệt
         cũng không tính là thất bại. Vai trò của từng lượt hiện thành badge{' '}
-        <code className="text-[#6a9fcc]">lead</code>/<code className="text-[#9fa4ab]">worker</code>{' '}
+        <code className="text-accent-steel">lead</code>/<code className="text-text-muted">worker</code>{' '}
         dưới câu trả lời.
       </p>
     </div>

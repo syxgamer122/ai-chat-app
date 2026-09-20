@@ -170,33 +170,41 @@ describe('CliCodingHarness (Harness Primitives)', () => {
 
   it('write và edit cập nhật file đúng quy trình', () => {
     const testFile = 'tmp-test-cli-file.txt';
-    const writeRes = harness.write(testFile, 'line1\nline2\nline3');
-    expect(writeRes.ok).toBe(true);
+    const abs = path.join(process.cwd(), testFile);
+    /*
+     * try/finally: trước đây dọn ở CUỐI thân test nên assertion nào fail là file
+     * tạm ở lại repo root — đúng loại "rác" mà lần dọn này nhắm tới.
+     */
+    try {
+      const writeRes = harness.write(testFile, 'line1\nline2\nline3');
+      expect(writeRes.ok).toBe(true);
 
-    const editRes = harness.edit(testFile, 'line2', 'line2-modified');
-    expect(editRes.ok).toBe(true);
+      const editRes = harness.edit(testFile, 'line2', 'line2-modified');
+      expect(editRes.ok).toBe(true);
 
-    const readRes = harness.read(testFile);
-    expect(readRes.output).toContain('line2-modified');
-
-    // Dọn dẹp
-    fs.unlinkSync(path.join(process.cwd(), testFile));
+      const readRes = harness.read(testFile);
+      expect(readRes.output).toContain('line2-modified');
+    } finally {
+      if (fs.existsSync(abs)) fs.unlinkSync(abs);
+    }
   });
 
   it('edit xử lý trơn tru line-endings CRLF (Windows) khi target dùng LF', () => {
     const testFile = 'tmp-test-crlf-file.txt';
-    // Ghi file với ký tự xuống dòng CRLF chuẩn Windows
-    fs.writeFileSync(path.join(process.cwd(), testFile), 'first line\r\nsecond line\r\nthird line\r\n', 'utf8');
+    const abs = path.join(process.cwd(), testFile);
+    try {
+      // Ghi file với ký tự xuống dòng CRLF chuẩn Windows
+      fs.writeFileSync(abs, 'first line\r\nsecond line\r\nthird line\r\n', 'utf8');
 
-    // Gọi edit với target dùng LF thuần
-    const editRes = harness.edit(testFile, 'first line\nsecond line', 'first line modified\nsecond line modified');
-    expect(editRes.ok).toBe(true);
+      // Gọi edit với target dùng LF thuần
+      const editRes = harness.edit(testFile, 'first line\nsecond line', 'first line modified\nsecond line modified');
+      expect(editRes.ok).toBe(true);
 
-    const content = fs.readFileSync(path.join(process.cwd(), testFile), 'utf8');
-    expect(content).toContain('first line modified');
-
-    // Dọn dẹp
-    fs.unlinkSync(path.join(process.cwd(), testFile));
+      const content = fs.readFileSync(abs, 'utf8');
+      expect(content).toContain('first line modified');
+    } finally {
+      if (fs.existsSync(abs)) fs.unlinkSync(abs);
+    }
   });
 
   it('find tìm kiếm đúng các file trong workspace', () => {

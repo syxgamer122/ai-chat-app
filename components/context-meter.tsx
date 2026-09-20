@@ -62,7 +62,7 @@ export const ContextMeter = memo(function ContextMeter({
   const barTone =
     tone === 'error' ? 'bg-[#e8704f]' : tone === 'warning' ? 'bg-[#e8993a]' : 'bg-[#4b607c]';
   const textTone =
-    tone === 'error' ? 'text-[#e8704f]' : tone === 'warning' ? 'text-[#e8993a]' : 'text-[#9fa4ab]';
+    tone === 'error' ? 'text-status-error' : tone === 'warning' ? 'text-status-warning' : 'text-text-muted';
 
   return (
     <div
@@ -78,7 +78,7 @@ export const ContextMeter = memo(function ContextMeter({
         aria-valuemax={100}
         className="flex items-center gap-2"
       >
-        <div className="h-0.5 flex-1 bg-[#1c2128]">
+        <div className="h-0.5 flex-1 bg-surface-code">
           <div
             className={`h-full ${barTone}`}
             style={{ width: `${Math.round(fillRatio * 100)}%` }}

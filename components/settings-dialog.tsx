@@ -1,959 +1,35 @@
 'use client';
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import dynamic from 'next/dynamic';
-import { db, addMemory, deleteMemory, MAX_MEMORIES, MAX_MEMORY_CHARS, type PromptTemplate, type RecipeRecord } from '@/lib/db';
-import { useAppStore, SERVER_PROVIDER_ID, ALL_TOOL_CATEGORIES, TOOL_CATEGORY_LABELS, PERMISSION_OPTIONS, isApiModelId, isPermissionOverride, type PermissionOverride } from '@/lib/store';
-import { isQueueMode } from '@/lib/message-queue';
-import { exportJson, exportMarkdown, importBackup, type ImportMode } from '@/lib/backup';
-import { X, Download, Upload, Loader2, ShieldAlert, Pencil, Trash2, Check, Clock, Ban, AlertCircle, Sparkles, Zap } from 'lucide-react';
-import { VyenMark } from '@/components/vyen-logo';
-import { TOOL_CATEGORY_ICON_COMPONENTS } from '@/components/tool-category-icons';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { savePrompt, deletePrompt } from '@/lib/prompt-library';
-import { BUILTIN_SLASH_COMMANDS } from '@/lib/slash-commands';
-import { DiskSkillsSection } from '@/components/settings-skills';
-import { AgentMemorySection } from '@/components/settings-agent-memory';
-import { proposeCandidate, reviewCandidate, deleteReviewedRecord } from '@/lib/memory/store';
-import type { MemoryKind, MemoryRecord } from '@/lib/memory/types';
+import { Z_CLASS } from '@/lib/ui-z';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useAppStore } from '@/lib/store';
+import { Search, X } from 'lucide-react';
+import { useFocusTrap } from '@/lib/hooks/use-focus-trap';
+import { AppearanceTab } from '@/components/settings/appearance-tab';
+import { ProvidersTab } from '@/components/settings/providers-tab';
+import { SafetyTab } from '@/components/settings/safety-tab';
+import { ExtensionsTab } from '@/components/settings/extensions-tab';
+import { MemoryTab } from '@/components/settings/memory-tab';
+import { DataTab } from '@/components/settings/data-tab';
 import {
-  backupNow,
-  chooseBackupDirectory,
-  clearBackupDirectory,
-  getAutoBackupDirName,
-  getBackupIntervalDays,
-  isFileSystemAccessSupported,
-  getLastBackupAt,
-  setBackupIntervalDays,
-} from '@/lib/auto-backup';
+  SETTINGS_TABS,
+  SETTINGS_SEARCH_ITEMS,
+  resolveSettingsTab,
+  type SettingsTab,
+} from '@/components/settings/settings-tabs';
+
+/*
+ * Re-export để importer cũ không phải đổi đường dẫn — `tests/a11y-contract.test.ts`
+ * đọc `SETTINGS_TABS` từ chính file này để kiểm chứng liên kết ARIA tab ↔ panel.
+ */
+export { SETTINGS_TABS };
+export type { SettingsTab };
 
 type Status = { kind: 'idle' | 'busy' | 'ok' | 'error'; message?: string };
-
-function SectionLoading() {
-  return (
-    <div className="flex items-center gap-2 py-6 font-mono text-xs text-[#9fa4ab]" role="status">
-      <span className="terminal-cursor" aria-hidden="true" />
-      <span>Đang tải mục cài đặt…</span>
-    </div>
-  );
-}
-
-/* Ba section nặng (provider + MCP panel, thống kê) tách chunk riêng: shell
-   dialog + tab Chung mount tức thì, section chỉ tải khi tab được ghé lần đầu. */
-const ProviderManager = dynamic(
-  () => import('@/components/provider-manager').then((m) => m.ProviderManager),
-  { ssr: false, loading: SectionLoading },
-);
-const UsageStats = dynamic(
-  () => import('@/components/usage-stats').then((m) => m.UsageStats),
-  { ssr: false, loading: SectionLoading },
-);
-const McpSettingsPanel = dynamic(
-  () => import('@/components/mcp/mcp-settings-panel').then((m) => m.McpSettingsPanel),
-  { ssr: false, loading: SectionLoading },
-);
-const RoutingSettingsPanel = dynamic(
-  () => import('@/components/routing-settings-panel').then((m) => m.RoutingSettingsPanel),
-  { ssr: false, loading: SectionLoading },
-);
-const ToolPermissionsTable = dynamic(
-  () => import('@/components/tool-permissions-table').then((m) => m.ToolPermissionsTable),
-  { ssr: false, loading: SectionLoading },
-);
-const SchedulerPanel = dynamic(
-  () => import('@/components/scheduler/scheduler-panel').then((m) => m.SchedulerPanel),
-  { ssr: false, loading: SectionLoading },
-);
-
-/**
- * PWA: nút cài đặt lên thiết bị (Chrome/Edge/Android);
- * iOS hiện hướng dẫn "Thêm vào Màn hình chính".
- */
-/* ------------------ Ghi nhớ dài hạn (memory) ------------------ */
-
-function MemoriesSection() {
-  const candidates = useLiveQuery(
-    () => db.memoryCandidates?.where('status').equals('pending').reverse().sortBy('createdAt'),
-    [],
-    [],
-  );
-  const records = useLiveQuery(
-    () => db.memoryRecords?.reverse().sortBy('createdAt'),
-    [],
-    [],
-  );
-
-  const [newText, setNewText] = useState('');
-  const [newKind, setNewKind] = useState<MemoryKind>('pattern');
-  const [refusePromptId, setRefusePromptId] = useState<string | null>(null);
-  const [refuseReason, setRefuseReason] = useState('');
-  const [error, setError] = useState<string | null>(null);
-
-  const handlePropose = async () => {
-    if (!newText.trim()) return;
-    try {
-      await proposeCandidate({
-        text: newText.trim(),
-        kind: newKind,
-        scope: { kind: 'project', ref: 'global' },
-        provenance: { threadId: 'settings' },
-      });
-      setNewText('');
-      setError(null);
-    } catch (e) {
-      console.error('[memory propose]', e);
-      setError('Không thể tạo candidate ghi nhớ.');
-    }
-  };
-
-  const handleReview = async (id: string, action: 'remember' | 'refuse' | 'defer', reason?: string) => {
-    try {
-      if (action === 'refuse' && !reason?.trim()) {
-        setError('Từ chối ghi nhớ bắt buộc phải có lý do cụ thể.');
-        return;
-      }
-      await reviewCandidate(id, action, { reason: reason?.trim() });
-      setRefusePromptId(null);
-      setRefuseReason('');
-      setError(null);
-    } catch (e) {
-      console.error('[memory review]', e);
-      setError(e instanceof Error ? e.message : 'Lỗi khi kiểm duyệt ghi nhớ.');
-    }
-  };
-
-  const kindIcons: Record<MemoryKind, string> = {
-    rule: '📏',
-    pattern: '🔧',
-    gotcha: '⚠️',
-    decision: '💡',
-    term: '📖',
-  };
-
-  return (
-    <div className="space-y-4">
-      <div>
-        <h3 className="text-sm font-semibold text-zinc-800 dark:text-zinc-200">
-          Bộ nhớ dài hạn & Reviewer Gate
-        </h3>
-        <p className="mt-1 text-xs leading-relaxed text-zinc-600 dark:text-zinc-400">
-          Không ghi nhớ im lặng: Agent chỉ đề xuất candidate. Bạn trực tiếp duyệt (Nhớ / Từ chối / Hoãn).
-          Chỉ ký ức đã duyệt mới vào Recall Pack theo ngân sách token.
-        </p>
-      </div>
-
-      {error && (
-        <div className="flex items-center gap-1.5 rounded-lg bg-red-50 p-2 text-xs text-red-700 dark:bg-red-950/40 dark:text-red-300">
-          <AlertCircle size={14} className="shrink-0" />
-          <span>{error}</span>
-        </div>
-      )}
-
-      {/* 1. Review Cards for Pending Candidates */}
-      <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <h4 className="flex items-center gap-1.5 text-xs font-semibold text-zinc-700 dark:text-zinc-300">
-            <Clock size={13} className="text-amber-500" />
-            <span>Đang chờ duyệt</span>
-            <span className="rounded-full bg-amber-100 px-1.5 py-0.2 text-[10px] font-medium text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
-              {(candidates ?? []).length}
-            </span>
-          </h4>
-        </div>
-
-        {(candidates ?? []).length === 0 ? (
-          <p className="rounded-lg bg-surface-muted/60 px-3 py-2 text-[11px] italic text-zinc-500">
-            Không có ghi nhớ nào đang chờ duyệt.
-          </p>
-        ) : (
-          <div className="space-y-2">
-            {(candidates ?? []).map((cand) => (
-              <div
-                key={cand.id}
-                className="rounded-xl border border-amber-200/80 bg-amber-50/40 p-3 text-xs dark:border-amber-900/50 dark:bg-amber-950/20"
-              >
-                <div className="flex items-center justify-between gap-2 pb-1.5 border-b border-amber-200/40 dark:border-amber-900/30">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-xs">{kindIcons[cand.kind] || '📌'}</span>
-                    <span className="font-semibold uppercase tracking-wider text-[10px] text-zinc-700 dark:text-zinc-300">
-                      {cand.kind}
-                    </span>
-                    <span className="text-zinc-400">•</span>
-                    <span className="text-[10px] text-zinc-500">
-                      scope: {cand.scope.kind} ({cand.scope.ref})
-                    </span>
-                  </div>
-                  {cand.reviewDueAt && (
-                    <span className="text-[10px] text-amber-700 dark:text-amber-400">
-                      Hạn xét: {new Date(cand.reviewDueAt).toLocaleDateString()}
-                    </span>
-                  )}
-                </div>
-
-                <div className="my-2 leading-relaxed text-zinc-800 dark:text-zinc-200">
-                  {cand.text}
-                </div>
-
-                {refusePromptId === cand.id ? (
-                  <div className="mt-2 space-y-2 rounded-lg border border-red-200 bg-red-50/80 p-2 dark:border-red-900 dark:bg-red-950/40">
-                    <div className="text-[11px] font-medium text-red-800 dark:text-red-300">
-                      Nhập lý do từ chối (bắt buộc):
-                    </div>
-                    <input
-                      type="text"
-                      value={refuseReason}
-                      onChange={(e) => setRefuseReason(e.target.value)}
-                      placeholder="Ví dụ: Quy ước này không còn áp dụng / Vi phạm bảo mật"
-                      className="field-sm w-full text-xs"
-                      autoFocus
-                    />
-                    <div className="flex justify-end gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setRefusePromptId(null);
-                          setRefuseReason('');
-                        }}
-                        className="btn-ghost text-xs px-2 py-1"
-                      >
-                        Hủy
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => void handleReview(cand.id, 'refuse', refuseReason)}
-                        className="rounded bg-red-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-red-700"
-                      >
-                        Xác nhận từ chối
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="flex items-center justify-end gap-1.5 pt-1">
-                    <button
-                      type="button"
-                      onClick={() => void handleReview(cand.id, 'defer', 'Hoãn xem xét 7 ngày')}
-                      className="inline-flex items-center gap-1 rounded-md border border-zinc-300 bg-white px-2 py-1 text-[11px] font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
-                    >
-                      <Clock size={11} /> Hoãn
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setRefusePromptId(cand.id);
-                        setRefuseReason('');
-                      }}
-                      className="inline-flex items-center gap-1 rounded-md border border-red-200 bg-red-50 px-2 py-1 text-[11px] font-medium text-red-700 hover:bg-red-100 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300"
-                    >
-                      <Ban size={11} /> Từ chối
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void handleReview(cand.id, 'remember')}
-                      className="inline-flex items-center gap-1 rounded-md bg-emerald-600 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-emerald-700 dark:bg-emerald-700 dark:hover:bg-emerald-600"
-                    >
-                      <Check size={11} /> Nhớ
-                    </button>
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* 2. Active & Reviewed Memories */}
-      <div className="space-y-2">
-        <h4 className="flex items-center gap-1.5 text-xs font-semibold text-zinc-700 dark:text-zinc-300">
-          <Sparkles size={13} className="text-blue-500" />
-          <span>Ký ức đã duyệt</span>
-          <span className="rounded-full bg-blue-100 px-1.5 py-0.2 text-[10px] font-medium text-blue-800 dark:bg-blue-900/40 dark:text-blue-300">
-            {(records ?? []).length}
-          </span>
-        </h4>
-
-        {(records ?? []).length === 0 ? (
-          <p className="rounded-lg bg-surface-muted/60 px-3 py-2 text-[11px] italic text-zinc-500">
-            Chưa có ký ức nào được kích hoạt.
-          </p>
-        ) : (
-          <div className="max-h-60 space-y-1.5 overflow-y-auto pr-1">
-            {(records ?? []).map((rec) => (
-              <div
-                key={rec.id}
-                className="group flex items-start justify-between gap-2 rounded-lg border border-zinc-200 bg-surface-muted/40 p-2.5 text-xs dark:border-zinc-800"
-              >
-                <div className="min-w-0 flex-1 space-y-1">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-[11px]">{kindIcons[rec.kind] || '📌'}</span>
-                    <span
-                      className={`rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider ${
-                        rec.status === 'active'
-                          ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'
-                          : rec.status === 'reference'
-                            ? 'bg-sky-100 text-sky-800 dark:bg-sky-950/60 dark:text-sky-300'
-                            : rec.status === 'archive'
-                              ? 'bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-400'
-                              : 'bg-red-100 text-red-800 dark:bg-red-950/60 dark:text-red-300'
-                      }`}
-                    >
-                      {rec.status}
-                    </span>
-                    <span className="text-[10px] text-zinc-400">
-                      confirm: {rec.confirmCount}
-                    </span>
-                    {rec.reviewDueAt && (
-                      <span className="text-[10px] text-zinc-500">
-                        • hạn: {new Date(rec.reviewDueAt).toLocaleDateString()}
-                      </span>
-                    )}
-                  </div>
-                  <div className="text-zinc-700 dark:text-zinc-300 leading-relaxed">{rec.text}</div>
-                  {rec.reason && (
-                    <div className="text-[10px] text-red-600 dark:text-red-400 italic">
-                      Lý do: {rec.reason}
-                    </div>
-                  )}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    void deleteReviewedRecord(rec.id);
-                  }}
-                  aria-label="Xóa ký ức"
-                  className="rounded p-1 text-zinc-400 opacity-60 transition hover:bg-red-50 hover:text-red-600 group-hover:opacity-100 dark:hover:bg-red-950/40"
-                >
-                  <Trash2 size={12} />
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* 3. Propose New Memory Card */}
-      <div className="space-y-2 rounded-xl border border-dashed border-zinc-300 p-3 dark:border-zinc-700">
-        <div className="flex items-center justify-between">
-          <label className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">
-            Thêm đề xuất ghi nhớ mới
-          </label>
-          <select
-            value={newKind}
-            onChange={(e) => setNewKind(e.target.value as MemoryKind)}
-            className="field-sm text-xs py-0.5"
-          >
-            <option value="pattern">🔧 Pattern (cách làm tốt)</option>
-            <option value="rule">📏 Rule (quy tắc bắt buộc)</option>
-            <option value="gotcha">⚠️ Gotcha (cạm bẫy tránh)</option>
-            <option value="decision">💡 Decision (quyết định thiết kế)</option>
-            <option value="term">📖 Term (thuật ngữ dự án)</option>
-          </select>
-        </div>
-
-        <textarea
-          value={newText}
-          onChange={(e) => setNewText(e.target.value)}
-          rows={2}
-          maxLength={MAX_MEMORY_CHARS}
-          className="field-sm resize-none text-xs w-full"
-          placeholder='Ví dụ: "Luôn chạy test vitest trước khi commit thay đổi"'
-          aria-label="Nội dung đề xuất ghi nhớ"
-        />
-
-        <button
-          type="button"
-          onClick={() => void handlePropose()}
-          disabled={!newText.trim()}
-          className="btn-secondary w-full justify-center text-xs py-1.5"
-        >
-          Đề xuất ghi nhớ
-        </button>
-      </div>
-    </div>
-  );
-}
-
-
-/* ------------------ Model đọc ảnh (vision) ------------------ */
-
-/**
- * Chọn model MÔ TẢ ẢNH của provider đang bật. Tách thành component riêng để
- * chỉ phần này re-render khi snapshot provider đổi (danh sách model được nạp
- * lại sau mỗi lần "Kiểm tra kết nối"), thay vì cả dialog cài đặt.
- *
- * Vyen KHÔNG tự đoán model nào nhìn được ảnh: provider BYOK chỉ trả id/tên qua
- * /v1/models, không có metadata capability. Đoán sai thì mọi lượt fs_read ảnh
- * đều thất bại kèm lỗi mơ hồ của provider — nên để người dùng tự chọn.
- */
-function VisionModelSection() {
-  const visionModel = useAppStore((s) => s.settings.visionModel ?? '');
-  const updateSettings = useAppStore((s) => s.updateSettings);
-  const activeProviderId = useAppStore((s) => s.activeProviderId);
-  const activeProvider = useAppStore((s) => s.activeProvider);
-
-  const models = activeProvider?.models ?? [];
-  /* Chưa chọn provider riêng (đang dùng Máy chủ mặc định) hoặc provider chưa
-     tải /v1/models → không có gì để chọn. /api/vision đòi provider active nên
-     đường này chắc chắn không dùng được, khoá select cho rõ ràng. */
-  const noModels = activeProviderId === SERVER_PROVIDER_ID || models.length === 0;
-  /* Model đã lưu nhưng không có trong danh sách hiện tại (đổi provider, provider
-     bỏ model, snapshot chưa nạp): vẫn hiện thành một option để select không
-     "nói dối" là đang tắt — và KHÔNG reset về '' vì đó là âm thầm xoá lựa chọn
-     của người dùng. */
-  const orphanModel = Boolean(visionModel) && !models.some((m) => m.id === visionModel);
-  /* Id provider chứa ký tự mà mọi route LLM từ chối (khoảng trắng, '@'...) —
-     client không gửi được nên tính năng ảnh coi như tắt. Nói thẳng ở đây, kẻo
-     người dùng thấy đã chọn model mà ảnh vẫn không đọc được. */
-  const unusableModel = Boolean(visionModel) && !isApiModelId(visionModel);
-
-  return (
-    <div>
-      <label htmlFor="vision-model" className="mb-1.5 block text-sm font-medium text-zinc-700">
-        Model đọc ảnh (vision)
-      </label>
-      <select
-        id="vision-model"
-        value={visionModel}
-        disabled={noModels}
-        onChange={(e) => updateSettings({ visionModel: e.target.value })}
-        className="field disabled:cursor-not-allowed disabled:opacity-60"
-      >
-        <option value="">— Không dùng —</option>
-        {orphanModel && <option value={visionModel}>{visionModel} (không còn trong danh sách)</option>}
-        {models.map((m) => (
-          <option key={m.id} value={m.id}>
-            {m.name || m.id}
-          </option>
-        ))}
-      </select>
-      {noModels ? (
-        <p className="mt-1 text-[11px] leading-relaxed text-zinc-600">
-          Hãy chọn một Nhà cung cấp ở trên và bấm kiểm tra kết nối để tải danh sách model, rồi
-          quay lại đây chọn model đọc ảnh.
-          {visionModel ? ` Lựa chọn cũ (${visionModel}) vẫn được giữ.` : ''}
-        </p>
-      ) : (
-        <p className="mt-1 text-[11px] leading-relaxed text-zinc-600">
-          Dùng để mô tả ảnh thành chữ: ảnh trong thư mục làm việc khi agent gọi{' '}
-          <code className="claude-inline-code">fs_read</code>, ảnh do công cụ MCP trả về, và ảnh
-          bạn đính kèm cho model không xem được ảnh. Phải chọn model <em>nhìn được ảnh</em> (tên
-          thường có <code className="claude-inline-code">vision</code>,{' '}
-          <code className="claude-inline-code">vl</code>,{' '}
-          <code className="claude-inline-code">gpt-4o</code>,{' '}
-          <code className="claude-inline-code">gemini</code>…) — Vyen không tự biết model nào có
-          khả năng này. Để trống thì ảnh chỉ được thay bằng ghi chú dạng chữ.
-        </p>
-      )}
-      {unusableModel && (
-        <p className="notice-warn mt-1.5 text-[11px] leading-relaxed" role="status">
-          Tên model &ldquo;{visionModel}&rdquo; chứa ký tự mà máy chủ không nhận (chỉ cho phép chữ,
-          số và <code className="claude-inline-code">. - : ~ /</code>) nên Vyen chưa dùng được để
-          đọc ảnh. Hãy chọn model khác.
-        </p>
-      )}
-    </div>
-  );
-}
-
-type SettingsTab = 'chung' | 'provider' | 'routing' | 'stats' | 'skills' | 'memory' | 'schedules' | 'data';
-
-const SETTINGS_TABS: Array<{ id: SettingsTab; label: string }> = [
-  { id: 'chung', label: 'Chung' },
-  { id: 'provider', label: 'Nhà cung cấp' },
-  { id: 'routing', label: 'Routing' },
-  { id: 'stats', label: 'Thống kê' },
-  { id: 'skills', label: 'Skills & lệnh' },
-  { id: 'memory', label: 'Ghi nhớ' },
-  { id: 'schedules', label: 'Scheduler' },
-  { id: 'data', label: 'Dữ liệu' },
-];
 
 const FOCUSABLE_SELECTOR =
   'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
-function LegacySkillsSection() {
-  const skills = useLiveQuery(
-    () => db.prompts.orderBy('updatedAt').reverse().filter((p) => p.mode === 'skill').toArray(),
-    [],
-    [],
-  );
-
-  const [newTitle, setNewTitle] = useState('');
-  const [newContent, setNewContent] = useState('');
-  const [newDescription, setNewDescription] = useState('');
-  const [error, setError] = useState<string | null>(null);
-
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editTitle, setEditTitle] = useState('');
-  const [editContent, setEditContent] = useState('');
-  const [editDescription, setEditDescription] = useState('');
-
-  const addSkill = async () => {
-    try {
-      await savePrompt({
-        title: newTitle,
-        content: newContent,
-        mode: 'skill',
-        description: newDescription,
-      });
-      setNewTitle('');
-      setNewContent('');
-      setNewDescription('');
-      setError(null);
-    } catch (err: any) {
-      setError(err?.message ?? 'Không lưu được skill.');
-    }
-  };
-
-  const startEdit = (p: PromptTemplate) => {
-    setEditingId(p.id);
-    setEditTitle(p.title);
-    setEditContent(p.content);
-    setEditDescription(p.description ?? '');
-  };
-
-  const saveEdit = async () => {
-    if (!editingId) return;
-    try {
-      await savePrompt({
-        id: editingId,
-        title: editTitle,
-        content: editContent,
-        mode: 'skill',
-        description: editDescription,
-      });
-      setEditingId(null);
-      setError(null);
-    } catch (err: any) {
-      setError(err?.message ?? 'Không lưu được skill.');
-    }
-  };
-
-  return (
-    <div className="space-y-3">
-      <h3 className="text-sm font-semibold text-zinc-800">Skills cũ (lưu trong trình duyệt)</h3>
-      <p className="text-xs leading-relaxed text-zinc-600">
-        Agent tự kích hoạt các skill này khi tin nhắn khớp mô tả; không chèn vào ô chat.
-        Skills trên đĩa được quản lý riêng ở trên.
-      </p>
-
-      {(skills ?? []).map((p) =>
-        editingId === p.id ? (
-          <div key={p.id} className="space-y-2 rounded-xl border border-zinc-300 bg-surface-muted p-2.5">
-            <input
-              value={editTitle}
-              onChange={(e) => setEditTitle(e.target.value)}
-              className="field-sm"
-              placeholder="Tên skill"
-              aria-label="Tên skill"
-            />
-            <textarea
-              value={editContent}
-              onChange={(e) => setEditContent(e.target.value)}
-              rows={4}
-              className="field-sm resize-y text-xs"
-              placeholder="Nội dung skill"
-              aria-label="Nội dung skill"
-            />
-            <input
-              value={editDescription}
-              onChange={(e) => setEditDescription(e.target.value)}
-              className="field-sm"
-              placeholder="Khi nào agent nên dùng skill này"
-              aria-label="Mô tả khi nào dùng skill"
-            />
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={saveEdit}
-                className="rounded-lg bg-brand px-3 py-1 text-xs font-medium text-[#0d1116] transition-colors hover:bg-brand-hover/85"
-              >
-                Lưu
-              </button>
-              <button
-                type="button"
-                onClick={() => setEditingId(null)}
-                className="rounded-lg px-3 py-1 text-xs text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900"
-              >
-                Hủy
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div
-            key={p.id}
-            className="group flex items-start justify-between gap-2 rounded-lg border border-zinc-200 bg-surface-muted/60 px-2.5 py-2"
-          >
-            <div className="min-w-0 flex-1">
-              <div className="text-[13px] font-medium text-zinc-800">
-                {p.title}
-                {p.mode === 'skill' && (
-                  <span className="ml-1.5 rounded bg-brand/10 px-1.5 py-0.5 align-middle text-[9px] font-semibold uppercase tracking-wide text-brand">
-                    Skill
-                  </span>
-                )}
-              </div>
-              {p.mode === 'skill' && p.description && (
-                <div className="mt-0.5 line-clamp-1 text-[11px] italic text-zinc-500">
-                  Khi nào dùng: {p.description}
-                </div>
-              )}
-              <div className="mt-0.5 line-clamp-2 text-[11px] leading-relaxed text-zinc-600">
-                {p.content.replace(/\n+/g, ' ')}
-              </div>
-            </div>
-            <div className="flex flex-shrink-0 gap-1 opacity-70 transition-opacity group-hover:opacity-100">
-              <button
-                type="button"
-                onClick={() => startEdit(p)}
-                aria-label={`Sửa ${p.title}`}
-                className="rounded p-1 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800 dark:hover:bg-zinc-200/60 dark:hover:text-zinc-100"
-              >
-                <Pencil size={12} />
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  if (window.confirm(`Xóa skill "${p.title}"?`)) void deletePrompt(p.id);
-                }}
-                aria-label={`Xóa ${p.title}`}
-                className="rounded p-1 text-zinc-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10 dark:hover:text-red-400"
-              >
-                <Trash2 size={12} />
-              </button>
-            </div>
-          </div>
-        ),
-      )}
-
-      <div className="space-y-2 rounded-xl border border-dashed border-zinc-300 p-2.5">
-        <input
-          value={newTitle}
-          onChange={(e) => setNewTitle(e.target.value)}
-          className="field-sm"
-          placeholder="Tên skill mới (vd: Viết email)"
-          aria-label="Tên skill mới"
-        />
-        <textarea
-          value={newContent}
-          onChange={(e) => setNewContent(e.target.value)}
-          rows={3}
-          className="field-sm resize-y text-xs"
-          placeholder="Nội dung skill"
-          aria-label="Nội dung skill mới"
-        />
-        <input
-          value={newDescription}
-          onChange={(e) => setNewDescription(e.target.value)}
-          className="field-sm"
-          placeholder="Khi nào agent nên dùng skill này"
-          aria-label="Mô tả khi nào dùng skill mới"
-        />
-        <button
-          type="button"
-          onClick={addSkill}
-          className="w-full rounded-lg bg-zinc-100 py-1.5 text-xs font-medium text-zinc-700 transition hover:bg-zinc-200"
-        >
-          + Thêm skill
-        </button>
-        {error && <p className="notice-error">{error}</p>}
-      </div>
-    </div>
-  );
-}
-
-/* ------------------ Slash Commands tùy biến ------------------ */
-
-function CustomSlashCommandsSection() {
-  const customSlashCommands = useAppStore((s) => s.settings.customSlashCommands ?? {});
-  const setCustomSlashCommand = useAppStore((s) => s.setCustomSlashCommand);
-  const removeCustomSlashCommand = useAppStore((s) => s.removeCustomSlashCommand);
-
-  const recipes = useLiveQuery(
-    () => db.recipes.orderBy('updatedAt').reverse().toArray(),
-    [],
-    [] as RecipeRecord[],
-  );
-
-  const [cmdName, setCmdName] = useState('');
-  const [selectedRecipeId, setSelectedRecipeId] = useState('');
-  const [error, setError] = useState<string | null>(null);
-
-  const handleAdd = () => {
-    const cleaned = cmdName.trim().replace(/^\//, '').toLowerCase();
-    if (!cleaned) {
-      setError('Vui lòng nhập tên lệnh slash (ví dụ: lint hoặc fix).');
-      return;
-    }
-    if (!/^[a-zA-Z0-9_-]+$/.test(cleaned)) {
-      setError('Tên lệnh chỉ được chứa chữ cái, số, gạch dưới (_) hoặc gạch ngang (-).');
-      return;
-    }
-    if (BUILTIN_SLASH_COMMANDS.some((b) => b.name === cleaned || b.aliases?.includes(cleaned))) {
-      setError(`Tên lệnh "/${cleaned}" đã trùng với lệnh mặc định của hệ thống.`);
-      return;
-    }
-    if (!selectedRecipeId) {
-      setError('Vui lòng chọn một recipe để liên kết.');
-      return;
-    }
-    setCustomSlashCommand(cleaned, selectedRecipeId);
-    setCmdName('');
-    setSelectedRecipeId('');
-    setError(null);
-  };
-
-  const commandEntries = Object.entries(customSlashCommands);
-
-  return (
-    <div className="space-y-4 pt-4">
-      <div>
-        <h3 className="text-sm font-semibold text-zinc-800 dark:text-zinc-200">
-          Lệnh gõ nhanh (Slash Commands)
-        </h3>
-        <p className="text-xs leading-relaxed text-zinc-600 dark:text-zinc-400">
-          Gõ <code className="claude-inline-code">/</code> trong khung chat để điều khiển nhanh hoặc kích hoạt workflow.
-        </p>
-      </div>
-
-      {/* Danh sách lệnh built-in chuẩn */}
-      <div className="rounded-xl border border-zinc-200 bg-zinc-50/50 p-3 dark:border-zinc-800 dark:bg-zinc-900/30">
-        <h4 className="mb-2 text-xs font-semibold text-zinc-700 dark:text-zinc-300">
-          Lệnh hệ thống mặc định
-        </h4>
-        <div className="grid grid-cols-1 gap-2 text-xs sm:grid-cols-2">
-          {BUILTIN_SLASH_COMMANDS.map((cmd) => (
-            <div
-              key={cmd.name}
-              className="flex flex-col gap-0.5 rounded-lg border border-zinc-200/80 bg-white p-2 dark:border-zinc-800 dark:bg-zinc-900"
-            >
-              <div className="flex items-center gap-1.5 font-mono font-medium text-brand">
-                <span>/{cmd.name}</span>
-                {cmd.aliases && cmd.aliases.length > 0 && (
-                  <span className="text-[10px] font-normal text-zinc-400">
-                    ({cmd.aliases.map((a) => `/${a}`).join(', ')})
-                  </span>
-                )}
-              </div>
-              <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
-                {cmd.description}
-              </p>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Danh sách custom slash commands */}
-      <div className="space-y-2">
-        <h4 className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">
-          Lệnh tùy biến liên kết Recipe (Custom /&lt;tên&gt; → Recipe)
-        </h4>
-
-        {commandEntries.length === 0 ? (
-          <p className="text-xs italic text-zinc-500">
-            Chưa có lệnh tùy biến nào. Thêm lệnh bên dưới để mở nhanh workflow yêu thích bằng phím tắt <code className="claude-inline-code">/</code>.
-          </p>
-        ) : (
-          <div className="space-y-1.5">
-            {commandEntries.map(([name, recipeId]) => {
-              const rec = (recipes ?? []).find((r) => r.id === recipeId);
-              return (
-                <div
-                  key={name}
-                  className="flex items-center justify-between rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs dark:border-zinc-800 dark:bg-zinc-900"
-                >
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono font-semibold text-brand">/{name}</span>
-                    <span className="text-zinc-400">→</span>
-                    <span className="font-medium text-zinc-800 dark:text-zinc-200">
-                      {rec?.title ?? recipeId}
-                    </span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => removeCustomSlashCommand(name)}
-                    className="rounded p-1 text-zinc-400 transition hover:bg-zinc-100 hover:text-red-600 dark:hover:bg-zinc-800"
-                    title={`Xóa lệnh /${name}`}
-                  >
-                    <Trash2 size={13} />
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        {/* Form thêm custom command */}
-        <div className="space-y-2 rounded-xl border border-dashed border-zinc-300 p-2.5 dark:border-zinc-700">
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-            <div>
-              <input
-                value={cmdName}
-                onChange={(e) => {
-                  setCmdName(e.target.value);
-                  if (error) setError(null);
-                }}
-                className="field-sm w-full"
-                placeholder="Tên lệnh (vd: lint hoặc test)"
-                aria-label="Tên lệnh slash"
-              />
-            </div>
-            <div>
-              <select
-                value={selectedRecipeId}
-                onChange={(e) => {
-                  setSelectedRecipeId(e.target.value);
-                  if (error) setError(null);
-                }}
-                className="field-sm w-full"
-                aria-label="Chọn Recipe"
-              >
-                <option value="">-- Chọn Recipe liên kết --</option>
-                {(recipes ?? []).map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {r.title}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={handleAdd}
-            className="w-full rounded-lg bg-zinc-100 py-1.5 text-xs font-medium text-zinc-700 transition hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
-          >
-            + Gán lệnh slash vào Recipe
-          </button>
-          {error && <p className="notice-error">{error}</p>}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ------------------ Tự động sao lưu ------------------ */
-
-function AutoBackupSection() {
-  const [intervalDays, setIntervalDays] = useState(() => getBackupIntervalDays());
-  const [dirName, setDirName] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
-  const [fsSupported] = useState(() => isFileSystemAccessSupported());
-
-  const refreshDir = () => {
-    void getAutoBackupDirName().then(setDirName);
-  };
-  useEffect(refreshDir, []);
-
-  const formatLast = () => {
-    const ts = getLastBackupAt();
-    return ts ? new Date(ts).toLocaleString('vi-VN') : 'chưa bao giờ';
-  };
-  const [lastBackup, setLastBackup] = useState(formatLast);
-
-  const handleChoose = async () => {
-    setBusy(true);
-    setMessage(null);
-    try {
-      const name = await chooseBackupDirectory();
-      setDirName(name);
-      setMessage(name ? `Sẽ tự động ghi file vào thư mục "${name}".` : null);
-    } catch {
-      setMessage('Không chọn được thư mục.');
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const handleBackupNow = async () => {
-    setBusy(true);
-    setMessage(null);
-    try {
-      const result = await backupNow('prefer-folder');
-      if (result.ok) {
-        setLastBackup(formatLast());
-        setMessage(result.mode === 'folder' ? 'Đã ghi file vào thư mục đã chọn.' : 'Đã xuất file .json (kiểm tra mục Tải xuống).');
-      } else {
-        setMessage(result.message ?? 'Sao lưu thất bại.');
-      }
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div className="space-y-3">
-      <h3 className="text-sm font-semibold text-zinc-800">Tự động sao lưu</h3>
-      <div>
-        <label htmlFor="backup-interval" className="mb-1.5 block text-xs font-medium text-zinc-600">
-          Chu kỳ nhắc / tự động
-        </label>
-        <select
-          id="backup-interval"
-          value={intervalDays}
-          onChange={(e) => {
-            const days = Number(e.target.value);
-            setIntervalDays(days);
-            setBackupIntervalDays(days);
-          }}
-          className="field"
-        >
-          <option value={1}>Mỗi ngày</option>
-          <option value={3}>Mỗi 3 ngày</option>
-          <option value={7}>Mỗi tuần</option>
-          <option value={14}>Mỗi 2 tuần</option>
-          <option value={30}>Mỗi tháng</option>
-        </select>
-      </div>
-
-      {fsSupported && (
-        <div className="space-y-2">
-          {dirName ? (
-            <div className="flex items-center justify-between gap-2 rounded-xl border border-zinc-300 bg-surface-muted px-3 py-2 text-xs text-zinc-700">
-              <span className="min-w-0 truncate">📁 {dirName}</span>
-              <button
-                type="button"
-                onClick={() => {
-                  void clearBackupDirectory().then(() => {
-                    setDirName(null);
-                    setMessage('Đã gỡ thư mục tự động — quay lại chế độ nhắc + tải file.');
-                  });
-                }}
-                className="flex-shrink-0 rounded px-1.5 py-0.5 text-zinc-600 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10 dark:hover:text-red-400"
-              >
-                Gỡ
-              </button>
-            </div>
-          ) : (
-            <button
-              type="button"
-              onClick={handleChoose}
-              disabled={busy}
-              className="btn-secondary w-full"
-            >
-              Chọn thư mục lưu tự động…
-            </button>
-          )}
-          <p className="text-[11px] leading-relaxed text-zinc-600">
-            Desktop Chrome/Edge: đến kỳ app tự ghi file <code className="claude-inline-code">.json</code> vào
-            thư mục này, không cần bấm gì.
-          </p>
-        </div>
-      )}
-
-      <button
-        type="button"
-        onClick={handleBackupNow}
-        disabled={busy}
-        className="btn-secondary w-full"
-      >
-        {busy ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-        Sao lưu ngay
-      </button>
-      <p className="text-[11px] text-zinc-600">Lần sao lưu cuối: {lastBackup}</p>
-      {message && <p className="notice-warn" role="status">{message}</p>}
-    </div>
-  );
-}
 
 export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const settings = useAppStore((s) => s.settings);
@@ -961,17 +37,15 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const updatePerf = useAppStore((s) => s.updatePerf);
   const activeProviderId = useAppStore((s) => s.activeProviderId);
   const settingsInitialTab = useAppStore((s) => s.settingsInitialTab);
-  const initialResolvedTab: SettingsTab =
-    settingsInitialTab === 'prompts'
-      ? 'skills'
-      : settingsInitialTab && SETTINGS_TABS.some((t) => t.id === settingsInitialTab)
-        ? (settingsInitialTab as SettingsTab)
-        : 'chung';
-  const [tab, setTab] = useState<SettingsTab>(initialResolvedTab);
-  const [visited, setVisited] = useState<Set<SettingsTab>>(
-    () => new Set<SettingsTab>(['chung', initialResolvedTab]),
-  );
-  const show = (t: SettingsTab) => tab === t;
+
+  const initialTab = resolveSettingsTab(settingsInitialTab);
+  const [tab, setTab] = useState<SettingsTab>(initialTab);
+  const [visited, setVisited] = useState<Set<SettingsTab>>(() => new Set<SettingsTab>([initialTab]));
+  const [searchQuery, setSearchQuery] = useState('');
+
+  
+  const panelRef = useRef<HTMLDivElement>(null);
+
   const switchTab = useCallback((t: SettingsTab) => {
     setTab(t);
     setVisited((prev) => {
@@ -982,93 +56,20 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
     });
   }, []);
 
-  const [importMode, setImportMode] = useState<ImportMode>('merge');
-  const [status, setStatus] = useState<Status>({ kind: 'idle' });
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const panelRef = useRef<HTMLDivElement>(null);
-
-  /* Focus trap: focus đầu vào khi mở, giữ Tab trong dialog, trả focus khi đóng. */
   useEffect(() => {
-    const panel = panelRef.current;
-    const previouslyFocused = document.activeElement as HTMLElement | null;
-
-    const firstFocusable = panel?.querySelector<HTMLElement>(FOCUSABLE_SELECTOR);
-    (firstFocusable ?? panel)?.focus();
-
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.stopPropagation();
-        onClose();
-        return;
-      }
-      if (e.key !== 'Tab' || !panel) return;
-
-      const focusables = Array.from(
-        panel.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
-      ).filter((el) => el.offsetParent !== null);
-      if (focusables.length === 0) return;
-
-      const first = focusables[0];
-      const last = focusables[focusables.length - 1];
-      const active = document.activeElement;
-
-      if (e.shiftKey && (active === first || active === panel)) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && active === last) {
-        e.preventDefault();
-        first.focus();
-      }
-    };
-
-    panel?.addEventListener('keydown', onKeyDown);
-    return () => {
-      panel?.removeEventListener('keydown', onKeyDown);
-      previouslyFocused?.focus();
-    };
-  }, [onClose]);
-
-  const run = async (label: string, task: () => Promise<void>) => {
-    setStatus({ kind: 'busy', message: label });
-    try {
-      await task();
-      setStatus({ kind: 'ok', message: 'Hoàn tất.' });
-    } catch (err: any) {
-      console.error('[settings backup]', err);
-      setStatus({ kind: 'error', message: err?.message ?? 'Đã xảy ra lỗi.' });
+    if (settingsInitialTab) {
+      const target = resolveSettingsTab(settingsInitialTab);
+      switchTab(target);
     }
-  };
+  }, [settingsInitialTab, switchTab]);
 
-  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (!file) return;
+  useFocusTrap(panelRef, {
+    active: true,
+    onEscape: onClose,
+  });
 
-    if (importMode === 'overwrite') {
-      const ok = window.confirm(
-        'Chế độ GHI ĐÈ sẽ xóa toàn bộ lịch sử chat hiện tại trước khi nạp tệp. Tiếp tục?',
-      );
-      if (!ok) return;
-    }
+  
 
-    setStatus({ kind: 'busy', message: 'Đang nạp dữ liệu…' });
-    try {
-      const stats = await importBackup(file, importMode);
-      setStatus({
-        kind: 'ok',
-        message: `Đã nạp ${stats.chatsAdded} đoạn chat, ${stats.messagesAdded} tin nhắn${
-          stats.chatsSkipped ? `, bỏ qua ${stats.chatsSkipped} đoạn đã tồn tại` : ''
-        }.`,
-      });
-    } catch (err: any) {
-      console.error('[settings import]', err);
-      setStatus({ kind: 'error', message: err?.message ?? 'Không đọc được tệp.' });
-    }
-  };
-
-  const busy = status.kind === 'busy';
-
-  /** Tablist: mũi trái/phải để đổi tab theo khuyến nghị WAI-ARIA. */
   const onTabKeyDown = (e: React.KeyboardEvent) => {
     if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
     e.preventDefault();
@@ -1081,31 +82,48 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
     (e.currentTarget.parentElement?.children[next] as HTMLElement | undefined)?.focus();
   };
 
+  /* Tìm kiếm trong cài đặt */
+  const searchResults = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return [];
+    return SETTINGS_SEARCH_ITEMS.filter((item) => {
+      const haystack = `${item.title} ${item.description} ${item.keywords}`.toLowerCase();
+      return haystack.includes(q);
+    });
+  }, [searchQuery]);
+
+  const handleSelectSearchResult = (targetTab: SettingsTab) => {
+    switchTab(targetTab);
+    setSearchQuery('');
+  };
+
   return (
     <div
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
-      className="fixed inset-0 z-50 flex animate-fade-in items-center justify-center bg-black/60 p-4"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+      className={`fixed inset-0 ${Z_CLASS.system} flex animate-fade-in items-center justify-center bg-black/60 p-4`}
     >
-      {/*
-        role="dialog" phải nằm trên chính hộp thoại, không phải lớp phủ: nếu đặt
-        ở lớp phủ thì screen reader coi cả nền mờ là nội dung dialog.
-      */}
       <div
         ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="settings-dialog-title"
         tabIndex={-1}
-        className="pi-frame relative flex max-h-[90dvh] w-full max-w-lg animate-pop-in flex-col overflow-hidden rounded-none border border-[#495059] bg-[#212730] focus:outline-none font-mono"
+        className="pi-frame relative flex max-h-[90dvh] w-full max-w-xl animate-pop-in flex-col overflow-hidden rounded-none border border-border-hairline bg-panel-bg focus:outline-none font-mono"
       >
         <span className="pi-corner-tl" />
         <span className="pi-corner-tr" />
         <span className="pi-corner-bl" />
         <span className="pi-corner-br" />
 
-        <div className="flex flex-shrink-0 items-center justify-between gap-3 border-b border-[#495059] bg-[#161d27] px-5 py-3">
-          <h2 id="settings-dialog-title" className="flex items-center gap-1.5 font-pixel text-[16px] font-semibold tracking-[0.05em] text-[#ebe7e4] [image-rendering:pixelated]">
-            <span className="font-bold text-[#6a9fcc]">$</span>
+        {/* Header */}
+        <div className="flex flex-shrink-0 items-center justify-between gap-3 border-b border-border-hairline bg-surface-raised px-5 py-3">
+          <h2
+            id="settings-dialog-title"
+            className="flex items-center gap-1.5 font-pixel text-[16px] font-semibold tracking-[0.05em] text-text-primary [image-rendering:pixelated]"
+          >
+            <span className="font-bold text-accent-steel">$</span>
             <span>settings</span>
           </h2>
           <button
@@ -1118,552 +136,149 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
           </button>
         </div>
 
+        {/* Search Bar */}
+        <div className="relative flex-shrink-0 border-b border-border-hairline/60 bg-surface-raised/70 px-5 py-2">
+          <div className="relative">
+            <Search
+              size={13}
+              className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-[#757d89]"
+            />
+            <input
+              type="search"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Tìm cài đặt (vd: hiệu ứng, temperature, mcp, sao lưu, quyền, routing...)"
+              className="field-sm w-full pl-8 text-xs"
+              aria-label="Tìm kiếm trong cài đặt"
+            />
+          </div>
+
+          {searchResults.length > 0 && (
+            <div className="absolute left-5 right-5 top-full z-20 mt-1 max-h-56 overflow-y-auto border border-border-hairline bg-surface-raised shadow-xl">
+              {searchResults.map((item) => {
+                const tabMeta = SETTINGS_TABS.find((t) => t.id === item.tab);
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => handleSelectSearchResult(item.tab)}
+                    className="flex w-full items-start justify-between gap-2 border-b border-border-hairline/30 p-2.5 text-left text-xs hover:bg-panel-bg"
+                  >
+                    <div>
+                      <div className="font-semibold text-text-primary">{item.title}</div>
+                      <div className="text-[11px] text-text-muted">{item.description}</div>
+                    </div>
+                    <span className="flex-shrink-0 border border-border-hairline bg-panel-bg px-1.5 py-0.5 text-[10px] text-accent-steel">
+                      {tabMeta?.label}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Tab List */}
         <div className="flex-shrink-0 px-5 pt-3">
           <div
-            className="no-scrollbar flex gap-1 overflow-x-auto rounded-none bg-[#0d1116] p-1 border border-[#495059]"
+            className="no-scrollbar flex gap-1 overflow-x-auto rounded-none border border-border-hairline bg-bg-deep p-1"
             role="tablist"
             aria-label="Nhóm cài đặt"
           >
-            {SETTINGS_TABS.map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                role="tab"
-                id={`settings-tab-${t.id}`}
-                aria-selected={tab === t.id}
-                aria-controls={`settings-panel-${t.id}`}
-                tabIndex={tab === t.id ? 0 : -1}
-                onClick={() => switchTab(t.id)}
-                onKeyDown={onTabKeyDown}
-                className={`flex-shrink-0 rounded-none px-2.5 py-1 text-xs font-mono transition-colors duration-100 ${
-                  tab === t.id
-                    ? 'bg-[#6a9fcc] text-[#0d1116] font-semibold'
-                    : 'text-[#9fa4ab] hover:bg-[#161d27] hover:text-[#ebe7e4]'
-                }`}
-              >
-                {t.label}
-              </button>
-            ))}
+            {SETTINGS_TABS.map((t) => {
+              const Icon = t.icon;
+              return (
+                <button
+                  key={t.id}
+                  type="button"
+                  role="tab"
+                  id={`settings-tab-${t.id}`}
+                  aria-selected={tab === t.id}
+                  aria-controls={`settings-panel-${t.id}`}
+                  tabIndex={tab === t.id ? 0 : -1}
+                  onClick={() => switchTab(t.id)}
+                  onKeyDown={onTabKeyDown}
+                  className={`flex flex-shrink-0 items-center gap-1.5 rounded-none px-2.5 py-1 text-xs font-mono transition-colors duration-100 ${
+                    tab === t.id
+                      ? 'bg-[#6a9fcc] font-semibold text-[#0d1116]'
+                      : 'text-text-muted hover:bg-surface-raised hover:text-text-primary'
+                  }`}
+                >
+                  <Icon size={12} />
+                  <span>{t.label}</span>
+                </button>
+              );
+            })}
           </div>
         </div>
 
-        <div
-          role="tabpanel"
-          id={`settings-panel-${tab}`}
-          aria-labelledby={`settings-tab-${tab}`}
-          className="settings-panel min-h-0 flex-1 overflow-y-auto px-5 py-5 sm:px-6"
-        >
-{visited.has('chung') && (
-          <div className={show('chung') ? 'contents' : 'hidden'}>
-            <>
-              <div className="space-y-4">
-                <div>
-                  <label htmlFor="temperature" className="mb-1.5 flex items-baseline justify-between gap-2 text-sm">
-                    <span className="font-medium text-zinc-700">Temperature</span>
-                    <span className="font-mono text-xs tabular-nums text-zinc-600">
-                      {settings.temperature.toFixed(2)}
-                    </span>
-                  </label>
-                  <input
-                    id="temperature"
-                    type="range" min="0" max="1" step="0.05"
-                    value={settings.temperature}
-                    onChange={(e) => updateSettings({ temperature: parseFloat(e.target.value) })}
-                    className="w-full accent-brand"
-                  />
-                  <p className="mt-1 text-[11px] leading-relaxed text-zinc-600">
-                    Thấp = trả lời ổn định, sát dữ kiện. Cao = sáng tạo, biến thiên nhiều hơn.
-                  </p>
-                </div>
-
-                <div>
-                  <label htmlFor="system-prompt" className="mb-1.5 block text-sm font-medium text-zinc-700">
-                    System Prompt
-                  </label>
-                  <textarea
-                    id="system-prompt"
-                    value={settings.systemPrompt}
-                    onChange={(e) => updateSettings({ systemPrompt: e.target.value })}
-                    rows={4}
-                    className="field resize-y"
-                  />
-                </div>
-
-                <label htmlFor="agent-tools-toggle" className="flex items-start justify-between gap-3">
-                  <span className="min-w-0">
-                    <span className="block text-sm font-medium text-zinc-700">
-                      Cho phép AI dùng công cụ
-                    </span>
-                    <span className="mt-0.5 block text-[11px] leading-relaxed text-zinc-600">
-                      Bật: AI tự tra web, đọc và sửa file trong thư mục bạn kết nối (agent coding).
-                      Tắt: chat thuần — AI chỉ trả lời bằng kiến thức sẵn có, không gọi công cụ nào.
-                    </span>
-                  </span>
-                  <input
-                    id="agent-tools-toggle"
-                    type="checkbox"
-                    checked={settings.agentTools ?? true}
-                    onChange={(e) => updateSettings({ agentTools: e.target.checked })}
-                    className="mt-0.5 h-4 w-4 flex-shrink-0 rounded accent-brand"
-                  />
-                </label>
-
-                {(settings.agentTools ?? true) && (
-                  <label
-                    htmlFor="force-emulated-tools"
-                    className="flex items-start justify-between gap-3 border-l-2 border-zinc-200 pl-3"
-                  >
-                    <span className="min-w-0">
-                      <span className="block text-sm font-medium text-zinc-700">
-                        Đường tool giả lập (provider không hỗ trợ tools)
-                      </span>
-                      <span className="mt-0.5 block text-[11px] leading-relaxed text-zinc-600">
-                        Bật khi model cố gọi công cụ nhưng JSON hiện ra dạng chữ trong câu trả lời
-                        (provider âm thầm bỏ qua tham số tools). Tool sẽ chạy qua protocol text thay vì
-                        function calling gốc.
-                      </span>
-                    </span>
-                    <input
-                      id="force-emulated-tools"
-                      type="checkbox"
-                      checked={settings.forceEmulatedTools ?? false}
-                      onChange={(e) => updateSettings({ forceEmulatedTools: e.target.checked })}
-                      className="mt-0.5 h-4 w-4 flex-shrink-0 rounded accent-brand"
-                    />
-                  </label>
-                )}
-
-                {(settings.agentTools ?? true) && (
-                  <label
-                    htmlFor="staging-sandbox-toggle"
-                    className="flex items-start justify-between gap-3 border-l-2 border-zinc-200 pl-3"
-                  >
-                    <span className="min-w-0">
-                      <span className="block text-sm font-medium text-zinc-700">
-                        Staging Sandbox (review batch trước khi ghi đĩa)
-                      </span>
-                      <span className="mt-0.5 block text-[11px] leading-relaxed text-zinc-600">
-                        Agent ghi thay đổi vào bộ đệm thay vì đĩa. Bạn review toàn bộ diff rồi bấm
-                        Apply để ghi thật hoặc Reject để hủy. Đĩa không bị đụng cho tới khi Apply.
-                        Tắt → hành vi cũ: phê duyệt từng edit qua diff modal, ghi đĩa ngay.
-                      </span>
-                    </span>
-                    <input
-                      id="staging-sandbox-toggle"
-                      type="checkbox"
-                      checked={settings.stagingSandbox ?? true}
-                      onChange={(e) => updateSettings({ stagingSandbox: e.target.checked })}
-                      className="mt-0.5 h-4 w-4 flex-shrink-0 rounded accent-brand"
-                    />
-                  </label>
-                )}
-
-                {/* Chế độ hoạt động & phê duyệt chuẩn (P1-6) */}
-                {(settings.agentTools ?? true) && (
-                  <>
-                    <div className="rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-900">
-                      <div className="flex items-center gap-2 mb-1.5">
-                        <Zap size={14} className="text-amber-600" />
-                        <label htmlFor="approval-policy" className="text-xs font-semibold text-zinc-800 dark:text-zinc-200">
-                          Chế độ hoạt động & phê duyệt (Approval Policy — 4 chế độ chuẩn)
-                        </label>
-                      </div>
-                      <select
-                        id="approval-policy"
-                        value={settings.approvalPolicy ?? (settings.autoPilot ? 'smart' : 'always')}
-                        onChange={(e) => {
-                          const policy = e.target.value as 'always' | 'smart' | 'never' | 'chat_only';
-                          updateSettings({
-                            approvalPolicy: policy,
-                            autoPilot: policy === 'smart' || policy === 'never',
-                          });
-                        }}
-                        className="field w-full text-xs"
-                      >
-                        <option value="smart">Smart (Thông minh — mặc định) — tự duyệt đọc & safe shell, hỏi ghi/destructive</option>
-                        <option value="never">Autonomous (Tự chủ / YOLO) — tự duyệt tất cả trừ lệnh luôn-chặn</option>
-                        <option value="always">Manual (Thủ công) — luôn hỏi phê duyệt trước khi chạy bất kỳ tool nào</option>
-                        <option value="chat_only">Chat Only (Chỉ chat) — vô hiệu hoàn toàn toàn bộ công cụ (kể cả fs_read)</option>
-                      </select>
-                      <p className="mt-1.5 text-[11px] leading-relaxed text-zinc-500">
-                        {(settings.approvalPolicy ?? 'smart') === 'smart' && '✅ Read-only tools và safe commands (npm test, git status...) tự động duyệt. Write/destructive vẫn hỏi.'}
-                        {(settings.approvalPolicy ?? 'smart') === 'never' && '⚡ Tất cả tool calls tự động duyệt TRỪ lệnh luôn-chặn (rm -rf /, mkfs, shutdown...). Dùng với Staging Sandbox.'}
-                        {(settings.approvalPolicy ?? 'smart') === 'always' && '🔒 Luôn hỏi trước khi chạy bất kỳ tool nào. Tương đương Manual mode.'}
-                        {(settings.approvalPolicy ?? 'smart') === 'chat_only' && '💬 Vô hiệu hoàn toàn tất cả công cụ (kể cả fs_read). Dành cho phân tích và viết lách thuần tuý.'}
-                      </p>
-                    </div>
-                  </>
-                )}
-              </div>
-
-              {/* Bảng phân quyền chi tiết per-tool (P1-6) */}
-              {(settings.agentTools ?? true) && (
-                <div className="space-y-3">
-                  <div>
-                    <h3 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
-                      Bảng phân quyền chi tiết từng công cụ (Per-Tool Permissions)
-                    </h3>
-                    <p className="text-[11px] leading-relaxed text-zinc-500">
-                      Cấu hình quyền Tự duyệt (auto), Luôn hỏi (ask) hoặc Chặn (deny) cho từng tool độc lập. &quot;Mặc định&quot; sẽ tuân theo Approval Policy ở trên.
-                    </p>
-                  </div>
-                  <ToolPermissionsTable />
-                </div>
-              )}
-
-              {/* Code Mode (P1-7) */}
-              {(settings.agentTools ?? true) && (
-                <div className="rounded-xl border border-zinc-200/80 bg-zinc-50/50 p-3.5 dark:border-zinc-800 dark:bg-zinc-900/30">
-                  <label htmlFor="code-mode-toggle" className="flex items-start justify-between gap-3 cursor-pointer">
-                    <span className="min-w-0">
-                      <span className="block text-sm font-medium text-zinc-700 dark:text-zinc-300">
-                        Code Mode (Thực thi JS gọi MCP on-demand)
-                      </span>
-                      <span className="mt-0.5 block text-xs text-zinc-500">
-                        Cung cấp công cụ <code className="rounded bg-zinc-200/80 px-1 py-0.5 text-[11px] dark:bg-zinc-800 font-mono">run_code</code> cho phép model viết script JavaScript thực thi trong Node bridge để gọi các công cụ MCP và xử lý dữ liệu phức tạp mà không cần nạp từng tool riêng lẻ vào ngữ cảnh.
-                      </span>
-                    </span>
-                    <input
-                      id="code-mode-toggle"
-                      type="checkbox"
-                      className="mt-0.5 h-4 w-4 rounded border-zinc-300 text-teal-600 focus:ring-teal-500 dark:border-zinc-700"
-                      checked={settings.codeModeEnabled ?? false}
-                      onChange={(e) => updateSettings({ codeModeEnabled: e.target.checked })}
-                    />
-                  </label>
-                </div>
-              )}
-
-              <McpSettingsPanel />
-
-              <div className="space-y-3">
-                <h3 className="text-sm font-semibold text-zinc-800">Nhập &amp; hiệu năng</h3>
-
-                <label htmlFor="send-on-enter" className="flex items-start justify-between gap-3">
-                  <span className="min-w-0">
-                    <span className="block text-sm font-medium text-zinc-700">
-                      Enter để gửi tin nhắn
-                    </span>
-                    <span className="mt-0.5 block text-[11px] leading-relaxed text-zinc-600">
-                      Tắt thì Enter xuống dòng, gửi bằng Ctrl/⌘ + Enter.
-                    </span>
-                  </span>
-                  <input
-                    id="send-on-enter"
-                    type="checkbox"
-                    checked={settings.sendOnEnter}
-                    onChange={(e) => updateSettings({ sendOnEnter: e.target.checked })}
-                    className="mt-0.5 h-4 w-4 flex-shrink-0 rounded accent-brand"
-                  />
-                </label>
-
-                <div className="flex items-start justify-between gap-3">
-                  <span className="min-w-0">
-                    <span className="block text-sm font-medium text-zinc-700">
-                      Tin xếp hàng khi AI đang chạy
-                    </span>
-                    <span className="mt-0.5 block text-[11px] leading-relaxed text-zinc-600">
-                      Enter khi AI đang trả lời = steering (gửi ngay khi lượt xong), Alt+Enter =
-                      follow-up (gửi khi AI rảnh). Chọn cách bắn hàng đợi khi đến lượt.
-                    </span>
-                  </span>
-                  <span className="flex flex-shrink-0 flex-col gap-1">
-                    <select
-                      aria-label="Chế độ steering"
-                      value={settings.steeringMode}
-                      onChange={(e) => {
-                        const v: unknown = e.target.value;
-                        updateSettings({ steeringMode: isQueueMode(v) ? v : 'one-at-a-time' });
-                      }}
-                      className="field"
-                    >
-                      <option value="one-at-a-time">Steering: từng tin</option>
-                      <option value="all">Steering: tất cả</option>
-                    </select>
-                    <select
-                      aria-label="Chế độ follow-up"
-                      value={settings.followUpMode}
-                      onChange={(e) => {
-                        const v: unknown = e.target.value;
-                        updateSettings({ followUpMode: isQueueMode(v) ? v : 'one-at-a-time' });
-                      }}
-                      className="field"
-                    >
-                      <option value="one-at-a-time">Follow-up: từng tin</option>
-                      <option value="all">Follow-up: tất cả</option>
-                    </select>
-                  </span>
-                </div>
-
-                <label htmlFor="auto-compact-toggle" className="flex items-start justify-between gap-3">
-                  <span className="min-w-0">
-                    <span className="block text-sm font-medium text-zinc-700">
-                      Nén hội thoại tự động
-                    </span>
-                    <span className="mt-0.5 block text-[11px] leading-relaxed text-zinc-600">
-                      Khi hội thoại gần trần ngữ cảnh của model, tự tóm tắt phần cũ và chỉ gửi
-                      tóm tắt + tin mới lên AI. Luôn có nút &ldquo;Nén bây giờ&rdquo; ở header.
-                    </span>
-                  </span>
-                  <input
-                    id="auto-compact-toggle"
-                    type="checkbox"
-                    checked={settings.autoCompact}
-                    onChange={(e) => updateSettings({ autoCompact: e.target.checked })}
-                    className="mt-0.5 h-4 w-4 flex-shrink-0 rounded accent-brand"
-                  />
-                </label>
-
-                <label htmlFor="anim-toggle" className="flex items-start justify-between gap-3">
-                  <span className="min-w-0">
-                    <span className="block text-sm font-medium text-zinc-700">
-                      Hiệu ứng chuyển động
-                    </span>
-                    <span className="mt-0.5 block text-[11px] leading-relaxed text-zinc-600">
-                      Tắt để giảm chuyển động trên máy yếu. Hệ thống cũng tự tôn trọng thiết lập
-                      &ldquo;giảm chuyển động&rdquo; của thiết bị.
-                    </span>
-                  </span>
-                  <input
-                    id="anim-toggle"
-                    type="checkbox"
-                    checked={settings.perf?.animations ?? true}
-                    onChange={(e) => updatePerf({ animations: e.target.checked })}
-                    className="mt-0.5 h-4 w-4 flex-shrink-0 rounded accent-brand"
-                  />
-                </label>
-
-                <div>
-                  <label htmlFor="throttle-ms" className="mb-1.5 block text-sm font-medium text-zinc-700">
-                    Tần suất vẽ lại khi AI đang trả lời
-                  </label>
-                  <select
-                    id="throttle-ms"
-                    value={settings.perf?.throttleMs ?? 150}
-                    onChange={(e) => updatePerf({ throttleMs: Number(e.target.value) })}
-                    className="field"
-                  >
-                    <option value={80}>Mượt nhất — 80ms (máy khỏe)</option>
-                    <option value={150}>Cân bằng — 150ms (mặc định)</option>
-                    <option value={250}>Tiết kiệm — 250ms</option>
-                    <option value={400}>Nhẹ nhất — 400ms (máy yếu)</option>
-                  </select>
-                </div>
-              </div>
-            </>
+        {/* Panels Container */}
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          {/* TAB 1: GIAO DIỆN & TRẢI NGHIỆM */}
+          <div
+            role="tabpanel"
+            id="settings-panel-appearance"
+            aria-labelledby="settings-tab-appearance"
+            hidden={tab !== 'appearance'}
+            className={`settings-panel px-5 py-5 sm:px-6 space-y-4 ${tab === 'appearance' ? 'block' : 'hidden'}`}
+          >
+            {visited.has('appearance') && <AppearanceTab />}
           </div>
-          )}
 
-{visited.has('provider') && (
-          <div className={show('provider') ? 'contents' : 'hidden'}>
-            <>
-              {activeProviderId === SERVER_PROVIDER_ID && (
-                <div>
-                  <label htmlFor="server-api-key" className="mb-1.5 block text-sm font-medium text-zinc-700">
-                    API Key — dùng cho model OpenAI chính gốc
-                  </label>
-                  <input
-                    id="server-api-key"
-                    type="password"
-                    value={settings.apiKey || ''}
-                    onChange={(e) => updateSettings({ apiKey: e.target.value })}
-                    placeholder="sk-..."
-                    className="field font-mono"
-                  />
-                  <p className="mt-1 text-[11px] leading-relaxed text-zinc-600">
-                    Chỉ lưu trong phiên này, không ghi vào bộ nhớ máy. Key này được gửi
-                    thẳng tới api.openai.com khi gọi model OpenAI.
-                  </p>
-                </div>
-              )}
-
-              <div>
-                <h3 className="mb-1.5 text-sm font-semibold text-zinc-800">Nhà cung cấp API</h3>
-                <p className="mb-2 text-[11px] leading-relaxed text-zinc-600">
-                  Lưu nhiều nhà cung cấp chuẩn OpenAI-compatible, tải danh sách model và chuyển
-                  nhanh mà không cần cấu hình lại server.
-                </p>
-                <ProviderManager />
-              </div>
-
-              <VisionModelSection />
-
-              <div>
-                <label htmlFor="access-code" className="mb-1.5 block text-sm font-medium text-zinc-700">
-                  Mã truy cập (Access Code)
-                </label>
-                <input
-                  id="access-code"
-                  type="password"
-                  value={settings.accessCode || ''}
-                  onChange={(e) => updateSettings({ accessCode: e.target.value })}
-                  placeholder="Nhập mã truy cập..."
-                  className="field font-mono"
-                />
-              </div>
-            </>
+          {/* TAB 2: MODEL & NHÀ CUNG CẤP */}
+          <div
+            role="tabpanel"
+            id="settings-panel-providers"
+            aria-labelledby="settings-tab-providers"
+            hidden={tab !== 'providers'}
+            className={`settings-panel px-5 py-5 sm:px-6 space-y-4 ${tab === 'providers' ? 'block' : 'hidden'}`}
+          >
+            {visited.has('providers') && <ProvidersTab />}
           </div>
-          )}
 
-          {visited.has('routing') && (
-            <div className={show('routing') ? 'contents' : 'hidden'}>
-              <RoutingSettingsPanel />
-            </div>
-          )}
-
-{visited.has('stats') && (
-          <div className={show('stats') ? 'contents' : 'hidden'}>
-            <div>
-              <h3 className="mb-2 text-sm font-semibold text-zinc-800">Thống kê token sử dụng</h3>
-              <UsageStats />
-            </div>
+          {/* TAB 3: QUYỀN & AN TOÀN */}
+          <div
+            role="tabpanel"
+            id="settings-panel-safety"
+            aria-labelledby="settings-tab-safety"
+            hidden={tab !== 'safety'}
+            className={`settings-panel px-5 py-5 sm:px-6 space-y-4 ${tab === 'safety' ? 'block' : 'hidden'}`}
+          >
+            {visited.has('safety') && <SafetyTab />}
           </div>
-          )}
 
-{visited.has('skills') && (
-          <div className={show('skills') ? 'contents' : 'hidden'}>
-            <DiskSkillsSection />
-            <div className="my-6 border-t border-zinc-200 dark:border-zinc-800" />
-            <LegacySkillsSection />
-            <div className="my-6 border-t border-zinc-200 dark:border-zinc-800" />
-            <CustomSlashCommandsSection />
+          {/* TAB 4: MỞ RỘNG */}
+          <div
+            role="tabpanel"
+            id="settings-panel-extensions"
+            aria-labelledby="settings-tab-extensions"
+            hidden={tab !== 'extensions'}
+            className={`settings-panel px-5 py-5 sm:px-6 space-y-4 ${tab === 'extensions' ? 'block' : 'hidden'}`}
+          >
+            {visited.has('extensions') && <ExtensionsTab />}
           </div>
-          )}
 
-{visited.has('memory') && (
-          <div className={show('memory') ? 'contents' : 'hidden'}>
-            <AgentMemorySection />
-            <div className="my-4 border-t border-zinc-200 dark:border-zinc-800" />
-            <MemoriesSection />
+          {/* TAB 5: BỘ NHỚ */}
+          <div
+            role="tabpanel"
+            id="settings-panel-memory"
+            aria-labelledby="settings-tab-memory"
+            hidden={tab !== 'memory'}
+            className={`settings-panel px-5 py-5 sm:px-6 space-y-4 ${tab === 'memory' ? 'block' : 'hidden'}`}
+          >
+            {visited.has('memory') && <MemoryTab />}
           </div>
-          )}
 
-{visited.has('schedules') && (
-          <div className={show('schedules') ? 'contents' : 'hidden'}>
-            <SchedulerPanel />
+          {/* TAB 6: DỮ LIỆU & TỰ ĐỘNG HOÁ */}
+          <div
+            role="tabpanel"
+            id="settings-panel-data"
+            aria-labelledby="settings-tab-data"
+            hidden={tab !== 'data'}
+            className={`settings-panel px-5 py-5 sm:px-6 space-y-4 ${tab === 'data' ? 'block' : 'hidden'}`}
+          >
+            {visited.has('data') && <DataTab />}
           </div>
-          )}
-
-
-{visited.has('data') && (
-          <div className={show('data') ? 'contents' : 'hidden'}>
-            <>
-              <AutoBackupSection />
-
-              <div className="space-y-3">
-                <h3 className="text-sm font-semibold text-zinc-800">Sao lưu &amp; Phục hồi</h3>
-                <p className="text-xs leading-relaxed text-zinc-600">
-                  Bản <code className="claude-inline-code">.json</code> lưu đầy đủ cây phân nhánh và tệp kèm —
-                  dùng để phục hồi. Bản <code className="claude-inline-code">.md</code> chỉ xuất nhánh đang
-                  xem, dùng để đọc hoặc in.
-                </p>
-
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => run('Đang xuất JSON…', () => exportJson())}
-                    className="btn-secondary"
-                  >
-                    <Download size={14} /> Xuất tất cả .json
-                  </button>
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => run('Đang xuất Markdown…', () => exportMarkdown())}
-                    className="btn-secondary"
-                  >
-                    <Download size={14} /> Xuất tất cả .md
-                  </button>
-                </div>
-
-                <div>
-                  <label htmlFor="import-mode" className="mb-1.5 block text-xs font-medium text-zinc-600">
-                    Cách xử lý khi nạp lại
-                  </label>
-                  <select
-                    id="import-mode"
-                    value={importMode}
-                    onChange={(e) => setImportMode(e.target.value as ImportMode)}
-                    className="field"
-                  >
-                    <option value="merge">Gộp — bỏ qua đoạn chat đã tồn tại (an toàn)</option>
-                    <option value="duplicate">Nhân bản — luôn tạo bản mới với ID mới</option>
-                    <option value="overwrite">Ghi đè — xóa sạch rồi nạp lại</option>
-                  </select>
-                </div>
-
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => fileInputRef.current?.click()}
-                  className="btn-primary w-full"
-                >
-                  {busy ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
-                  Nạp tệp sao lưu (.json)
-                </button>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="application/json,.json"
-                  onChange={handleFile}
-                  className="hidden"
-                />
-
-                {status.kind !== 'idle' && status.message && (
-                  <p
-                    className={`text-xs leading-relaxed ${
-                      status.kind === 'error'
-                        ? 'text-red-700 dark:text-red-400'
-                        : status.kind === 'ok'
-                          ? 'text-emerald-700 dark:text-emerald-400'
-                          : 'text-zinc-600'
-                    }`}
-                    role="status"
-                  >
-                    {status.message}
-                  </p>
-                )}
-              </div>
-
-              <div>
-                <h3 className="mb-2 text-sm font-semibold text-red-700 dark:text-red-400">Vùng nguy hiểm</h3>
-                <div className="mb-2 flex items-start gap-2 text-xs text-zinc-600">
-                  <ShieldAlert size={14} className="mt-0.5 flex-shrink-0 text-red-600 dark:text-red-400" />
-                  <span>Hãy xuất bản sao lưu .json trước khi thực hiện hành động này.</span>
-                </div>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    if (
-                      window.confirm(
-                        'CẢNH BÁO: Hành động này sẽ xóa toàn bộ lịch sử chat và cài đặt. Bạn có chắc chắn không?',
-                      )
-                    ) {
-                      try {
-                        await db.delete();
-                      } catch {
-                        // Tab khác đang giữ IndexedDB mở → delete bị chặn vĩnh viễn.
-                        // Trước đây lỗi này nuốt lặng lẽ: bấm nút không có gì xảy ra.
-                        setStatus({
-                          kind: 'error',
-                          message:
-                            'Không xóa được: có tab khác đang mở ứng dụng. Hãy đóng các tab khác rồi thử lại.',
-                        });
-                        return;
-                      }
-                      localStorage.clear();
-                      window.location.reload();
-                    }
-                  }}
-                  className="w-full rounded-xl border border-red-300 bg-red-50 px-4 py-2.5 text-sm font-medium text-red-700 transition hover:bg-red-100 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300 dark:hover:bg-red-500/20"
-                >
-                  Xóa toàn bộ dữ liệu ứng dụng
-                </button>
-              </div>
-            </>
-          </div>
-          )}
         </div>
       </div>
     </div>

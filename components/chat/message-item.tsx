@@ -19,21 +19,21 @@ function ThinkingBlock({ reasoning, isStreaming }: { reasoning: string; isStream
   const preview = lines[lines.length - 1] || 'thinking...';
 
   return (
-    <div className="my-2 rounded-none border border-[#495059] bg-[#161d27] p-2 text-xs font-mono">
+    <div className="my-2 rounded-none border border-border-hairline bg-surface-raised p-2 text-xs font-mono">
       <button
         type="button"
         onClick={() => setOpen(!open)}
-        className="flex w-full items-baseline justify-between gap-2 text-left text-[11px] text-[#6a9fcc] hover:text-[#ebe7e4]"
+        className="flex w-full items-baseline justify-between gap-2 text-left text-[11px] text-accent-steel hover:text-text-primary"
       >
         <span className="flex min-w-0 items-baseline gap-1.5 italic">
           <span className="font-semibold not-italic">thinking</span>
           {isStreaming && <span className="terminal-cursor not-italic" aria-hidden="true" />}
-          {!open && <span className="truncate text-[#9fa4ab]">· {preview}</span>}
+          {!open && <span className="truncate text-text-muted">· {preview}</span>}
         </span>
-        <span className="flex-shrink-0 text-[10px] text-[#9fa4ab]">[{open ? 'hide' : 'expand'}]</span>
+        <span className="flex-shrink-0 text-[10px] text-text-muted">[{open ? 'hide' : 'expand'}]</span>
       </button>
       {open && (
-        <div className="mt-2 max-h-60 overflow-y-auto whitespace-pre-wrap border-l border-[#495059] pl-2.5 font-mono text-[11.5px] italic leading-relaxed text-[#9fa4ab]">
+        <div className="mt-2 max-h-60 overflow-y-auto whitespace-pre-wrap border-l border-border-hairline pl-2.5 font-mono text-[11.5px] italic leading-relaxed text-text-muted">
           {reasoning}
         </div>
       )}
@@ -86,8 +86,8 @@ function ActionButton({
       title={label}
       className={`relative flex h-6 w-6 items-center justify-center rounded-none transition-colors after:absolute after:-inset-[10px] after:content-[''] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[#6a9fcc] ${
         active
-          ? 'bg-[#252f3d] text-[#6a9fcc]'
-          : 'text-[#9fa4ab] hover:bg-[#252f3d] hover:text-[#ebe7e4]'
+          ? 'bg-panel-soft text-accent-steel'
+          : 'text-text-muted hover:bg-panel-soft hover:text-text-primary'
       }`}
     >
       <Icon size={13} />
@@ -125,7 +125,7 @@ export const MessageItem = memo(
           {m.experimental_attachments && m.experimental_attachments.length > 0 && (
             <div className="mb-1.5 flex flex-wrap gap-2">
               {m.experimental_attachments.map((att, idx) => (
-                <div key={idx} className="relative overflow-hidden rounded-none border border-[#495059] bg-[#212730]">
+                <div key={idx} className="relative overflow-hidden rounded-none border border-border-hairline bg-panel-bg">
                   {att.contentType?.startsWith('image/') ? (
                     <img
                       src={att.url}
@@ -137,8 +137,8 @@ export const MessageItem = memo(
                       onError={onContentResize}
                     />
                   ) : (
-                    <div className="flex items-center gap-2 px-3 py-2 text-xs font-mono text-[#ebe7e4]">
-                      <Paperclip size={12} className="text-[#6a9fcc]" />
+                    <div className="flex items-center gap-2 px-3 py-2 text-xs font-mono text-text-primary">
+                      <Paperclip size={12} className="text-accent-steel" />
                       <span className="truncate max-w-[150px]">{att.name}</span>
                     </div>
                   )}
@@ -148,7 +148,7 @@ export const MessageItem = memo(
           )}
 
           {isEditing ? (
-            <div className="flex w-full min-w-[280px] flex-col gap-2 rounded-none border border-[#495059] bg-[#161d27] p-3">
+            <div className="flex w-full min-w-[280px] flex-col gap-2 rounded-none border border-border-hairline bg-surface-raised p-3">
               <TextareaAutosize
                 value={draft}
                 onChange={(e) => onDraftChange(e.target.value)}
@@ -160,14 +160,14 @@ export const MessageItem = memo(
                   if (e.key === 'Escape') onCancelEdit();
                 }}
                 aria-label="Sửa nội dung tin nhắn"
-                className="w-full resize-none bg-transparent font-mono text-sm text-[#ebe7e4] outline-none placeholder:text-[#9fa4ab]"
+                className="w-full resize-none bg-transparent font-mono text-sm text-text-primary outline-none placeholder:text-text-muted"
                 autoFocus
               />
-              <div className="flex justify-end gap-2 border-t border-[#495059] pt-2 text-xs font-mono">
+              <div className="flex justify-end gap-2 border-t border-border-hairline pt-2 text-xs font-mono">
                 <button
                   type="button"
                   onClick={onCancelEdit}
-                  className="rounded-none px-2.5 py-1 text-[#9fa4ab] transition-colors hover:bg-[#252f3d] hover:text-[#ebe7e4]"
+                  className="rounded-none px-2.5 py-1 text-text-muted transition-colors hover:bg-panel-soft hover:text-text-primary"
                 >
                   Hủy
                 </button>
@@ -188,7 +188,7 @@ export const MessageItem = memo(
             >
               <span
                 aria-hidden="true"
-                className="select-none flex-none pt-px font-mono text-[13.5px] font-semibold leading-relaxed text-[#6a9fcc]"
+                className="select-none flex-none pt-px font-mono text-[13.5px] font-semibold leading-relaxed text-accent-steel"
               >
                 &gt;
               </span>
@@ -197,7 +197,7 @@ export const MessageItem = memo(
               >
                 Bạn:
               </span>
-              <div className="min-w-0 flex-1 whitespace-pre-wrap break-words font-mono text-[13.5px] leading-relaxed text-[#ebe7e4]">
+              <div className="min-w-0 flex-1 whitespace-pre-wrap break-words font-mono text-[13.5px] leading-relaxed text-text-primary">
                 {sanitizeContent(m.content)}
               </div>
 
@@ -212,7 +212,7 @@ export const MessageItem = memo(
               type="button"
               onClick={() => setIsExpanded((prev) => !prev)}
               aria-expanded={isExpanded}
-              className="ml-4 mt-0.5 inline-flex items-center gap-1 font-mono text-[11px] font-medium text-[#6a9fcc] transition-colors hover:text-[#ebe7e4]"
+              className="ml-4 mt-0.5 inline-flex items-center gap-1 font-mono text-[11px] font-medium text-accent-steel transition-colors hover:text-text-primary"
             >
               {isExpanded ? (
                 <>
@@ -264,7 +264,7 @@ export const MessageItem = memo(
           {m.experimental_attachments && m.experimental_attachments.length > 0 && (
             <div className="flex flex-wrap gap-2">
               {m.experimental_attachments.map((att, idx) => (
-                <div key={idx} className="relative overflow-hidden rounded-none border border-[#495059] bg-[#212730]">
+                <div key={idx} className="relative overflow-hidden rounded-none border border-border-hairline bg-panel-bg">
                   {att.contentType?.startsWith('image/') ? (
                     <img
                       src={att.url}
@@ -276,8 +276,8 @@ export const MessageItem = memo(
                       onError={onContentResize}
                     />
                   ) : (
-                    <div className="flex items-center gap-2 px-3 py-2 text-xs font-mono text-[#ebe7e4]">
-                      <Paperclip size={12} className="text-[#6a9fcc]" />
+                    <div className="flex items-center gap-2 px-3 py-2 text-xs font-mono text-text-primary">
+                      <Paperclip size={12} className="text-accent-steel" />
                       <span className="truncate max-w-[150px]">{att.name}</span>
                     </div>
                   )}
@@ -310,7 +310,7 @@ export const MessageItem = memo(
           })()}
 
           <div
-            className={`claude-prose text-[#ebe7e4] ${isStreaming ? 'streaming-caret' : ''}`}
+            className={`claude-prose text-text-primary ${isStreaming ? 'streaming-caret' : ''}`}
             aria-busy={isStreaming}
           >
             <ErrorBoundary resetKey={`${m.id}:${m.content.length}`}>
@@ -326,7 +326,7 @@ export const MessageItem = memo(
             const { truncated, message: note } = getFinishInfo(m);
             if (!truncated || isStreaming) return null;
             return (
-              <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-none border border-[#e8993a]/30 bg-[#161d27] px-3 py-2 text-xs font-mono text-[#e8993a]">
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-none border border-status-warning/30 bg-surface-raised px-3 py-2 text-xs font-mono text-status-warning">
                 <span className="min-w-0">{note ?? 'Câu trả lời có thể chưa hoàn chỉnh.'}</span>
                 {onContinueGenerating && (
                   <button
@@ -358,15 +358,15 @@ export const MessageItem = memo(
           )}
 
           {m.role === 'assistant' && (m as any).status === 'aborted' && (
-            <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-[#495059] pt-2 font-mono">
+            <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-border-hairline pt-2 font-mono">
               <div className="flex items-center gap-1.5">
                 <MessageStatusBadge status="aborted" />
-                <span className="text-[11px] text-[#9fa4ab]">· Bạn có thể tạo lại</span>
+                <span className="text-[11px] text-text-muted">· Bạn có thể tạo lại</span>
               </div>
               <button
                 type="button"
                 onClick={() => onRegenerate(m.id)}
-                className="inline-flex items-center gap-1 rounded-none px-2 py-1 text-[11px] text-[#6a9fcc] transition-colors hover:bg-[#252f3d] hover:text-[#ebe7e4]"
+                className="inline-flex items-center gap-1 rounded-none px-2 py-1 text-[11px] text-accent-steel transition-colors hover:bg-panel-soft hover:text-text-primary"
               >
                 <RefreshCcw size={12} />
                 <span>Tạo nhánh mới</span>

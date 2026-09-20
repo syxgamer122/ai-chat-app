@@ -20,6 +20,8 @@ import {
   Globe,
   ListChecks,
   Loader2,
+  Mic,
+  MicOff,
   MoreHorizontal,
   Paperclip,
   Pencil,
@@ -30,8 +32,11 @@ import {
   Zap,
 } from 'lucide-react';
 import { useHaptics } from '@/components/effects';
-import { filterPrompts } from '@/lib/prompt-library';
+import { filterPrompts } from '@/lib/slash-commands';
+import { ModelSelector } from '@/components/model-selector';
+import type { ModelOption, ModelFavorite, RecentModel } from '@/components/model-selector';
 import { TOOL_CATALOG } from '@/lib/tool-catalog';
+import { useSpeechRecognition } from '@/lib/use-speech-recognition';
 
 export interface Attachment {
   id: string;
@@ -98,8 +103,8 @@ function ToolbarButton({
       title={label}
       className={`relative flex h-8 w-8 flex-none items-center justify-center rounded-none transition-colors duration-100 after:absolute after:-inset-[6px] after:content-[''] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[#6a9fcc] ${
         active
-          ? 'bg-[#252f3d] text-[#6a9fcc]'
-          : 'text-[#9fa4ab] hover:bg-[#161d27] hover:text-[#ebe7e4]'
+          ? 'bg-panel-soft text-accent-steel'
+          : 'text-text-muted hover:bg-surface-raised hover:text-text-primary'
       } disabled:cursor-not-allowed disabled:opacity-30 ${className ?? ''}`}
     >
       <Icon size={14} />
@@ -129,10 +134,10 @@ function SendButton({
       aria-label={isStreaming ? 'Dừng tạo' : 'Gửi tin nhắn'}
       className={`relative flex h-8 w-8 flex-none items-center justify-center rounded-none transition-colors duration-100 after:absolute after:-inset-[6px] after:content-[''] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[#6a9fcc] ${
         isStreaming
-          ? 'bg-[#252f3d] text-[#ebe7e4] hover:bg-[#495059]'
+          ? 'bg-panel-soft text-text-primary hover:bg-[#495059]'
           : canSubmit
             ? 'bg-[#6a9fcc] text-[#0d1116] hover:bg-[#6a9fcc]/85 active:scale-95'
-            : 'bg-white/[0.04] text-[#9fa4ab]/40'
+            : 'bg-white/[0.04] text-text-muted/40'
       }`}
     >
       {isStreaming ? (
@@ -175,22 +180,66 @@ function TaskMenu({ groups }: { groups: TaskGroupSpec[] }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const itemRefs = useRef<Array<HTMLButtonElement | null>>([]);
+
+  const flatItems = useMemo(() => groups.flatMap((g) => g.items), [groups]);
 
   useEffect(() => {
     if (!open) return;
     const onPointerDown = (e: PointerEvent) => {
       if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
     };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false);
-    };
     document.addEventListener('pointerdown', onPointerDown, true);
-    document.addEventListener('keydown', onKey);
     return () => {
       document.removeEventListener('pointerdown', onPointerDown, true);
-      document.removeEventListener('keydown', onKey);
     };
   }, [open]);
+
+  useEffect(() => {
+    if (open) {
+      setTimeout(() => {
+        const firstEnabled = flatItems.findIndex((it) => !it.disabled);
+        if (firstEnabled !== -1) {
+          itemRefs.current[firstEnabled]?.focus();
+        }
+      }, 10);
+    }
+  }, [open, flatItems]);
+
+  const onMenuKeyDown = (e: React.KeyboardEvent) => {
+    const enabledIndices = flatItems
+      .map((item, idx) => (!item.disabled ? idx : -1))
+      .filter((idx) => idx !== -1);
+    if (enabledIndices.length === 0) return;
+
+    const currentIdx = itemRefs.current.findIndex((el) => el === document.activeElement);
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      const next = currentIdx === -1
+        ? enabledIndices[0]
+        : enabledIndices[(enabledIndices.indexOf(currentIdx) + 1) % enabledIndices.length];
+      itemRefs.current[next]?.focus();
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      const prev = currentIdx === -1
+        ? enabledIndices[enabledIndices.length - 1]
+        : enabledIndices[(enabledIndices.indexOf(currentIdx) - 1 + enabledIndices.length) % enabledIndices.length];
+      itemRefs.current[prev]?.focus();
+    } else if (e.key === 'Home') {
+      e.preventDefault();
+      itemRefs.current[enabledIndices[0]]?.focus();
+    } else if (e.key === 'End') {
+      e.preventDefault();
+      itemRefs.current[enabledIndices[enabledIndices.length - 1]]?.focus();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      setOpen(false);
+      triggerRef.current?.focus();
+    } else if (e.key === 'Tab') {
+      setOpen(false);
+    }
+  };
 
   const activeCount = groups.reduce((acc, g) => acc + g.items.filter((t) => t.active).length, 0);
 
@@ -209,21 +258,27 @@ function TaskMenu({ groups }: { groups: TaskGroupSpec[] }) {
         <div
           role="menu"
           aria-label="Tác vụ"
+          tabIndex={-1}
+          onKeyDown={onMenuKeyDown}
           className="surface-panel absolute bottom-full right-0 z-40 mb-2 w-[min(18rem,calc(100vw-2rem))] animate-slide-up overflow-hidden p-1.5"
         >
           {groups.map((group) => (
             <div key={group.key} role="presentation">
               <div
                 aria-hidden="true"
-                className="px-2 pb-1 pt-1.5 text-[10.5px] font-semibold uppercase tracking-wide text-[#6a9fcc]"
+                className="px-2 pb-1 pt-1.5 text-[10.5px] font-semibold uppercase tracking-wide text-accent-steel"
               >
                 {group.label}
               </div>
               {group.items.map((t) => {
+                const flatIndex = flatItems.findIndex((it) => it.key === t.key);
                 const Icon = t.icon;
                 return (
                   <button
                     key={t.key}
+                    ref={(el) => {
+                      itemRefs.current[flatIndex] = el;
+                    }}
                     type="button"
                     role="menuitem"
                     disabled={t.disabled}
@@ -232,18 +287,18 @@ function TaskMenu({ groups }: { groups: TaskGroupSpec[] }) {
                       t.onClick();
                       setOpen(false);
                     }}
-                    className="flex w-full items-center gap-2.5 rounded-none px-2 py-2 text-left transition-colors hover:bg-[#161d27] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[#6a9fcc] disabled:cursor-not-allowed disabled:opacity-40"
+                    className="flex w-full items-center gap-2.5 rounded-none px-2 py-2 text-left transition-colors hover:bg-surface-raised focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[#6a9fcc] disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     <Icon
                       size={15}
-                      className={`flex-none ${t.active ? 'text-[#5db87a]' : 'text-[#9fa4ab]'}`}
+                      className={`flex-none ${t.active ? 'text-status-success' : 'text-text-muted'}`}
                     />
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-[13px] text-[#ebe7e4]">
+                      <span className="block truncate text-[13px] text-text-primary">
                         {t.shortLabel ?? t.label}
                       </span>
                       {t.description && (
-                        <span className="block truncate text-[10.5px] leading-tight text-[#9fa4ab]">
+                        <span className="block truncate text-[10.5px] leading-tight text-text-muted">
                           {t.description}
                         </span>
                       )}
@@ -254,7 +309,7 @@ function TaskMenu({ groups }: { groups: TaskGroupSpec[] }) {
                       </span>
                     )}
                     {t.active && !t.badge && (
-                      <Check size={13} className="flex-none text-[#5db87a]" />
+                      <Check size={13} className="flex-none text-status-success" />
                     )}
                   </button>
                 );
@@ -305,6 +360,24 @@ interface ComposerProps {
   composerApiRef?: React.MutableRefObject<ComposerApi | null>;
   /** P3.1 (Alt+↑): lấy lại tin đã queue mới nhất vào ô nhập. false = queue rỗng. */
   onTakeBackQueued?: () => boolean;
+
+  /*
+   * Chọn model — đặt Ở ĐÂY vì đây là nơi tay đang gõ, không phải status line
+   * trên cùng. Status line vẫn hiển thị TĨNH model đang dùng, nhưng chỉ còn MỘT
+   * control tương tác cho việc chọn (trước đây ở status line, kèm ghi chú
+   * "khỏi chiếm chỗ trong composer" — đổi lại vì khoảng cách tới tay quá xa).
+   */
+  models: ModelOption[];
+  model: string;
+  onModelChange: (id: string) => void;
+  modelSelectorDisabled?: boolean;
+  /** id provider đang active: Gần đây/Yêu thích của picker scoped theo đây. */
+  modelProviderId: string;
+  /** true khi danh sách model là catalog built-in (hiện section Đề xuất). */
+  modelCatalogBuiltin: boolean;
+  modelFavorites: ModelFavorite[];
+  modelRecents: RecentModel[];
+  onToggleModelFavorite: (id: string) => void;
 }
 
 /**
@@ -350,6 +423,15 @@ export const Composer = memo(function Composer({
   maxFileBytes = DEFAULT_MAX_FILE_BYTES,
   composerApiRef,
   onTakeBackQueued,
+  models,
+  model,
+  onModelChange,
+  modelSelectorDisabled,
+  modelProviderId,
+  modelCatalogBuiltin,
+  modelFavorites,
+  modelRecents,
+  onToggleModelFavorite,
 }: ComposerProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -358,6 +440,12 @@ export const Composer = memo(function Composer({
   const [fileError, setFileError] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [pickPending, setPickPending] = useState(false);
+
+  const speech = useSpeechRecognition({
+    onFinalText: (text) => {
+      setDraft((prev) => (prev ? `${prev} ${text}` : text));
+    },
+  });
 
   useImperativeHandle(
     composerApiRef,
@@ -537,12 +625,11 @@ export const Composer = memo(function Composer({
     }
   }, [onPickWorkspace, pickPending]);
 
-  const modeTasks: TaskSpec[] = [];
-  const lookupTasks: TaskSpec[] = [];
-  const advancedTasks: TaskSpec[] = [];
+  const sessionTasks: TaskSpec[] = [];
+  const extensionTasks: TaskSpec[] = [];
 
   if (onToggleAgentMode) {
-    modeTasks.push({
+    sessionTasks.push({
       key: 'agent-mode',
       icon: Pencil,
       active: agentMode === 'plan',
@@ -566,7 +653,7 @@ export const Composer = memo(function Composer({
             : 'Smart';
     const isChatOnly = currentPolicy === 'chat_only';
     const isManual = currentPolicy === 'always';
-    modeTasks.push({
+    sessionTasks.push({
       key: 'auto-pilot',
       icon: Zap,
       active: currentPolicy === 'smart' || currentPolicy === 'never',
@@ -589,7 +676,7 @@ export const Composer = memo(function Composer({
   }
 
   if (onToggleWebSearch) {
-    lookupTasks.push({
+    sessionTasks.push({
       key: 'web',
       icon: Globe,
       active: webSearch,
@@ -602,7 +689,7 @@ export const Composer = memo(function Composer({
   }
 
   if (onGoalLoopClick) {
-    advancedTasks.push({
+    sessionTasks.push({
       key: 'goal-loop',
       icon: Target,
       active: goalLoopActive ?? false,
@@ -617,7 +704,7 @@ export const Composer = memo(function Composer({
   }
 
   if (onOpenStaging && (stagedFileCount ?? 0) > 0) {
-    advancedTasks.push({
+    extensionTasks.push({
       key: 'staging',
       icon: FileText,
       label: `${stagedFileCount} file đang staged`,
@@ -628,20 +715,8 @@ export const Composer = memo(function Composer({
     });
   }
 
-  if (onDisconnectWorkspace && workspace?.connected) {
-    advancedTasks.push({
-      key: 'workspace-disconnect',
-      icon: FolderOpen,
-      disabled: isStreaming,
-      label: `Ngắt kết nối: ${workspace.name ?? 'workspace'}`,
-      shortLabel: 'Ngắt thư mục làm việc',
-      description: 'Gỡ kết nối thư mục làm việc hiện tại khỏi phiên',
-      onClick: onDisconnectWorkspace,
-    });
-  }
-
   if (onOpenToolsPanel) {
-    advancedTasks.push({
+    extensionTasks.push({
       key: 'tools-panel',
       icon: Wrench,
       label: 'Công cụ & quyền…',
@@ -652,7 +727,7 @@ export const Composer = memo(function Composer({
   }
 
   if (onOpenRecipes) {
-    advancedTasks.push({
+    extensionTasks.push({
       key: 'recipes-panel',
       icon: ChefHat,
       label: 'Recipes…',
@@ -662,10 +737,21 @@ export const Composer = memo(function Composer({
     });
   }
 
+  if (onDisconnectWorkspace && workspace?.connected) {
+    extensionTasks.push({
+      key: 'workspace-disconnect',
+      icon: FolderOpen,
+      disabled: isStreaming,
+      label: `Ngắt kết nối: ${workspace.name ?? 'workspace'}`,
+      shortLabel: 'Ngắt thư mục làm việc',
+      description: 'Gỡ kết nối thư mục làm việc hiện tại khỏi phiên',
+      onClick: onDisconnectWorkspace,
+    });
+  }
+
   const taskGroups: TaskGroupSpec[] = [
-    { key: 'mode', label: 'Chế độ', items: modeTasks },
-    { key: 'lookup', label: 'Tra cứu', items: lookupTasks },
-    { key: 'advanced', label: 'Nâng cao', items: advancedTasks },
+    { key: 'session', label: 'Chế độ phiên', items: sessionTasks },
+    { key: 'extensions', label: 'Công cụ & mở rộng', items: extensionTasks },
   ].filter((g) => g.items.length > 0);
 
   return (
@@ -677,7 +763,7 @@ export const Composer = memo(function Composer({
           <button
             type="button"
             onClick={onContinue}
-            className="flex items-center gap-1.5 rounded-none border border-[#495059] bg-[#161d27] px-3 py-1.5 font-mono text-[12px] font-medium text-[#6a9fcc] transition-colors duration-100 hover:border-[#757d89] hover:bg-[#212730] hover:text-[#ebe7e4] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[#6a9fcc]"
+            className="flex items-center gap-1.5 rounded-none border border-border-hairline bg-surface-raised px-3 py-1.5 font-mono text-[12px] font-medium text-accent-steel transition-colors duration-100 hover:border-border-hover hover:bg-panel-bg hover:text-text-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[#6a9fcc]"
           >
             <CornerDownLeft size={12} aria-hidden="true" />
             Viết tiếp
@@ -703,15 +789,15 @@ export const Composer = memo(function Composer({
           setDragging(false);
           acceptFiles(e.dataTransfer?.files ?? null);
         }}
-        className={`group relative rounded-none border border-[#495059] bg-[#212730] transition-colors duration-100 focus-within:border-[#6a9fcc] ${
-          dragging ? 'border-[#6a9fcc]' : ''
+        className={`group relative rounded-none border border-border-hairline bg-panel-bg transition-colors duration-100 focus-within:border-accent-steel ${
+          dragging ? 'border-accent-steel' : ''
         }`}
       >
         {slashOpen && (
           <div
             role="listbox"
             aria-label="Danh sách prompt"
-            className="absolute bottom-full left-0 right-0 z-30 mb-2 max-h-64 overflow-y-auto rounded-none border border-[#495059] bg-[#212730] p-1 font-mono"
+            className="absolute bottom-full left-0 right-0 z-30 mb-2 max-h-64 overflow-y-auto rounded-none border border-border-hairline bg-panel-bg p-1 font-mono"
             onMouseDown={(e) => e.preventDefault()}
           >
             {slashMatches.map((p, i) => (
@@ -724,19 +810,19 @@ export const Composer = memo(function Composer({
                 onClick={() => applyPrompt(p)}
                 onMouseEnter={() => setSlashIndex(i)}
                 className={`flex w-full flex-col items-start gap-0.5 rounded-none px-3 py-2 text-left transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[#6a9fcc] ${
-                  i === slashIndex ? 'bg-[#252f3d] text-[#ebe7e4]' : 'text-[#ebe7e4] hover:bg-[#161d27]'
+                  i === slashIndex ? 'bg-panel-soft text-text-primary' : 'text-text-primary hover:bg-surface-raised'
                 }`}
               >
-                <span className="flex items-center gap-1.5 text-[12.5px] font-medium text-[#ebe7e4]">
+                <span className="flex items-center gap-1.5 text-[12.5px] font-medium text-text-primary">
                   {p.kind === 'recipe' ? (
-                    <ChefHat size={11} aria-hidden="true" className="flex-none text-[#6a9fcc]" />
+                    <ChefHat size={11} aria-hidden="true" className="flex-none text-accent-steel" />
                   ) : null}
                   {p.kind === 'command' ? (
-                    <ListChecks size={11} aria-hidden="true" className="flex-none text-[#6a9fcc]" />
+                    <ListChecks size={11} aria-hidden="true" className="flex-none text-accent-steel" />
                   ) : null}
                   /{p.title}
                 </span>
-                <span className="line-clamp-1 w-full text-[11px] text-[#9fa4ab]">
+                <span className="line-clamp-1 w-full text-[11px] text-text-muted">
                   {p.kind === 'recipe'
                     ? 'workflow · mở panel để chạy'
                     : p.kind === 'command'
@@ -753,15 +839,15 @@ export const Composer = memo(function Composer({
             {attachments.map((a) => (
               <span
                 key={a.id}
-                className="flex max-w-[200px] items-center gap-1.5 rounded-none border border-[#495059] bg-[#161d27] px-2 py-1 font-mono text-[11px] text-[#ebe7e4]"
+                className="flex max-w-[200px] items-center gap-1.5 rounded-none border border-border-hairline bg-surface-raised px-2 py-1 font-mono text-[11px] text-text-primary"
               >
-                <Paperclip size={10} aria-hidden="true" className="flex-shrink-0 text-[#6a9fcc]" />
+                <Paperclip size={10} aria-hidden="true" className="flex-shrink-0 text-accent-steel" />
                 <span className="truncate">{a.name}</span>
                 <button
                   type="button"
                   onClick={() => onRemoveAttachment(a.id)}
                   aria-label={`Gỡ ${a.name}`}
-                  className="ml-0.5 rounded-none p-1 text-[#9fa4ab] transition-colors hover:bg-[#252f3d] hover:text-[#ebe7e4] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[#6a9fcc]"
+                  className="ml-0.5 rounded-none p-1 text-text-muted transition-colors hover:bg-panel-soft hover:text-text-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[#6a9fcc]"
                 >
                   <X size={10} aria-hidden="true" />
                 </button>
@@ -772,7 +858,7 @@ export const Composer = memo(function Composer({
 
         {webBusy && (
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3.5 pt-3 font-mono text-[12px] leading-relaxed">
-            <span className="flex min-w-0 items-center gap-1.5 text-[#9fa4ab]">
+            <span className="flex min-w-0 items-center gap-1.5 text-text-muted">
               <span aria-hidden="true" className="terminal-cursor" />
               <span className="truncate">Đang tra cứu web…</span>
             </span>
@@ -780,7 +866,7 @@ export const Composer = memo(function Composer({
         )}
 
         <div className="relative flex items-start">
-          <span className="select-none pl-3.5 pt-3 font-mono text-[14px] text-[#757d89] group-focus-within:text-[#6a9fcc]">
+          <span className="select-none pl-3.5 pt-3 font-mono text-[14px] text-[#757d89] group-focus-within:text-accent-steel">
             $
           </span>
           <TextareaAutosize
@@ -809,7 +895,7 @@ export const Composer = memo(function Composer({
               slashOpen ? `slash-opt-${slashMatches[slashIndex]?.id}` : undefined
             }
             placeholder="Nêu việc cho agent, hoặc gõ / để dùng prompt mẫu..."
-              className="w-full resize-none bg-transparent pl-2 pr-4 pb-1 pt-3 font-mono text-[14px] leading-relaxed text-[#ebe7e4] outline-none placeholder:text-[#9fa4ab]"
+              className="w-full resize-none bg-transparent pl-2 pr-4 pb-1 pt-3 font-mono text-[14px] leading-relaxed text-text-primary outline-none placeholder:text-text-muted"
           />
         </div>
 
@@ -823,6 +909,18 @@ export const Composer = memo(function Composer({
             e.target.value = '';
           }}
         />
+
+        {((speech.listening && speech.interim) || speech.error) && (
+          <div className="border-t border-border-hairline/40 px-3 py-1 font-mono text-[11px]">
+            {speech.error ? (
+              <span className="text-status-error">{speech.error}</span>
+            ) : (
+              <span className="block truncate italic text-accent-steel">
+                Đang nghe: {speech.interim}
+              </span>
+            )}
+          </div>
+        )}
 
         <div className="flex items-center gap-2 px-2 pb-2 pt-1">
           {/* Cụm TRÁI: đính kèm + thư mục + Tác vụ. Vùng chứa co được (min-w-0). */}
@@ -845,9 +943,38 @@ export const Composer = memo(function Composer({
                 onClick={handlePickWorkspace}
               />
             )}
+            {speech.supported && (
+              <ToolbarButton
+                icon={speech.listening ? MicOff : Mic}
+                active={speech.listening}
+                className={speech.listening ? 'animate-pulse text-status-error' : undefined}
+                label={
+                  speech.listening
+                    ? 'Dừng nhận diện giọng nói (đang nghe)'
+                    : 'Nhập bằng giọng nói'
+                }
+                onClick={speech.toggle}
+              />
+            )}
           </div>
 
           <div className="flex flex-none items-center gap-1.5">
+            {/*
+             * Chọn model nằm ngay đây — nơi tay đang gõ — thay vì status line
+             * trên cùng. Trigger tự giới hạn bề rộng (nhãn cắt ở 30vw / 160px)
+             * nên không đè các nút khác trên màn hình hẹp.
+             */}
+            <ModelSelector
+              models={models}
+              value={model}
+              onChange={onModelChange}
+              disabled={modelSelectorDisabled}
+              providerId={modelProviderId}
+              builtinCatalog={modelCatalogBuiltin}
+              favorites={modelFavorites}
+              recents={modelRecents}
+              onToggleFavorite={onToggleModelFavorite}
+            />
             <TaskMenu groups={taskGroups} />
             <div className="hidden h-4 w-px flex-none bg-[#495059] sm:block" />
             <SendButton
@@ -858,7 +985,7 @@ export const Composer = memo(function Composer({
           </div>
         </div>
       </form>
-        <div className="mt-1.5 px-2 font-mono text-[10.5px] text-[#9fa4ab]">
+        <div className="mt-1.5 px-2 font-mono text-[10.5px] text-text-muted">
           Enter để gửi · Shift+Enter xuống dòng · Enter/Alt+Enter khi AI chạy = xếp hàng · Alt+↑ lấy lại · / lệnh nhanh
         </div>
     </div>

@@ -6,9 +6,9 @@
  * ngữ cảnh, trạng thái — và các tác vụ phiên (xuất/nén/xóa) dạng icon.
  * Dữ liệu chỉ đọc từ props mà ChatInterface đã có; không tự tính gì mới.
  */
-import React, { memo } from 'react';
+import React, { memo, useMemo } from 'react';
 import { Menu, Scissors, Trash2 } from 'lucide-react';
-import { ModelSelector, type ModelOption } from '@/components/model-selector';
+import type { ModelOption } from '@/components/model-selector';
 import { ThinkingMenu } from '@/components/thinking-menu';
 import { ChatExportMenu } from '@/components/chat-export-menu';
 import { computeMeter, fmt, type ContextMeterTone } from '@/components/context-meter';
@@ -19,17 +19,13 @@ interface StatusLineProps {
   onOpenSidebar: () => void;
   sidebarCollapsed: boolean;
 
+  /**
+   * Chỉ để HIỂN THỊ TĨNH model đang dùng. Chọn model nằm ở composer — nơi tay
+   * đang gõ — nên ở đây không còn `onModelChange` và các prop của picker.
+   * Giữ `models` để tra ra tên hiển thị thay vì in ra id thô.
+   */
   models: ModelOption[];
   model: string;
-  onModelChange: (id: string) => void;
-  modelSelectorDisabled: boolean;
-  /** id provider đang active: Gần đây/Yêu thích của picker scoped theo đây. */
-  modelProviderId: string;
-  /** true khi danh sách model là catalog built-in (hiện section Đề xuất). */
-  modelCatalogBuiltin: boolean;
-  modelFavorites: ModelFavorite[];
-  modelRecents: RecentModel[];
-  onToggleModelFavorite: (id: string) => void;
 
   agentMode?: 'plan' | 'act';
   onToggleAgentMode?: () => void;
@@ -60,9 +56,9 @@ interface StatusLineProps {
 }
 
 const TONE_TEXT: Record<ContextMeterTone, string> = {
-  ok: 'text-[#9fa4ab]',
-  warning: 'text-[#e8993a]',
-  error: 'text-[#e8704f]',
+  ok: 'text-text-muted',
+  warning: 'text-status-warning',
+  error: 'text-status-error',
 };
 
 const TONE_BAR: Record<ContextMeterTone, string> = {
@@ -76,13 +72,6 @@ export const StatusLine = memo(function StatusLine({
   sidebarCollapsed,
   models,
   model,
-  onModelChange,
-  modelSelectorDisabled,
-  modelProviderId,
-  modelCatalogBuiltin,
-  modelFavorites,
-  modelRecents,
-  onToggleModelFavorite,
   agentMode,
   onToggleAgentMode,
   agentModeDisabled,
@@ -106,17 +95,23 @@ export const StatusLine = memo(function StatusLine({
 }: StatusLineProps) {
   const meter = ctxUsed !== undefined && ctxMax ? computeMeter(ctxUsed, ctxMax) : null;
 
+  /* Tra tên hiển thị thay vì in id thô; model lạ (đã gỡ khỏi danh sách) vẫn hiện id. */
+  const activeModelLabel = useMemo(() => {
+    const found = models.find((m) => m.id === model);
+    return found?.label || model || 'chưa chọn model';
+  }, [models, model]);
+
   const runLabel = run.webBusy
     ? 'web'
     : run.streaming
       ? 'running'
       : 'idle';
   const runTone = run.webBusy || run.streaming
-    ? 'text-[#6a9fcc]'
-    : 'text-[#9fa4ab]';
+    ? 'text-accent-steel'
+    : 'text-text-muted';
 
   return (
-    <header className="sticky top-0 z-20 flex h-9 min-w-0 flex-shrink-0 items-center gap-1.5 overflow-x-auto no-scrollbar border-b border-[#495059] bg-[#0d1116] px-2 font-mono text-[11.5px] pt-safe-2 md:px-3">
+    <header className="sticky top-0 z-20 flex h-9 min-w-0 flex-shrink-0 items-center gap-1.5 overflow-x-auto no-scrollbar border-b border-border-hairline bg-bg-deep px-2 font-mono text-[11.5px] pt-safe-2 md:px-3">
       <button
         type="button"
         onClick={onOpenSidebar}
@@ -126,19 +121,16 @@ export const StatusLine = memo(function StatusLine({
         <Menu size={15} />
       </button>
 
-      {/* Model — chọn được ngay từ status line, khỏi chiếm chỗ trong composer. */}
-      <div className="min-w-0 flex-none max-w-[13rem]">
-        <ModelSelector
-          models={models}
-          value={model}
-          onChange={onModelChange}
-          disabled={modelSelectorDisabled}
-          providerId={modelProviderId}
-          builtinCatalog={modelCatalogBuiltin}
-          favorites={modelFavorites}
-          recents={modelRecents}
-          onToggleFavorite={onToggleModelFavorite}
-        />
+      {/*
+       * Model — hiển thị TĨNH. Việc chọn model đã chuyển xuống composer (nơi tay
+       * đang gõ); ở đây chỉ còn vai trò "biết đang chạy model nào" khi mắt đang
+       * ở phần trên màn hình. Một control tương tác duy nhất, không nhân đôi.
+       */}
+      <div
+        className="min-w-0 max-w-[13rem] flex-none truncate font-mono text-[11.5px] text-text-muted"
+        title={activeModelLabel}
+      >
+        {activeModelLabel}
       </div>
 
       {onToggleAgentMode && (
@@ -156,8 +148,8 @@ export const StatusLine = memo(function StatusLine({
           }
           className={`flex-none rounded-none px-1.5 py-0.5 uppercase tracking-[0.08em] transition-colors duration-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[#6a9fcc] disabled:cursor-not-allowed disabled:opacity-40 ${
             agentMode === 'plan'
-              ? 'bg-[#252f3d] text-[#e8993a]'
-              : 'text-[#9fa4ab] hover:bg-[#161d27] hover:text-[#ebe7e4]'
+              ? 'bg-panel-soft text-status-warning'
+              : 'text-text-muted hover:bg-surface-raised hover:text-text-primary'
           }`}
         >
           {agentMode === 'plan' ? 'plan' : 'act'}
@@ -166,7 +158,7 @@ export const StatusLine = memo(function StatusLine({
 
       {workspace && (
         <span
-          className="hidden flex-none text-[#9fa4ab] sm:inline"
+          className="hidden flex-none text-text-muted sm:inline"
           title={
             workspace.connected
               ? `Thư mục làm việc: ${workspace.name}${workspace.branch ? ` (nhánh ${workspace.branch})` : ''}`
@@ -183,7 +175,7 @@ export const StatusLine = memo(function StatusLine({
           className="hidden min-w-0 flex-none items-center gap-1.5 md:flex"
           title={`Ngữ cảnh: ${fmt(ctxUsed!)} / ${fmt(meter.safeMax)} token (${meter.percent}%)`}
         >
-          <div className="h-0.5 w-16 bg-[#1c2128]" aria-hidden="true">
+          <div className="h-0.5 w-16 bg-surface-code" aria-hidden="true">
             <div
               className={`h-full ${TONE_BAR[meter.tone]}`}
               style={{ width: `${Math.round(meter.fillRatio * 100)}%` }}
@@ -231,7 +223,7 @@ export const StatusLine = memo(function StatusLine({
               ? 'Đang nén hội thoại...'
               : 'Nén phần hội thoại cũ thành tóm tắt'
           }
-          className="icon-btn-sm flex-none text-[#9fa4ab] hover:text-[#6a9fcc]"
+          className="icon-btn-sm flex-none text-text-muted hover:text-accent-steel"
         >
           <Scissors size={13} />
         </button>
@@ -239,18 +231,18 @@ export const StatusLine = memo(function StatusLine({
 
       {hasMessages &&
         (confirmClear ? (
-          <div className="flex flex-none items-center gap-1 rounded-none border border-[#495059] bg-[#161d27] p-0.5 font-mono text-[11px]">
+          <div className="flex flex-none items-center gap-1 rounded-none border border-border-hairline bg-surface-raised p-0.5 font-mono text-[11px]">
             <button
               type="button"
               onClick={onDeleteChat}
-              className="rounded-none px-1.5 py-0.5 font-medium text-[#e8704f] transition-colors hover:bg-[#e8704f]/10"
+              className="rounded-none px-1.5 py-0.5 font-medium text-status-error transition-colors hover:bg-[#e8704f]/10"
             >
               Xóa
             </button>
             <button
               type="button"
               onClick={() => onSetConfirmClear(false)}
-              className="rounded-none px-1.5 py-0.5 text-[#9fa4ab] transition-colors hover:bg-[#252f3d]"
+              className="rounded-none px-1.5 py-0.5 text-text-muted transition-colors hover:bg-panel-soft"
             >
               Hủy
             </button>
@@ -261,7 +253,7 @@ export const StatusLine = memo(function StatusLine({
             onClick={() => onSetConfirmClear(true)}
             aria-label="Xóa cuộc trò chuyện"
             title="Xóa cuộc trò chuyện này"
-            className="icon-btn-sm icon-btn-danger flex-none text-[#9fa4ab] hover:text-[#e8704f]"
+            className="icon-btn-sm icon-btn-danger flex-none text-text-muted hover:text-status-error"
           >
             <Trash2 size={13} />
           </button>

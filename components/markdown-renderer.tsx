@@ -220,14 +220,14 @@ const CodeBlock = memo(function CodeBlock({
   return (
     <div className="claude-code-block my-4">
       {/* Thanh công cụ nằm trên nền tối → dùng border/chữ sáng cho đủ tương phản. */}
-      <div className="flex items-center justify-between border-b border-[#495059] bg-[#161d27] px-3 py-1.5">
-        <span className="font-mono text-[11px] font-medium text-[#9fa4ab]">
+      <div className="flex items-center justify-between border-b border-border-hairline bg-surface-raised px-3 py-1.5">
+        <span className="font-mono text-[11px] font-medium text-text-muted">
           {language || 'text'}
         </span>
         <button
           type="button"
           onClick={onCopy}
-          className="flex items-center gap-1 rounded-none px-1 py-0.5 text-[11px] text-[#9fa4ab] transition-colors hover:bg-white/10 hover:text-[#ebe7e4]"
+          className="flex items-center gap-1 rounded-none px-1 py-0.5 text-[11px] text-text-muted transition-colors hover:bg-white/10 hover:text-text-primary"
           aria-label={copied ? 'Đã chép đoạn mã' : 'Chép đoạn mã'}
         >
           {copied ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}

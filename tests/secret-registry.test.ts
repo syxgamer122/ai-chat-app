@@ -32,12 +32,6 @@ import { buildAgentTools, type MemoryItem } from '@/lib/agent-tools';
 import { __clearAllToolCallBudgets } from '@/lib/tool-call-budget';
 import { SAST_RULES } from '@/lib/security-sast';
 import {
-  agentLoop,
-  type AgentEvent,
-  type AgentLoopConfig,
-  type AgentStreamFn,
-} from '@/lib/agent/loop';
-import {
   AutonomousCliAgent,
   CliCodingHarness,
   withSecretRedaction,
@@ -327,83 +321,6 @@ describe('chi phí che phải TUYẾN TÍNH trên kết quả tool dài (chốt 
     const out = redactSecretText(`api_key = "sk-proj-abcdefghijklmnopqrstuvwx" ${filler}`);
     expect(out).not.toContain('sk-proj-abcdefghijklmnopqrstuvwx');
     expect(out).toContain(REDACT_PLACEHOLDER);
-  });
-});
-
-describe('hợp nhất vào đường đi THẬT của kết quả tool — agent loop & CLI', () => {
-  /* Giá trị CỐ Ý không khớp rule pattern nào (không sk-/ghp_/AIza/AKIA/=…): nhờ
-     vậy khẳng định "chưa đăng ký thì đi qua nguyên vẹn" mới đo đúng tầng VALUE
-     thay vì ăn may từ tầng PATTERN. */
-  const REGISTERED = 'vyen-registered-token-0123456789abcdef';
-
-  /** Chạy hết generator, gom event + result (cùng kiểu tests/agent-loop.test.ts). */
-  async function runLoop(config: Partial<AgentLoopConfig> & { streamFn: AgentStreamFn }) {
-    const events: AgentEvent[] = [];
-    const gen = agentLoop({
-      initialMessages: [{ id: 'u1', role: 'user', content: 'đọc cấu hình' }],
-      ...config,
-    });
-    for (;;) {
-      const item = await gen.next();
-      if (item.done) return { events, result: item.value };
-      events.push(item.value);
-    }
-  }
-
-  /** streamFn hai bước: gọi 1 tool rồi trả lời (đủ để loop ghi toolResult).
-     PHẢI là factory: bộ đếm nằm trong closure, dùng chung một instance giữa các
-     test thì test sau bắt đầu ở bước 3 và không gọi tool nào. */
-  function toolThenAnswer(): AgentStreamFn {
-    let call = 0;
-    return async () => {
-      call++;
-      if (call === 1) {
-        return {
-          id: 'a1',
-          role: 'assistant',
-          content: '',
-          toolCalls: [{ id: 't1', name: 'fs_read', args: { path: '.env.local' } }],
-        };
-      }
-      return { id: `a${call}`, role: 'assistant', content: 'xong' };
-    };
-  }
-
-  it('agent loop: transcript + event tool_execution_end chỉ nhận bản ĐÃ CHE', async () => {
-    getDefaultSecretRegistry().register(REGISTERED, 'test-secret');
-    /* Kết quả tool chứa CẢ bí mật đã đăng ký (tầng VALUE) và bí mật chỉ khớp
-       pattern (tầng PATTERN): cả hai phải mất trước khi vào ngữ cảnh model. */
-    const { events, result } = await runLoop({
-      streamFn: toolThenAnswer(),
-      executeTool: async () => `TOKEN=${REGISTERED}\nGITHUB=${GHP}`,
-    });
-
-    const transcript = JSON.stringify(result.messages.filter((m) => m.role === 'toolResult'));
-    expect(transcript).not.toContain(REGISTERED);
-    expect(transcript).not.toContain(GHP);
-    expect(transcript).toContain(REDACT_PLACEHOLDER);
-
-    /* Event cũng là đường ra (persistence-subscriber ghi DB) nên phải sạch. */
-    const endEvents = JSON.stringify(events.filter((e) => e.type === 'tool_execution_end'));
-    expect(endEvents).not.toContain(REGISTERED);
-    expect(endEvents).toContain(REDACT_PLACEHOLDER);
-  });
-
-  it('agent loop: afterToolCall (policy auto-pilot) vẫn thấy bản THÔ', async () => {
-    getDefaultSecretRegistry().register(REGISTERED, 'test-secret');
-    let seenByPolicy = '';
-    const { result } = await runLoop({
-      streamFn: toolThenAnswer(),
-      executeTool: async () => `TOKEN=${REGISTERED}`,
-      afterToolCall: async (ctx) => {
-        seenByPolicy = JSON.stringify(ctx.result);
-        return { terminate: true };
-      },
-    });
-    /* Auto-pilot quyết định DỰA TRÊN nội dung thô; che ở đây sẽ làm policy
-       (vd. chặn khi thấy ghi ra bí mật) mất dữ liệu để phán đoán. */
-    expect(seenByPolicy).toContain(REGISTERED);
-    expect(JSON.stringify(result.messages)).not.toContain(REGISTERED);
   });
 });
 

@@ -66,6 +66,16 @@ const config: Config = {
         'panel-soft': 'rgb(var(--panel-soft) / <alpha-value>)',
         'border-hairline': 'rgb(var(--border-hairline) / <alpha-value>)',
         'border-hover': 'rgb(var(--border-hover) / <alpha-value>)',
+        /*
+         * Bậc viền theo VAI TRÒ (DESIGN.md mục 4). Trước đây mọi đường viền
+         * dùng chung --border-hairline nên khung, control và divider cùng trọng
+         * lượng thị giác. Ba token dưới tách bạch:
+         *   border-subtle  — đường phân cách TRONG một khối (dùng ở alpha ~45%)
+         *   border-control — viền control (input, nút), nổi hơn khung một bậc
+         *   border-hover   — hover / focus / active
+         */
+        'border-subtle': 'rgb(var(--border-subtle) / <alpha-value>)',
+        'border-control': 'rgb(var(--border-control) / <alpha-value>)',
         'text-primary': 'rgb(var(--text-primary) / <alpha-value>)',
         'text-muted': 'rgb(var(--text-muted) / <alpha-value>)',
         'accent-steel': 'rgb(var(--accent-steel) / <alpha-value>)',

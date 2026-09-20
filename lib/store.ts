@@ -305,7 +305,7 @@ export const useAppStore = create<AppState>()(
       setCurrentChatId: (id) => set({ currentChatId: id, isSidebarOpen: false }),
       setSidebarOpen: (open) => set({ isSidebarOpen: open }),
       setSidebarCollapsed: (collapsed) => set({ isSidebarCollapsed: collapsed }),
-      setSettingsOpen: (open) => set({ isSettingsOpen: open, settingsInitialTab: open ? undefined : undefined }),
+      setSettingsOpen: (open) => set({ isSettingsOpen: open, settingsInitialTab: undefined }),
       openSettings: (tab) => set({ isSettingsOpen: true, settingsInitialTab: tab }),
       setCustomSlashCommand: (name, recipeId) =>
         set((s) => {
@@ -335,7 +335,19 @@ export const useAppStore = create<AppState>()(
         }),
       setTheme: (theme) => set({ theme }),
       updateSettings: (partial) =>
-        set((s) => ({ settings: { ...s.settings, ...partial } })),
+        set((s) => {
+          const next = { ...s.settings, ...partial };
+          if (partial.approvalPolicy !== undefined) {
+            next.autoPilot = partial.approvalPolicy === 'smart' || partial.approvalPolicy === 'never';
+            next.agentTools = partial.approvalPolicy !== 'chat_only';
+          } else if (partial.agentTools === false && partial.approvalPolicy === undefined) {
+            next.approvalPolicy = 'chat_only';
+            next.autoPilot = false;
+          } else if (partial.autoPilot !== undefined && partial.approvalPolicy === undefined) {
+            next.approvalPolicy = partial.autoPilot ? 'smart' : 'always';
+          }
+          return { settings: next };
+        }),
       updatePerf: (partial) =>
         set((s) => ({ settings: { ...s.settings, perf: { ...s.settings.perf, ...partial } } })),
       setActiveProvider: (id) => set({ activeProviderId: id, activeProvider: null }),

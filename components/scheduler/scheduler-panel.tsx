@@ -193,7 +193,7 @@ export function SchedulerPanel() {
   const renderStatusBadge = (status?: ScheduleStatus, error?: string) => {
     if (status === 'running') {
       return (
-        <span className="inline-flex items-center gap-1 rounded bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-500">
+        <span className="inline-flex items-center gap-1 rounded-none border border-status-warning/30 bg-[#e8993a]/15 px-2 py-0.5 text-[11px] font-medium text-status-warning">
           <Loader2 size={12} className="animate-spin" />
           Đang chạy
         </span>
@@ -201,7 +201,7 @@ export function SchedulerPanel() {
     }
     if (status === 'success') {
       return (
-        <span className="inline-flex items-center gap-1 rounded bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-500">
+        <span className="inline-flex items-center gap-1 rounded-none border border-status-success/30 bg-[#5db87a]/15 px-2 py-0.5 text-[11px] font-medium text-status-success">
           <CheckCircle2 size={12} />
           Thành công
         </span>
@@ -210,7 +210,7 @@ export function SchedulerPanel() {
     if (status === 'failure') {
       return (
         <span
-          className="inline-flex items-center gap-1 rounded bg-red-500/10 px-2 py-0.5 text-[11px] font-medium text-red-500"
+          className="inline-flex items-center gap-1 rounded-none border border-status-error/30 bg-[#e8704f]/15 px-2 py-0.5 text-[11px] font-medium text-status-error"
           title={error}
         >
           <AlertCircle size={12} />
@@ -219,7 +219,7 @@ export function SchedulerPanel() {
       );
     }
     return (
-      <span className="inline-flex items-center gap-1 rounded bg-zinc-500/10 px-2 py-0.5 text-[11px] font-medium text-zinc-400">
+      <span className="inline-flex items-center gap-1 rounded-none border border-border-hairline/40 bg-panel-bg px-2 py-0.5 text-[11px] font-medium text-text-muted">
         Chưa chạy
       </span>
     );
@@ -227,10 +227,10 @@ export function SchedulerPanel() {
 
   return (
     <div className="space-y-4 font-mono text-xs">
-      <div className="flex items-center justify-between border-b border-zinc-700/50 pb-3">
+      <div className="flex items-center justify-between border-b border-border-hairline pb-3">
         <div>
-          <h3 className="text-sm font-semibold text-zinc-200">Lịch chạy Recipe (Scheduler)</h3>
-          <p className="mt-0.5 text-[11px] text-zinc-400">
+          <h3 className="text-sm font-semibold text-text-primary">Lịch chạy Recipe (Scheduler)</h3>
+          <p className="mt-0.5 text-[11px] text-text-muted">
             Tự động thực thi các workflow recipe theo biểu thức cron định kỳ.
           </p>
         </div>
@@ -238,7 +238,7 @@ export function SchedulerPanel() {
           <button
             type="button"
             onClick={handleStartCreate}
-            className="flex items-center gap-1.5 rounded-lg bg-brand px-2.5 py-1 text-xs font-medium text-[#0d1116] transition hover:bg-brand-hover"
+            className="flex items-center gap-1.5 rounded-none bg-[#6a9fcc] px-2.5 py-1 text-xs font-semibold text-[#0d1116] transition hover:bg-[#6a9fcc]/85"
           >
             <Plus size={13} />
             <span>Thêm lịch mới</span>
@@ -249,23 +249,23 @@ export function SchedulerPanel() {
       {isEditing && (
         <form
           onSubmit={handleSave}
-          className="rounded-xl border border-zinc-700 bg-surface-muted/40 p-3.5 space-y-3"
+          className="rounded-none border border-border-hairline bg-surface-raised p-3.5 space-y-3"
         >
           <div className="flex items-center justify-between">
-            <h4 className="font-semibold text-zinc-200">
+            <h4 className="font-semibold text-text-primary">
               {editingId ? 'Sửa lịch trình' : 'Tạo lịch trình mới'}
             </h4>
             <button
               type="button"
               onClick={resetForm}
-              className="text-zinc-400 hover:text-zinc-200 text-[11px]"
+              className="text-text-muted hover:text-text-primary text-[11px]"
             >
               Hủy
             </button>
           </div>
 
           <div>
-            <label htmlFor={recipeSelectId} className="block mb-1 text-zinc-300">
+            <label htmlFor={recipeSelectId} className="block mb-1 text-text-primary">
               Recipe cần chạy
             </label>
             {recipes && recipes.length > 0 ? (
@@ -277,7 +277,7 @@ export function SchedulerPanel() {
                   const found = recipes.find((r) => r.id === e.target.value);
                   if (found) setRecipeName(found.title);
                 }}
-                className="w-full rounded border border-zinc-700 bg-surface px-2.5 py-1.5 text-zinc-200 focus:outline-none focus:border-brand"
+                className="w-full rounded-none border border-border-hairline bg-bg-deep px-2.5 py-1.5 text-text-primary focus:outline-none focus:border-accent-steel"
               >
                 {recipes.map((r) => (
                   <option key={r.id} value={r.id}>
@@ -295,7 +295,7 @@ export function SchedulerPanel() {
                   setRecipeName(e.target.value);
                   setRecipeId(e.target.value);
                 }}
-                className="w-full rounded border border-zinc-700 bg-surface px-2.5 py-1.5 text-zinc-200 focus:outline-none focus:border-brand"
+                className="w-full rounded-none border border-border-hairline bg-bg-deep px-2.5 py-1.5 text-text-primary focus:outline-none focus:border-accent-steel"
                 required
               />
             )}
@@ -303,10 +303,10 @@ export function SchedulerPanel() {
 
           <div>
             <div className="flex items-center justify-between mb-1">
-              <label htmlFor={cronInputId} className="text-zinc-300">
+              <label htmlFor={cronInputId} className="text-text-primary">
                 Biểu thức Cron (5 trường)
               </label>
-              <span className="text-[11px] text-zinc-400">
+              <span className="text-[11px] text-text-muted">
                 {isValidCron(cronExpr) ? describeCron(cronExpr) : 'Cú pháp không hợp lệ'}
               </span>
             </div>
@@ -316,10 +316,10 @@ export function SchedulerPanel() {
               value={cronExpr}
               onChange={(e) => setCronExpr(e.target.value)}
               placeholder="*/5 * * * *"
-              className={`w-full rounded border px-2.5 py-1.5 text-zinc-200 focus:outline-none ${
+              className={`w-full rounded-none border px-2.5 py-1.5 text-text-primary focus:outline-none ${
                 isValidCron(cronExpr)
-                  ? 'border-zinc-700 bg-surface focus:border-brand'
-                  : 'border-red-500 bg-red-950/20'
+                  ? 'border-border-hairline bg-bg-deep focus:border-accent-steel'
+                  : 'border-status-error bg-[#e8704f]/10'
               }`}
               required
             />
@@ -329,7 +329,7 @@ export function SchedulerPanel() {
                   key={p.cron}
                   type="button"
                   onClick={() => setCronExpr(p.cron)}
-                  className="rounded bg-surface-muted px-2 py-0.5 text-[10px] text-zinc-400 hover:text-zinc-200 transition"
+                  className="rounded-none border border-border-hairline bg-panel-bg px-2 py-0.5 text-[10px] text-text-muted hover:text-text-primary hover:bg-panel-soft transition"
                 >
                   {p.label}
                 </button>
@@ -338,8 +338,8 @@ export function SchedulerPanel() {
           </div>
 
           {isValidCron(cronExpr) && (
-            <div className="text-[11px] text-zinc-400 flex items-center gap-1.5">
-              <Clock size={12} className="text-brand" />
+            <div className="text-[11px] text-text-muted flex items-center gap-1.5">
+              <Clock size={12} className="text-accent-steel" />
               <span>
                 Lần chạy kế tiếp:{' '}
                 {getNextCronRun(cronExpr)?.toLocaleString('vi-VN') || 'Không tìm thấy mốc kế tiếp'}
@@ -348,7 +348,7 @@ export function SchedulerPanel() {
           )}
 
           {errorMessage && (
-            <div className="flex items-center gap-1.5 text-red-400 text-[11px]">
+            <div className="flex items-center gap-1.5 text-status-error text-[11px]">
               <AlertCircle size={13} />
               <span>{errorMessage}</span>
             </div>
@@ -358,13 +358,13 @@ export function SchedulerPanel() {
             <button
               type="button"
               onClick={resetForm}
-              className="rounded px-3 py-1 text-zinc-400 hover:text-zinc-200"
+              className="rounded-none border border-border-hairline bg-panel-bg px-3 py-1 text-text-muted hover:text-text-primary hover:bg-panel-soft"
             >
               Hủy
             </button>
             <button
               type="submit"
-              className="rounded bg-brand px-3 py-1 font-medium text-[#0d1116] hover:bg-brand-hover transition"
+              className="rounded-none bg-[#6a9fcc] px-3 py-1 font-semibold text-[#0d1116] hover:bg-[#6a9fcc]/85 transition"
             >
               Lưu lịch trình
             </button>
@@ -375,13 +375,13 @@ export function SchedulerPanel() {
       {/* Danh sách Schedule */}
       <div className="space-y-2">
         {(!schedules || schedules.length === 0) && !isEditing && (
-          <div className="rounded-xl border border-dashed border-zinc-700/80 p-6 text-center text-zinc-400">
-            <Calendar size={24} className="mx-auto mb-2 text-zinc-500" />
+          <div className="rounded-none border border-dashed border-border-hairline bg-surface-raised p-6 text-center text-text-muted">
+            <Calendar size={24} className="mx-auto mb-2 text-[#757d89]" />
             <p>Chưa có lịch trình nào được tạo.</p>
             <button
               type="button"
               onClick={handleStartCreate}
-              className="mt-2 inline-flex items-center gap-1 rounded bg-surface-muted px-2.5 py-1 text-zinc-300 hover:text-zinc-100"
+              className="mt-2 inline-flex items-center gap-1 rounded-none border border-border-hairline bg-panel-bg px-2.5 py-1 text-text-primary hover:bg-panel-soft"
             >
               <Plus size={12} />
               <span>Tạo lịch đầu tiên</span>
@@ -392,23 +392,23 @@ export function SchedulerPanel() {
         {schedules?.map((s) => (
           <div
             key={s.id}
-            className={`rounded-xl border p-3 transition ${
+            className={`rounded-none border p-3 transition ${
               s.enabled
-                ? 'border-zinc-700 bg-surface/40 hover:border-zinc-600'
-                : 'border-zinc-800 bg-surface-muted/20 opacity-60'
+                ? 'border-border-hairline bg-surface-raised hover:border-border-hover'
+                : 'border-border-hairline/40 bg-surface-raised/40 opacity-60'
             }`}
           >
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
-                  <span className="font-semibold text-zinc-200 truncate">
+                  <span className="font-semibold text-text-primary truncate">
                     {s.recipeName || s.recipeId}
                   </span>
                   {renderStatusBadge(s.lastStatus, s.lastError)}
                 </div>
 
-                <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-zinc-400">
-                  <span className="rounded bg-surface-muted px-1.5 py-0.5 text-zinc-300">
+                <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-text-muted">
+                  <span className="rounded-none border border-border-hairline bg-panel-bg px-1.5 py-0.5 text-text-primary">
                     {s.cron}
                   </span>
                   <span>{describeCron(s.cron)}</span>
@@ -425,7 +425,7 @@ export function SchedulerPanel() {
                   onClick={() => handleRunNow(s)}
                   disabled={runningId === s.id}
                   title="Chạy ngay bây giờ"
-                  className="rounded p-1.5 text-zinc-400 hover:bg-surface-muted hover:text-brand transition disabled:opacity-50"
+                  className="rounded-none border border-border-hairline bg-panel-bg p-1.5 text-text-muted hover:bg-panel-soft hover:text-accent-steel transition disabled:opacity-50"
                 >
                   {runningId === s.id ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />}
                 </button>
@@ -434,16 +434,16 @@ export function SchedulerPanel() {
                   type="button"
                   onClick={() => handleToggle(s)}
                   title={s.enabled ? 'Tạm dừng (Pause)' : 'Kích hoạt (Resume)'}
-                  className="rounded p-1.5 text-zinc-400 hover:bg-surface-muted hover:text-zinc-200 transition"
+                  className="rounded-none border border-border-hairline bg-panel-bg p-1.5 text-text-muted hover:bg-panel-soft hover:text-text-primary transition"
                 >
-                  {s.enabled ? <Pause size={13} /> : <Play size={13} className="text-emerald-500" />}
+                  {s.enabled ? <Pause size={13} /> : <Play size={13} className="text-status-success" />}
                 </button>
 
                 <button
                   type="button"
                   onClick={() => handleStartEdit(s)}
                   title="Chỉnh sửa"
-                  className="rounded p-1.5 text-zinc-400 hover:bg-surface-muted hover:text-zinc-200 transition"
+                  className="rounded-none border border-border-hairline bg-panel-bg p-1.5 text-text-muted hover:bg-panel-soft hover:text-text-primary transition"
                 >
                   <Pencil size={13} />
                 </button>
@@ -452,7 +452,7 @@ export function SchedulerPanel() {
                   type="button"
                   onClick={() => handleDelete(s.id)}
                   title="Xóa lịch trình"
-                  className="rounded p-1.5 text-zinc-400 hover:bg-red-500/10 hover:text-red-400 transition"
+                  className="rounded-none border border-border-hairline bg-panel-bg p-1.5 text-text-muted hover:bg-[#e8704f]/10 hover:text-status-error transition"
                 >
                   <Trash2 size={13} />
                 </button>
@@ -461,13 +461,13 @@ export function SchedulerPanel() {
 
             {/* Danh sách Sessions sinh ra */}
             {s.sessions && s.sessions.length > 0 && (
-              <div className="mt-2 pt-2 border-t border-zinc-800/60">
+              <div className="mt-2 pt-2 border-t border-border-hairline">
                 <button
                   type="button"
                   onClick={() =>
                     setExpandedSessionsId(expandedSessionsId === s.id ? null : s.id)
                   }
-                  className="flex items-center gap-1 text-[10px] text-zinc-400 hover:text-zinc-300"
+                  className="flex items-center gap-1 text-[10px] text-text-muted hover:text-text-primary"
                 >
                   {expandedSessionsId === s.id ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
                   <span>{s.sessions.length} phiên đã sinh ra</span>
@@ -478,13 +478,13 @@ export function SchedulerPanel() {
                     {s.sessions.map((sessId) => (
                       <div
                         key={sessId}
-                        className="flex items-center justify-between rounded bg-surface-muted/30 px-2 py-1 text-[11px] text-zinc-300"
+                        className="flex items-center justify-between rounded-none border border-border-hairline/50 bg-panel-bg px-2 py-1 text-[11px] text-text-primary"
                       >
                         <span className="truncate">{sessId}</span>
                         <button
                           type="button"
                           onClick={() => setCurrentChatId(sessId)}
-                          className="flex items-center gap-1 text-brand hover:underline shrink-0 text-[10px]"
+                          className="flex items-center gap-1 text-accent-steel hover:underline shrink-0 text-[10px]"
                         >
                           <span>Mở phiên</span>
                           <ExternalLink size={10} />

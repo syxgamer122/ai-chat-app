@@ -94,13 +94,13 @@ export function ChatExportMenu({ chatId }: { chatId: string | null }) {
               </p>
             )}
             <MenuRow
-              icon={<FileJson size={15} className="text-[#9fa4ab]" />}
+              icon={<FileJson size={15} className="text-text-muted" />}
               title="Xuất JSON (đầy đủ nhánh)"
               desc="Bảo toàn toàn bộ cây tin nhắn"
               onClick={() => run('json')}
             />
             <MenuRow
-              icon={<FileText size={15} className="text-[#9fa4ab]" />}
+              icon={<FileText size={15} className="text-text-muted" />}
               title="Xuất Markdown (nhánh active)"
               desc="Dành cho đọc và in ấn"
               onClick={() => run('md')}
@@ -146,8 +146,8 @@ function MenuRow({
     >
       <span className="mt-0.5 flex-none">{icon}</span>
       <span className="flex min-w-0 flex-col">
-        <span className="text-[13px] font-medium text-[#ebe7e4]">{title}</span>
-        <span className="text-[11px] text-[#9fa4ab]">{desc}</span>
+        <span className="text-[13px] font-medium text-text-primary">{title}</span>
+        <span className="text-[11px] text-text-muted">{desc}</span>
       </span>
     </button>
   );

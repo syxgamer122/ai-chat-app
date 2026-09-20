@@ -1,9 +1,11 @@
 'use client';
 
+import { Z_CLASS } from '@/lib/ui-z';
 import { useEffect, useMemo, useRef } from 'react';
 import { Check, X } from 'lucide-react';
 import { lineDiff, renderUnifiedDiff } from '@/lib/naive-diff';
 import { useHaptics } from '@/components/effects';
+import { useFocusTrap } from '@/lib/hooks/use-focus-trap';
 
 /**
  * Modal phê duyệt ghi file của agent coding — cổng an toàn BẮT BUỘC trước
@@ -27,6 +29,7 @@ export function DiffConfirm({
   state: DiffConfirmState | null;
   onClose: () => void;
 }) {
+  const containerRef = useRef<HTMLDivElement>(null);
   const discardRef = useRef<HTMLButtonElement>(null);
 
   const diff = useMemo(() => {
@@ -34,41 +37,33 @@ export function DiffConfirm({
     return renderUnifiedDiff(lineDiff(state.oldText, state.newText));
   }, [state]);
 
-  useEffect(() => {
-    if (!state?.open) return;
-    discardRef.current?.focus();
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        state.resolve(false);
-        onClose();
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [state, onClose]);
-
   /* Hook PHẢI gọi trước mọi early-return (rules-of-hooks). */
   const haptics = useHaptics();
 
-  if (!state?.open || !diff) return null;
-
   const decide = (approved: boolean) => {
     if (approved) haptics.trigger('success');
-    state.resolve(approved);
+    state?.resolve(approved);
     onClose();
   };
 
+  useFocusTrap(containerRef, {
+    active: Boolean(state?.open && diff),
+    onEscape: () => decide(false),
+  });
+
+  if (!state?.open || !diff) return null;
+
   return (
     <div
+      ref={containerRef}
       role="dialog"
       aria-modal="true"
-      aria-label={`Phê duyệt ghi file ${state.path}`}
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4"
+      aria-labelledby="diff-confirm-title"
+      className={`fixed inset-0 ${Z_CLASS.approval} flex items-center justify-center bg-black/60 p-4`}
       onClick={() => decide(false)}
     >
       <div
-        className="pi-frame relative flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-none border border-[#495059] bg-[#212730] font-mono"
+        className="pi-frame relative flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-none border border-border-hairline bg-panel-bg font-mono"
         onClick={(e) => e.stopPropagation()}
       >
         <span className="pi-corner-tl" />
@@ -76,23 +71,23 @@ export function DiffConfirm({
         <span className="pi-corner-bl" />
         <span className="pi-corner-br" />
 
-        <div className="flex items-center justify-between gap-2 border-b border-[#495059] bg-[#161d27] px-4 py-3">
-          <div className="flex items-center gap-2 min-w-0 font-pixel text-[16px] [image-rendering:pixelated]">
-            <span className="font-bold text-[#6a9fcc]">$</span>
-            <span className="font-semibold text-[#6a9fcc]">write</span>
-            <span className="truncate text-xs font-mono text-[#ebe7e4]">{state.path}</span>
-          </div>
+        <div className="flex items-center justify-between gap-2 border-b border-border-hairline bg-surface-raised px-4 py-3">
+          <h2 id="diff-confirm-title" className="flex items-center gap-2 min-w-0 font-pixel text-[16px] [image-rendering:pixelated]">
+            <span className="font-bold text-accent-steel">$</span>
+            <span className="font-semibold text-accent-steel">write</span>
+            <span className="truncate text-xs font-mono text-text-primary">{state.path}</span>
+          </h2>
           <div className="flex flex-shrink-0 items-center gap-1.5 text-[11px] font-mono">
-            <span className="rounded-none border border-[#5db87a]/30 bg-[#5db87a]/10 px-1.5 py-0.5 text-[#5db87a]">
+            <span className="rounded-none border border-status-success/30 bg-[#5db87a]/10 px-1.5 py-0.5 text-status-success">
               +{diff.adds}
             </span>
-            <span className="rounded-none border border-[#e8704f]/30 bg-[#e8704f]/10 px-1.5 py-0.5 text-[#e8704f]">
+            <span className="rounded-none border border-status-error/30 bg-[#e8704f]/10 px-1.5 py-0.5 text-status-error">
               -{diff.dels}
             </span>
           </div>
         </div>
 
-        <div className="flex-1 overflow-auto bg-[#0d1116] p-3.5 font-mono text-[11.5px] leading-relaxed">
+        <div className="flex-1 overflow-auto bg-bg-deep p-3.5 font-mono text-[11.5px] leading-relaxed">
           {diff.text.split('\n').map((line, idx) => {
             const isAdd = line.startsWith('+');
             const isDel = line.startsWith('-');
@@ -102,12 +97,12 @@ export function DiffConfirm({
                 key={idx}
                 className={
                   isAdd
-                    ? 'diff-line-added px-1 text-[#5db87a] bg-[#5db87a]/10'
+                    ? 'diff-line-added px-1 text-status-success bg-[#5db87a]/10'
                     : isDel
-                      ? 'diff-line-removed px-1 text-[#e8704f] bg-[#e8704f]/10'
+                      ? 'diff-line-removed px-1 text-status-error bg-[#e8704f]/10'
                       : isHunk
-                        ? 'text-[#6a9fcc] font-semibold'
-                        : 'text-[#9fa4ab]'
+                        ? 'text-accent-steel font-semibold'
+                        : 'text-text-muted'
                 }
               >
                 {line || ' '}
@@ -116,14 +111,14 @@ export function DiffConfirm({
           })}
         </div>
 
-        <div className="flex items-center justify-between gap-2 border-t border-[#495059] bg-[#161d27] px-4 py-2.5">
-          <span className="text-[11px] text-[#9fa4ab]">$ Esc to reject</span>
+        <div className="flex items-center justify-between gap-2 border-t border-border-hairline bg-surface-raised px-4 py-2.5">
+          <span className="text-[11px] text-text-muted">$ Esc to reject</span>
           <div className="flex gap-2">
             <button
               ref={discardRef}
               type="button"
               onClick={() => decide(false)}
-              className="flex items-center gap-1.5 rounded-none border border-[#495059] bg-[#252f3d] px-3 py-1.5 text-xs text-[#ebe7e4] transition-colors hover:border-[#757d89]"
+              className="flex items-center gap-1.5 rounded-none border border-border-hairline bg-panel-soft px-3 py-1.5 text-xs text-text-primary transition-colors hover:border-border-hover"
             >
               <X size={13} />
               Từ chối

@@ -28,6 +28,19 @@
     --accent-steel: 106 159 204; /* #6a9fcc — Màu nhấn chủ đạo: con trỏ, link, viền focus */
     --accent-thread: 75 96 124; /* #4b607c — Dùng kết hợp trong sọc trạng thái active */
 
+    /*
+     * VIỀN CHIA THEO VAI TRÒ (DESIGN.md mục 4).
+     *
+     * Trước đây MỌI đường viền — khung panel, đường phân cách, viền input, viền
+     * nút — đều dùng chung #495059. Kết quả: container, control và divider có
+     * cùng trọng lượng thị giác, mắt không có tầng bậc để bám vào.
+     *
+     * Nay tách thành 4 bậc. Không thêm màu mới: 3 bậc sau là alpha của chính
+     * hairline/border-hover nên vẫn nằm trong bảng màu DESIGN.md.
+     */
+    --border-subtle: 73 80 89; /* dùng ở alpha 45% — đường phân cách TRONG một khối */
+    --border-control: 93 102 111; /* #5d666f — viền control (input, nút) nổi hơn khung */
+
     --status-success: 93 184 122; /* #5db87a */
     --status-warning: 232 153 58; /* #e8993a */
     --status-error: 232 112 79; /* #e8704f */
@@ -82,6 +95,10 @@
     --accent-steel: 106 159 204; /* #6a9fcc */
     --accent-thread: 75 96 124; /* #4b607c */
 
+    /* Bậc viền theo vai trò — xem chú thích ở :root */
+    --border-subtle: 73 80 89;
+    --border-control: 93 102 111; /* #5d666f */
+
     --status-success: 93 184 122; /* #5db87a */
     --status-warning: 232 153 58; /* #e8993a */
     --status-error: 232 112 79; /* #e8704f */
@@ -126,8 +143,13 @@
     color-scheme: dark;
   }
 
+  /*
+   * Base 16px = mốc thiết kế của Tailwind. Trước đây 18px làm MỌI kích thước
+   * rem phình 12,5% (text-xs 13,5px, p-2 = 9px, h-8 = 36px) nên bảng cấu hình
+   * vừa to vừa chật. Thân bài đọc dài vẫn giữ 17px riêng ở .claude-prose.
+   */
   html {
-    font-size: 18px;
+    font-size: 16px;
     background-color: rgb(var(--surface));
     color: rgb(var(--foreground));
     -webkit-font-smoothing: antialiased;
@@ -208,6 +230,57 @@ html[data-animations='off'] *::after {
   -webkit-backdrop-filter: none !important;
 }
 
+/* ------------------------------------------------------------------ */
+/* PIXEL BEVEL — tầng bậc thị giác không cần bóng đổ (DESIGN.md mục 4) */
+/* ------------------------------------------------------------------ */
+/*
+ * Bài toán: DESIGN.md cấm bóng đổ và bo góc, nên mọi khối chỉ còn là hình chữ
+ * nhật viền 1px cùng màu → không có tầng bậc, mắt không phân biệt được đâu là
+ * khung, đâu là control, đâu là vùng nhấn.
+ *
+ * Lời giải lấy từ chính GUI Minecraft / Windows 95: chiều sâu tạo bằng VIỀN
+ * HAI TÔNG — cạnh trên & trái sáng hơn, cạnh dưới & phải tối hơn. Khối "nổi"
+ * dùng bevel xuôi, khối "chìm" (ô nhập, rãnh) dùng bevel ngược. Vẫn phẳng
+ * tuyệt đối, vẫn góc vuông, nhưng mắt đọc được ngay đâu là bề mặt nổi.
+ *
+ * Dùng rgba() thay hex để không mở rộng bảng màu DESIGN.md.
+ */
+.vyen-bevel {
+  border-top-color: rgba(255, 255, 255, 0.09);
+  border-left-color: rgba(255, 255, 255, 0.06);
+  border-bottom-color: rgba(0, 0, 0, 0.5);
+  border-right-color: rgba(0, 0, 0, 0.34);
+}
+
+.vyen-bevel-inset {
+  border-top-color: rgba(0, 0, 0, 0.5);
+  border-left-color: rgba(0, 0, 0, 0.34);
+  border-bottom-color: rgba(255, 255, 255, 0.07);
+  border-right-color: rgba(255, 255, 255, 0.05);
+}
+
+/* Bản nhẹ cho card/khối lớn — đủ gợi chiều sâu mà không gây ồn. */
+.vyen-bevel-soft {
+  border-top-color: rgba(255, 255, 255, 0.055);
+  border-left-color: rgba(255, 255, 255, 0.035);
+  border-bottom-color: rgba(0, 0, 0, 0.3);
+  border-right-color: rgba(0, 0, 0, 0.2);
+}
+
+/*
+ * Dải tiêu đề khối: nền sáng hơn thân một bậc + gạch chân hairline. Đây là
+ * cách GUI Minecraft phân vùng "khung" và "nội dung" mà không cần bóng.
+ */
+.vyen-block-head {
+  background-color: rgb(var(--panel-soft) / 0.55);
+  border-bottom: 1px solid rgb(var(--border-subtle) / 0.45);
+}
+
+/* Đường phân cách TRONG một khối — mờ hơn hairline khung để không tranh chấp. */
+.vyen-rule {
+  border-color: rgb(var(--border-subtle) / 0.45);
+}
+
 * {
   scrollbar-width: thin;
   scrollbar-color: #495059 transparent;
@@ -285,13 +358,40 @@ html[data-animations='off'] *::after {
   image-rendering: pixelated;
 }
 
+/*
+ * Nhãn MỤC (section header) — giữ bản sắc pixel: IN HOA + pixel font.
+ * Chỉ dùng cho tiêu đề cấp 1 trong panel, không dùng cho nhãn trường.
+ */
 .pixel-label,
 .pixel-meta {
   font-family: var(--font-pixel), 'Pixelify Sans', 'Minecraft', monospace;
-  font-size: 0.84rem;
+  font-size: 0.78rem;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.06em;
   image-rendering: pixelated;
+}
+
+/*
+ * Nhãn TRƯỜNG (form label) — chữ thường, mono, không giãn chữ.
+ *
+ * Trước đây nhãn trường dùng chung .pixel-label nên bị IN HOA + giãn 0.08em +
+ * font pixel: tổ hợp tệ nhất cho việc đọc quét — mắt phải giải mã từng ký tự
+ * thay vì nhận diện hình dạng từ. Tách riêng để bảng cấu hình dày đặc đọc được.
+ */
+.field-label {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 0.8125rem; /* 13px */
+  font-weight: 500;
+  color: rgb(var(--text-primary));
+  letter-spacing: 0;
+}
+
+/* Mô tả phụ dưới nhãn trường — nhỏ, mờ, xuống dòng thoáng. */
+.field-hint {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 0.75rem; /* 12px */
+  line-height: 1.5;
+  color: rgb(var(--text-muted));
 }
 
 /* ------------------------------------------------------------------ */
@@ -346,8 +446,8 @@ html[data-animations='off'] *::after {
 
 @layer components {
   .icon-btn {
-    @apply flex flex-shrink-0 items-center justify-center rounded-none text-[#9fa4ab]
-      transition-colors duration-100 hover:bg-white/[0.08] hover:text-[#6a9fcc]
+    @apply flex flex-shrink-0 items-center justify-center rounded-none text-text-muted
+      transition-colors duration-100 hover:bg-white/[0.08] hover:text-accent-steel
       disabled:pointer-events-none disabled:opacity-40;
   }
   .icon-btn-sm {
@@ -357,60 +457,138 @@ html[data-animations='off'] *::after {
     @apply icon-btn h-8 w-8;
   }
   .icon-btn-danger {
-    @apply hover:bg-[#e8704f]/10 hover:text-[#e8704f];
+    @apply hover:bg-[#e8704f]/10 hover:text-status-error;
   }
 
+  /*
+   * Khối nổi (panel, popover, dropdown) — bevel xuôi: cạnh trên/trái sáng,
+   * dưới/phải tối. Nhờ vậy khối tách khỏi nền mà không cần bóng đổ.
+   */
   .surface-panel {
-    @apply rounded-none border border-[#495059] bg-[#161d27];
+    @apply rounded-none border bg-surface-raised;
+    border-top-color: rgba(255, 255, 255, 0.08);
+    border-left-color: rgba(255, 255, 255, 0.05);
+    border-bottom-color: rgba(0, 0, 0, 0.45);
+    border-right-color: rgba(0, 0, 0, 0.3);
   }
 
   .menu-item {
     @apply flex w-full items-center gap-2 rounded-none px-2.5 py-1.5 text-[12px] font-mono
-      text-[#ebe7e4] transition-colors duration-100 hover:bg-[#252f3d] hover:text-[#ebe7e4];
+      text-text-primary transition-colors duration-100 hover:bg-panel-soft hover:text-text-primary;
   }
   .menu-item-danger {
-    @apply text-[#e8704f] hover:bg-[#e8704f]/10 hover:text-[#e8704f];
+    @apply text-status-error hover:bg-[#e8704f]/10 hover:text-status-error;
   }
 
+  /*
+   * Ô nhập — bevel NGƯỢC: cạnh trên/trái tối, dưới/phải sáng. Mắt đọc ngay
+   * đây là chỗ "khoét vào" để gõ, khác hẳn khối nổi xung quanh.
+   */
   .field {
-    @apply w-full rounded-none border border-[#495059] bg-[#0d1116] p-2.5 text-sm font-mono
-      text-[#ebe7e4] outline-none transition-colors duration-100 placeholder:text-[#9fa4ab]
-      focus:border-[#6a9fcc] focus:bg-[#161d27] focus:ring-1 focus:ring-[#6a9fcc]/40;
+    @apply w-full rounded-none border px-3 py-2 text-sm font-mono text-text-primary
+      outline-none transition-colors duration-100 placeholder:text-text-muted
+      focus:border-accent-steel focus:ring-1 focus:ring-[#6a9fcc]/40;
+    background-color: #0d1116;
+    border-top-color: rgba(0, 0, 0, 0.5);
+    border-left-color: rgba(0, 0, 0, 0.34);
+    border-bottom-color: rgba(255, 255, 255, 0.07);
+    border-right-color: rgba(255, 255, 255, 0.05);
   }
   .field-sm {
-    @apply w-full rounded-none border border-[#495059] bg-[#0d1116] px-2.5 py-1.5
-      text-xs font-mono text-[#ebe7e4] outline-none transition-colors duration-100 placeholder:text-[#9fa4ab]
-      focus:border-[#6a9fcc] focus:bg-[#161d27] focus:ring-1 focus:ring-[#6a9fcc]/40;
+    @apply w-full rounded-none border px-2.5 py-1.5 text-xs font-mono text-text-primary
+      outline-none transition-colors duration-100 placeholder:text-text-muted
+      focus:border-accent-steel focus:ring-1 focus:ring-[#6a9fcc]/40;
+    background-color: #0d1116;
+    border-top-color: rgba(0, 0, 0, 0.5);
+    border-left-color: rgba(0, 0, 0, 0.34);
+    border-bottom-color: rgba(255, 255, 255, 0.07);
+    border-right-color: rgba(255, 255, 255, 0.05);
   }
 
   .btn-primary {
     @apply inline-flex items-center justify-center gap-2 rounded-none bg-[#6a9fcc] px-3.5
       py-2 text-xs font-mono font-semibold text-[#0d1116] transition-all duration-100
       hover:bg-[#6a9fcc]/85 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50;
+    border-top-color: rgba(255, 255, 255, 0.35);
+    border-left-color: rgba(255, 255, 255, 0.22);
   }
   .btn-secondary {
-    @apply inline-flex items-center justify-center gap-2 rounded-none border
-      border-[#495059] bg-[#161d27] px-3 py-2 text-xs font-mono font-medium
-      text-[#ebe7e4] transition-all duration-100 hover:border-[#757d89] hover:bg-[#212730] hover:text-[#ebe7e4] disabled:pointer-events-none
-      disabled:opacity-50;
+    @apply inline-flex items-center justify-center gap-2 rounded-none border bg-surface-raised
+      px-3 py-2 text-xs font-mono font-medium text-text-primary transition-all duration-100
+      hover:bg-panel-bg hover:text-text-primary
+      disabled:pointer-events-none disabled:opacity-50;
+    border-top-color: rgba(255, 255, 255, 0.09);
+    border-left-color: rgba(255, 255, 255, 0.06);
+    border-bottom-color: rgba(0, 0, 0, 0.45);
+    border-right-color: rgba(0, 0, 0, 0.3);
   }
 
   .notice {
     @apply rounded-none border px-3 py-2 text-xs font-mono leading-relaxed;
   }
   .notice-warn {
-    @apply notice border-[#e8993a]/40 bg-[#161d27] text-[#e8993a];
+    @apply notice border-status-warning/40 bg-surface-raised text-status-warning;
   }
   .notice-error {
-    @apply notice border-[#e8704f]/40 bg-[#161d27] text-[#e8704f];
+    @apply notice border-status-error/40 bg-surface-raised text-status-error;
+  }
+
+  .claude-input {
+    @apply field-sm;
+  }
+
+  .no-scrollbar {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  /*
+   * KHỐI CÀI ĐẶT (DESIGN.md mục 4) — thay cho "danh sách phẳng".
+   *
+   * Trước đây mọi mục trong Settings chỉ là div xếp dọc ngăn bằng đường kẻ 1px,
+   * nên 20+ mục trông như một dải chữ liền mạch. Nay mỗi nhóm là một khối có
+   * dải tiêu đề riêng (nền sáng hơn + gạch chân) — mắt tách nhóm tức thì.
+   */
+  .settings-card {
+    @apply rounded-none border bg-surface-raised;
+    border-top-color: rgba(255, 255, 255, 0.06);
+    border-left-color: rgba(255, 255, 255, 0.04);
+    border-bottom-color: rgba(0, 0, 0, 0.4);
+    border-right-color: rgba(0, 0, 0, 0.26);
+  }
+  .settings-card-head {
+    @apply flex items-start gap-2.5 px-4 py-3;
+    background-color: rgb(var(--panel-soft) / 0.5);
+    border-bottom: 1px solid rgb(var(--border-subtle) / 0.45);
+  }
+  .settings-card-body {
+    @apply space-y-3.5 px-4 py-3.5;
+  }
+
+  /*
+   * Khi khối không có dải tiêu đề riêng (markup cũ đặt <h4> trực tiếp trong
+   * thân khối), tự biến <h4> ĐẦU TIÊN thành dải tiêu đề tràn viền: bù padding
+   * của khối bằng margin âm rồi vẽ nền + gạch chân. Nhờ vậy chỉ cần đổi
+   * className của khối ngoài là có ngay bố cục card, không phải viết lại JSX.
+   */
+  .settings-card > h4:first-child,
+  .settings-card-body > h4:first-child {
+    margin: -0.875rem -1rem 0.75rem;
+    padding: 0.625rem 1rem;
+    background-color: rgb(var(--panel-soft) / 0.5);
+    border-bottom: 1px solid rgb(var(--border-subtle) / 0.45);
   }
 
   .settings-panel > * + * {
-    @apply mt-5 border-t border-[#495059] pt-5;
+    @apply mt-4;
   }
 
+
   .dark .icon-btn-danger {
-    @apply hover:bg-[#e8704f]/10 hover:text-[#e8704f];
+    @apply hover:bg-[#e8704f]/10 hover:text-status-error;
   }
 }
 

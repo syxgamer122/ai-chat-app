@@ -266,8 +266,8 @@ export function ThinkingMenu({ value, onChange, disabled, supportedLevels, manda
         aria-expanded={open}
         title={snapped ? snappedLabel : 'Mức độ suy luận của AI'}
         /* `after:-inset-6px` nới vùng chạm 36px lên 48px (mốc 44px trên mobile) mà không đổi khối hiển thị, giống nút icon trong composer. */
-        className={`relative flex h-8 items-center gap-1.5 rounded-none border border-[#495059] bg-[#161d27] px-2.5 text-xs font-medium text-[#ebe7e4] transition-colors after:absolute after:-inset-[6px] after:content-[''] hover:border-[#757d89] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[#6a9fcc] disabled:cursor-not-allowed disabled:opacity-50 ${
-          open ? 'border-[#757d89]' : ''
+        className={`relative flex h-8 items-center gap-1.5 rounded-none border border-border-hairline bg-surface-raised px-2.5 text-xs font-medium text-text-primary transition-colors after:absolute after:-inset-[6px] after:content-[''] hover:border-border-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[#6a9fcc] disabled:cursor-not-allowed disabled:opacity-50 ${
+          open ? 'border-border-hover' : ''
         }`}
       >
         <LevelMeter level={effectiveValue} />
@@ -276,7 +276,7 @@ export function ThinkingMenu({ value, onChange, disabled, supportedLevels, manda
           {snapped ? '*' : ''}
         </span>
         <ChevronDown
-          className={`h-3 w-3 text-[#9fa4ab] transition-transform duration-100 ${open ? 'rotate-180' : ''}`}
+          className={`h-3 w-3 text-text-muted transition-transform duration-100 ${open ? 'rotate-180' : ''}`}
           aria-hidden="true"
         />
       </button>
@@ -294,11 +294,11 @@ export function ThinkingMenu({ value, onChange, disabled, supportedLevels, manda
             style={{ position: 'fixed', top: pos.top, left: pos.left, width: pos.width }}
             className="surface-panel z-40 animate-pop-in overflow-hidden p-1.5"
           >
-            <div className="border-b border-[#495059] px-2.5 pb-1.5 pt-1">
-              <p className="font-mono text-[11px] font-semibold uppercase tracking-[0.08em] text-[#6a9fcc]">
+            <div className="border-b border-border-hairline px-2.5 pb-1.5 pt-1">
+              <p className="font-mono text-[11px] font-semibold uppercase tracking-[0.08em] text-accent-steel">
                 Mức suy luận
               </p>
-              <p className="mt-0.5 text-[11px] leading-relaxed text-[#9fa4ab]">
+              <p className="mt-0.5 text-[11px] leading-relaxed text-text-muted">
                 {menuSubtitle(supportedLevels, !!mandatory)}
               </p>
             </div>
@@ -306,7 +306,7 @@ export function ThinkingMenu({ value, onChange, disabled, supportedLevels, manda
               {LEVELS.map((level, i) => {
                 const isActive = effectiveValue === level.key;
                 const levelSupported = isLevelSupported(level.key);
-                const activeToneClass = level.key === 'max' ? 'text-[#e8993a]' : 'text-[#6a9fcc]';
+                const activeToneClass = level.key === 'max' ? 'text-status-warning' : 'text-accent-steel';
                 return (
                   <button
                     key={level.key}
@@ -327,7 +327,7 @@ export function ThinkingMenu({ value, onChange, disabled, supportedLevels, manda
                       onChange(level.key);
                       close();
                     }}
-                    className={`menu-item ${isActive ? 'bg-[#252f3d] text-[#ebe7e4]' : ''} focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[#6a9fcc] ${
+                    className={`menu-item ${isActive ? 'bg-panel-soft text-text-primary' : ''} focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[#6a9fcc] ${
                       levelSupported ? '' : 'cursor-not-allowed opacity-40'
                     }`}
                   >
@@ -335,24 +335,24 @@ export function ThinkingMenu({ value, onChange, disabled, supportedLevels, manda
                     <span className="min-w-0 flex-1">
                       <span
                         className={`block text-xs font-medium ${
-                          isActive ? activeToneClass : 'text-[#ebe7e4]'
+                          isActive ? activeToneClass : 'text-text-primary'
                         }`}
                       >
                         {level.label}
                       </span>
-                      <span className="mt-0.5 block truncate text-[11px] leading-tight text-[#9fa4ab]">
+                      <span className="mt-0.5 block truncate text-[11px] leading-tight text-text-muted">
                         {level.description}
                       </span>
                     </span>
                     {isActive && (
-                      <Check size={13} className="flex-none text-[#6a9fcc]" aria-hidden="true" />
+                      <Check size={13} className="flex-none text-accent-steel" aria-hidden="true" />
                     )}
                   </button>
                 );
               })}
             </div>
             {snapped && (
-              <p className="mt-1 border-t border-[#495059] px-2.5 py-1.5 text-[11px] leading-relaxed text-[#e8993a]">
+              <p className="mt-1 border-t border-border-hairline px-2.5 py-1.5 text-[11px] leading-relaxed text-status-warning">
                 {levelLabel(value)} không khả dụng, đang gửi {levelLabel(effectiveValue)}
               </p>
             )}

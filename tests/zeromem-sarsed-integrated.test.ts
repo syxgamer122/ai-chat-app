@@ -165,10 +165,11 @@ export class AuthService {
     expect(diskAfterApply).toBe('export function calculate() {\n  return 30;\n}\n');
   });
 
-  it('verifies Dexie v17 schema declarations', () => {
+  it('verifies Dexie schema declarations cho Zero-Mem', () => {
     expect(db.zeromemTraces).toBeDefined();
     expect(db.zeromemEntities).toBeDefined();
     expect(db.zeromemRelations).toBeDefined();
-    expect(db.verno).toBe(17);
+    /* v18: bảng `prompts` (rác web chat cũ) đã bị xoá — xem lib/db.ts. */
+    expect(db.verno).toBe(18);
   });
 });

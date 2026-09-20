@@ -61,7 +61,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           rel="stylesheet"
         />
       </head>
-      <body className="relative min-h-dvh bg-[#0d1116] font-sans text-[#ebe7e4] antialiased overscroll-none selection:bg-[#6a9fcc]/30 selection:text-[#ebe7e4]">
+      <body className="relative min-h-dvh bg-bg-deep font-sans text-text-primary antialiased overscroll-none selection:bg-[#6a9fcc]/30 selection:text-text-primary">
         <script dangerouslySetInnerHTML={{ __html: THEME_NO_FLASH_SCRIPT }} />
         <PWARegister />
         {children}
