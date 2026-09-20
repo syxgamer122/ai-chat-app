@@ -190,3 +190,30 @@ describe('ApprovalQueue — reset', () => {
     expect(t.drainedCount()).toBe(0);
   });
 });
+
+describe('ApprovalQueue — abortAll (P0.5)', () => {
+  it('abortAll() resolves all active and pending requests with false and drains queue', () => {
+    const t = makeQueue();
+    const resolve1 = vi.fn();
+    const resolve2 = vi.fn();
+    const resolve3 = vi.fn();
+
+    t.queue.request({ kind: 'diff', label: '1' }, resolve1);
+    t.queue.request({ kind: 'shell', label: '2' }, resolve2);
+    t.queue.request({ kind: 'diff', label: '3' }, resolve3);
+
+    expect(t.queue.isBusy).toBe(true);
+    expect(t.queue.pending).toBe(2);
+
+    t.queue.abortAll(false);
+
+    expect(resolve1).toHaveBeenCalledWith(false);
+    expect(resolve2).toHaveBeenCalledWith(false);
+    expect(resolve3).toHaveBeenCalledWith(false);
+    expect(t.queue.isBusy).toBe(false);
+    expect(t.queue.pending).toBe(0);
+    expect(t.current()).toBeNull();
+    expect(t.drainedCount()).toBe(1);
+  });
+});
+

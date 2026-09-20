@@ -17,6 +17,7 @@ import type { ToolPermissions, PermissionOverride } from '@/lib/store';
 import { TOOL_CATEGORY_MAP } from '@/lib/store';
 import { getEffectiveToolPermission } from '@/lib/tool-permissions';
 import { evaluateToolcallRules, type ToolcallRule } from '@/lib/toolcall-rules';
+import { isProtectedPath, validateSafeRelativePath } from '@/lib/path-utils';
 
 /* ------------------------------------------------------------------ */
 /* Types                                                                */
@@ -63,11 +64,9 @@ const SAFE_COMMAND_PATTERNS: RegExp[] = [
   /^npx\s+(?:npm-check|depcheck)\b/i,
   // File reading / listing
   /^(?:cat|head|tail|less|more|wc|file|stat|ls|dir|find|grep|rg|fd)\b/i,
-  // Node evaluation
-  /^node\s+-e\b/i,
-  /^node\s+--eval\b/i,
-  // Python read-only
-  /^python(?:3)?\s+(?:-c|--version|-V)\b/i,
+  // Version checks (read-only) — strictly version flags only, no arbitrary args
+  /^node\s+(?:--version|-v)\s*$/i,
+  /^python(?:3)?\s+(?:--version|-V)\s*$/i,
 ];
 
 /**
@@ -124,6 +123,8 @@ const READ_ONLY_TOOLS = new Set([
 const WRITE_TOOLS = new Set([
   'fs_write',
   'fs_edit',
+  'fs_delete',
+  'code_patch',
   'git_commit',
   'memory_save',
   'lesson_save',
@@ -143,9 +144,15 @@ const WRITE_TOOLS = new Set([
 
 /**
  * Check if a shell command matches any safe pattern.
+ * Strictly disallows shell metacharacters: chaining (&&, ||, ;), piping (|),
+ * redirections (>, <), command substitution (`...`, $(...)), and newlines.
  */
 export function isSafeCommand(command: string): boolean {
   const trimmed = command.trim();
+  if (!trimmed) return false;
+  if (/[;&|`$><\r\n]/.test(trimmed)) {
+    return false;
+  }
   return SAFE_COMMAND_PATTERNS.some((p) => p.test(trimmed));
 }
 
@@ -156,6 +163,27 @@ export function isSafeCommand(command: string): boolean {
 export function isAlwaysBlocked(command: string): boolean {
   const trimmed = command.trim();
   return ALWAYS_BLOCK_PATTERNS.some((p) => p.test(trimmed));
+}
+
+/**
+ * Check if tool targets auto-execute or sensitive configuration files
+ * (.git/**, package.json, .vscode/**, .env*, .vyen/**).
+ * Modifying or staging these files ALWAYS requires explicit approval (ask),
+ * even in Autonomous / never policy mode or per-tool override 'auto'.
+ */
+export function targetsProtectedPath(toolName: string, args: Record<string, unknown>): boolean {
+  const isTargetingTool =
+    WRITE_TOOLS.has(toolName) || toolName === 'git_add' || toolName === 'fs_delete';
+  if (!isTargetingTool) return false;
+
+  const singlePath = args.path ?? args.relPath ?? args.file ?? args.filepath ?? args.file_path;
+  if (typeof singlePath === 'string' && isProtectedPath(singlePath)) {
+    return true;
+  }
+  if (Array.isArray(args.paths)) {
+    return args.paths.some((p) => typeof p === 'string' && isProtectedPath(p));
+  }
+  return false;
 }
 
 /**
@@ -179,10 +207,21 @@ export function shouldAutoApprove(ctx: AutoApproveContext): boolean {
   // ── Mode chat_only: vô hiệu hoàn toàn tool ──
   if (ctx.policy === 'chat_only') return false;
 
-  // ── 0. Destructive safety check (always blocked) ──
+  // ── 0a. Destructive safety check (always blocked) ──
   if (ctx.toolName === 'shell_run') {
     const command = String(ctx.args.command ?? '');
     if (isAlwaysBlocked(command)) return false;
+    // P0.2: Shell command cwd lockdown check
+    if (ctx.args.cwd && !validateSafeRelativePath(String(ctx.args.cwd)).ok) {
+      return false;
+    }
+  }
+
+  // ── 0b. P0.3: Protect auto-execute and sensitive configuration files ──
+  // (.git/**, package.json, .vscode/**, .env*, .vyen/**)
+  // ALWAYS require explicit user approval (ask), even in 'never' mode or override 'auto'
+  if (targetsProtectedPath(ctx.toolName, ctx.args)) {
+    return false;
   }
 
   // ── 1. User Toolcall Rules (mức ưu tiên trước policy) ──

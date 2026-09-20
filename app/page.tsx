@@ -53,6 +53,13 @@ export default function Home() {
     }
   }, []);
 
+  /* P0.6: Yêu cầu quyền lưu trữ bền vững (persistent storage) cho IndexedDB để tránh bị trình duyệt tự dọn dẹp */
+  useEffect(() => {
+    if (typeof navigator !== 'undefined' && navigator.storage?.persist) {
+      navigator.storage.persist().catch(() => {});
+    }
+  }, []);
+
   /* Trạng thái mới nhất cho handler phím tắt. Đọc qua ref để listener KHÔNG
      phải gắn/gỡ lại mỗi lần thu gọn sidebar hay mở settings — trước đây
      effect phụ thuộc `isSidebarCollapsed` + `isSettingsOpen` nên cứ đổi là

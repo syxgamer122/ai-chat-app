@@ -16,6 +16,8 @@ import {
   serializeStaging,
   parseStaging,
   emptyStagingStore,
+  computeSha256,
+  verifyDiskHash,
   STAGING_KV_KEY,
 } from '@/lib/staging';
 
@@ -147,3 +149,52 @@ describe('STAGING_KV_KEY', () => {
     expect(STAGING_KV_KEY).toBe('staging:current');
   });
 });
+
+describe('P0.4: TOCTOU Prevention with SHA-256 baseHash', () => {
+  it('computes sha256 hash consistently', async () => {
+    const hash1 = await computeSha256('hello world');
+    const hash2 = await computeSha256('hello world');
+    const hashDifferent = await computeSha256('hello world 2');
+
+    expect(hash1).toBe(hash2);
+    expect(hash1).not.toBe(hashDifferent);
+    expect(await computeSha256(null)).toBeNull();
+  });
+
+  it('stores baseHash in stagedFile and preserves it across subsequent stages', async () => {
+    const originalText = 'const a = 1;';
+    const hash = await computeSha256(originalText);
+
+    let store = stageFile(emptyStagingStore(), 'src/app.ts', originalText, 'const a = 2;', hash);
+    expect(store['src/app.ts'].baseHash).toBe(hash);
+
+    // Staging again preserves the first baseHash
+    store = stageFile(store, 'src/app.ts', 'const a = 2;', 'const a = 3;', 'new-hash');
+    expect(store['src/app.ts'].baseHash).toBe(hash);
+  });
+
+  it('persists and restores baseHash through serializeStaging and parseStaging', async () => {
+    const hash = await computeSha256('disk v1');
+    const store = stageFile(emptyStagingStore(), 'foo.ts', 'disk v1', 'staged v1', hash);
+
+    const serialized = serializeStaging(store);
+    const parsed = parseStaging(serialized);
+
+    expect(parsed['foo.ts'].baseHash).toBe(hash);
+  });
+
+  it('verifyDiskHash detects on-disk file tampering / TOCTOU mismatch', async () => {
+    const baseContent = 'function main() { return 1; }';
+    const baseHash = await computeSha256(baseContent);
+
+    // File on disk matches baseContent -> ok
+    const check1 = await verifyDiskHash(baseContent, baseHash);
+    expect(check1.matches).toBe(true);
+
+    // File on disk changed externally -> mismatch detected
+    const modifiedDisk = 'function main() { return 2; }';
+    const check2 = await verifyDiskHash(modifiedDisk, baseHash);
+    expect(check2.matches).toBe(false);
+  });
+});
+

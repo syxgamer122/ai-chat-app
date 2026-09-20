@@ -167,7 +167,7 @@ import {
   type TurnCapture,
 } from '@/lib/workspace-checkpoints';
 import { CLIENT_TOOL_NAMES, CLIENT_TOOL_DEFS } from '@/lib/agent-tools';
-import { shouldAutoApprove } from '@/lib/auto-pilot';
+import { shouldAutoApprove, targetsProtectedPath } from '@/lib/auto-pilot';
 import { loadToolPermissionsFromDb } from '@/lib/tool-permissions';
 import {
   isToolDenied,
@@ -214,6 +214,7 @@ import {
   stagingStats,
   serializeStaging,
   parseStaging,
+  computeSha256,
   STAGING_KV_KEY,
   type StagingStore,
 } from '@/lib/staging';
@@ -243,7 +244,7 @@ import {
   suggestLessonFromDebug,
   type LessonCategory,
 } from '@/lib/lessons';
-import { normalizePathKey } from '@/lib/path-utils';
+import { normalizePathKey, validateSafeRelativePath } from '@/lib/path-utils';
 import { showNotice } from '@/lib/notice-store';
 import { DiffConfirm, type DiffConfirmState } from '@/components/diff-confirm';
 import { ShellConfirm } from '@/components/shell-confirm';
@@ -734,14 +735,37 @@ export default function ChatInterface() {
       }
     }
 
-    /* Ghi từng file vào đĩa. */
+    /* Ghi từng file vào đĩa — có kiểm tra TOCTOU trước khi ghi */
+    const conflictedFiles: string[] = [];
+    const writtenPaths = new Set<string>();
+
     for (const file of files) {
       try {
+        // TOCTOU check: đọc lại file hiện tại trên đĩa và so sánh hash với baseHash
+        let currentDiskText: string | null = null;
+        if (isDesktop) {
+          const r = await desktopFsReadFull(file.path);
+          if (r.status === 'ok') currentDiskText = r.content;
+        } else if (wsForFs) {
+          const r = await fsReadFull(wsForFs, file.path);
+          if (r.status === 'ok') currentDiskText = r.content;
+        }
+        const currentDiskHash = await computeSha256(currentDiskText);
+        if (file.baseHash !== undefined && currentDiskHash !== file.baseHash) {
+          conflictedFiles.push(file.path);
+          showNotice(
+            `[TOCTOU] Xung đột: File "${file.path}" đã bị thay đổi trên đĩa bởi ứng dụng khác kể từ khi stage. Đã giữ nguyên trong staging để re-confirm.`,
+            8000,
+          );
+          continue;
+        }
+
         if (isDesktop) {
           await desktopFsWrite(file.path, file.content);
         } else if (wsForFs) {
           await fsWrite(wsForFs, file.path, file.content);
         }
+        writtenPaths.add(normalizePathKey(file.path));
       } catch (e) {
         showNotice(`Lỗi ghi file ${file.path}: ${e instanceof Error ? e.message : String(e)}`);
       }
@@ -750,10 +774,19 @@ export default function ChatInterface() {
     /* Lưu checkpoint (cho undo sau này). */
     if (capture) void saveTurnCapture(capture);
 
-    /* Clear overlay + persist. */
-    updateStaging(clearStaging(store));
-    setStagingPanelOpen(false);
-    showNotice(`Đã apply ${files.length} file vào đĩa.`);
+    /* Chỉ gỡ khỏi staging những file đã ghi thành công */
+    const nextStore = { ...stagingRef.current };
+    for (const p of writtenPaths) {
+      delete nextStore[p];
+    }
+    updateStaging(nextStore);
+
+    if (conflictedFiles.length > 0) {
+      showNotice(`Đã apply ${writtenPaths.size} file. Còn lại ${conflictedFiles.length} file xung đột (TOCTOU) cần kiểm tra lại.`);
+    } else {
+      setStagingPanelOpen(false);
+      showNotice(`Đã apply ${writtenPaths.size} file vào đĩa.`);
+    }
   }, [readCaptureForPath, updateStaging]);
 
   /** Reject từng file — chỉ xóa khỏi overlay, đĩa không bị đụng. */
@@ -1100,6 +1133,9 @@ export default function ChatInterface() {
 
   const autoApproveShell = useCallback(
     async (s: { command: string; cwd?: string }): Promise<boolean> => {
+      if (s.cwd && !validateSafeRelativePath(s.cwd).ok) {
+        return false;
+      }
       if (
         shouldAutoApprove({
           toolName: 'shell_run',
@@ -1750,9 +1786,11 @@ export default function ChatInterface() {
             }
             /* Staging path: ghi vào overlay thay vì đĩa. Agent tiếp tục làm
                việc bình thường; user review batch trong staging panel. */
+            const baseHash = await computeSha256(beforeText);
             if (stagingEnabled) {
               const diskOriginal = existingStaged ? existingStaged.original : beforeText;
-              updateStaging(stageFile(stagingRef.current, path, diskOriginal, current));
+              const stagedBaseHash = existingStaged?.baseHash !== undefined ? existingStaged.baseHash : baseHash;
+              updateStaging(stageFile(stagingRef.current, path, diskOriginal, current, stagedBaseHash));
               readFilesRef.current.add(normPath);
               return JSON.stringify({ applied: true, staged: true, blocks: applied.length, strategies: applied });
             }
@@ -1763,6 +1801,16 @@ export default function ChatInterface() {
                 applied: false,
                 approved: false,
                 note: 'Người dùng TỪ CHỐI bản sửa này. Hỏi họ muốn điều chỉnh gì trước khi thử lại.',
+              });
+            }
+            // TOCTOU check: xác minh on-disk hash sau khi người dùng duyệt diff
+            const diskCheck = isDesktop ? await desktopFsReadFull(path) : await fsReadFull(wsForFs!, path);
+            const currentDiskText = diskCheck.status === 'ok' ? diskCheck.content : null;
+            const currentDiskHash = await computeSha256(currentDiskText);
+            if (currentDiskHash !== baseHash) {
+              return JSON.stringify({
+                applied: false,
+                error: `[TOCTOU] File "${path}" đã bị thay đổi trên đĩa bởi ứng dụng khác trong khi chờ duyệt. Vui lòng đọc lại file (fs_read) và áp lại thay đổi để xác nhận lại.`,
               });
             }
             const capChatId = useAppStore.getState().currentChatId;
@@ -1817,6 +1865,7 @@ export default function ChatInterface() {
             }
             const content = String(args.content ?? '');
             let oldText = '';
+            let fileOnDiskExists = false;
             {
               /* Đọc full như fs_edit: oldText là cơ sở của diff duyệt + original
                  của staging + đếm dòng cho trần 200 dòng — bản cắt 24k làm user
@@ -1831,7 +1880,10 @@ export default function ChatInterface() {
                     'Dùng fs_edit để sửa cục bộ thay vì ghi lại cả file.',
                 });
               }
-              if (full.status === 'ok') oldText = full.content;
+              if (full.status === 'ok') {
+                oldText = full.content;
+                fileOnDiskExists = true;
+              }
               /* missing/error → coi như file mới — diff toàn bộ là add (giữ hành vi cũ). */
             }
             /* Large file protection (port Wove, Apache-2.0): chặn full rewrite
@@ -1852,11 +1904,13 @@ export default function ChatInterface() {
                 });
               }
             }
+            const baseHash = fileOnDiskExists ? await computeSha256(oldText) : null;
             /* Staging path: ghi vào overlay thay vì đĩa. */
             if (stagingEnabled) {
               const existing = stagingRef.current[normPath];
-              const diskOriginal = existing ? existing.original : (oldText || null);
-              updateStaging(stageFile(stagingRef.current, path, diskOriginal, content));
+              const diskOriginal = existing ? existing.original : (fileOnDiskExists ? oldText : null);
+              const stagedBaseHash = existing?.baseHash !== undefined ? existing.baseHash : baseHash;
+              updateStaging(stageFile(stagingRef.current, path, diskOriginal, content, stagedBaseHash));
               readFilesRef.current.add(normPath);
               return JSON.stringify({ written: true, staged: true, size: content.length });
             }
@@ -1867,6 +1921,16 @@ export default function ChatInterface() {
                 written: false,
                 approved: false,
                 note: 'Người dùng TỪ CHỐI ghi file này. Đừng ghi lại y nguyên — hỏi họ muốn điều chỉnh gì.',
+              });
+            }
+            // TOCTOU check: xác minh on-disk hash sau khi người dùng duyệt diff
+            const diskCheck = isDesktop ? await desktopFsReadFull(path) : await fsReadFull(wsForFs!, path);
+            const currentDiskText = diskCheck.status === 'ok' ? diskCheck.content : null;
+            const currentDiskHash = await computeSha256(currentDiskText);
+            if (currentDiskHash !== baseHash) {
+              return JSON.stringify({
+                written: false,
+                error: `[TOCTOU] File "${path}" đã bị thay đổi trên đĩa bởi ứng dụng khác trong khi chờ duyệt. Vui lòng đọc lại file (fs_read) trước khi ghi đè để xác nhận lại.`,
               });
             }
             const capChatId = useAppStore.getState().currentChatId;
@@ -1884,7 +1948,17 @@ export default function ChatInterface() {
           }
           case 'shell_run': {
             const command = String(args.command ?? '');
-            const cwd = args.cwd ? String(args.cwd) : undefined;
+            const rawCwd = args.cwd ? String(args.cwd) : undefined;
+            if (rawCwd) {
+              const cwdCheck = validateSafeRelativePath(rawCwd);
+              if (!cwdCheck.ok) {
+                return JSON.stringify({
+                  approved: false,
+                  error: `Thư mục làm việc (cwd) không hợp lệ hoặc thoát khỏi workspace: "${rawCwd}". ${cwdCheck.reason}`,
+                });
+              }
+            }
+            const cwd = rawCwd;
             const timeoutSecs = typeof args.timeout_secs === 'number' ? Math.min(Math.max(args.timeout_secs, 1), 600) : undefined;
             const timeoutMs = timeoutSecs ? timeoutSecs * 1000 : undefined;
             const approved = await autoApproveShell({ command, cwd });
@@ -1985,6 +2059,15 @@ export default function ChatInterface() {
           case 'git_add': {
             const bridge = (await import('@/lib/desktop-bridge')).vyenDesktop()!;
             const paths = Array.isArray(args.paths) ? (args.paths as string[]) : [];
+            if (targetsProtectedPath('git_add', { paths })) {
+              const approved = await autoApproveShell({
+                command: `git add ${paths.join(' ')} (tệp cấu hình/nhạy cảm)`,
+                cwd: undefined,
+              });
+              if (!approved) {
+                return JSON.stringify({ approved: false, note: 'Người dùng TỪ CHỐI stage tệp cấu hình/nhạy cảm này vào git.' });
+              }
+            }
             const result = await bridge.git.add(paths);
             return JSON.stringify(result);
           }
@@ -2337,8 +2420,9 @@ export default function ChatInterface() {
                 note: 'Patch NGUYÊN TỬ: không khối nào được áp vì có khối không khớp. Đọc lại file rồi copy nguyên văn đoạn SEARCH.',
               });
             }
+            const baseHash = await computeSha256(original);
             if (stagingEnabled) {
-              updateStaging(stageFile(stagingRef.current, targetPath, original, patched.modifiedContent));
+              updateStaging(stageFile(stagingRef.current, targetPath, original, patched.modifiedContent, baseHash));
               return JSON.stringify({
                 ok: true,
                 staged: true,
@@ -2359,12 +2443,35 @@ export default function ChatInterface() {
                 note: 'Người dùng TỪ CHỐI bản vá. Hỏi họ muốn điều chỉnh gì trước khi thử lại.',
               });
             }
-            return JSON.stringify({
+            // TOCTOU check: xác minh on-disk hash sau khi người dùng duyệt diff
+            const diskCheck = isDesktop ? await desktopFsReadFull(targetPath) : await fsReadFull(wsForFs!, targetPath);
+            const currentDiskText = diskCheck.status === 'ok' ? diskCheck.content : null;
+            const currentDiskHash = await computeSha256(currentDiskText);
+            if (currentDiskHash !== baseHash) {
+              return JSON.stringify({
+                ok: false,
+                applied: false,
+                error: `[TOCTOU] File "${targetPath}" đã bị thay đổi trên đĩa bởi ứng dụng khác trong khi chờ duyệt. Vui lòng đọc lại file (fs_read) và áp lại thay đổi để xác nhận lại.`,
+              });
+            }
+            const capChatId = useAppStore.getState().currentChatId;
+            if (capChatId) {
+              if (!turnCaptureRef.current) {
+                turnCaptureRef.current = newTurnCapture(capChatId);
+              }
+              captureFile(turnCaptureRef.current, await readCaptureForPath(isDesktop ? null : wsForFs!, targetPath));
+            }
+            const res = isDesktop ? await desktopFsWrite(targetPath, patched.modifiedContent) : await fsWrite(wsForFs!, targetPath, patched.modifiedContent);
+            if (turnCaptureRef.current) void saveTurnCapture(turnCaptureRef.current);
+            const editChecks = await runPostEditChecks();
+            const editResult = JSON.stringify({
               ok: true,
               applied: true,
               hunksApplied: patched.hunksApplied,
               totalHunks: patched.totalHunks,
+              ...res,
             });
+            return editChecks ? attachPostEditCheck(editResult, editChecks) : editResult;
           }
 
           case 'code_verify': {
@@ -3555,6 +3662,9 @@ export default function ChatInterface() {
     stop();
     closeTurnCapture();
 
+    // P0.5: Hủy toàn bộ modal phê duyệt đang mở và promise đang đợi, tránh deadlock / treo lượt chạy
+    approvalQueue.abortAll(false);
+
     /**
      * P3.1 (Escape) — abort rồi TRẢ message đã queue về ô nhập: ưu tiên tin
      * steering mới nhất, hết steering mới tới follow-up.
@@ -3587,7 +3697,7 @@ export default function ChatInterface() {
     ) {
       pendingAssistantForkRef.current = null;
     }
-  }, [stop, stopRun, closeTurnCapture]);
+  }, [stop, stopRun, closeTurnCapture, approvalQueue]);
 
   useEffect(() => {
     if (isLoading) {

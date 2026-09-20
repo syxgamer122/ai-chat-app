@@ -161,6 +161,18 @@ describe('isSafeCommand', () => {
     expect(isSafeCommand('docker rm -f container')).toBe(false);
     expect(isSafeCommand('pip install malware')).toBe(false);
   });
+
+  it('rejects arbitrary code execution commands (P0.1: node -e, node --eval, python -c)', () => {
+    expect(isSafeCommand('node -e "console.log(1)"')).toBe(false);
+    expect(isSafeCommand('node --eval "process.exit() stand"')).toBe(false);
+    expect(isSafeCommand('python -c "import os; os.system(\'ls\')"')).toBe(false);
+    expect(isSafeCommand('python3 -c "print(1)"')).toBe(false);
+    // Harmless version checks remain allowed
+    expect(isSafeCommand('node -v')).toBe(true);
+    expect(isSafeCommand('node --version')).toBe(true);
+    expect(isSafeCommand('python --version')).toBe(true);
+    expect(isSafeCommand('python3 -V')).toBe(true);
+  });
 });
 
 /* ------------------------------------------------------------------ */
@@ -261,3 +273,82 @@ describe('per-tool overrides', () => {
     })).toBe(true);
   });
 });
+
+/* ------------------------------------------------------------------ */
+/* P0.2 & P0.3 Security Hardening                                     */
+/* ------------------------------------------------------------------ */
+
+describe('P0.2: Shell cwd confinement', () => {
+  it('blocks shell_run when cwd attempts path traversal or absolute paths', () => {
+    // Path escapes
+    expect(shouldAutoApprove(ctx('shell_run', { command: 'npm test', cwd: '../outside' }, 'never'))).toBe(false);
+    expect(shouldAutoApprove(ctx('shell_run', { command: 'npm test', cwd: '../../etc' }, 'never'))).toBe(false);
+    expect(shouldAutoApprove(ctx('shell_run', { command: 'npm test', cwd: '/etc' }, 'never'))).toBe(false);
+    expect(shouldAutoApprove(ctx('shell_run', { command: 'npm test', cwd: 'C:\\Windows' }, 'never'))).toBe(false);
+    expect(shouldAutoApprove(ctx('shell_run', { command: 'npm test', cwd: '\\\\server\\share' }, 'never'))).toBe(false);
+
+    // Also blocks in smart mode
+    expect(shouldAutoApprove(ctx('shell_run', { command: 'npm test', cwd: '../outside' }, 'smart'))).toBe(false);
+
+    // Valid in-workspace cwd is allowed
+    expect(shouldAutoApprove(ctx('shell_run', { command: 'npm test', cwd: 'packages/app' }, 'smart'))).toBe(true);
+    expect(shouldAutoApprove(ctx('shell_run', { command: 'npm test', cwd: './subpkg' }, 'smart'))).toBe(true);
+    expect(shouldAutoApprove(ctx('shell_run', { command: 'npm test', cwd: '.' }, 'smart'))).toBe(true);
+  });
+});
+
+describe('P0.3: Protected auto-execute and sensitive config files', () => {
+  it('forces explicit user approval (ask -> false) for protected files even in never / YOLO mode', () => {
+    // package.json (auto-execute scripts)
+    expect(shouldAutoApprove(ctx('fs_write', { path: 'package.json' }, 'never'))).toBe(false);
+    expect(shouldAutoApprove(ctx('fs_edit', { path: 'package.json' }, 'never'))).toBe(false);
+    expect(shouldAutoApprove(ctx('fs_write', { path: './package.json' }, 'never'))).toBe(false);
+    expect(shouldAutoApprove(ctx('fs_write', { path: 'sub/package.json' }, 'never'))).toBe(false);
+
+    // .git/** (hooks, config)
+    expect(shouldAutoApprove(ctx('fs_write', { path: '.git/hooks/pre-commit' }, 'never'))).toBe(false);
+    expect(shouldAutoApprove(ctx('fs_edit', { path: '.git/config' }, 'never'))).toBe(false);
+
+    // .vscode/** (tasks.json, settings.json)
+    expect(shouldAutoApprove(ctx('fs_write', { path: '.vscode/tasks.json' }, 'never'))).toBe(false);
+    expect(shouldAutoApprove(ctx('fs_write', { path: '.vscode/settings.json' }, 'never'))).toBe(false);
+
+    // .env* (secrets)
+    expect(shouldAutoApprove(ctx('fs_write', { path: '.env' }, 'never'))).toBe(false);
+    expect(shouldAutoApprove(ctx('fs_write', { path: '.env.local' }, 'never'))).toBe(false);
+    expect(shouldAutoApprove(ctx('fs_write', { path: '.env.production' }, 'never'))).toBe(false);
+    expect(shouldAutoApprove(ctx('fs_write', { path: 'config/.env.test' }, 'never'))).toBe(false);
+
+    // .vyen/** (internal configuration & rules)
+    expect(shouldAutoApprove(ctx('fs_write', { path: '.vyen/rules.json' }, 'never'))).toBe(false);
+    expect(shouldAutoApprove(ctx('fs_edit', { path: '.vyen/config.json' }, 'never'))).toBe(false);
+
+    // git_add targeting protected files
+    expect(shouldAutoApprove(ctx('git_add', { paths: ['.env'] }, 'never'))).toBe(false);
+    expect(shouldAutoApprove(ctx('git_add', { paths: ['src/index.ts', 'package.json'] }, 'never'))).toBe(false);
+
+    // Non-protected files remain auto-approved in never mode
+    expect(shouldAutoApprove(ctx('fs_write', { path: 'src/app.ts' }, 'never'))).toBe(true);
+    expect(shouldAutoApprove(ctx('fs_edit', { path: 'README.md' }, 'never'))).toBe(true);
+  });
+
+  it('protected files cannot be bypassed by per-tool override "auto"', () => {
+    const perms: ToolPermissions = { ...DEFAULT_PERMS, fs_write: 'auto', fs_edit: 'auto' };
+    expect(shouldAutoApprove({
+      toolName: 'fs_write',
+      args: { path: 'package.json' },
+      policy: 'smart',
+      autoPilotEnabled: true,
+      toolPermissions: perms,
+    })).toBe(false);
+
+    expect(shouldAutoApprove({
+      toolName: 'fs_write',
+      args: { path: '.env' },
+      policy: 'smart',
+      autoPilotEnabled: true,
+      toolPermissions: perms,
+    })).toBe(false);
+  });
+});
+

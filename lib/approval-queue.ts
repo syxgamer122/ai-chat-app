@@ -99,6 +99,25 @@ export class ApprovalQueue<TItem> {
   }
 
   /**
+   * Huỷ toàn bộ yêu cầu phê duyệt đang chờ và đang hiện, resolve chúng với `approved` (mặc định false).
+   * Đóng modal đang hiện và báo onDrained để giải phóng run, tránh deadlock hoặc rò rỉ promise.
+   */
+  abortAll(approved = false): void {
+    const all = [...(this.active ? [this.active] : []), ...this.waiting];
+    this.waiting = [];
+    this.active = null;
+    this.cfg.onPresent(null);
+    this.cfg.onDrained?.();
+    for (const entry of all) {
+      try {
+        entry.resolve(approved);
+      } catch {
+        // Phòng hờ resolver ném lỗi
+      }
+    }
+  }
+
+  /**
    * Xoá sạch hàng đợi mà KHÔNG resolve các promise đang chờ.
    *
    * Chỉ dùng khi component unmount hoặc đổi phiên: promise của tool đang chờ

@@ -20,6 +20,46 @@ import { normalizePathKey } from '@/lib/path-utils';
 const normalizeStagingPath = normalizePathKey;
 export { normalizeStagingPath };
 
+/**
+ * Tính mã băm SHA-256 cho chuỗi nội dung văn bản.
+ * Chạy được cả trong Browser (Web Crypto) và Node.js.
+ */
+export async function computeSha256(content: string | null): Promise<string | null> {
+  if (content === null) return null;
+  if (typeof crypto !== 'undefined' && crypto.subtle) {
+    const data = new TextEncoder().encode(content);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+  }
+  try {
+    const nodeCrypto = await import('node:crypto');
+    return nodeCrypto.createHash('sha256').update(content, 'utf8').digest('hex');
+  } catch {
+    let hash = 0;
+    for (let i = 0; i < content.length; i++) {
+      hash = ((hash << 5) - hash) + content.charCodeAt(i);
+      hash |= 0;
+    }
+    return String(hash);
+  }
+}
+
+/**
+ * Kiểm tra xem hash SHA-256 của file trên đĩa hiện tại có khớp với baseHash đã ghi nhận trước đó hay không.
+ * Giúp ngăn chặn TOCTOU (Time-of-Check to Time-of-Use) race conditions khi ghi đĩa hoặc apply diffs.
+ */
+export async function verifyDiskHash(
+  currentDiskContent: string | null,
+  expectedBaseHash: string | null | undefined,
+): Promise<{ matches: boolean; currentHash: string | null }> {
+  const currentHash = await computeSha256(currentDiskContent);
+  if (expectedBaseHash === undefined) {
+    return { matches: true, currentHash };
+  }
+  return { matches: currentHash === expectedBaseHash, currentHash };
+}
+
 export interface StagedFile {
   /**
    * Path NGUYÊN VĂN từ tool call — dùng để GHI ĐĨA + hiển thị. FS trên
@@ -37,6 +77,8 @@ export interface StagedFile {
   /** Nội dung đã stage (kết quả tích lũy mọi lần sửa). */
   content: string;
   stagedAt: number;
+  /** SHA-256 hash của original trên đĩa tại thời điểm stage đầu tiên (null nếu file mới). */
+  baseHash?: string | null;
 }
 
 /** Key của record = path đã chuẩn hóa (normalizeStagingPath). Plain object để
@@ -64,6 +106,7 @@ export function stageFile(
   path: string,
   diskOriginal: string | null,
   content: string,
+  baseHash?: string | null,
 ): StagingStore {
   const key = normalizeStagingPath(path);
   const existing = store[key];
@@ -74,6 +117,7 @@ export function stageFile(
       original: existing ? existing.original : diskOriginal,
       content,
       stagedAt: Date.now(),
+      baseHash: existing?.baseHash !== undefined ? existing.baseHash : (baseHash !== undefined ? baseHash : null),
     },
   };
 }
@@ -168,6 +212,7 @@ export function parseStaging(raw: unknown): StagingStore {
       original: f.original ?? null,
       content: f.content,
       stagedAt: typeof f.stagedAt === 'number' ? f.stagedAt : Date.now(),
+      baseHash: typeof f.baseHash === 'string' ? f.baseHash : (f.baseHash === null ? null : undefined),
     };
   }
   return out;
