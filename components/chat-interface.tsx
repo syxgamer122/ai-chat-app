@@ -21,6 +21,7 @@ import {
 import { AVAILABLE_MODELS } from '@/lib/models';
 import { shouldShowThinkingControl } from '@/lib/reasoning-capability';
 import { ApprovalQueue } from '@/lib/approval-queue';
+import { recordAuditLog } from '@/lib/audit-log';
 import { deriveModelOption, toggleFavorite, upsertRecent } from '@/lib/model-meta';
 import {
   reconstructActiveThread,
@@ -1134,6 +1135,15 @@ export default function ChatInterface() {
   const autoApproveShell = useCallback(
     async (s: { command: string; cwd?: string }): Promise<boolean> => {
       if (s.cwd && !validateSafeRelativePath(s.cwd).ok) {
+        void recordAuditLog({
+          action: 'rejection',
+          tool: 'shell_run',
+          target: s.command,
+          decision: 'blocked',
+          payload: s,
+          chatId: chatKey,
+          details: { reason: 'unsafe_cwd' },
+        });
         return false;
       }
       if (
@@ -1145,11 +1155,28 @@ export default function ChatInterface() {
           toolPermissions,
         })
       ) {
+        void recordAuditLog({
+          action: 'shell_execution',
+          tool: 'shell_run',
+          target: s.command,
+          decision: 'auto_approved',
+          payload: s,
+          chatId: chatKey,
+        });
         return true;
       }
-      return showShellModal(s);
+      const approved = await showShellModal(s);
+      void recordAuditLog({
+        action: approved ? 'approval' : 'rejection',
+        tool: 'shell_run',
+        target: s.command,
+        decision: approved ? 'approved' : 'rejected',
+        payload: s,
+        chatId: chatKey,
+      });
+      return approved;
     },
-    [autoPilot, approvalPolicy, toolPermissions, showShellModal],
+    [autoPilot, approvalPolicy, toolPermissions, showShellModal, chatKey],
   );
 
   const autoApproveCode = useCallback(
@@ -1163,11 +1190,26 @@ export default function ChatInterface() {
           toolPermissions,
         })
       ) {
+        void recordAuditLog({
+          action: 'shell_execution',
+          tool: 'run_code',
+          decision: 'auto_approved',
+          payload: s,
+          chatId: chatKey,
+        });
         return true;
       }
-      return showShellModal({ command: `[run_code]:\n${s.code}` });
+      const approved = await showShellModal({ command: `[run_code]:\n${s.code}` });
+      void recordAuditLog({
+        action: approved ? 'approval' : 'rejection',
+        tool: 'run_code',
+        decision: approved ? 'approved' : 'rejected',
+        payload: s,
+        chatId: chatKey,
+      });
+      return approved;
     },
-    [autoPilot, approvalPolicy, toolPermissions, showShellModal],
+    [autoPilot, approvalPolicy, toolPermissions, showShellModal, chatKey],
   );
 
   const autoApproveDiff = useCallback(
@@ -1181,11 +1223,28 @@ export default function ChatInterface() {
           toolPermissions,
         })
       ) {
+        void recordAuditLog({
+          action: 'file_modification',
+          tool: 'fs_edit',
+          target: s.path,
+          decision: 'auto_approved',
+          payload: s,
+          chatId: chatKey,
+        });
         return true;
       }
-      return showDiffModal(s);
+      const approved = await showDiffModal(s);
+      void recordAuditLog({
+        action: approved ? 'approval' : 'rejection',
+        tool: 'fs_edit',
+        target: s.path,
+        decision: approved ? 'approved' : 'rejected',
+        payload: s,
+        chatId: chatKey,
+      });
+      return approved;
     },
-    [autoPilot, approvalPolicy, toolPermissions, showDiffModal],
+    [autoPilot, approvalPolicy, toolPermissions, showDiffModal, chatKey],
   );
 
   useEffect(() => {
@@ -1821,6 +1880,7 @@ export default function ChatInterface() {
               captureFile(turnCaptureRef.current, await readCaptureForPath(isDesktop ? null : wsForFs!, path));
             }
             const res = isDesktop ? await desktopFsWrite(path, current) : await fsWrite(wsForFs!, path, current);
+            void recordAuditLog({ action: 'file_modification', tool: 'fs_edit', target: path, decision: 'executed', payload: { path, blocks: applied.length }, chatId: chatKey });
             if (turnCaptureRef.current) void saveTurnCapture(turnCaptureRef.current);
             const editChecks = await runPostEditChecks();
             const editResult = JSON.stringify({ applied: true, blocks: applied.length, strategies: applied, ...res });
@@ -1941,6 +2001,7 @@ export default function ChatInterface() {
               captureFile(turnCaptureRef.current, await readCaptureForPath(isDesktop ? null : wsForFs!, path));
             }
             const writeRes = isDesktop ? await desktopFsWrite(path, content) : await fsWrite(wsForFs!, path, content);
+            void recordAuditLog({ action: 'file_modification', tool: 'fs_write', target: path, decision: 'executed', payload: { path, size: content.length }, chatId: chatKey });
             if (turnCaptureRef.current) void saveTurnCapture(turnCaptureRef.current);
             const writeChecks = await runPostEditChecks();
             const writeResult = JSON.stringify({ written: true, ...writeRes });
@@ -1967,6 +2028,14 @@ export default function ChatInterface() {
             }
             const bridge = (await import('@/lib/desktop-bridge')).vyenDesktop()!;
             const result = await bridge.shell.run({ command, cwd, timeoutMs });
+            void recordAuditLog({
+              action: 'shell_execution',
+              tool: 'shell_run',
+              target: command,
+              decision: 'executed',
+              payload: { command, cwd, exitCode: result.code },
+              chatId: chatKey,
+            });
 
             /* Auto-debug loop: khi lệnh fail + safe command → track attempts và
                chèn retry guidance vào result để model tự sửa và retry. Port từ
@@ -6002,6 +6071,7 @@ export default function ChatInterface() {
       </aside>
 
       <Composer
+        chatId={chatKey}
         onSubmit={onSubmit}
         isStreaming={isLoading}
         onStop={handleStop}

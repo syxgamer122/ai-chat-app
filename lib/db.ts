@@ -205,6 +205,38 @@ export interface ScheduleRecord {
   updatedAt: number;
 }
 
+export type AuditActionType =
+  | 'approval'
+  | 'rejection'
+  | 'file_modification'
+  | 'shell_execution'
+  | 'auto_approval'
+  | string;
+
+export type AuditDecisionType =
+  | 'approved'
+  | 'rejected'
+  | 'auto_approved'
+  | 'executed'
+  | 'blocked'
+  | string;
+
+/**
+ * Bản ghi nhật ký kiểm toán bất biến (P3.5 Immutable Audit Log).
+ * Ghi nhận mọi lượt duyệt, từ chối, sửa file và chạy shell.
+ */
+export interface StoredAuditLogEntry {
+  id: string;
+  timestamp: number;
+  action: AuditActionType;
+  tool: string;
+  target?: string;
+  payloadHash?: string;
+  decision: AuditDecisionType;
+  chatId?: string;
+  details?: Record<string, unknown>;
+}
+
 function newAttachmentId(): string {
   try {
     return globalThis.crypto.randomUUID();
@@ -307,6 +339,7 @@ export class ChatAppDatabase extends Dexie {
   zeromemTraces!: Table<ZeroMemTrace, string>;
   zeromemEntities!: Table<ZeroMemEntity, string>;
   zeromemRelations!: Table<ZeroMemRelation, string>;
+  auditLogs!: Table<StoredAuditLogEntry, string>;
 
   constructor() {
     super('ai_chat_app_db');
@@ -660,6 +693,14 @@ export class ChatAppDatabase extends Dexie {
       zeromemTraces: 'id, sessionId, episodeId, timestamp, *entityIds',
       zeromemEntities: 'id, name, kind, scope, createdAt',
       zeromemRelations: 'id, sourceId, targetId, relationType, createdAt',
+    });
+
+    /*
+     * v19: Bổ sung bảng `auditLogs` — nhật ký kiểm toán bất biến append-only (P3.5).
+     * Ghi nhận phê duyệt, từ chối, chỉnh sửa file và thực thi lệnh shell kèm băm SHA-256.
+     */
+    this.version(19).stores({
+      auditLogs: 'id, timestamp, action, tool, decision, chatId',
     });
 
     this.messages.hook('creating', (_primKey, obj) => {

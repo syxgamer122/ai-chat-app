@@ -66,6 +66,8 @@ export interface ComposerApi {
 }
 
 const DEFAULT_MAX_FILE_BYTES = 20 * 1024 * 1024;
+export const DRAFT_KEY_PREFIX = 'vyen:draft:';
+export const getDraftStorageKey = (chatId?: string) => `${DRAFT_KEY_PREFIX}${chatId || 'default'}`;
 
 /**
  * Nút icon 32px như thanh công cụ; vùng chạm mở rộng bằng pseudo `after:-inset-6px`
@@ -360,6 +362,8 @@ interface ComposerProps {
   composerApiRef?: React.MutableRefObject<ComposerApi | null>;
   /** P3.1 (Alt+↑): lấy lại tin đã queue mới nhất vào ô nhập. false = queue rỗng. */
   onTakeBackQueued?: () => boolean;
+  /** P2.3: chatId của phiên hiện tại để phân tách draft lưu localStorage */
+  chatId?: string;
 
   /*
    * Chọn model — đặt Ở ĐÂY vì đây là nơi tay đang gõ, không phải status line
@@ -423,6 +427,7 @@ export const Composer = memo(function Composer({
   maxFileBytes = DEFAULT_MAX_FILE_BYTES,
   composerApiRef,
   onTakeBackQueued,
+  chatId,
   models,
   model,
   onModelChange,
@@ -440,6 +445,68 @@ export const Composer = memo(function Composer({
   const [fileError, setFileError] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [pickPending, setPickPending] = useState(false);
+
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  const currentChatIdRef = useRef(chatId);
+  currentChatIdRef.current = chatId;
+  const prevChatIdRef = useRef<string | undefined>(chatId);
+
+  const flushDraft = useCallback((targetChatId: string | undefined, text: string) => {
+    if (typeof window === 'undefined' || !window.localStorage) return;
+    try {
+      const key = getDraftStorageKey(targetChatId);
+      if (text.trim().length > 0) {
+        window.localStorage.setItem(key, text);
+      } else {
+        window.localStorage.removeItem(key);
+      }
+    } catch {
+      // Bỏ qua quota/private mode
+    }
+  }, []);
+
+  // P2.3: Khi đổi chat, flush ngay draft của chat cũ rồi nạp draft của chat mới
+  useEffect(() => {
+    if (prevChatIdRef.current !== chatId) {
+      if (prevChatIdRef.current !== undefined) {
+        flushDraft(prevChatIdRef.current, draftRef.current);
+      }
+      prevChatIdRef.current = chatId;
+    }
+
+    if (typeof window === 'undefined' || !window.localStorage) return;
+    try {
+      const saved = window.localStorage.getItem(getDraftStorageKey(chatId));
+      const loaded = saved !== null ? saved : '';
+      setDraft(loaded);
+      draftRef.current = loaded;
+    } catch {
+      // Bỏ qua lỗi truy cập localStorage
+    }
+  }, [chatId, flushDraft]);
+
+  // P2.3: Persist draft vào localStorage debounced 300ms khi gõ
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.localStorage) return;
+    const timer = setTimeout(() => {
+      flushDraft(chatId, draft);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [chatId, draft, flushDraft]);
+
+  // P2.3: Flush draft khi đóng tab hoặc unmount để không mất dữ liệu chưa kịp debounce
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleBeforeUnload = () => {
+      flushDraft(currentChatIdRef.current, draftRef.current);
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      flushDraft(currentChatIdRef.current, draftRef.current);
+    };
+  }, [flushDraft]);
 
   const speech = useSpeechRecognition({
     onFinalText: (text) => {
@@ -541,10 +608,17 @@ export const Composer = memo(function Composer({
       if (accepted) {
         // Chỉ xoá khi draft KHÔNG bị gõ tiếp trong lúc chờ (web search có thể
         // mất tới ~15s) — draft mới của người dùng luôn được giữ.
-        setDraft((d) => (d === text ? '' : d));
+        setDraft((d) => {
+          if (d === text) {
+            flushDraft(chatId, '');
+            draftRef.current = '';
+            return '';
+          }
+          return d;
+        });
       }
     },
-    [canSubmit, draft, onSubmit],
+    [canSubmit, draft, onSubmit, chatId, flushDraft],
   );
 
   const handleKeyDown = useCallback(

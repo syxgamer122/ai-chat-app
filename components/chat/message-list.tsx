@@ -1,7 +1,7 @@
 /*
  * Danh sách tin nhắn virtualized + các chiến lược scroll/pin.
  */
-import React, { memo, useEffect, useMemo, useState } from 'react';
+import React, { memo, useEffect, useMemo, useRef, useState } from 'react';
 import type { Message } from 'ai/react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { ArrowDown } from 'lucide-react';
@@ -12,9 +12,62 @@ import { MessageItem, type BranchInfo } from './message-item';
 /* Subcomponent 2: Memoized MessageList with Virtualization           */
 /* ------------------------------------------------------------------ */
 
-/** Cache chiều cao thật theo chatId:messageId — sống qua unmount/đổi chat. */
-const HEIGHT_CACHE = new Map<string, number>();
-const cacheKey = (chatId: string, id: string) => `${chatId}:${id}`;
+/**
+ * Bounded LRU cache cho chiều cao dòng theo `${chatId}:${messageId}:${widthBucket}`.
+ * Tự động giới hạn trần 2.000 bản ghi, chống rò rỉ bộ nhớ qua các phiên dài.
+ */
+export class LruCache<K, V> {
+  private readonly map = new Map<K, V>();
+  constructor(private readonly maxSize: number = 2000) {}
+
+  get(key: K): V | undefined {
+    const val = this.map.get(key);
+    if (val !== undefined) {
+      this.map.delete(key);
+      this.map.set(key, val);
+    }
+    return val;
+  }
+
+  set(key: K, value: V): void {
+    if (this.map.has(key)) {
+      this.map.delete(key);
+    }
+    this.map.set(key, value);
+    if (this.map.size > this.maxSize) {
+      const oldestKey = this.map.keys().next().value;
+      if (oldestKey !== undefined) {
+        this.map.delete(oldestKey);
+      }
+    }
+  }
+
+  delete(key: K): boolean {
+    return this.map.delete(key);
+  }
+
+  clear(): void {
+    this.map.clear();
+  }
+
+  keys(): IterableIterator<K> {
+    return this.map.keys();
+  }
+
+  get size(): number {
+    return this.map.size;
+  }
+}
+
+export function getWidthBucket(width?: number): number {
+  if (!width || width <= 0) return 800;
+  return Math.round(width / 50) * 50;
+}
+
+/** Cache chiều cao thật theo chatId:messageId:widthBucket — sống qua unmount/đổi chat. */
+const HEIGHT_CACHE = new LruCache<string, number>(2000);
+const cacheKey = (chatId: string, id: string, widthBucket: number) =>
+  `${chatId}:${id}:${widthBucket}`;
 
 /** Ước lượng sát thực tế cho hàng chưa từng render. */
 function estimateMessageHeight(m: Message): number {  const text = m.content ?? '';
@@ -185,10 +238,46 @@ export const MessageList = memo(function MessageList({
     lastContentLen === 0 &&
     !(lastMsg as any)?.reasoning;
 
-  const visibleMessages = useMemo(
-    () => (pendingEmptyAssistant ? messages.slice(0, -1) : messages),
-    [messages, pendingEmptyAssistant],
-  );
+  /**
+   * P2.1: Tin nhắn assistant đang stream (đã có nội dung hoặc reasoning)
+   * được tách khỏi virtualizer để render ở sticky footer container bên dưới,
+   * triệt tiêu hoàn toàn đo đạc giật lag (measurement thrashing) trên từng token.
+   */
+  const isStreamingAssistant =
+    isLoading &&
+    lastRole === 'assistant' &&
+    (Boolean((lastMsg as any)?.reasoning) || lastContentLen > 0);
+
+  const visibleMessages = useMemo(() => {
+    if (pendingEmptyAssistant || isStreamingAssistant) {
+      return messages.slice(0, -1);
+    }
+    return messages;
+  }, [messages, pendingEmptyAssistant, isStreamingAssistant]);
+
+  /** Theo dõi kích thước container để chọn width bucket cho HEIGHT_CACHE */
+  const [containerWidth, setContainerWidth] = useState(0);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const updateWidth = () => {
+      const w = el.clientWidth;
+      if (w > 0) {
+        setContainerWidth((prev) => {
+          const prevBucket = getWidthBucket(prev);
+          const newBucket = getWidthBucket(w);
+          return prevBucket !== newBucket ? w : prev;
+        });
+      }
+    };
+    updateWidth();
+    const observer = new ResizeObserver(() => {
+      updateWidth();
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [scrollRef]);
 
   /** Banner nén gắn vào tin ĐẦU TIÊN nằm sau ranh giới marker. */
   const compactionBannerBeforeId = useMemo(() => {
@@ -207,16 +296,20 @@ export const MessageList = memo(function MessageList({
     getItemKey: (index) => visibleMessages[index]?.id ?? `row-${index}`,
     overscan: 6,
     paddingStart: 16,
-    paddingEnd: 96,
+    paddingEnd: isStreamingAssistant ? 16 : 96,
     estimateSize: (index) => {
       const m = visibleMessages[index];
       if (!m) return 140;
-      return HEIGHT_CACHE.get(cacheKey(chatId, m.id)) ?? estimateMessageHeight(m);
+      const bucket = getWidthBucket(containerWidth || scrollRef.current?.clientWidth);
+      return HEIGHT_CACHE.get(cacheKey(chatId, m.id, bucket)) ?? estimateMessageHeight(m);
     },
     measureElement: (el) => {
       const h = el.getBoundingClientRect().height;
       const id = el.getAttribute('data-message-id');
-      if (id && h > 0) HEIGHT_CACHE.set(cacheKey(chatId, id), h);
+      const bucket = getWidthBucket(
+        containerWidth || scrollRef.current?.clientWidth || el.getBoundingClientRect().width,
+      );
+      if (id && h > 0) HEIGHT_CACHE.set(cacheKey(chatId, id, bucket), h);
       return h;
     },
   });
@@ -238,13 +331,10 @@ export const MessageList = memo(function MessageList({
     [messages, branchInfoByMessageId],
   );
 
-  /* 1. Đổi chat: xoá cache chiều cao của chat khác (tránh phình vô hạn theo
-     phiên), nhảy đáy TỨC THÌ rồi ghim 1s để bù các lần đo lại */
+  /* 1. Đổi chat: nhảy đáy TỨC THÌ rồi ghim 1s để bù các lần đo lại.
+     HEIGHT_CACHE là bounded LRU (2.000 phần tử) nên tự giới hạn trần bộ nhớ,
+     giữ chiều cao các chat gần đây sống qua unmount/đổi chat để không bị giật layout. */
   useEffect(() => {
-    const prefix = `${chatId}:`;
-    for (const key of HEIGHT_CACHE.keys()) {
-      if (!key.startsWith(prefix)) HEIGHT_CACHE.delete(key);
-    }
     const el = scrollRef.current;
     if (!el || messages.length === 0) return;
     el.scrollTop = el.scrollHeight;
@@ -268,6 +358,18 @@ export const MessageList = memo(function MessageList({
     if (isLoading && isAtBottomRef.current) pin(200);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lastContentLen, isLoading, pin]);
+
+  /* 3b. Kết thúc streaming (isLoading: true -> false):
+     Tin nhắn chuyển từ sticky footer vào virtualizer list.
+     Đảm bảo virtualizer đo lại và giữ vị trí đáy mượt mà nếu đang ở đáy. */
+  const prevLoadingRef = useRef(isLoading);
+  useEffect(() => {
+    if (prevLoadingRef.current && !isLoading) {
+      rowVirtualizer.measure();
+      if (isAtBottomRef.current) pin(400);
+    }
+    prevLoadingRef.current = isLoading;
+  }, [isLoading, pin, rowVirtualizer, isAtBottomRef]);
 
   /* 4. Font KaTeX/mono nạp xong */
   useEffect(() => {
@@ -327,7 +429,8 @@ export const MessageList = memo(function MessageList({
         tabIndex={0}
         role="log"
         aria-label="Danh sách tin nhắn"
-        className="chat-scroll h-full overflow-hidden overflow-y-auto px-4 md:px-8"
+        style={{ overflowAnchor: 'none' }}
+        className="chat-scroll h-full overflow-hidden overflow-y-auto px-4 md:px-8 [overflow-anchor:none]"
       >
         {!hasMessages ? (
           <div className="mx-auto flex h-full max-w-thread flex-col justify-center px-4 pb-16 pt-8">
@@ -434,6 +537,35 @@ export const MessageList = memo(function MessageList({
                 ((lastMsg as any)?.reasoning || lastContentLen > 0)
               ) &&
               <ThinkingIndicator />}
+
+            {isStreamingAssistant && lastMsg && (
+              <div className="mx-auto w-full max-w-thread pb-24">
+                <ChatErrorBoundary onReset={() => rowVirtualizer.measure()}>
+                  <MessageItem
+                    m={lastMsg}
+                    branchInfo={branchInfoByMessageId.get(lastMsg.id)}
+                    isStreaming={true}
+                    isEditing={editingId === lastMsg.id}
+                    isCopied={copiedId === lastMsg.id}
+                    draft={editingId === lastMsg.id ? draft : ''}
+                    isTouchDevice={isTouchDevice}
+                    sendOnEnter={sendOnEnter}
+                    throttleMs={throttleMs}
+                    onCopy={onCopy}
+                    onRegenerate={onRegenerate}
+                    onSwitchBranch={onSwitchBranch}
+                    onStartEdit={onStartEdit}
+                    onSaveEdit={onSaveEdit}
+                    onCancelEdit={onCancelEdit}
+                    onDraftChange={onDraftChange}
+                    onContinueGenerating={onContinueGenerating}
+                    onContentResize={() => {
+                      if (isAtBottomRef.current) pin(300);
+                    }}
+                  />
+                </ChatErrorBoundary>
+              </div>
+            )}
           </>
         )}
 

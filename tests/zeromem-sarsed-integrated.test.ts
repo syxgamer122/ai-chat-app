@@ -169,7 +169,8 @@ export class AuthService {
     expect(db.zeromemTraces).toBeDefined();
     expect(db.zeromemEntities).toBeDefined();
     expect(db.zeromemRelations).toBeDefined();
-    /* v18: bảng `prompts` (rác web chat cũ) đã bị xoá — xem lib/db.ts. */
-    expect(db.verno).toBe(18);
+    expect(db.auditLogs).toBeDefined();
+    /* v19: bảng `auditLogs` append-only đã thêm (v18 xoá prompts) — xem lib/db.ts. */
+    expect(db.verno).toBe(19);
   });
 });

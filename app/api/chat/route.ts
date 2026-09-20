@@ -80,7 +80,7 @@ import { formatRecalledMemoriesBlock } from '@/lib/memory/recall';
  * cho phép delegate là mở cửa write lậu khỏi plan mode.
  */
 const PLAN_MODE_WRITE_TOOLS = new Set(['fs_write', 'fs_edit', 'delegate']);
-import { mergeSameRole, normalize } from '@/lib/message-normalize';
+import { mergeSameRole, normalize, normalizeToolCallPairing, normalizeMessageToolInvocations } from '@/lib/message-normalize';
 import { nonStreamingFetch } from '@/lib/non-streaming-fetch';
 import { looksLikePseudoError, extractPseudoErrorMessage } from '@/lib/pseudo-error-response';
 import { resetToolCallBudget } from '@/lib/tool-call-budget';
@@ -1360,13 +1360,15 @@ export async function POST(req: Request) {
 
     let core: CoreMessage[];
     try {
-      core = mergeSameRole(normalize(convertToCoreMessages(bridgeMessages as any)));
+      const normalizedBridge = normalizeMessageToolInvocations(bridgeMessages as any);
+      core = mergeSameRole(normalizeToolCallPairing(mergeSameRole(normalize(convertToCoreMessages(normalizedBridge as any)))));
     } catch {
       /* History nhiễm tin nhắn hỏng (vd text leaked từ upstream agent lạ) —
          KHÔNG chặn chết cả hội thoại: convert từng tin, bỏ tin không hợp lệ,
          giữ phần còn lại. Người dùng mất tối đa 1 tin rác thay vì cả chat. */
+      const normalizedBridge = normalizeMessageToolInvocations(bridgeMessages as any);
       const repaired: CoreMessage[] = [];
-      for (const m of bridgeMessages as unknown[]) {
+      for (const m of normalizedBridge as unknown[]) {
         try {
           repaired.push(...normalize(convertToCoreMessages([m as never])));
         } catch {
@@ -1383,7 +1385,7 @@ export async function POST(req: Request) {
           'Dữ liệu tin nhắn hoặc file đính kèm không đúng định dạng.',
         );
       }
-      core = mergeSameRole(repaired);
+      core = mergeSameRole(normalizeToolCallPairing(mergeSameRole(repaired)));
     }
 
     /* Provider override KHÔNG kèm key, mà gateway lại yêu cầu xác thực →

@@ -15,7 +15,7 @@
 
 import type { ToolPermissions, PermissionOverride } from '@/lib/store';
 import { TOOL_CATEGORY_MAP } from '@/lib/store';
-import { getEffectiveToolPermission } from '@/lib/tool-permissions';
+import { getEffectiveToolPermission, isDynamicMcpTool } from '@/lib/tool-permissions';
 import { evaluateToolcallRules, type ToolcallRule } from '@/lib/toolcall-rules';
 import { isProtectedPath, validateSafeRelativePath } from '@/lib/path-utils';
 
@@ -233,7 +233,7 @@ export function shouldAutoApprove(ctx: AutoApproveContext): boolean {
 
   // ── Per-tool override check (highest priority) ──
   if (ctx.toolPermissions) {
-    const override = getEffectiveToolPermission(ctx.toolName, ctx.toolPermissions);
+    const override = getEffectiveToolPermission(ctx.toolName, ctx.toolPermissions, ctx.args);
 
     if (override === 'deny') return false;   // Blocked entirely
     if (override === 'ask') return false;     // Always ask, even in YOLO
@@ -246,6 +246,17 @@ export function shouldAutoApprove(ctx: AutoApproveContext): boolean {
       return true;
     }
     // 'default' → fall through to policy-based logic below
+  }
+
+  // ── Enforce deny-by-default for unapproved dynamic MCP tools (mcp__<server>__<tool>) ──
+  // P3.6: Dynamic MCP tools require explicit permission override ('auto') to auto-approve.
+  if (isDynamicMcpTool(ctx.toolName)) {
+    const effective = ctx.toolPermissions
+      ? getEffectiveToolPermission(ctx.toolName, ctx.toolPermissions, ctx.args)
+      : 'deny';
+    if (effective !== 'auto') {
+      return false;
+    }
   }
 
   // Master switch off → always ask

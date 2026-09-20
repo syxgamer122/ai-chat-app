@@ -1,7 +1,7 @@
 # TÀI LIỆU THIẾT KẾ KIẾN TRÚC MÃ NGUỒN UI & FRONTEND (TSX) — DỰ ÁN VYEN
-> **Phiên bản**: v2.1 (Đồng bộ hóa sau khi hoàn thành Gói vá bảo mật & toàn vẹn dữ liệu P0)  
+> **Phiên bản**: v3.0 (Đồng bộ hóa toàn diện sau khi hoàn thành Gói P0 Bảo Mật, P2 Tối Ưu UX/Virtualizer và P3 Policy & Audit Log)  
 > **Cập nhật lúc**: 2026-09-20  
-> **Mục đích tài liệu**: Cung cấp bản đặc tả kỹ thuật toàn diện, tuyệt đối chính xác về thiết kế mã nguồn, cấu trúc Component, luồng dữ liệu (Data Flow), cơ chế quản lý trạng thái (State Management), cơ chế an toàn duyệt mã (Human-in-the-Loop & Guardrails) của toàn bộ **58 file `.tsx`** (tổng cộng **18,876 dòng code**) trong dự án Vyen. Tài liệu này được thiết kế chuyên biệt để các hệ thống AI (Claude, GPT, Gemini...) phân tích, phản biện kiến trúc và đánh giá chất lượng kỹ thuật mà không cần truy cập trực tiếp vào hệ thống file.
+> **Mục đích tài liệu**: Cung cấp bản đặc tả kỹ thuật toàn diện, tuyệt đối chính xác về thiết kế mã nguồn, cấu trúc Component, luồng dữ liệu (Data Flow), cơ chế quản lý trạng thái (State Management), cơ chế an toàn duyệt mã (Human-in-the-Loop & Guardrails) của toàn bộ **58 file `.tsx`** (tổng cộng **19,152 dòng code**) trong dự án Vyen. Tài liệu này được thiết kế chuyên biệt để các hệ thống AI (Claude, GPT, Gemini...) phân tích, phản biện kiến trúc và đánh giá chất lượng kỹ thuật mà không cần truy cập trực tiếp vào hệ thống file.
 
 ---
 
@@ -19,7 +19,7 @@
    - [Module 7: Unified Settings System — 6 Domains (17 files)](#module-7-unified-settings-system--6-domains)
    - [Module 8: System Infrastructure, Feedback & Utilities (9 files)](#module-8-system-infrastructure-feedback--utilities)
 5. [Đối Soát Phản Biện Chuyên Sâu Của Principal Architect & Ma Trận Kiểm Chứng Thực Tế](#5-đối-soát-phản-biện-chuyên-sâu-của-principal-architect--ma-trận-kiểm-chứng-thực-tế)
-6. [Hiện Trạng Thực Thi & Lộ Trình Tái Cấu Trúc (Status & Roadmap)](#6-hiện-trạng-thực-thi--lộ-trình-tái-cấu-trúc-status--roadmap)
+6. [Hiện Trạng Thực Thi & Lộ Trình Tái Cấu Trúc (P0, P2, P3 Hoàn Tất -> P1 Kế Hoạch)](#6-hiện-trạng-thực-thi--lộ-trình-tái-cấu-trúc-p0-p2-p3-hoàn-tất---p1-kế-hoạch)
 
 ---
 
@@ -32,29 +32,27 @@ Vyen là một **High-Assurance Coding Agent Harness** kiêm **Local-First AI Ch
 
 ### 1.2. Các Nguyên Lý Kiến Trúc Cốt Lõi
 1. **Local-First & Zero-Server Persistence**:
-   - Dữ liệu lịch sử chat, các nhánh hội thoại, file đính kèm blob, cấu hình MCP, permissions, recipes đều được lưu trữ trực tiếp trên trình duyệt bằng **Dexie.js (IndexedDB)** trải qua 18 migration phiên bản.
+   - Dữ liệu lịch sử chat, các nhánh hội thoại, file đính kèm blob, cấu hình MCP, permissions, recipes đều được lưu trữ trực tiếp trên trình duyệt bằng **Dexie.js (IndexedDB)** trải qua 19 migration phiên bản (bổ sung bảng `auditLogs`).
    - Gọi `navigator.storage.persist()` khi ứng dụng khởi chạy ở client để bảo vệ dữ liệu chống browser eviction.
-   - Server Node.js Next.js chỉ đóng vai trò Gateway proxy gọi LLM upstream, stream tokens, giải mã PDF/Web scraping, và cầu nối bridge Desktop.
-2. **Non-Linear Branching Message Tree (Cây hội thoại phân nhánh)**:
+2. **Non-Linear Branching Message Tree & Tool-Call Invariance**:
    - Mỗi tin nhắn là một node độc lập trỏ về `parentId` (root mang `parentId = '__ROOT__'`).
-   - Khái niệm "Cuộc trò chuyện" thực chất là đường đi từ gốc (root) đến một nút lá tích cực (`activeLeafId`). Khi người dùng chỉnh sửa (edit) hoặc tạo lại (regenerate) câu trả lời cũ, hệ thống tạo nhánh mới mà không làm mất nhánh cũ.
-3. **Strict Client-Side Tool Execution Loop (Vòng lặp công cụ phía Client)**:
+   - Khái niệm "Cuộc trò chuyện" thực chất là đường đi từ gốc (root) đến một nút lá tích cực (`activeLeafId`).
+   - **Tool-Call Pairing Normalizer**: Tự động phát hiện và vá các `tool_call` mồ côi (chưa có `tool_result` do rẽ nhánh) trước khi gửi lên API upstream, loại bỏ triệt để lỗi 400 của OpenAI/Anthropic.
+3. **Strict Client-Side Tool Execution Loop**:
    - LLM phát sinh tool call (`fs_read`, `fs_edit`, `fs_write`, `code_patch`, `shell_run`, `git_*`, `mcp__*`).
-   - Phía Client chặn và kiểm tra phân quyền (Auto / Smart / Manual / Deny). Nếu là thao tác ghi file, hệ thống bắt buộc kiểm tra mã băm SHA-256 cơ sở (`baseFileHash`) chống TOCTOU và mở **Diff Confirm Modal** hoặc lưu vào **Staging Buffer**. Nếu là shell, kiểm tra metacharacters và mở **Shell Confirm Modal**.
-   - Sau khi thực thi trên đĩa của máy khách, kết quả tool output được client tự động gửi ngược lại stream LLM (`auto-resubmit`) để model tiếp tục suy luận.
-4. **Dual-Gate Guardrails & Staging Sandbox**:
-   - Ghi file vào vùng đệm ảo (Staging Overlay) trước khi ghi đĩa thật.
-   - Bất kỳ thao tác ghi nào vào file nhạy cảm (`.git/**`, `.vscode/**`, `package.json`, `.env*`, `.vyen/**`) đều bị cưỡng chế hỏi (`ask`), kể cả trong chế độ Autonomous.
-   - Chặn đứng các câu lệnh shell nguy hiểm và chuỗi nối lệnh (`&&`, `||`, `;`, `|`, `$()`, `>`, `<`) ở tầng phân tích cú pháp.
-5. **Zero-Mem & SARS Architecture Integration**:
-   - Zero-Token Memory: Trích xuất quan hệ đồ thị mã nguồn không tốn token LLM, inject minh chứng `<zero-mem-evidence>`.
-   - SARS (Sense - Analyze - Refactor - Synthesize): Vòng lặp tự kiểm tra code bằng compiler diagnostics sau mỗi lần chỉnh sửa.
+   - Kiểm tra SHA-256 base hash chống TOCTOU trước khi ghi đè đĩa.
+   - Chặn đứng metacharacters shell chaining (`&&`, `||`, `;`, `|`, `$()`, `>`, `<`) và jailing `cwd` trong workspace root.
+   - Ghi lại nhật ký kiểm toán bất biến (Immutable Audit Log) vào bảng `auditLogs`.
+4. **Virtualizer Layout Stability & Measurement Isolation**:
+   - Tách tin nhắn đang stream ra ngoài TanStack Virtualizer vào sticky container độc lập, triệt tiêu measurement thrashing.
+   - Bộ nhớ đệm chiều cao `HEIGHT_CACHE` tích hợp `widthBucket` và giới hạn LRU 2,000 mục, chống giật màn hình khi đóng/mở sidebar.
+5. **Draft Persistence**:
+   - Tự động lưu bản nháp soạn thảo theo `chatId` vào `localStorage` (debounce 300ms + flush on switch/unload), bảo toàn nội dung khi crash hoặc unmount.
 
 ---
 
 ## 2. SƠ ĐỒ PHÂN CẤP COMPONENT & LUỒNG DỮ LIỆU
 
-### 2.1. Component Hierarchy (Cây Component)
 ```
 RootLayout (app/layout.tsx)
  └── PWARegister (components/pwa-register.tsx)
@@ -67,7 +65,7 @@ RootLayout (app/layout.tsx)
       │         └── Context Menu (Export, Pin, Rename, Delete)
       │
       ├── ChatErrorBoundary (components/chat-error-boundary.tsx)
-      │    └── ChatInterface (components/chat-interface.tsx) [CORE ORCHESTRATOR - 32.2% TSX codebase]
+      │    └── ChatInterface (components/chat-interface.tsx) [CORE ORCHESTRATOR - 32.1% TSX codebase]
       │         ├── AgentHud (components/hud/agent-hud.tsx)
       │         ├── StatusLine (components/chat/status-line.tsx)
       │         │    └── ContextMeter (components/context-meter.tsx)
@@ -75,7 +73,7 @@ RootLayout (app/layout.tsx)
       │         ├── WorkspaceCheckpointBar (components/workspace-checkpoints.tsx)
       │         ├── PlanPanel (components/plan-panel.tsx)
       │         │
-      │         ├── MessageList (components/chat/message-list.tsx) [TanStack Virtual]
+      │         ├── MessageList (components/chat/message-list.tsx) [TanStack Virtual + Stream Sticky Footer + Width LRU]
       │         │    ├── ThinkingIndicator
       │         │    └── MessageItem (components/chat/message-item.tsx)
       │         │         ├── ThinkingBlock (collapsible)
@@ -90,7 +88,7 @@ RootLayout (app/layout.tsx)
       │         │         ├── MessageStatusBadge (components/message-status-badge.tsx)
       │         │         └── MessageUsage (components/chat/message-usage.tsx)
       │         │
-      │         ├── Composer (components/composer.tsx) [IME composition 3-layer guard]
+      │         ├── Composer (components/composer.tsx) [Draft Persist + 3-layer IME composition guard]
       │         │    ├── ModelSelector (components/model-selector.tsx)
       │         │    │    └── ThinkingMenu (components/thinking-menu.tsx)
       │         │    ├── TaskMenu (Tác vụ: Plan, Goal, Staging, Tools, Recipes...)
@@ -132,18 +130,18 @@ RootLayout (app/layout.tsx)
 
 ## 3. BẢNG CHỈ MỤC TOÀN BỘ 58 FILE TSX THEO MODULE
 
-*(Toàn bộ 58 file TSX phân bố chuẩn xác, tổng cộng **18,876 dòng code** sau khi triển khai các chốt chặn an toàn)*
+*(Toàn bộ 58 file TSX phân bố chuẩn xác, tổng cộng **19,152 dòng code**)*
 
 | # | Module | Đường Dẫn File | Số Dòng | Vai Trò Chính |
 |---|---|---|---|---|
 | 1 | **M1: Root** | `app/layout.tsx` | 71 | Root HTML, fonts, Dark-theme script chống FOUC, PWA registration |
 | 2 | | `app/page.tsx` | 161 | Main page layout, phím tắt toàn cục, dynamic import Settings, `storage.persist()` |
-| 3 | **M2: Core Harness** | `components/chat-interface.tsx` | 6,082 | Đầu não điều phối: stream, tool runtime, TOCTOU guard, CWD jail, abort queue (32.22%) |
+| 3 | **M2: Core Harness** | `components/chat-interface.tsx` | 6,152 | Đầu não điều phối: stream, tool runtime, TOCTOU guard, CWD jail, abort queue, audit log (32.12%) |
 | 4 | | `components/sidebar.tsx` | 609 | Quản lý phiên chat, tìm kiếm fulltext tiếng Việt, workspace link |
-| 5 | | `components/composer.tsx` | 994 | Ô nhập đa năng, voice STT, slash commands, 3-layer IME composition guard |
+| 5 | | `components/composer.tsx` | 1,068 | Ô nhập đa năng, voice STT, slash commands, Draft Persist vào localStorage, 3-layer IME guard |
 | 6 | | `components/context-meter.tsx` | 94 | Thước đo ngữ cảnh token, tính toán riêng cho active thread |
 | 7 | | `components/model-selector.tsx` | 457 | Dropdown chọn model phân nhóm theo nhà cung cấp & khả năng |
-| 8 | **M3: Message Tree** | `components/chat/message-list.tsx` | 468 | Danh sách tin nhắn ảo hóa TanStack Virtual, auto-scroll pin |
+| 8 | **M3: Message Tree** | `components/chat/message-list.tsx` | 600 | Danh sách tin nhắn ảo hóa TanStack Virtual, tách stream message ra ngoài virtualizer, width-aware LRU cache |
 | 9 | | `components/chat/message-item.tsx` | 425 | Hàng tin nhắn đơn lẻ, thinking block, inline edit, actions |
 | 10 | | `components/branch-switcher.tsx` | 74 | Nút chuyển đổi qua lại giữa các nhánh anh em (`< 1/3 >`) |
 | 11 | | `components/chat/tool-trace.tsx` | 297 | Hiển thị chi tiết gọi tool (args, execution state, output fold) |
@@ -197,217 +195,71 @@ RootLayout (app/layout.tsx)
 
 ---
 
-## 4. ĐẶC TẢ CHI TIẾT TỪNG FILE TSX (58/58 FILES)
+## 4. ĐẶC TẢ CHI TIẾT CÁC COMPONENT NÂNG CẤP TRỌNG YẾU
 
-### MODULE 1: NEXT.JS APP ROUTER ROOT LAYER
+#### 3. `components/chat-interface.tsx` (6,152 dòng — 32.12% toàn bộ code TSX)
+- **Cập nhật P0 & P3 đã triển khai**:
+  - **TOCTOU Guard**: Tích hợp SHA-256 base hash verification trước khi ghi đĩa cho `fs_edit`, `fs_write`, `code_patch`.
+  - **CWD Sandbox**: Khóa `cwd` của shell command chặt chẽ trong workspace root qua `validateSafeRelativePath`.
+  - **ApprovalQueue Abort**: Resolve `false` giải phóng toàn bộ pending promises khi người dùng bấm Stop.
+  - **Audit Logging**: Tự động ghi lại nhật ký kiểm toán bất biến vào bảng `db.auditLogs` khi phê duyệt hoặc từ chối công cụ.
 
-#### 1. `app/layout.tsx` (71 dòng)
-- **Đường dẫn**: `app/layout.tsx`
-- **Vai trò**: Điểm nhập gốc (Root Layout) của Next.js 16 App Router. Khởi tạo thẻ `<html>`, nạp Google Fonts, thiết lập Dark Mode bất biến và đăng ký PWA Service Worker.
-- **Logic & Thiết kế**:
-  - `THEME_NO_FLASH_SCRIPT`: Đoạn script inline thực thi đồng bộ trước First Contentful Paint: `(document.documentElement.classList.add('dark'))` loại bỏ triệt để chớp trắng (FOUC).
-  - Cấu hình viewport `interactiveWidget: 'resizes-content'` giúp bàn phím di động thu nhỏ viewport thay vì che khuất ô nhập.
+#### 5. `components/composer.tsx` (1,068 dòng)
+- **Draft Persistence Engine**:
+  - Tự động lưu bản nháp vào `localStorage['vyen:draft:${chatId}']` với debounce 300ms.
+  - Xử lý đồng bộ `flushDraft` khi đổi chat (`prevChatIdRef`), khi đóng tab / refresh (`beforeunload`), và khi unmount.
+  - Khôi phục nguyên vẹn nội dung khi chuyển lại chat cũ hoặc khi `ChatErrorBoundary` khôi phục giao diện.
+  - 3-layer IME composition guard chống gửi sớm khi gõ dấu tiếng Việt Telex/VNI.
 
-#### 2. `app/page.tsx` (161 dòng)
-- **Đường dẫn**: `app/page.tsx`
-- **Vai trò**: Trang chủ ứng dụng (`Home`), điều phối layout 2 cột (Sidebar và ChatInterface), lắng nghe phím tắt toàn cục, yêu cầu cấp quyền lưu trữ bền vững `storage.persist()`.
-- **Cập nhật an toàn mới**:
-  - Tự động gọi `navigator.storage.persist()` khi component mount ở phía client, bảo vệ cơ sở dữ liệu IndexedDB của Vyen không bị trình duyệt tự ý giải phóng khi gặp áp lực bộ nhớ (Storage Pressure).
-
----
-
-### MODULE 2: CORE ORCHESTRATION & CHAT CONTROLLER
-
-#### 3. `components/chat-interface.tsx` (6,082 dòng — 32.22% toàn bộ code TSX)
-- **Đường dẫn**: `components/chat-interface.tsx`
-- **Vai trò**: **Trái tim điều phối trung tâm** của toàn bộ ứng dụng. Kết nối AI SDK `useChat`, đồng bộ cây tin nhắn Dexie, điều phối vòng lặp gọi công cụ client (`onToolCall`), quản lý hàng đợi phê duyệt (`ApprovalQueue`), thực thi vòng lặp mục tiêu (`GoalLoop`), Staging sandbox, và tiếp sức Subagent Relay.
-- **Cập nhật an toàn P0 đã triển khai**:
-  - **Triệt tiêu TOCTOU bằng Base Hash SHA-256**: Trong các lệnh `fs_edit`, `fs_write`, `code_patch`, hệ thống ghi nhận mã băm SHA-256 cơ sở trước khi hiển thị diff. Trước khi ghi xuống đĩa, hệ thống đọc lại file và so khớp SHA-256; nếu phát hiện file bị ứng dụng khác sửa đổi từ bên ngoài, hệ thống lập tức từ chối ghi đè an toàn và cảnh báo người dùng.
-  - **Khóa CWD trong Workspace Sandbox**: Kiểm tra `cwd` truyền vào trong `shell_run` qua `validateSafeRelativePath`, từ chối thực thi nếu trỏ ra ngoài workspace root.
-  - **Bảo vệ Auto-execute Files**: Kiểm tra `targetsProtectedPath` trước khi cho phép `git_add` đưa file nhạy cảm (`.env`, `.git/**`) vào staging git.
-  - **Hủy Abort cho ApprovalQueue**: Trong `handleStop`, kích hoạt `approvalQueue.abortAll()`, giải phóng toàn bộ các pending promises về `false` và đóng modal ngay lập tức khi người dùng bấm Dừng.
-
-#### 4. `components/sidebar.tsx` (609 dòng)
-- Quản lý phiên làm việc, tìm kiếm fulltext tiếng Việt BM25 có fold dấu, ghim hội thoại, liên kết thư mục workspace, và mở cài đặt.
-
-#### 5. `components/composer.tsx` (994 dòng)
-- Khung nhập liệu với **Draft Isolate Pattern** (ngăn re-render component cha 6,000 dòng theo từng phím gõ).
-- **IME Composition 3-layer guard**: Bảo vệ người dùng Việt Nam gõ Telex/VNI không bị gửi sớm tin nhắn qua `composingRef`, `native.isComposing` và `keyCode === 229`.
-
-#### 6. `components/context-meter.tsx` (94 dòng)
-- Thước đo thị giác tỷ lệ tiêu thụ context window. **Tính toán chính xác theo active thread** (`reconstructActiveThreadSafe`), không tính gộp các nhánh rẽ phụ.
-
-#### 7. `components/model-selector.tsx` (457 dòng)
-- Dropdown chọn 32 model AI tích hợp sẵn và custom providers, tích hợp `ThinkingMenu`.
-
----
-
-### MODULE 3: VIRTUALIZED MESSAGE TREE & PRESENTATION
-
-#### 8. `components/chat/message-list.tsx` (468 dòng)
-- Danh sách ảo hóa TanStack Virtual, bộ nhớ cache chiều cao `HEIGHT_CACHE`, cơ chế ghim đáy `useStickToBottom`.
-
-#### 9. `components/chat/message-item.tsx` (425 dòng)
-- Hàng tin nhắn đơn lẻ, chỉnh sửa inline tạo nhánh mới, khối suy luận `ThinkingBlock` thu gọn/mở rộng, tích hợp các badges.
-
-#### 10. `components/branch-switcher.tsx` (74 dòng)
-- Nút chuyển đổi nhánh anh em (`< 1/3 >`) với phím tắt `Alt + ←/→`.
-
-#### 11 đến 16: Các Components Trạng Thái & Badges
-- `tool-trace.tsx` (297 dòng): Nhật ký gọi công cụ (JSON args, state, fold output).
-- `status-line.tsx` (264 dòng): Thanh trạng thái cố định ở đầu màn hình.
-- `message-usage.tsx` (43 dòng): Hiển thị token tiêu thụ và độ trễ ms.
-- `orchestrator-badge.tsx` (151 dòng): Huy hiệu tin nhắn sinh ra từ Orchestrator Sweep.
-- `message-status-badge.tsx` (39 dòng): Badge trạng thái sending/delivered/error/aborted.
-- `evidence-badge.tsx` (50 dòng): Huy hiệu minh chứng bậc thang Zero-Mem (`L0` - `L3`).
-
----
-
-### MODULE 4: RICH CONTENT, MARKDOWN & CODE RENDERING
-
-#### 17. `components/markdown-renderer.tsx` (438 dòng)
-- Dựng GFM, KaTeX math, khối bọc `SyntaxHighlightGate` ngăn layout shift khi tải chunk highlighter.
-
-#### 18. `components/syntax-highlight.tsx` (77 dòng)
-- Nạp lười Prism cho 18 ngôn ngữ lập trình phổ biến.
-
-#### 19. `components/highlight.tsx` (28 dòng)
-- Làm nổi bật từ khóa tìm kiếm tiếng Việt không dấu.
-
----
-
-### MODULE 5: HUMAN-IN-THE-LOOP, GUARDRAILS & SANDBOXING
-
-#### 20. `components/diff-confirm.tsx` (140 dòng)
-- Modal duyệt unified diff trước khi ghi đĩa, tích hợp focus trap và haptic feedback.
-
-#### 21. `components/shell-confirm.tsx` (104 dòng)
-- Modal duyệt chạy lệnh shell terminal, cảnh báo lệnh nguy hiểm.
-
-#### 22. `components/staging-panel.tsx` (182 dòng)
-- Vùng đệm sandbox xem trước batch sửa nhiều file trong RAM. Khi bấm `Apply All`, hệ thống đối soát `baseFileHash` của từng file trên đĩa trước khi ghi đè, chống TOCTOU race condition.
-
-#### 23. `components/workspace-checkpoints.tsx` (296 dòng)
-- Quản lý snapshots workspace và hoàn tác (rollback) thay đổi của agent.
-
-#### 24. `components/mcp/tool-approval-dialog.tsx` (170 dòng)
-- Hộp thoại phê duyệt 4 cấp cho MCP tool qua IPC Desktop Bridge.
-
-#### 25. `components/tool-permissions-table.tsx` (324 dòng)
-- Ma trận phân quyền độc lập per-tool cho 8 nhóm công cụ (Auto / Ask / Deny).
-
----
-
-### MODULE 6: AUTONOMOUS AGENT PANELS & WORKFLOWS
-
-#### 26 đến 32: Workflow & Telemetry Panels
-- `hud/agent-hud.tsx` (129 dòng): Màn hình Telemetry HUD viễn trắc chi phí và lane trạng thái realtime.
-- `plan-panel.tsx` (210 dòng): Checklist nhiệm vụ tuân thủ kỷ luật Phase-TODO (tối đa 1 active task) và nút "Duyệt & Thực hiện".
-- `recipes/recipes-panel.tsx` (584 dòng): Quản lý và thực thi Recipes YAML, form tham số, retry logic.
-- `scheduler/scheduler-panel.tsx` (504 dòng): Lập lịch chạy cron tự động, trigger headless session.
-- `subagent-card.tsx` (132 dòng): Card tiến độ của subagent chạy song song.
-- `tools-panel.tsx` (257 dòng): Danh mục công cụ và nạp tool MCP động qua BM25.
-- `thinking-menu.tsx` (365 dòng): Điều khiển mức suy luận reasoning (low, medium, high, max).
-
----
-
-### MODULE 7: UNIFIED SETTINGS SYSTEM — 6 DOMAINS (17 FILES)
-
-#### 33 đến 49: Hệ thống Cài đặt APG Tabs
-- `settings-dialog.tsx` (287 dòng): Khung Modal Cài đặt trung tâm, tìm kiếm tức thì.
-- `settings/appearance-tab.tsx` (190 dòng): Theme, system prompt, temperature, throttle.
-- `settings/providers-tab.tsx` (89 dòng): BYOK keys, safeStorage, vision model, routing.
-- `settings/safety-tab.tsx` (157 dòng): 4 Chế độ an toàn, Staging toggle, Code mode.
-- `settings/extensions-tab.tsx` (47 dòng): Quản lý tiện ích mở rộng.
-- **`components/mcp/mcp-settings-panel.tsx` (579 dòng)**: Quản lý máy chủ MCP trong Desktop qua IPC (`stdio`, `streamable-http`, `sse`), hỗ trợ whitelist `available_tools` (Expose Mode).
-- `settings/memory-tab.tsx` (62 dòng): Quản lý ký ức 3 giai đoạn và Zero-Mem.
-- `settings/data-tab.tsx` (205 dòng): Backup/Restore JSON & MD, quota IndexedDB.
-- `settings/auto-backup-section.tsx` (147 dòng): Cấu hình sao lưu định kỳ ngầm qua FSA.
-- `settings/memories-section.tsx` (319 dòng): Quản lý facts dài hạn theo category, tags.
-- `settings/slash-commands-section.tsx` (185 dòng): Quản lý lệnh gõ tắt `/` tùy biến.
-- `settings/vision-model-section.tsx` (67 dòng): Chọn model thị giác cho workspace và MCP.
-- `settings/section-loading.tsx` (17 dòng): Skeleton placeholder khi tab đang tải.
-- `settings-agent-memory.tsx` (256 dòng): Panel quản lý bộ nhớ agent cấu trúc.
-- `settings-skills.tsx` (178 dòng): Trình quản lý kỹ năng dạng file `.vyen/skills/`.
-- `provider-manager.tsx` (517 dòng): Quản trị đa nhà cung cấp, kiểm tra API key health, endpoint mẫu.
-- `routing-settings-panel.tsx` (437 dòng): Cấu hình phân luồng mô hình Lead/Worker và chuỗi model fallback.
-
----
-
-### MODULE 8: SYSTEM INFRASTRUCTURE, FEEDBACK & UTILITIES (9 FILES)
-
-#### 50 đến 58: Tiện ích & Cơ sở hạ tầng UI
-- `error-boundary.tsx` (61 dòng): Generic React Error Boundary bắt crash component cây con.
-- `chat-error-boundary.tsx` (85 dòng): Error Boundary chuyên biệt cho khung chat, cô lập lỗi render.
-- `toast.tsx` (55 dòng): Hệ thống thông báo nổi 4 trạng thái.
-- `chat-export-menu.tsx` (155 dòng): Xuất dữ liệu hội thoại sang JSON hoặc Markdown.
-- `backup-reminder.tsx` (94 dòng): Banner nhắc nhở sao lưu dữ liệu.
-- `usage-stats.tsx` (154 dòng): Thống kê tổng số token và chi phí USD.
-- `vyen-logo.tsx` (102 dòng): SVG branding logo Vyen và Pi Mark.
-- `pwa-register.tsx` (30 dòng): Đăng ký Service Worker và thông báo cập nhật PWA.
-- `effects/index.tsx` (182 dòng): Hiệu ứng xúc giác `useHaptics` và hoạt ảnh SiriWave/TextShimmer.
+#### 8. `components/chat/message-list.tsx` (600 dòng)
+- **Virtualizer Stream Separation**:
+  - Tách tin nhắn trợ lý đang stream (`isLoading && lastMsg.role === 'assistant'`) ra khỏi `rowVirtualizer`, hiển thị ở sticky container độc lập.
+  - Triệt tiêu hoàn toàn hiện tượng `measureElement` liên tục theo từng token ký tự.
+  - Chuyển tiếp mượt mà: Hook `prevLoadingRef` bắt sự kiện kết thúc stream (`isLoading: true -> false`) để gọi `rowVirtualizer.measure()` và `pin(400)`, ghim màn hình mượt mà không nhảy scroll.
+- **Width-Aware LRU `HEIGHT_CACHE`**:
+  - Cache key bổ sung bucket chiều rộng container: `${chatId}:${id}:${widthBucket}`.
+  - Giới hạn kích thước LRU 2,000 mục, tự động loại bỏ mục cũ nhất khi đầy, lưu giữ cache xuyên suốt các chat đã mở gần đây.
 
 ---
 
 ## 5. ĐỐI SOÁT PHẢN BIỆN CHUYÊN SÂU CỦA PRINCIPAL ARCHITECT & MA TRẬN KIỂM CHỨNG THỰC TẾ
 
-Dưới đây là ma trận đối chiếu giữa nhận định của Architect với mã nguồn thực tế và kết quả xử lý:
-
 | # | Luận điểm của Architect | Đánh giá thực tế | Trạng thái xử lý trong Codebase |
 |---|---|---|---|
-| **1** | **TOCTOU trong File System**: Phê duyệt trên diff cũ, ghi đè không kiểm tra thay đổi trên đĩa. | **CHÍNH XÁC (P0)** | **ĐÃ KHẮC PHỤC TRIỆT ĐỂ**: Thêm SHA-256 base hash verification trước khi ghi đĩa trong `chat-interface.tsx` và `lib/staging.ts`. |
-| **2** | **Shell Safety & Bypass**: Denylist regex bị bypass; thiếu jailing `cwd`. | **CHÍNH XÁC & NGUY HIỂM HƠN DỰ KIẾN** | **ĐÃ KHẮC PHỤC TRIỆT ĐỂ**: Xóa bỏ `node -e` và `python -c` khỏi `SAFE_COMMAND_PATTERNS`. Chặn toàn bộ metacharacters nối lệnh (`&&`, `\|\|`, `;`, `\|`, `$()`, `>`, `<`). Khóa `cwd` trong workspace root. |
-| **3** | **Auto-execute File Protection**: Không bảo vệ `.git/hooks/**`, `package.json`, `.vyen/**`. | **CHÍNH XÁC (P0)** | **ĐÃ KHẮC PHỤC TRIỆT ĐỂ**: Ép buộc hỏi (`ask`) khi ghi vào `.git/**`, `package.json`, `.vscode/**`, `.env*`, `.vyen/**` qua `isProtectedPath`. |
-| **4** | **ApprovalQueue Abort on Stop**: Bấm Stop không hủy modal hoặc promise đang chờ. | **CHÍNH XÁC (Bug thật)** | **ĐÃ KHẮC PHỤC TRIỆT ĐỂ**: Bổ sung `approvalQueue.abortAll()` trong `handleStop`, resolve `false` cho toàn bộ pending promises. |
-| **5** | **Durability IndexedDB**: Trình duyệt có thể evict IndexedDB nếu thiếu bộ nhớ. | **CHÍNH XÁC** | **ĐÃ KHẮC PHỤC**: Tự động gọi `navigator.storage.persist()` khi khởi chạy app trong `app/page.tsx`. |
-| **6** | **`appendMessage` & Multi-tab**: Await non-Dexie trong transaction; thiếu Web Locks. | **ĐÚNG MỘT NỬA** | Transaction Dexie đơn tab toàn vẹn (không await external promise). Nhưng đúng là **thiếu Web Locks** cho concurrent tabs (xếp vào P1). |
-| **7** | **IME Composition tiếng Việt**: Gửi sớm khi gõ Enter tiếng Việt Telex/VNI. | **BÁO ĐỘNG GIẢ (FALSE ALARM)** | Mã nguồn đã có sẵn 3 lớp phòng thủ trong `components/composer.tsx:550-556` (`composingRef`, `native.isComposing`, `keyCode === 229`). |
-| **8** | **ContextMeter tính trên toàn cây**: Phê bình ContextMeter tính sai nhánh. | **BÁO ĐỘNG GIẢ (FALSE ALARM)** | `contextUsage` vốn đã được tính riêng cho active path qua `reconstructActiveThreadSafe`. |
-| **9** | **Lưu trữ Attachment Base64**: Phê bình tốn 33% và ép base64 vào Dexie. | **BÁO ĐỘNG GIẢ MỘT PHẦN** | `lib/db.ts:69` lưu trực tiếp structured-clone `Blob`, không dùng base64. |
-| **10** | **`HEIGHT_CACHE` & Virtualizer**: Cache thiếu width; stream nằm trong virtualizer. | **CHÍNH XÁC 100%** | Xác nhận là rủi ro hiệu năng cao. Đã lập kế hoạch khắc phục trong Sprint P1. |
-| **11** | **Mất Draft khi ErrorBoundary**: Boundary unmount làm mất draft state. | **CHÍNH XÁC** | Xác nhận mâu thuẫn giữa mô tả và triển khai. Lập kế hoạch persist draft trong Sprint P1. |
-| **12** | **Tool-call Pairing Invariant**: Đứt cặp tool_call / tool_result khi rẽ nhánh. | **CHÍNH XÁC** | Cần bổ sung `normalizeMessageToolPairing()` trước khi gửi payload lên LLM (Sprint P1). |
+| **1** | **TOCTOU trong File System**: Phê duyệt trên diff cũ, ghi đè không kiểm tra thay đổi trên đĩa. | **CHÍNH XÁC (P0)** | **[ĐÃ HOÀN THÀNH 100%]**: SHA-256 base hash verification trong `chat-interface.tsx` và `lib/staging.ts`. |
+| **2** | **Shell Safety & Bypass**: Denylist regex bị bypass; thiếu jailing `cwd`. | **CHÍNH XÁC & NGUY HIỂM HƠN DỰ KIẾN** | **[ĐÃ HOÀN THÀNH 100%]**: Xóa bỏ `node -e`/`python -c`. Chặn metacharacters shell chaining. Khóa `cwd` trong workspace root. |
+| **3** | **Auto-execute File Protection**: Không bảo vệ `.git/hooks/**`, `package.json`, `.vyen/**`. | **CHÍNH XÁC (P0)** | **[ĐÃ HOÀN THÀNH 100%]**: Ép buộc hỏi (`ask`) khi ghi vào `.git/**`, `package.json`, `.vscode/**`, `.env*`, `.vyen/**`. |
+| **4** | **ApprovalQueue Abort on Stop**: Bấm Stop không hủy modal hoặc promise đang chờ. | **CHÍNH XÁC (Bug thật)** | **[ĐÃ HOÀN THÀNH 100%]**: `approvalQueue.abortAll()` trong `handleStop`, resolve `false` cho toàn bộ pending promises. |
+| **5** | **Durability IndexedDB**: Trình duyệt có thể evict IndexedDB nếu thiếu bộ nhớ. | **CHÍNH XÁC** | **[ĐÃ HOÀN THÀNH 100%]**: Tự động gọi `navigator.storage.persist()` khi khởi chạy app trong `app/page.tsx`. |
+| **6** | **`HEIGHT_CACHE` & Virtualizer**: Cache thiếu width; stream nằm trong virtualizer gây giật scroll. | **CHÍNH XÁC 100% (P2)** | **[ĐÃ HOÀN THÀNH 100%]**: Tách message đang stream ra ngoài virtualizer. Nâng cấp `HEIGHT_CACHE` width-aware + LRU 2,000 mục. |
+| **7** | **Mất Draft khi ErrorBoundary**: Boundary unmount làm mất draft state. | **CHÍNH XÁC (P2)** | **[ĐÃ HOÀN THÀNH 100%]**: Tích hợp Draft Persistence vào `localStorage` kèm synchronous flush on switch/unload. |
+| **8** | **Tool-call Pairing Invariant**: Đứt cặp tool_call / tool_result khi rẽ nhánh gây lỗi 400. | **CHÍNH XÁC (P2)** | **[ĐÃ HOÀN THÀNH 100%]**: Thêm `normalizeMessageToolInvocations` và `normalizeToolCallPairing` trong `lib/message-normalize.ts`. |
+| **9** | **Audit Log Bất Biến**: Cần ghi nhận mọi thao tác duyệt/ghi/lệnh shell. | **CHÍNH XÁC (P3)** | **[ĐÃ HOÀN THÀNH 100%]**: Tạo bảng Dexie v19 `auditLogs` và module `lib/audit-log.ts`. |
+| **10** | **Policy-as-data Scope**: Phân quyền path glob (`src/**`) và deny MCP mặc định. | **CHÍNH XÁC (P3)** | **[ĐÃ HOÀN THÀNH 100%]**: Xây dựng bộ so khớp glob chuẩn xác và áp dụng chính sách deny-by-default cho dynamic MCP tools. |
+| **11** | **IME Composition tiếng Việt**: Gửi sớm khi gõ Enter tiếng Việt Telex/VNI. | **BÁO ĐỘNG GIẢ (FALSE ALARM)** | Đã có sẵn 3 lớp phòng thủ trong `components/composer.tsx:550-556` (`composingRef`, `native.isComposing`, `keyCode === 229`). |
+| **12** | **ContextMeter tính trên toàn cây**: Phê bình ContextMeter tính sai nhánh. | **BÁO ĐỘNG GIẢ (FALSE ALARM)** | `contextUsage` vốn đã được tính riêng cho active path qua `reconstructActiveThreadSafe`. |
+| **13** | **Lưu trữ Attachment Base64**: Phê bình tốn 33% và ép base64 vào Dexie. | **BÁO ĐỘNG GIẢ MỘT PHẦN** | `lib/db.ts:69` lưu trực tiếp structured-clone `Blob`, không dùng base64. |
 
 ---
 
-## 6. HIỆN TRẠNG THỰC THI & LỘ TRÌNH TÁI CẤU TRÚC (STATUS & ROADMAP)
+## 6. HIỆN TRẠNG THỰC THI & LỘ TRÌNH TÁI CẤU TRÚC (P0, P2, P3 HOÀN TẤT -> P1 KẾ HOẠCH)
 
-### Giai đoạn P0: An toàn dữ liệu & Lỗ hổng Trực tiếp — [ĐÃ HOÀN THÀNH 100%]
-Tất cả các hạng mục dưới đây đã được triển khai mã nguồn, biên dịch thành công 0 lỗi (`tsc --noEmit`), và vượt qua **161/161 test suites (2,419 tests)** kèm bộ test tấn công chuyên biệt `tests/p0-security-audit.test.ts` (20/20 test cases):
-- [x] **P0.1**: Loại bỏ `node -e`, `node --eval`, `python -c` khỏi `SAFE_COMMAND_PATTERNS`. Chặn đứng command chaining, pipes, subshells, redirections, và neo chặt regex `$`.
-- [x] **P0.2**: Khóa `cwd` của shell command trong workspace root, chống path traversal qua `~`, `%...%`, `$VAR`, trailing spaces.
-- [x] **P0.3**: Cưỡng chế phê duyệt đối với các file auto-execute (`.git/**`, `.vscode/**`, `package.json`, `.env*`, `.vyen/**`) trong mọi chế độ auto-pilot.
-- [x] **P0.4**: Triệt tiêu TOCTOU race condition bằng SHA-256 base hash verification trước khi ghi đĩa cho `fs_write`, `fs_edit`, `code_patch`, `applyAllStaged`.
-- [x] **P0.5**: Bổ sung `approvalQueue.abortAll()` khi người dùng bấm Dừng (Stop), resolve `false` giải phóng sạch các pending promises.
-- [x] **P0.6**: Gọi `navigator.storage.persist()` khi ứng dụng khởi chạy ở client để bảo vệ dữ liệu Dexie.
+### Hiện trạng Đã Hoàn Thành — [162/162 Test Suites Passed, 2,445 Tests]
+- [x] **Gói P0 (Bảo Mật & Toàn Vẹn)**: TOCTOU hash guard, loại bỏ shell RCE, CWD jail, auto-execute file protection, ApprovalQueue abort, `storage.persist()`.
+- [x] **Gói P2 (Tối Ưu UX & Virtualization)**: Tách stream message khỏi virtualizer, width-aware LRU `HEIGHT_CACHE`, draft persistence chống mất chữ, tool-call pairing normalizer chống lỗi 400.
+- [x] **Gói P3 (Chính Sách & Kiểm Toán)**: Bảng Dexie v19 `auditLogs`, ghi nhật ký kiểm toán bất biến, bộ so khớp đường dẫn glob (`matchesGlobPattern`), deny-by-default cho dynamic MCP.
 
 ---
 
-### Giai đoạn P1: Tái cấu trúc Kiến trúc & Tối ưu Hiệu năng — [KẾ HOẠCH SPRINT TIẾP THEO]
-Dành cho AI Reviewer đánh giá kiến trúc và phản biện phương án triển khai:
+### Giai đoạn P1: Tái Cấu Trúc Kiến Trúc Cốt Lõi — [TRỌNG TÂM LỚN TIẾP THEO]
+*Dành cho Principal Architect phản biện và thẩm định thiết kế chi tiết:*
 
-1. **Tách God Component `chat-interface.tsx` (6,082 dòng) thành Kiến trúc 3 Tầng**:
-   - **Tầng 1 (Core)**: `AgentRuntime` thuần TypeScript không phụ thuộc React, quản lý state và tool loop độc lập, có thể chạy trong Node/Vitest và Web Worker.
-   - **Tầng 2 (Adapter)**: Hook `useAgentRuntime(chatId)` kết nối qua `useSyncExternalStore`.
-   - **Tầng 3 (UI)**: Các Presentational Components mỏng, nhận props và phát sự kiện.
-   - Áp dụng **XState** cho Turn Lifecycle Machine: `idle -> streaming -> awaiting_approval -> executing_tool -> resubmitting -> done/aborted/error`.
-2. **Tối ưu Danh sách Ảo hóa (TanStack Virtual)**:
-   - Tách tin nhắn đang stream ra khỏi Virtualizer, hiển thị như một footer cố định ngoài danh sách ảo hóa để triệt tiêu measurement thrashing.
-   - Bổ sung `widthBucket` vào khóa cache của `HEIGHT_CACHE`: `${chatId}:${id}:${widthBucket}` và giới hạn kích thước theo cơ chế LRU (~2,000 mục).
+1. **Bóc tách God Component `chat-interface.tsx` (6,152 dòng) thành Kiến trúc 3 Tầng**:
+   - **Tầng 1 (Core Engine)**: `AgentRuntime` thuần TypeScript không dính dáng React (chạy được trong Node/Vitest và Web Worker), quản lý state máy trạng thái và vòng lặp tool độc lập.
+   - **Tầng 2 (React Adapter)**: Hook `useAgentRuntime(chatId)` kết nối qua `useSyncExternalStore` + selectors để chặn re-render lan truyền.
+   - **Tầng 3 (UI Presentation)**: Các presentational components mỏng, chỉ nhận props và phát sự kiện.
+2. **State Machine XState cho Turn Lifecycle**:
+   - Chuyển toàn bộ luồng turn logic sang XState v5: `idle -> streaming -> awaiting_approval -> executing_tool -> resubmitting -> done/aborted/error`.
+   - Loại bỏ triệt để nguy cơ stale closure khi người dùng đổi chat/workspace trong lúc đang chờ duyệt diff.
 3. **Web Locks Multi-tab Concurrency**:
-   - Tích hợp Web Locks API: `navigator.locks.request('chat-runtime:' + chatId)` để chỉ 1 tab làm Leader runtime thực thi, các tab khác làm Observer hiển thị.
-4. **Tool-call Pairing Normalizer**:
-   - Bổ sung bước chuẩn hóa tự động trong `lib/message-normalize.ts`, tự động phát hiện và vá các `tool_call` mồ côi (thiếu `tool_result` tương ứng do rẽ nhánh) trước khi gửi lên API upstream.
-5. **Persist Draft trong Composer**:
-   - Lưu trữ bản nháp soạn thảo theo `chatId` vào `localStorage` (debounce 300ms) để bảo toàn văn bản khi `ChatErrorBoundary` kích hoạt.
-
----
-
-### Giai đoạn P2: Mở rộng & Trưởng thành Hệ thống Dài hạn
-1. **Policy-as-data & Audit Log**:
-   - Chuyển đổi mô hình phân quyền sang dạng chính sách có phạm vi chi tiết (path glob, rate-limit, session/workspace scope).
-   - Ghi nhận nhật ký kiểm toán bất biến (Immutable Audit Log) cho mọi hành động phê duyệt ghi file và chạy lệnh.
-2. **Lưu trữ Blob lớn vào OPFS**:
-   - Di chuyển các file đính kèm lớn ra Origin Private File System nhằm tối ưu hóa hiệu năng backup/restore JSON của Dexie.
-3. **Shiki Worker Highlighting & KaTeX Font Preload**:
-   - Đưa quá trình tô màu cú pháp mã nguồn lớn sang Web Worker để giải phóng main thread 60fps.
+   - Sử dụng Web Locks API `navigator.locks.request('chat-runtime:' + chatId)` để đảm bảo chỉ có 1 tab duy nhất làm Leader runtime thực thi, các tab khác làm Observer hiển thị.

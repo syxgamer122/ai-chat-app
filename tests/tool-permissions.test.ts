@@ -250,6 +250,50 @@ describe('P1-6: Tool permissions & 4 modes', () => {
       expect(getEffectiveToolPermission('bg_run', perms)).toBe('ask');
       expect(getEffectiveToolPermission('fs_read', perms)).toBe('default');
     });
+
+    it('hỗ trợ path glob pattern trong toolPermissions (P3.6)', () => {
+      const perms: ToolPermissions = {
+        'fs_write:src/**/*.ts': 'auto',
+        'fs_write:*.env*': 'deny',
+        'path:dist/**': 'ask',
+      };
+
+      // Match tool + path glob (cả 0 cấp thư mục trung gian và lồng nhiều cấp)
+      expect(getEffectiveToolPermission('fs_write', perms, { path: 'src/utils.ts' })).toBe('auto');
+      expect(getEffectiveToolPermission('fs_write', perms, { path: './src/utils.ts' })).toBe('auto');
+      expect(getEffectiveToolPermission('fs_write', perms, { path: 'src/lib/utils.ts' })).toBe('auto');
+      expect(getEffectiveToolPermission('fs_write', perms, { path: 'src/deep/nested/utils.ts' })).toBe('auto');
+      expect(getEffectiveToolPermission('fs_write', perms, { path: '.env.local' })).toBe('deny');
+      expect(getEffectiveToolPermission('fs_write', perms, { path: 'config.env.production' })).toBe('deny');
+      // Tool khác không khớp fs_write
+      expect(getEffectiveToolPermission('fs_read', perms, { path: 'src/lib/utils.ts' })).toBe('default');
+      // Generic path rule (khớp dist/** cả root dist và subpaths)
+      expect(getEffectiveToolPermission('fs_read', perms, { path: 'dist/bundle.js' })).toBe('ask');
+      expect(getEffectiveToolPermission('fs_read', perms, { path: 'dist/chunks/app.js' })).toBe('ask');
+      expect(getEffectiveToolPermission('fs_read', perms, { path: 'dist' })).toBe('ask');
+    });
+
+    it('áp dụng deny-by-default cho dynamic MCP tools chưa được phê duyệt (P3.6)', () => {
+      const emptyPerms: ToolPermissions = {};
+      // Tool MCP động dạng mcp__<server>__<tool> chưa cấu hình -> deny
+      expect(getEffectiveToolPermission('mcp__github__create_issue', emptyPerms)).toBe('deny');
+      expect(getEffectiveToolPermission('mcp__postgres__execute_sql', emptyPerms)).toBe('deny');
+
+      // Khi group mcp được duyệt -> auto
+      const mcpPerms: ToolPermissions = { mcp: 'auto' };
+      expect(getEffectiveToolPermission('mcp__github__create_issue', mcpPerms)).toBe('auto');
+
+      // Khi tool cụ thể được duyệt -> auto
+      const specificPerms: ToolPermissions = { mcp__github__create_issue: 'auto' };
+      expect(getEffectiveToolPermission('mcp__github__create_issue', specificPerms)).toBe('auto');
+      // Tool khác cùng server vẫn deny nếu chưa duyệt
+      expect(getEffectiveToolPermission('mcp__github__delete_repo', specificPerms)).toBe('deny');
+
+      // Wildcard server mcp__server__*
+      const serverPerms: ToolPermissions = { 'mcp__github__*': 'ask' };
+      expect(getEffectiveToolPermission('mcp__github__create_issue', serverPerms)).toBe('ask');
+      expect(getEffectiveToolPermission('mcp__postgres__execute_sql', serverPerms)).toBe('deny');
+    });
   });
 
   describe('Dexie v14 toolPermissions table', () => {

@@ -57,3 +57,138 @@ export function normalize(messages: CoreMessage[]): CoreMessage[] {
   if (firstUser === -1) return [];
   return [...systems, ...rest.slice(firstUser)];
 }
+
+/**
+ * Chuẩn hóa các toolInvocation trong mảng Message trước khi chuyển đổi sang CoreMessage.
+ * Nếu một invocation bị ngắt quãng do rẽ nhánh / đổi branch / reload trang (state !== 'result'),
+ * gắn kết quả tổng hợp (synthetic aborted result) để convertToCoreMessages không ném lỗi
+ * AI_MessageConversionError: ToolInvocation must have a result.
+ */
+export function normalizeMessageToolInvocations<T extends { role: string; toolInvocations?: any[] }>(
+  messages: T[],
+): T[] {
+  if (!messages || messages.length === 0) return [];
+  return messages.map((m) => {
+    if (m.role !== 'assistant' || !Array.isArray(m.toolInvocations) || m.toolInvocations.length === 0) {
+      return m;
+    }
+    const fixedInvocations = m.toolInvocations.map((inv) => {
+      if (!inv || typeof inv !== 'object') return inv;
+      if (inv.state !== 'result') {
+        return {
+          ...inv,
+          state: 'result',
+          result: inv.result ?? {
+            error: 'Tool execution was aborted or interrupted by branch switch',
+          },
+        };
+      }
+      return inv;
+    });
+    return {
+      ...m,
+      toolInvocations: fixedInvocations,
+    };
+  });
+}
+
+/**
+ * Chuẩn hóa cặp tool_call / tool_result (P2.4):
+ * Khi rẽ nhánh (branching) cắt ngang một lượt thực thi tool, assistant message có
+ * thể chứa tool_call nhưng thiếu tool_result tương ứng (hoặc ngược lại có tool_result mồ côi).
+ *
+ * Hàm này duyệt chuỗi CoreMessage và đảm bảo:
+ * 1. Mọi tool-call trong assistant message đều được ghép cặp với tool-result tương ứng.
+ * 2. Nếu thiếu tool-result (do chuyển nhánh / huỷ bỏ), chèn tool-result tổng hợp (synthetic aborted result).
+ * 3. Loại bỏ các tool-result mồ côi (không có tool-call tương ứng phía trước) để chống lỗi 400 upstream.
+ */
+export function normalizeToolCallPairing(messages: CoreMessage[]): CoreMessage[] {
+  if (!messages || messages.length === 0) return [];
+
+  const result: CoreMessage[] = [];
+  const pendingToolCalls = new Map<string, { toolCallId: string; toolName: string }>();
+
+  const createSyntheticToolMessage = (
+    toolCalls: Array<{ toolCallId: string; toolName: string }>,
+  ): CoreMessage => ({
+    role: 'tool',
+    content: toolCalls.map((tc) => ({
+      type: 'tool-result' as const,
+      toolCallId: tc.toolCallId,
+      toolName: tc.toolName,
+      result: { error: 'Tool execution was aborted or interrupted by branch switch' },
+      isError: true,
+    })),
+  });
+
+  for (let i = 0; i < messages.length; i++) {
+    const current = messages[i];
+
+    if (current.role === 'assistant') {
+      if (pendingToolCalls.size > 0) {
+        result.push(createSyntheticToolMessage(Array.from(pendingToolCalls.values())));
+        pendingToolCalls.clear();
+      }
+
+      if (Array.isArray(current.content)) {
+        for (const part of current.content) {
+          const callId = (part as any).toolCallId || (part as any).id;
+          if (part.type === 'tool-call' && callId) {
+            pendingToolCalls.set(callId, {
+              toolCallId: callId,
+              toolName: (part as any).toolName ?? 'unknown_tool',
+            });
+          }
+        }
+      }
+      result.push(current);
+    } else if (current.role === 'tool') {
+      const parts = Array.isArray(current.content) ? current.content : [];
+      const validResults: any[] = [];
+
+      for (const part of parts) {
+        const callId = (part as any).toolCallId || (part as any).id;
+        if (part.type === 'tool-result' && callId) {
+          if (pendingToolCalls.has(callId)) {
+            validResults.push(part);
+            pendingToolCalls.delete(callId);
+          }
+        }
+      }
+
+      const nextMsg = messages[i + 1];
+      if (!nextMsg || nextMsg.role !== 'tool') {
+        for (const [, missing] of pendingToolCalls) {
+          validResults.push({
+            type: 'tool-result',
+            toolCallId: missing.toolCallId,
+            toolName: missing.toolName,
+            result: { error: 'Tool execution was aborted or interrupted by branch switch' },
+            isError: true,
+          });
+        }
+        pendingToolCalls.clear();
+      }
+
+      if (validResults.length > 0) {
+        result.push({
+          role: 'tool',
+          content: validResults,
+        });
+      }
+    } else {
+      if (pendingToolCalls.size > 0) {
+        result.push(createSyntheticToolMessage(Array.from(pendingToolCalls.values())));
+        pendingToolCalls.clear();
+      }
+      result.push(current);
+    }
+  }
+
+  if (pendingToolCalls.size > 0) {
+    result.push(createSyntheticToolMessage(Array.from(pendingToolCalls.values())));
+    pendingToolCalls.clear();
+  }
+
+  return result;
+}
