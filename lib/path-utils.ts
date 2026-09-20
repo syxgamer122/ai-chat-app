@@ -63,8 +63,21 @@ export function validateSafeRelativePath(relPath?: string): { ok: boolean; reaso
 }
 
 /**
+ * Kiểm tra xem đường dẫn có trỏ tới thư mục hệ thống bị chặn tuyệt đối (.git, node_modules)
+ * cho cả hai chiều đọc và ghi.
+ */
+export function isSystemDenylistedPath(filePath: string): boolean {
+  if (!filePath || typeof filePath !== 'string') return false;
+  const p = filePath.replace(/\\/g, '/').replace(/^\.?\/+/, '').toLowerCase();
+  if (p === '.git' || p.startsWith('.git/') || p.includes('/.git/') || p.endsWith('/.git')) return true;
+  if (p === 'node_modules' || p.startsWith('node_modules/') || p.includes('/node_modules/') || p.endsWith('/node_modules')) return true;
+  return false;
+}
+
+/**
  * Kiểm tra xem đường dẫn có trỏ tới file cấu hình nhạy cảm hoặc file có khả năng auto-execute hay không:
  * - .git/** (hooks, config...)
+ * - node_modules/**
  * - package.json (scripts auto-run trên npm install/test/build)
  * - .vscode/** (tasks.json, settings.json...)
  * - .env* (.env, .env.local, .env.production...)
@@ -74,8 +87,8 @@ export function isProtectedPath(filePath: string): boolean {
   if (!filePath || typeof filePath !== 'string') return false;
   const p = filePath.replace(/\\/g, '/').replace(/^\.?\/+/, '').toLowerCase();
 
-  // 1. .git/**
-  if (p === '.git' || p.startsWith('.git/') || p.includes('/.git/') || p.endsWith('/.git')) return true;
+  // 1. .git/** & node_modules/**
+  if (isSystemDenylistedPath(p)) return true;
 
   // 2. package.json (root hoặc bất kỳ sub-package.json nào)
   if (p === 'package.json' || p.endsWith('/package.json')) return true;

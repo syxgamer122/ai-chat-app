@@ -5,6 +5,7 @@
  * không phải fork logic diff/search.
  */
 import { isVyenDesktop, vyenDesktop } from '@/lib/desktop-bridge';
+export { createApprovalArtifact, acquireDiskLock } from '@/lib/file-lock';
 
 // Mirror trần của lib/fs-access.ts — giữ đồng bộ để desktop không
 // đọc được nhiều hơn web rồi làm phình context ở nơi khác.

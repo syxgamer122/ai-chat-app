@@ -227,6 +227,9 @@ export type AuditDecisionType =
  */
 export interface StoredAuditLogEntry {
   id: string;
+  seq: number;
+  prevHash: string | null;
+  hash: string;
   timestamp: number;
   action: AuditActionType;
   tool: string;
@@ -700,7 +703,26 @@ export class ChatAppDatabase extends Dexie {
      * Ghi nhận phê duyệt, từ chối, chỉnh sửa file và thực thi lệnh shell kèm băm SHA-256.
      */
     this.version(19).stores({
-      auditLogs: 'id, timestamp, action, tool, decision, chatId',
+      chats: 'id, createdAt, updatedAt, pinned, activeLeafId, workspacePath, *titleTokens',
+      messages:
+        'id, chatId, role, createdAt, seq, parentId, ' +
+        '[chatId+parentId], [chatId+createdAt], [chatId+seq], ' +
+        '[chatId+parentId+branchOrder], *tokens',
+      kv: 'key',
+      providers: 'id, updatedAt',
+      memories: 'id, createdAt',
+      wsSnapshots: 'id, chatId, createdAt',
+      memoryCandidates: 'id, status, createdAt, digest, [scope.kind+scope.ref]',
+      memoryRecords: 'id, status, createdAt, reviewDueAt, digest, [scope.kind+scope.ref]',
+      memoryReviews: 'id, candidateId, action, reviewedAt',
+      recipes: 'id, title, updatedAt, source',
+      agentMemories: 'id, category, scope, workspaceKey, createdAt, *tags',
+      toolPermissions: 'toolName, permission, updatedAt',
+      schedules: 'id, recipeId, cron, enabled, lastRunAt, lastStatus, createdAt, updatedAt',
+      zeromemTraces: 'id, sessionId, episodeId, timestamp, *entityIds',
+      zeromemEntities: 'id, name, kind, scope, createdAt',
+      zeromemRelations: 'id, sourceId, targetId, relationType, createdAt',
+      auditLogs: 'id, seq, timestamp, action, tool, decision, chatId',
     });
 
     this.messages.hook('creating', (_primKey, obj) => {

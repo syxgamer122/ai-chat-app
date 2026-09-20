@@ -722,7 +722,7 @@ export default function ChatInterface() {
 
     const isDesktop = typeof window !== 'undefined' && (window as any).vyen?.desktop === true;
     const wsForFs = !isDesktop ? await requireWorkspace().then((r) => (r.ok ? r.deps : null)) : null;
-    const capChatId = useAppStore.getState().currentChatId;
+    const capChatId = useAppStore.getState().currentChatId || chatKey;
 
     /* Capture disk state TRƯỚC KHI ghi — một capture cho cả batch. */
     const capture = capChatId ? newTurnCapture(capChatId) : null;
@@ -735,6 +735,9 @@ export default function ChatInterface() {
         }
       }
     }
+
+    /* Lưu checkpoint TRƯỚC KHI ghi đĩa (bảo đảm luôn có điểm hoàn tác kể cả khi ghi thất bại) */
+    if (capture) await saveTurnCapture(capture);
 
     /* Ghi từng file vào đĩa — có kiểm tra TOCTOU trước khi ghi */
     const conflictedFiles: string[] = [];
@@ -771,9 +774,6 @@ export default function ChatInterface() {
         showNotice(`Lỗi ghi file ${file.path}: ${e instanceof Error ? e.message : String(e)}`);
       }
     }
-
-    /* Lưu checkpoint (cho undo sau này). */
-    if (capture) void saveTurnCapture(capture);
 
     /* Chỉ gỡ khỏi staging những file đã ghi thành công */
     const nextStore = { ...stagingRef.current };
@@ -1213,19 +1213,36 @@ export default function ChatInterface() {
   );
 
   const autoApproveDiff = useCallback(
-    async (s: { path: string; oldText: string; newText: string }): Promise<boolean> => {
+    async (s: { path: string; oldText: string; newText: string; toolName?: string; existedBefore?: boolean }): Promise<boolean> => {
+      const tool = s.toolName || 'fs_edit';
       if (
         shouldAutoApprove({
-          toolName: 'fs_edit',
+          toolName: tool,
           args: { path: s.path },
           policy: approvalPolicy,
           autoPilotEnabled: autoPilot,
           toolPermissions,
         })
       ) {
+        // Auto-checkpoint: ensure workspace checkpoint is captured before modifying files
+        const capChatId = useAppStore.getState().currentChatId || chatKey;
+        if (capChatId) {
+          if (!turnCaptureRef.current) {
+            turnCaptureRef.current = newTurnCapture(capChatId);
+          }
+          if (s.path) {
+            const existed = s.existedBefore !== undefined ? s.existedBefore : (s.oldText !== '');
+            captureFile(turnCaptureRef.current, {
+              status: existed ? 'ok' : 'missing',
+              path: s.path,
+              content: s.oldText || '',
+            });
+            await saveTurnCapture(turnCaptureRef.current);
+          }
+        }
         void recordAuditLog({
           action: 'file_modification',
-          tool: 'fs_edit',
+          tool,
           target: s.path,
           decision: 'auto_approved',
           payload: s,
@@ -1236,7 +1253,7 @@ export default function ChatInterface() {
       const approved = await showDiffModal(s);
       void recordAuditLog({
         action: approved ? 'approval' : 'rejection',
-        tool: 'fs_edit',
+        tool,
         target: s.path,
         decision: approved ? 'approved' : 'rejected',
         payload: s,
@@ -1872,16 +1889,16 @@ export default function ChatInterface() {
                 error: `[TOCTOU] File "${path}" đã bị thay đổi trên đĩa bởi ứng dụng khác trong khi chờ duyệt. Vui lòng đọc lại file (fs_read) và áp lại thay đổi để xác nhận lại.`,
               });
             }
-            const capChatId = useAppStore.getState().currentChatId;
+            const capChatId = useAppStore.getState().currentChatId || chatKey;
             if (capChatId) {
               if (!turnCaptureRef.current) {
                 turnCaptureRef.current = newTurnCapture(capChatId);
               }
               captureFile(turnCaptureRef.current, await readCaptureForPath(isDesktop ? null : wsForFs!, path));
+              await saveTurnCapture(turnCaptureRef.current);
             }
             const res = isDesktop ? await desktopFsWrite(path, current) : await fsWrite(wsForFs!, path, current);
             void recordAuditLog({ action: 'file_modification', tool: 'fs_edit', target: path, decision: 'executed', payload: { path, blocks: applied.length }, chatId: chatKey });
-            if (turnCaptureRef.current) void saveTurnCapture(turnCaptureRef.current);
             const editChecks = await runPostEditChecks();
             const editResult = JSON.stringify({ applied: true, blocks: applied.length, strategies: applied, ...res });
             return editChecks ? attachPostEditCheck(editResult, editChecks) : editResult;
@@ -1975,7 +1992,13 @@ export default function ChatInterface() {
               return JSON.stringify({ written: true, staged: true, size: content.length });
             }
             /* Legacy path: diff modal + ghi đĩa ngay + checkpoint. */
-            const approved = await autoApproveDiff({ path, oldText, newText: content });
+            const approved = await autoApproveDiff({
+              path,
+              oldText,
+              newText: content,
+              toolName: 'fs_write',
+              existedBefore: fileOnDiskExists,
+            });
             if (!approved) {
               return JSON.stringify({
                 written: false,
@@ -1993,16 +2016,16 @@ export default function ChatInterface() {
                 error: `[TOCTOU] File "${path}" đã bị thay đổi trên đĩa bởi ứng dụng khác trong khi chờ duyệt. Vui lòng đọc lại file (fs_read) trước khi ghi đè để xác nhận lại.`,
               });
             }
-            const capChatId = useAppStore.getState().currentChatId;
+            const capChatId = useAppStore.getState().currentChatId || chatKey;
             if (capChatId) {
               if (!turnCaptureRef.current) {
                 turnCaptureRef.current = newTurnCapture(capChatId);
               }
               captureFile(turnCaptureRef.current, await readCaptureForPath(isDesktop ? null : wsForFs!, path));
+              await saveTurnCapture(turnCaptureRef.current);
             }
             const writeRes = isDesktop ? await desktopFsWrite(path, content) : await fsWrite(wsForFs!, path, content);
             void recordAuditLog({ action: 'file_modification', tool: 'fs_write', target: path, decision: 'executed', payload: { path, size: content.length }, chatId: chatKey });
-            if (turnCaptureRef.current) void saveTurnCapture(turnCaptureRef.current);
             const writeChecks = await runPostEditChecks();
             const writeResult = JSON.stringify({ written: true, ...writeRes });
             return writeChecks ? attachPostEditCheck(writeResult, writeChecks) : writeResult;
@@ -2504,6 +2527,8 @@ export default function ChatInterface() {
               path: targetPath,
               oldText: original,
               newText: patched.modifiedContent,
+              toolName: 'apply_patch',
+              existedBefore: true,
             });
             if (!approved) {
               return JSON.stringify({
@@ -2523,15 +2548,16 @@ export default function ChatInterface() {
                 error: `[TOCTOU] File "${targetPath}" đã bị thay đổi trên đĩa bởi ứng dụng khác trong khi chờ duyệt. Vui lòng đọc lại file (fs_read) và áp lại thay đổi để xác nhận lại.`,
               });
             }
-            const capChatId = useAppStore.getState().currentChatId;
+            const capChatId = useAppStore.getState().currentChatId || chatKey;
             if (capChatId) {
               if (!turnCaptureRef.current) {
                 turnCaptureRef.current = newTurnCapture(capChatId);
               }
               captureFile(turnCaptureRef.current, await readCaptureForPath(isDesktop ? null : wsForFs!, targetPath));
+              await saveTurnCapture(turnCaptureRef.current);
             }
             const res = isDesktop ? await desktopFsWrite(targetPath, patched.modifiedContent) : await fsWrite(wsForFs!, targetPath, patched.modifiedContent);
-            if (turnCaptureRef.current) void saveTurnCapture(turnCaptureRef.current);
+            void recordAuditLog({ action: 'file_modification', tool: 'apply_patch', target: targetPath, decision: 'executed', payload: { path: targetPath, hunksApplied: patched.hunksApplied }, chatId: chatKey });
             const editChecks = await runPostEditChecks();
             const editResult = JSON.stringify({
               ok: true,
@@ -5101,6 +5127,13 @@ export default function ChatInterface() {
         setCurrentChatId(chatId);
       }
 
+      // Auto-checkpoint: Ensure workspace checkpoint is automatically captured when entering an autonomous/auto-approve turn before files are modified
+      if (approvalPolicy === 'never' || autoPilot) {
+        if (!turnCaptureRef.current && chatId) {
+          turnCaptureRef.current = newTurnCapture(chatId);
+        }
+      }
+
       const isFirstMessage = messages.length === 0;
       const userText = draftText.trim();
 
@@ -5331,9 +5364,7 @@ export default function ChatInterface() {
       console.error('[onSubmit]', err);
       return false;
     }
-    /* beginRun/currentRun/setRepairable là hàm ổn định (useCallback rỗng bên
-       trong hook), nên thêm vào đây không làm submitTurn bị tạo lại. */
-  }, [attachments, isLoading, currentChat, currentChatId, draftId, setCurrentChatId, append, pin, generateTitle, messages, webSearchEnabled, agentToolsEnabled, forceEmulatedTools, agentMode, stagingEnabled, beginRun, currentRun, setRepairable, MODELS, isRoutableModel, routingBodyFor, approvalPolicy]);
+  }, [attachments, isLoading, currentChat, currentChatId, draftId, setCurrentChatId, append, pin, generateTitle, messages, webSearchEnabled, agentToolsEnabled, forceEmulatedTools, agentMode, stagingEnabled, beginRun, currentRun, setRepairable, MODELS, isRoutableModel, routingBodyFor, approvalPolicy, autoPilot]);
 
   /* ---------------------------------------------------------------- */
   /* Recipe runner : attempt → checks → retry/pass/stop.   */

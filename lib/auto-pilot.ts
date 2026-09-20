@@ -18,6 +18,13 @@ import { TOOL_CATEGORY_MAP } from '@/lib/store';
 import { getEffectiveToolPermission, isDynamicMcpTool } from '@/lib/tool-permissions';
 import { evaluateToolcallRules, type ToolcallRule } from '@/lib/toolcall-rules';
 import { isProtectedPath, validateSafeRelativePath } from '@/lib/path-utils';
+import { compileShellCommand } from '@/lib/shell-policy';
+import {
+  isTurnTainted,
+  isEgressTool,
+  getTurnTaintState,
+  checkAutoBudget,
+} from '@/lib/taint-tracker';
 
 /* ------------------------------------------------------------------ */
 /* Types                                                                */
@@ -30,6 +37,8 @@ export interface AutoApproveContext {
   args: Record<string, unknown>;
   policy: ApprovalPolicy;
   autoPilotEnabled: boolean;
+  /** Active conversation identifier for turn taint and budget tracking. */
+  conversationId?: string | null;
   /** Per-tool permission overrides (optional for backward compat). */
   toolPermissions?: ToolPermissions;
   /** User-defined toolcall rules. */
@@ -144,16 +153,21 @@ const WRITE_TOOLS = new Set([
 
 /**
  * Check if a shell command matches any safe pattern.
- * Strictly disallows shell metacharacters: chaining (&&, ||, ;), piping (|),
- * redirections (>, <), command substitution (`...`, $(...)), and newlines.
+ * Compiles the command via strict argv tokenizer and allowlist (shell: false paradigm).
  */
 export function isSafeCommand(command: string): boolean {
   const trimmed = command.trim();
   if (!trimmed) return false;
-  if (/[;&|`$><\r\n]/.test(trimmed)) {
+  try {
+    const compiled = compileShellCommand(trimmed);
+    if (compiled.bin === 'git' && compiled.args.length > 0) {
+      const sub = compiled.args[0].toLowerCase();
+      if (sub === 'commit' || sub === 'add') return false;
+    }
+    return SAFE_COMMAND_PATTERNS.some((p) => p.test(trimmed));
+  } catch {
     return false;
   }
-  return SAFE_COMMAND_PATTERNS.some((p) => p.test(trimmed));
 }
 
 /**
@@ -206,6 +220,19 @@ export function targetsProtectedPath(toolName: string, args: Record<string, unkn
 export function shouldAutoApprove(ctx: AutoApproveContext): boolean {
   // ── Mode chat_only: vô hiệu hoàn toàn tool ──
   if (ctx.policy === 'chat_only') return false;
+
+  // ── Egress Guard: Turn bị nhiễm untrusted data thì mọi tool ra ngoài PHẢI hỏi ──
+  if (isTurnTainted(ctx.conversationId) && isEgressTool(ctx.toolName, ctx.args)) {
+    return false;
+  }
+
+  // ── Autonomous Budget Guard: Vượt trần ngân sách thì tự hạ về ask ──
+  if (ctx.policy === 'never' || ctx.policy === 'smart') {
+    const budget = checkAutoBudget(getTurnTaintState(ctx.conversationId));
+    if (budget.exceeded) {
+      return false;
+    }
+  }
 
   // ── 0a. Destructive safety check (always blocked) ──
   if (ctx.toolName === 'shell_run') {

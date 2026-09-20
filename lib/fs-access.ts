@@ -187,9 +187,23 @@ function sanitizeFsError(e: unknown): string {
  * Ngoài ra `....//x` co lại thành `..../x` và `a/...././b` -> `a/..../b`,
  * tức segment toàn dấu chấm cũng lọt.
  *
- * Cách sửa: duyệt TỪNG segment theo danh sách trắng — bỏ `.`, từ chối `..`,
- * từ chối mọi segment chỉ gồm dấu chấm. Không có đường return sớm nào bỏ qua
- * được bước kiểm tra.
+export function isProtectedFsPath(path: string): boolean {
+  const p = path.replace(/\\/g, '/').toLowerCase();
+  return (
+    p === '.git' ||
+    p.startsWith('.git/') ||
+    p.includes('/.git/') ||
+    p.endsWith('/.git') ||
+    p === 'node_modules' ||
+    p.startsWith('node_modules/') ||
+    p.includes('/node_modules/') ||
+    p.endsWith('/node_modules')
+  );
+}
+
+/**
+ * Chuẩn hóa đường dẫn tương đối. Trả null khi nguy hiểm: tuyệt đối, chứa '..',
+ * drive letter, backdot trá hình, hoặc trỏ vào .git / node_modules.
  */
 export function normalizeRelPath(raw: string): string | null {
   if (!raw) return '';
@@ -199,12 +213,14 @@ export function normalizeRelPath(raw: string): string | null {
   const out: string[] = [];
   for (const seg of p.split('/')) {
     if (seg === '' || seg === '.') continue; // bỏ qua rỗng và thư mục hiện tại
-    // Mọi segment chỉ gồm dấu chấm ('..', '...', '....') đều đáng ngờ:
-    // '..' là leo thư mục, phần còn lại là biến thể trá hình.
     if (/^\.+$/.test(seg)) return null;
     out.push(seg);
   }
-  return out.join('/');
+  const result = out.join('/');
+  if (isProtectedFsPath(result)) {
+    return null;
+  }
+  return result;
 }
 
 /* ------------------------------------------------------------------ */
@@ -215,6 +231,12 @@ async function resolveDir(deps: FsDeps, relPath: string, create: boolean): Promi
   let dir = deps.root;
   for (const seg of relPath.split('/').filter(Boolean)) {
     dir = await dir.getDirectoryHandle(seg, { create });
+    if (typeof (deps.root as unknown as { resolve?(h: unknown): Promise<string[] | null> }).resolve === 'function') {
+      const parts = await (deps.root as unknown as { resolve(h: unknown): Promise<string[] | null> }).resolve(dir);
+      if (!parts) {
+        throw new Error('Đường dẫn thư mục nằm ngoài workspace jail.');
+      }
+    }
   }
   return dir;
 }
@@ -415,14 +437,15 @@ export async function fsReadImage(
   };
 }
 
-/** Ghi file (create hoặc đè). Caller chịu trách nhiệm đã có xác nhận diff. */
+/** Ghi file (create hoặc đè). Hỗ trợ khóa TOCTOU qua expectedBaseHash. */
 export async function fsWrite(
   deps: FsDeps,
   rawPath: string,
   content: string,
+  expectedBaseHash?: string,
 ): Promise<{ path: string; bytes: number; created: boolean }> {
   const path = normalizeRelPath(rawPath);
-  if (path === null) throw new Error(`Đường dẫn không hợp lệ: "${rawPath}"`);
+  if (path === null) throw new Error(`Đường dẫn không hợp lệ hoặc nằm trong thư mục bị chặn: "${rawPath}"`);
   if (!path) throw new Error('Thiếu tên file.');
   const segs = path.split('/').filter(Boolean);
   const fileName = segs.pop();
@@ -431,11 +454,43 @@ export async function fsWrite(
   const dir = await resolveDir(deps, segs.join('/'), true);
   let created = false;
   try {
-    await dir.getFileHandle(fileName); // tồn tại?
-  } catch {
-    created = true;
+    const existing = await dir.getFileHandle(fileName);
+    // TOCTOU verification
+    if (expectedBaseHash) {
+      const existingFile = await existing.getFile();
+      const buf = await existingFile.arrayBuffer();
+      const hashBuf = await crypto.subtle.digest('SHA-256', buf);
+      const currentHash = Array.from(new Uint8Array(hashBuf))
+        .map((b) => b.toString(16).padStart(2, '0'))
+        .join('');
+      if (currentHash !== expectedBaseHash) {
+        throw new Error(
+          `TOCTOU Conflict: File "${path}" đã bị thay đổi kể từ khi diff được duyệt (expected: ${expectedBaseHash.slice(0, 8)}, current: ${currentHash.slice(0, 8)}). Ghi bị hủy để bảo vệ dữ liệu.`
+        );
+      }
+    }
+  } catch (err: unknown) {
+    const e = err as { name?: string };
+    if (e && e.name === 'NotFoundError') {
+      created = true;
+      if (expectedBaseHash && expectedBaseHash !== '') {
+        throw new Error(`TOCTOU Conflict: File "${path}" không tồn tại trên đĩa như mong đợi.`);
+      }
+    } else {
+      throw err;
+    }
   }
+
   const handle = (await dir.getFileHandle(fileName, { create: true })) as FsWriteCapableFile;
+
+  // Canonical FSA resolve check
+  if (typeof (deps.root as unknown as { resolve?(h: unknown): Promise<string[] | null> }).resolve === 'function') {
+    const parts = await (deps.root as unknown as { resolve(h: unknown): Promise<string[] | null> }).resolve(handle);
+    if (!parts) {
+      throw new Error('Thao tác ghi bị từ chối: Handle nằm ngoài workspace jail.');
+    }
+  }
+
   const writable = await handle.createWritable({ keepExistingData: false });
   await writable.write(content);
   await writable.close();

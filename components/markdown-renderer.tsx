@@ -15,6 +15,7 @@ import remarkMath from 'remark-math';
 import { Check, Copy } from 'lucide-react';
 import { useThrottledValue } from '@/lib/use-throttled-value';
 import { preprocessMarkdown } from '@/lib/markdown-preprocess';
+import { rehypeSanitizer } from '@/lib/rehype-sanitizer';
 
 /** Khối code thuần — dùng cho cả nhánh không tô màu lẫn lúc chờ nạp chunk. */
 function PlainCode({ value }: { value: string }) {
@@ -113,6 +114,8 @@ function loadKatex(): Promise<any> {
   }
   return katexModulePromise;
 }
+
+
 
 /**
  * CDN media của Qwen (cdn.qwenlm.ai) chặn hotlink theo `Referer`: mọi request
@@ -294,12 +297,12 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
     };
   }, [needsMath, katexReady]);
 
-  /* Sửa C1: mỗi instance có bản macros riêng, KaTeX ghi \gdef vào đây thì
-     cũng không ảnh hưởng tin nhắn khác. */
+  /* rehypeSanitizer chạy TRƯỚC rehype-katex.
+     rehype-katex dùng maxExpand: 100, trust: false, strict: 'ignore' (Sprint S1). */
   const rehypePlugins = useMemo<any[]>(() => {
-    if (!needsMath || !katexReady || !katexModule) return [];
-    return [
-      [
+    const plugins: any[] = [rehypeSanitizer];
+    if (needsMath && katexReady && katexModule) {
+      plugins.push([
         katexModule,
         {
           throwOnError: false,
@@ -307,13 +310,14 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
           strict: 'ignore',
           trust: false,
           maxSize: 60,
-          maxExpand: 1000,
+          maxExpand: 100, // Sprint S1: trần mở rộng macro 100
           globalGroup: false,
           macros: { ...KATEX_MACRO_TEMPLATE },
           output: 'htmlAndMathml', // sửa C5: giữ MathML cho screen reader
         },
-      ],
-    ];
+      ]);
+    }
+    return plugins;
   }, [needsMath, katexReady]);
 
   const streamingRef = useRef(isStreaming);
@@ -427,6 +431,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
           remarkPlugins={REMARK_PLUGINS}
           rehypePlugins={rehypePlugins}
           components={components}
+          urlTransform={(u) => (/^(javascript|data|vbscript):/i.test(u.trim()) ? '' : u)}
         >
           {source}
         </ReactMarkdown>
