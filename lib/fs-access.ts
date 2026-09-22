@@ -186,7 +186,7 @@ function sanitizeFsError(e: unknown): string {
  *     './../../x'    -> '../../x'
  * Ngoài ra `....//x` co lại thành `..../x` và `a/...././b` -> `a/..../b`,
  * tức segment toàn dấu chấm cũng lọt.
- *
+ */
 export function isProtectedFsPath(path: string): boolean {
   const p = path.replace(/\\/g, '/').toLowerCase();
   return (
@@ -470,8 +470,9 @@ export async function fsWrite(
       }
     }
   } catch (err: unknown) {
-    const e = err as { name?: string };
-    if (e && e.name === 'NotFoundError') {
+    /* Dùng helper chung của module (name HOẶC message): FSA thật ném DOMException
+       tên 'NotFoundError', còn fake trong test ném Error kèm tiền tố message. */
+    if (isNotFoundError(err)) {
       created = true;
       if (expectedBaseHash && expectedBaseHash !== '') {
         throw new Error(`TOCTOU Conflict: File "${path}" không tồn tại trên đĩa như mong đợi.`);

@@ -1,7 +1,7 @@
 # TÀI LIỆU THIẾT KẾ KIẾN TRÚC MÃ NGUỒN UI & FRONTEND (TSX) — DỰ ÁN VYEN
-> **Phiên bản**: v3.1 (Đồng bộ hóa toàn diện sau khi hoàn thành Gói P0 Bảo Mật, P2 Tối Ưu UX/Virtualizer và P3 Policy & Audit Log)  
-> **Cập nhật lúc**: 2026-09-20  
-> **Mục đích tài liệu**: Cung cấp bản đặc tả kỹ thuật toàn diện, tuyệt đối chính xác về thiết kế mã nguồn, cấu trúc Component, luồng dữ liệu (Data Flow), cơ chế quản lý trạng thái (State Management), cơ chế an toàn duyệt mã (Human-in-the-Loop & Guardrails) của toàn bộ **58 file `.tsx`** (tổng cộng **19,096 dòng code** loại trừ trailing newlines, tương đương **19,152 dòng** khi tính cả dòng rỗng cuối file) trong dự án Vyen. Tài liệu này được thiết kế chuyên biệt để các hệ thống AI (Claude, GPT, Gemini...) phân tích, phản biện kiến trúc và đánh giá chất lượng kỹ thuật mà không cần truy cập trực tiếp vào hệ thống file.
+> **Phiên bản**: v3.2 (Đồng bộ hóa số liệu sau Gói P0 Bảo Mật, P2 Tối Ưu UX/Virtualizer, P3 Policy & Audit Log và sprint hardening S1–S2)  
+> **Cập nhật lúc**: 2026-09-22 (số liệu đối chiếu tại HEAD `6768422`)  
+> **Mục đích tài liệu**: Cung cấp bản đặc tả kỹ thuật toàn diện, tuyệt đối chính xác về thiết kế mã nguồn, cấu trúc Component, luồng dữ liệu (Data Flow), cơ chế quản lý trạng thái (State Management), cơ chế an toàn duyệt mã (Human-in-the-Loop & Guardrails) của toàn bộ **58 file `.tsx`** (tổng cộng **19,130 dòng code** loại trừ trailing newlines, tương đương **19,188 dòng** khi tính cả dòng rỗng cuối file) trong dự án Vyen. Tài liệu này được thiết kế chuyên biệt để các hệ thống AI (Claude, GPT, Gemini...) phân tích, phản biện kiến trúc và đánh giá chất lượng kỹ thuật mà không cần truy cập trực tiếp vào hệ thống file.
 
 ---
 
@@ -130,13 +130,13 @@ RootLayout (app/layout.tsx)
 
 ## 3. BẢNG CHỈ MỤC TOÀN BỘ 58 FILE TSX THEO MODULE
 
-*(Toàn bộ 58 file TSX phân bố chuẩn xác, tổng cộng **19,096 dòng code** loại trừ trailing newlines, hoặc **19,152 dòng** khi tính cả dòng rỗng cuối file)*
+*(Toàn bộ 58 file TSX phân bố chuẩn xác, tổng cộng **19,130 dòng code** loại trừ trailing newlines, hoặc **19,188 dòng** khi tính cả dòng rỗng cuối file)*
 
 | # | Module | Đường Dẫn File | Số Dòng | Vai Trò Chính |
 |---|---|---|---|---|
 | 1 | **M1: Root** | `app/layout.tsx` | 71 | Root HTML, fonts, Dark-theme script chống FOUC, PWA registration |
 | 2 | | `app/page.tsx` | 161 | Main page layout, phím tắt toàn cục, dynamic import Settings, `storage.persist()` |
-| 3 | **M2: Core Harness** | `components/chat-interface.tsx` | 6,152 | Đầu não điều phối: stream, tool runtime, TOCTOU guard, CWD jail, abort queue, audit log (32.12%) |
+| 3 | **M2: Core Harness** | `components/chat-interface.tsx` | 6,183 | Đầu não điều phối: stream, tool runtime, TOCTOU guard, CWD jail, abort queue, audit log (32.22%) |
 | 4 | | `components/sidebar.tsx` | 609 | Quản lý phiên chat, tìm kiếm fulltext tiếng Việt, workspace link |
 | 5 | | `components/composer.tsx` | 1,068 | Ô nhập đa năng, voice STT, slash commands, Draft Persist vào localStorage, 3-layer IME guard |
 | 6 | | `components/context-meter.tsx` | 94 | Thước đo ngữ cảnh token, tính toán riêng cho active thread |
@@ -150,7 +150,7 @@ RootLayout (app/layout.tsx)
 | 14 | | `components/chat/orchestrator-badge.tsx` | 151 | Huy hiệu phân biệt tin nhắn sinh ra từ Orchestrator Sweep |
 | 15 | | `components/message-status-badge.tsx` | 39 | Badge trạng thái tin nhắn (sending, delivered, error, aborted) |
 | 16 | | `components/evidence-badge.tsx` | 50 | Huy hiệu minh chứng bậc thang (Zero-Mem Evidence Level) |
-| 17 | **M4: Rich Content** | `components/markdown-renderer.tsx` | 438 | Bộ dựng Markdown chuẩn GFM, KaTeX math, dynamic syntax gate |
+| 17 | **M4: Rich Content** | `components/markdown-renderer.tsx` | 443 | Bộ dựng Markdown chuẩn GFM, KaTeX math, dynamic syntax gate |
 | 18 | | `components/syntax-highlight.tsx` | 77 | Tô màu code Prism 18 ngôn ngữ, nạp lười giảm bundle |
 | 19 | | `components/highlight.tsx` | 28 | Highlight từ khóa tìm kiếm tiếng Việt không dấu |
 | 20 | **M5: Human-In-The-Loop** | `components/diff-confirm.tsx` | 140 | Modal duyệt diff dòng (unified diff) trước khi ghi đĩa |
@@ -206,7 +206,7 @@ RootLayout (app/layout.tsx)
   - Đăng ký bộ phím tắt toàn cục (`Ctrl/Cmd + K`, `Ctrl/Cmd + Shift + S`, `Escape`), điều phối hiển thị Sidebar và nạp lười (dynamic import) `SettingsDialog`.
 
 ### Module 2: Core Orchestration & Chat Controller (5 files)
-- **`components/chat-interface.tsx` (6,152 dòng — 32.12% toàn bộ code TSX)**:
+- **`components/chat-interface.tsx` (6,183 dòng — 32.22% toàn bộ code TSX)**:
   *Đầu não điều phối toàn bộ vòng đời tác vụ, streaming token, và phân phối công cụ*:
   - **TOCTOU Guard (P0)**: Tính toán và kiểm tra SHA-256 base hash trước khi ghi đĩa cho `fs_edit`, `fs_write`, `code_patch`. Nếu hash trên đĩa khác base hash thời điểm đọc, lập tức hủy ghi và trả lỗi `[TOCTOU] File đã bị thay đổi trên đĩa bởi tiến trình khác`.
   - **CWD Sandbox & Shell Chaining (P0)**: Toàn bộ đường dẫn thực thi lệnh shell được khóa chặt chẽ trong workspace root thông qua `validateSafeRelativePath`. Chặn đứng triệt để metacharacters (`&&`, `||`, `;`, `|`, `$()`, `>`, `<`) và denylist các flag nguy hiểm của `node`/`python`.
@@ -247,7 +247,7 @@ RootLayout (app/layout.tsx)
   - Huy hiệu hiển thị cấp độ bằng chứng ngữ cảnh từ bộ nhớ Zero-Mem (`<zero-mem-evidence>`).
 
 ### Module 4: Rich Content, Markdown & Code Rendering (3 files)
-- **`components/markdown-renderer.tsx` (438 dòng)**:
+- **`components/markdown-renderer.tsx` (443 dòng)**:
   - Bộ dựng Markdown chuẩn GitHub Flavored Markdown (GFM), hỗ trợ công thức toán học KaTeX (`remark-math`, `rehype-katex`), bảng biểu, và nạp code block qua dynamic gate.
 - **`components/syntax-highlight.tsx` (77 dòng)**:
   - Tô màu cú pháp Prism cho 18 ngôn ngữ lập trình phổ biến, nạp lười theo yêu cầu để tối ưu bundle size ban đầu.
@@ -339,17 +339,21 @@ RootLayout (app/layout.tsx)
 
 ## 6. HIỆN TRẠNG THỰC THI & LỘ TRÌNH TÁI CẤU TRÚC (P0, P2, P3 HOÀN TẤT -> P1 KẾ HOẠCH)
 
-### Hiện trạng Đã Hoàn Thành — [162/162 Test Suites Passed, 2,445 Tests]
+### Hiện Trạng Đã Hoàn Thành — [163/163 Test Files PASS · 2,456/2,456 Tests PASS]
 - [x] **Gói P0 (Bảo Mật & Toàn Vẹn)**: TOCTOU hash guard, loại bỏ shell RCE, CWD jail, auto-execute file protection, ApprovalQueue abort, `storage.persist()`.
 - [x] **Gói P2 (Tối Ưu UX & Virtualization)**: Tách stream message khỏi virtualizer, width-aware LRU `HEIGHT_CACHE`, draft persistence chống mất chữ, tool-call pairing normalizer chống lỗi 400.
 - [x] **Gói P3 (Chính Sách & Kiểm Toán)**: Bảng Dexie v19 `auditLogs`, ghi nhật ký kiểm toán bất biến, bộ so khớp đường dẫn glob (`matchesGlobPattern`), deny-by-default cho dynamic MCP.
+- [x] **Kiểm chứng tại HEAD `6768422` (2026-09-22)**: `tsc --noEmit` sạch; `vitest run` **163/163 test file PASS · 2,456/2,456 test PASS**; `node tests/sprint-s1-verification.cjs` và `node tests/sprint-s2-verification.cjs` đều PASS (gồm toàn bộ kiểm tra bảo mật shell policy).
+- [x] **5 lỗi chặn đã sửa trong đợt kiểm chứng này**: (1) comment JSDoc chưa đóng trong `lib/fs-access.ts` nuốt cả hàm `isProtectedFsPath` → `TS2304` + `ReferenceError` lúc chạy; (2) `const crypto` khai báo trùng ở module scope trong `lib/ipc.cjs` → SyntaxError làm sập toàn bộ bridge IPC; (3) `fsWrite` tự so `err.name === 'NotFoundError'` thay vì dùng helper chung `isNotFoundError()` cùng module → tạo file mới luôn thất bại; (4) `lib/shell-policy.cjs` thiếu `grep`/`echo`/`printf` trong allowlist đọc-only → `shell_run` từ chối cả lệnh chỉ-đọc vô hại; (5) `npx vite build`/`npx next build` bị chặn vì `vite`/`next` không nằm trong `NPX_ALLOWED_BINS` (nay tách thành `NPX_REQUIRED_SUBCOMMANDS` — vẫn chặn `vite dev`/`next dev`).
+- [x] **Ghi chú bảo mật (chủ ý)**: `find`/`fd` vẫn NGOÀI allowlist dù `SAFE_COMMAND_PATTERNS` của `lib/auto-pilot.ts` có liệt kê — `find ... -exec <cmd> +` và `-delete` chạy/ghi được mà tokenizer không chặn (không cần dấu `;`), nên hai binary này phải đòi phê duyệt thay vì auto-approve.
+- **Flaky theo môi trường**: `tests/web-backend.test.ts` phụ thuộc mạng (DuckDuckGo/SearXNG) — khi pass khi fail tùy kết nối, không phải lỗi logic.
 
 ---
 
 ### Giai đoạn P1: Tái Cấu Trúc Kiến Trúc Cốt Lõi — [TRỌNG TÂM LỚN TIẾP THEO]
 *Dành cho Principal Architect phản biện và thẩm định thiết kế chi tiết:*
 
-1. **Bóc tách God Component `chat-interface.tsx` (6,152 dòng) thành Kiến trúc 3 Tầng**:
+1. **Bóc tách God Component `chat-interface.tsx` (6,183 dòng) thành Kiến trúc 3 Tầng**:
    - **Tầng 1 (Core Engine)**: `AgentRuntime` thuần TypeScript không dính dáng React (chạy được trong Node/Vitest và Web Worker), quản lý state máy trạng thái và vòng lặp tool độc lập.
    - **Tầng 2 (React Adapter)**: Hook `useAgentRuntime(chatId)` kết nối qua `useSyncExternalStore` + selectors để chặn re-render lan truyền.
    - **Tầng 3 (UI Presentation)**: Các presentational components mỏng, chỉ nhận props và phát sự kiện.
