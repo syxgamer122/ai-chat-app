@@ -201,6 +201,40 @@ export function targetsProtectedPath(toolName: string, args: Record<string, unkn
 }
 
 /**
+ * Provenance cho Egress Guard: khi lượt đã nhiễm nội dung ngoài và tool sắp gọi
+ * có khả năng đưa dữ liệu ra ngoài, ghi lại nguồn nhiễm vào audit log (hash
+ * chain ở lib/audit-log.ts) để truy vết ngược khi có sự cố.
+ *
+ * Import động là CỐ Ý: lib/auto-pilot được unit-test trong môi trường node thuần
+ * — kéo Dexie vào đồ thị import tĩnh sẽ làm test phải chạy IndexedDB giả. Audit
+ * cũng chỉ chạy khi guard thực sự kích hoạt (hiếm), không nằm trên đường nóng.
+ */
+function recordTaintedEgress(ctx: AutoApproveContext): void {
+  const sources = getTurnTaintState(ctx.conversationId).sources;
+  void (async () => {
+    try {
+      const { recordAuditLog } = await import('@/lib/audit-log');
+      await recordAuditLog({
+        action: 'rejection',
+        tool: ctx.toolName,
+        target:
+          typeof ctx.args.command === 'string'
+            ? ctx.args.command.slice(0, 200)
+            : typeof ctx.args.path === 'string'
+              ? ctx.args.path.slice(0, 200)
+              : undefined,
+        decision: 'blocked',
+        payload: { args: ctx.args, policy: ctx.policy, taintSources: sources },
+        chatId: ctx.conversationId ?? undefined,
+        details: { reason: 'tainted_egress', taintSources: sources },
+      });
+    } catch {
+      /* Audit là best-effort — không được phép chặn quyết định an toàn. */
+    }
+  })();
+}
+
+/**
  * Determine whether a tool call should be auto-approved.
  *
  * @returns `true` if the tool call should execute WITHOUT showing a confirmation modal.
@@ -223,6 +257,7 @@ export function shouldAutoApprove(ctx: AutoApproveContext): boolean {
 
   // ── Egress Guard: Turn bị nhiễm untrusted data thì mọi tool ra ngoài PHẢI hỏi ──
   if (isTurnTainted(ctx.conversationId) && isEgressTool(ctx.toolName, ctx.args)) {
+    recordTaintedEgress(ctx);
     return false;
   }
 

@@ -22,6 +22,7 @@ import { AVAILABLE_MODELS } from '@/lib/models';
 import { shouldShowThinkingControl } from '@/lib/reasoning-capability';
 import { ApprovalQueue } from '@/lib/approval-queue';
 import { recordAuditLog } from '@/lib/audit-log';
+import { noteUntrustedToolResult, setActiveTaintConversation } from '@/lib/taint-tracker';
 import { deriveModelOption, toggleFavorite, upsertRecent } from '@/lib/model-meta';
 import {
   reconstructActiveThread,
@@ -532,6 +533,14 @@ export default function ChatInterface() {
 
   const [draftId, setDraftId] = useState(() => crypto.randomUUID());
   const chatKey = currentChatId ?? draftId;
+
+  /* Egress Guard (A5): đặt hội thoại đang hoạt động cho tầng taint. Các tầng
+     NẠP dữ liệu ngoài nằm sâu trong lib/ (đọc file, gọi MCP) không có tham số
+     chatId, còn tầng QUYẾT ĐỊNH (lib/auto-pilot.ts) nhận chatKey — con trỏ này
+     để hai tầng ghi/đọc cùng một bucket taint. */
+  useEffect(() => {
+    setActiveTaintConversation(chatKey);
+  }, [chatKey]);
   const requestEpoch = useRef(0);
   const previousChatId = useRef<string | null>(currentChatId);
 
@@ -1153,6 +1162,8 @@ export default function ChatInterface() {
           policy: approvalPolicy,
           autoPilotEnabled: autoPilot,
           toolPermissions,
+          /* Taint + ngân sách là chuyện của TỪNG hội thoại (A5). */
+          conversationId: chatKey,
         })
       ) {
         void recordAuditLog({
@@ -1188,6 +1199,8 @@ export default function ChatInterface() {
           policy: approvalPolicy,
           autoPilotEnabled: autoPilot,
           toolPermissions,
+          /* Taint + ngân sách là chuyện của TỪNG hội thoại (A5). */
+          conversationId: chatKey,
         })
       ) {
         void recordAuditLog({
@@ -1222,6 +1235,8 @@ export default function ChatInterface() {
           policy: approvalPolicy,
           autoPilotEnabled: autoPilot,
           toolPermissions,
+          /* Taint + ngân sách là chuyện của TỪNG hội thoại (A5). */
+          conversationId: chatKey,
         })
       ) {
         // Auto-checkpoint: ensure workspace checkpoint is captured before modifying files
@@ -1356,12 +1371,12 @@ export default function ChatInterface() {
   }), [accessCode, activeProvider, apiKey]);
 
   /**
-   * fs_*, shell, git tools chạy NGAY TRÊN MÁY USER — server không thể chạm file.
-   * onToolCall trả kết quả (JSON string) → useChat đặt state 'result' → sau stream,
-   * maxSteps phía client tự resubmit cho model đọc kết quả tiếp.
-   * fs_write/shell_run PHẢI qua confirm: người dùng duyệt mới ghi/chạy.
-   */
-  const handleClientToolCall = useCallback(
+ * fs_*, shell, git tools chạy NGAY TRÊN MÁY USER — server không thể chạm file.
+ * onToolCall trả kết quả (JSON string) → useChat đặt state 'result' → sau stream,
+ * maxSteps phía client tự resubmit cho model đọc kết quả tiếp.
+ * fs_write/shell_run PHẢI qua confirm: người dùng duyệt mới ghi/chạy.
+ */
+  const rawHandleClientToolCall = useCallback(
     async ({ toolCall }: { toolCall: { toolName: string; args?: unknown } }) => {
       /* Thân thực thi MCP dùng chung: tool thường (qua index) lẫn action "call"
          của tool proxy (resolve từ metadata) phải đi ĐÚNG đường này để không
@@ -2623,6 +2638,36 @@ export default function ChatInterface() {
     ],
   );
 
+  /* Taint tracking (A5): mọi kết quả tool có thể mang nội dung ngoài (stdout
+     shell, diff/log git, output run_code) phải đánh dấu lượt nhiễm để Egress
+     Guard ở lib/auto-pilot.ts hạ cấp tool exfil sang hỏi người dùng. Đọc file
+     (fs_read/fs_search) đã tự đánh dấu bên trong lib/fs-access.ts và
+     lib/desktop-fs.ts; MCP tự đánh dấu trong lib/mcp/bridge.ts — wrapper này
+     phủ phần còn lại CHỈ với kết quả THÀNH CÔNG (kết quả denied là JSON lỗi
+     do chính harness sinh, không phải dữ liệu ngoài). */
+  const executeClientToolCall = useCallback(
+    async (call: { toolCall: { toolName: string; args?: unknown } }): Promise<string> => {
+      const toolName = call.toolCall.toolName;
+      const result = await rawHandleClientToolCall(call);
+      /* Chỉ đánh dấu khi tool thực sự CHẠY (không bị deny/policy chặn) —
+         payload bị deny là thông điệp lỗi harness, không có dữ liệu ngoài. */
+      if (!/"denied":true/.test(result) && noteUntrustedToolResult(chatKey, toolName, result, (call.toolCall.args ?? {}) as Record<string, unknown>)) {
+        void recordAuditLog({
+          action: 'taint_ingested',
+          tool: toolName,
+          target: String((call.toolCall.args as Record<string, unknown>)?.command ?? (call.toolCall.args as Record<string, unknown>)?.path ?? '').slice(0, 200),
+          decision: 'executed',
+          payload: { tool: toolName, bytes: result.length },
+          chatId: chatKey,
+        });
+      }
+      return result;
+    },
+    [chatKey, rawHandleClientToolCall],
+  );
+
+  const handleClientToolCall = executeClientToolCall;
+
   /* ------------------------------------------------------------------ */
   /* Vòng đời run — desired/observed reconciler                          */
   /* ------------------------------------------------------------------ */
@@ -3087,6 +3132,26 @@ export default function ChatInterface() {
       })();
     }
   }, [messages, isLoading, handleClientToolCall, buildApiHeaders]);
+
+  /* Taint tracking (A5): tool web (web_search/web_fetch) chạy SERVER-SIDE
+     trong route — renderer chỉ thấy kết quả như toolInvocations của message
+     assistant, không có onToolCall để đánh dấu. Quét invocations khi stream
+     active: kết quả THÀNH CÔNG (state 'result', không phải JSON lỗi) đánh dấu
+     lượt nhiễm để Egress Guard hạ cấp tool exfil tiếp theo. Reset taint theo
+     lượt đã có ở lib/db.ts (appendMessage role user). */
+  useEffect(() => {
+    if (!isLoading) return;
+    for (const message of messages) {
+      if (message.role !== 'assistant') continue;
+      const invs = (message as { toolInvocations?: Array<{ state?: string; toolName?: string; result?: unknown; args?: Record<string, unknown> }> }).toolInvocations ?? [];
+      for (const inv of invs) {
+        if (inv.state !== 'result' || typeof inv.toolName !== 'string') continue;
+        if (!inv.toolName.startsWith('web_')) continue;
+        if (inv.result !== undefined && (inv.result as { error?: unknown })?.error !== undefined) continue;
+        noteUntrustedToolResult(chatKey, inv.toolName, inv.result ?? '', (inv.args ?? {}) as Record<string, unknown>);
+      }
+    }
+  }, [messages, isLoading, chatKey]);
 
   /* Nối các ref mà reconciler dùng — dùng ref để callback ở trên không bị
      phụ thuộc vào identity của hàm/mảng do useChat cấp. */

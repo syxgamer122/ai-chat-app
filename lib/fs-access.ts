@@ -16,6 +16,7 @@
 
 import { db } from '@/lib/db';
 import { redactSecretText } from '@/lib/secret-registry';
+import { noteUntrustedToolResult } from '@/lib/taint-tracker';
 
 const KV_KEY = 'agent_workspace_root';
 /** Thư mục luôn bỏ qua khi quét — đủ cho spike, chưa cần parse .gitignore đầy đủ. */
@@ -309,6 +310,13 @@ export async function fsRead(
   const dir = await resolveDir(deps, segs.join('/'), false);
   const handle = await dir.getFileHandle(fileName);
   const file = await handle.getFile();
+
+  /* Egress Guard (A5): nội dung file trong workspace là DỮ LIỆU KHÔNG ĐÁNG TIN
+     — repo clone từ nguồn lạ có thể chứa chỉ thị độc hại trong README/AGENTS.md.
+     Đánh dấu lượt đã nhiễm để mọi tool có khả năng exfil sau đó phải xin duyệt
+     (lib/auto-pilot.ts Egress Guard). `fsReadFull` (đọc cho snapshot/rollback)
+     KHÔNG đánh dấu vì nội dung đó không đi vào ngữ cảnh model. */
+  noteUntrustedToolResult(null, 'fs_read', file.size, { path });
 
   /* Chặn file NHỊ PHÂN trước khi decode.
      Lỗi thật đã gặp: agent gọi fs_read("image.png") → file.text() decode ảnh
@@ -785,5 +793,9 @@ export async function fsSearch(
         'để tránh regex treo giao diện.',
     );
   }
+  /* Egress Guard (A5): kết quả tìm kiếm trích từ file workspace = dữ liệu không
+     đáng tin → đánh dấu lượt trước khi trả về cho model. */
+  noteUntrustedToolResult(null, 'fs_search', results, { query });
+
   return results;
 }

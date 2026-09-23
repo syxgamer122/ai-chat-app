@@ -28,8 +28,28 @@ export const AUTO_BUDGET_LIMITS = Object.freeze({
 
 const taintBuckets = new Map<string, TurnTaintState>();
 
+/**
+ * Hội thoại đang hoạt động.
+ *
+ * Cần con trỏ này vì các tầng NẠP dữ liệu ngoài nằm sâu trong `lib/` (đọc file,
+ * gọi MCP) và không có tham số `conversationId`; trong khi tầng QUYẾT ĐỊNH
+ * (`lib/auto-pilot.ts`) lại nhận `conversationId`. `chat-interface` đặt con trỏ
+ * một lần cho mỗi hội thoại để hai tầng ghi/đọc CÙNG một bucket.
+ */
+let activeConversationId: string | null = null;
+
+/** Đặt hội thoại đang hoạt động cho tầng taint. */
+export function setActiveTaintConversation(conversationId?: string | null): void {
+  activeConversationId = conversationId || null;
+}
+
+/** Khoá bucket: tham số tường minh → hội thoại đang hoạt động → bucket mặc định. */
+function resolveTaintKey(conversationId?: string | null): string {
+  return conversationId || activeConversationId || '__default_turn__';
+}
+
 function getOrCreateBucket(conversationId?: string | null): TurnTaintState {
-  const key = conversationId || '__default_turn__';
+  const key = resolveTaintKey(conversationId);
   let state = taintBuckets.get(key);
   if (!state) {
     state = {
@@ -90,7 +110,8 @@ export function recordTurnToolExecution(
  * Check if the active conversation turn is tainted.
  */
 export function isTurnTainted(conversationId?: string | null): boolean {
-  const state = taintBuckets.get(conversationId || '__default_turn__');
+  /* Đọc KHÔNG tạo bucket: chưa từng nạp dữ liệu ngoài thì lượt chưa nhiễm. */
+  const state = taintBuckets.get(resolveTaintKey(conversationId));
   return state ? state.isTainted : false;
 }
 
@@ -105,8 +126,7 @@ export function getTurnTaintState(conversationId?: string | null): TurnTaintStat
  * Reset taint state at the beginning of a new user turn.
  */
 export function resetTurnTaint(conversationId?: string | null): void {
-  const key = conversationId || '__default_turn__';
-  taintBuckets.delete(key);
+  taintBuckets.delete(resolveTaintKey(conversationId));
 }
 
 /**
@@ -188,4 +208,92 @@ export function checkAutoBudget(state: TurnTaintState): { exceeded: boolean; rea
     };
   }
   return { exceeded: false };
+}
+
+/* ------------------------------------------------------------------ */
+/* Nối dây vào đường thực thi tool                                     */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Ánh xạ tool → nhãn NGUỒN KHÔNG ĐÁNG TIN, hoặc `null` nếu tool không nạp dữ
+ * liệu ngoài tầm kiểm soát của harness.
+ *
+ * Threat model (A5): nội dung file trong workspace, kết quả web và output MCP
+ * đều có thể chứa chỉ thị độc hại — chúng là DỮ LIỆU, không phải mệnh lệnh.
+ * Nhãn này được ghi vào taint state và vào audit log để truy vết ngược.
+ */
+export function untrustedSourceForTool(
+  toolName: string,
+  args: Record<string, unknown> = {},
+): string | null {
+  switch (toolName) {
+    case 'fs_read':
+    case 'fs_search':
+    case 'code_skeleton':
+    case 'code_symbols': {
+      const target = String(args.path ?? args.file_path ?? args.query ?? '').slice(0, 120);
+      return target ? `${toolName}:${target}` : toolName;
+    }
+    case 'skill_load': {
+      const name = String(args.name ?? args.skill ?? '').slice(0, 80);
+      return name ? `skill_load:${name}` : 'skill_load';
+    }
+    case 'run_code': {
+      /* Code Mode: đoạn mã JS do model viết gọi tool MCP tuỳ ý — output của
+         nó ghép kết quả từ nhiều nguồn ngoài, không thể tin là sạch. */
+      return 'run_code';
+    }
+    case 'shell_run':
+    case 'bg_run': {
+      /* stdout của lệnh shell do agent chạy: nội dung in ra phụ thuộc dữ
+         liệu ngoài (git log in nội dung commit, npm install in advisories,
+         cat in file...). Đánh dấu cả khi lệnh thoát 0 — byte đầu ra mới là
+         thứ vào context, không phải exit code. */
+      const cmd = String(args.command ?? '').slice(0, 120);
+      return cmd ? `${toolName}:${cmd}` : toolName;
+    }
+    case 'git_diff':
+    case 'git_log': {
+      /* Diff/log in nội dung do người khác commit vào repo — kênh injection
+         kinh điển (commit độc + agent review rồi thực thi). */
+      const scoped = String(args.path ?? args.file ?? '').slice(0, 80);
+      return scoped ? `${toolName}:${scoped}` : toolName;
+    }
+    default:
+      /* Tool MCP (`mcp__<server>__<tool>`) và tool web (chạy server-side) đều
+         là kênh dữ liệu ngoài. `fs_list` cố ý KHÔNG tính: chỉ trả tên/kích
+         thước, không mang nội dung do kẻ tấn công kiểm soát. `git_status`,
+         `git_add`, `git_commit`, `bg_status`, `bg_stop` chỉ mang trạng thái
+         lệnh của chính harness — không phải dữ liệu ngoài. */
+      if (toolName.startsWith('mcp__') || toolName.startsWith('web_')) return toolName;
+      return null;
+  }
+}
+
+/** Độ dài xấp xỉ (ký tự) của payload tool để cộng vào ngân sách taint. */
+export function payloadByteLength(result: unknown): number {
+  if (typeof result === 'string') return result.length;
+  if (result === undefined || result === null) return 0;
+  try {
+    return JSON.stringify(result)?.length ?? 0;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Ghi nhận kết quả tool có nội dung ngoài vào taint state của lượt hiện tại.
+ *
+ * @returns `true` nếu kết quả này thực sự đánh dấu lượt là đã nhiễm.
+ */
+export function noteUntrustedToolResult(
+  conversationId: string | null | undefined,
+  toolName: string,
+  result: unknown,
+  args: Record<string, unknown> = {},
+): boolean {
+  const source = untrustedSourceForTool(toolName, args);
+  if (!source) return false;
+  markTurnUntrustedInput(conversationId, source, payloadByteLength(result));
+  return true;
 }

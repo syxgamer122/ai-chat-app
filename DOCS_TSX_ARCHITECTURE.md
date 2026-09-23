@@ -42,7 +42,8 @@ Vyen là một **High-Assurance Coding Agent Harness** kiêm **Local-First AI Ch
    - LLM phát sinh tool call (`fs_read`, `fs_edit`, `fs_write`, `code_patch`, `shell_run`, `git_*`, `mcp__*`).
    - Kiểm tra SHA-256 base hash chống TOCTOU trước khi ghi đè đĩa.
    - Chặn đứng metacharacters shell chaining (`&&`, `||`, `;`, `|`, `$()`, `>`, `<`) và jailing `cwd` trong workspace root.
-   - Ghi lại nhật ký kiểm toán bất biến (Immutable Audit Log) vào bảng `auditLogs`.
+   - Ghi lại nhật ký kiểm toán chống giả mạo (Tamper-Evident Audit Log — hash chain + disk anchor; KHÔNG "bất biến" tuyệt đối vì nằm trong Dexie cùng origin) vào bảng `auditLogs`.
+   - **Chống prompt injection (A5)**: taint tracking toàn lượt — mọi nguồn ngoài (file đọc, output MCP, web_search/web_fetch, stdout shell/diff git, `run_code`) đánh dấu lượt nhiễm qua `lib/taint-tracker.ts`; khi lượt đã nhiễm, Egress Guard (`lib/auto-pilot.ts`) hạ cấp mọi tool exfil (web/MCP/git_push/shell có curl) sang chế độ hỏi người dùng, kèm trần ngân sách autonomous. CSP (`next.config.js`) là lớp phòng thủ thứ hai cho bề mặt render GFM/KaTeX.
 4. **Virtualizer Layout Stability & Measurement Isolation**:
    - Tách tin nhắn đang stream ra ngoài TanStack Virtualizer vào sticky container độc lập, triệt tiêu measurement thrashing.
    - Bộ nhớ đệm chiều cao `HEIGHT_CACHE` tích hợp `widthBucket` và giới hạn LRU 2,000 mục, chống giật màn hình khi đóng/mở sidebar.
@@ -342,7 +343,7 @@ RootLayout (app/layout.tsx)
 ### Hiện Trạng Đã Hoàn Thành — [163/163 Test Files PASS · 2,456/2,456 Tests PASS]
 - [x] **Gói P0 (Bảo Mật & Toàn Vẹn)**: TOCTOU hash guard, loại bỏ shell RCE, CWD jail, auto-execute file protection, ApprovalQueue abort, `storage.persist()`.
 - [x] **Gói P2 (Tối Ưu UX & Virtualization)**: Tách stream message khỏi virtualizer, width-aware LRU `HEIGHT_CACHE`, draft persistence chống mất chữ, tool-call pairing normalizer chống lỗi 400.
-- [x] **Gói P3 (Chính Sách & Kiểm Toán)**: Bảng Dexie v19 `auditLogs`, ghi nhật ký kiểm toán bất biến, bộ so khớp đường dẫn glob (`matchesGlobPattern`), deny-by-default cho dynamic MCP.
+- [x] **Gói P3 (Chính Sách & Kiểm Toán)**: Bảng Dexie v19 `auditLogs`, ghi nhật ký kiểm toán chống giả mạo (tamper-evident: hash chain + `verifyChain` + anchor `.vyen/audit/anchor.log`), bộ so khớp đường dẫn glob (`matchesGlobPattern`), deny-by-default cho dynamic MCP.
 - [x] **Kiểm chứng tại HEAD `6768422` (2026-09-22)**: `tsc --noEmit` sạch; `vitest run` **163/163 test file PASS · 2,456/2,456 test PASS**; `node tests/sprint-s1-verification.cjs` và `node tests/sprint-s2-verification.cjs` đều PASS (gồm toàn bộ kiểm tra bảo mật shell policy).
 - [x] **5 lỗi chặn đã sửa trong đợt kiểm chứng này**: (1) comment JSDoc chưa đóng trong `lib/fs-access.ts` nuốt cả hàm `isProtectedFsPath` → `TS2304` + `ReferenceError` lúc chạy; (2) `const crypto` khai báo trùng ở module scope trong `lib/ipc.cjs` → SyntaxError làm sập toàn bộ bridge IPC; (3) `fsWrite` tự so `err.name === 'NotFoundError'` thay vì dùng helper chung `isNotFoundError()` cùng module → tạo file mới luôn thất bại; (4) `lib/shell-policy.cjs` thiếu `grep`/`echo`/`printf` trong allowlist đọc-only → `shell_run` từ chối cả lệnh chỉ-đọc vô hại; (5) `npx vite build`/`npx next build` bị chặn vì `vite`/`next` không nằm trong `NPX_ALLOWED_BINS` (nay tách thành `NPX_REQUIRED_SUBCOMMANDS` — vẫn chặn `vite dev`/`next dev`).
 - [x] **Ghi chú bảo mật (chủ ý)**: `find`/`fd` vẫn NGOÀI allowlist dù `SAFE_COMMAND_PATTERNS` của `lib/auto-pilot.ts` có liệt kê — `find ... -exec <cmd> +` và `-delete` chạy/ghi được mà tokenizer không chặn (không cần dấu `;`), nên hai binary này phải đòi phê duyệt thay vì auto-approve.

@@ -19,6 +19,7 @@ import {
   type VyenMcpServerStatus,
   type VyenMcpToolInfo,
 } from '@/lib/desktop-bridge';
+import { noteUntrustedToolResult } from '@/lib/taint-tracker';
 
 /** MCP chỉ khả dụng trong app desktop có shell hỗ trợ. */
 export function isMcpAvailable(): boolean {
@@ -129,6 +130,12 @@ export async function callMcpTool(
   args: Record<string, unknown>,
 ): Promise<VyenMcpCallResult> {
   const result = await requireMcp().callTool(serverId, toolName, args ?? {});
+  /* Egress Guard (A5): output MCP là DỮ LIỆU NGOÀI (server bên thứ ba) → đánh
+     dấu lượt đã nhiễm. Bỏ qua khi chính sách chặn (`denied`) vì khi đó không có
+     nội dung nào của server đi vào ngữ cảnh. */
+  if (result?.denied !== true) {
+    noteUntrustedToolResult(null, `mcp__${serverId}__${toolName}`, result?.content ?? null);
+  }
   return {
     content: Array.isArray(result?.content) ? result.content : [],
     isError: result?.isError === true,

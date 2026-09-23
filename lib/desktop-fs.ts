@@ -5,6 +5,7 @@
  * không phải fork logic diff/search.
  */
 import { isVyenDesktop, vyenDesktop } from '@/lib/desktop-bridge';
+import { noteUntrustedToolResult } from '@/lib/taint-tracker';
 export { createApprovalArtifact, acquireDiskLock } from '@/lib/file-lock';
 
 // Mirror trần của lib/fs-access.ts — giữ đồng bộ để desktop không
@@ -119,6 +120,11 @@ export async function desktopFsRead(rawPath: string, options: number | FsReadOpt
   const startIndex = Math.min(Math.max(0, Math.floor((opts.startLine ?? 1) - 1)), Math.max(0, allLines.length - 1));
   const endIndex = opts.lineCount ? Math.min(allLines.length, startIndex + Math.max(1, Math.floor(opts.lineCount))) : allLines.length;
   const selected = allLines.slice(startIndex, endIndex).join('\n');
+
+  /* Egress Guard (A5): nội dung file workspace là dữ liệu KHÔNG ĐÁNG TIN →
+     đánh dấu lượt đã nhiễm (xem lib/auto-pilot.ts Egress Guard). */
+  noteUntrustedToolResult(null, 'fs_read', selected, { path: rawPath });
+
   return {
     path: rawPath,
     content: selected.slice(0, maxChars),

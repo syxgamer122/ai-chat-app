@@ -3,6 +3,7 @@ import { tokenize } from '@/lib/search-utils';
 import type { MemoryRecord, MemoryReviewEntry } from '@/lib/memory/types';
 import type { AgentMemoryRecord } from '@/lib/memory/agent-memory';
 import type { ZeroMemTrace, ZeroMemEntity, ZeroMemRelation } from '@/lib/zeromem/types';
+import { resetTurnTaint } from '@/lib/taint-tracker';
 
 /**
  * IndexedDB KHÔNG index được `null`. Message gốc phải mang sentinel này,
@@ -841,6 +842,12 @@ export interface AppendMessageInput
 
 export async function appendMessage(input: AppendMessageInput): Promise<StoredMessage> {
   const parentKey = toParentKey(input.parentId);
+
+  /* Egress Guard (A5): tin nhắn MỚI của người dùng = mốc bắt đầu lượt ⇒ xoá
+     trạng thái nhiễm của lượt trước (nội dung ngoài cũ không còn nằm trong
+     ngữ cảnh lượt này). Đặt ở tầng append vì đây là nơi DUY NHẤT mọi đường gửi
+     tin đều đi qua: UI, recipe, goal-loop, scheduler, khôi phục backup. */
+  if (input.role === 'user') resetTurnTaint();
 
   return db.transaction('rw', db.messages, db.chats, async () => {
     const lastSibling = await db.messages

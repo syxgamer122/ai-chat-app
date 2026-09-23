@@ -91,6 +91,15 @@ const SEVERITY_WEIGHTS: Record<SastSeverity, number> = {
   info: 0,
 };
 
+/**
+ * Tài liệu (`.md`/`.mdx`) thường TRÍCH DẪN mẫu mã nguy hiểm để cảnh báo — quét
+ * theo dòng sẽ báo động giả: một bảng đối soát/threat model ghi nguyên văn
+ * "spawn(…, { shell: true })" là điều ĐÚNG phải làm, không phải lỗi.
+ * Chỉ hai luật nhạy với việc trích dẫn mẫu mã bị loại ở tài liệu; các luật
+ * secret-leak và weak-crypto VẪN quét tài liệu (rò key trong README là thật).
+ */
+const isDocFile = (relPath: string): boolean => /\.(?:md|mdx)$/i.test(relPath);
+
 const IGNORE_DIRS = new Set([
   '.git',
   'node_modules',
@@ -159,7 +168,7 @@ export const SAST_RULES: SastRule[] = [
     description: 'child_process.spawn called with shell: true option enables shell meta-character evaluation.',
     remediation: 'Set shell: false and pass arguments as separate array elements.',
     match: (line, _idx, _content, relPath) => {
-      if (relPath.includes('test') || relPath.endsWith('security-sast.ts')) return false;
+      if (relPath.includes('test') || relPath.endsWith('security-sast.ts') || isDocFile(relPath)) return false;
       return /spawn(?:Sync)?\s*\(.+shell\s*:\s*true/i.test(line);
     },
   },
@@ -348,7 +357,7 @@ export const SAST_RULES: SastRule[] = [
     description: 'Direct insertion of raw HTML via dangerouslySetInnerHTML without sanitization.',
     remediation: 'Sanitize HTML with DOMPurify or use standard JSX text interpolation.',
     match: (line, _idx, _content, relPath) => {
-      if (relPath.includes('test') || relPath.endsWith('security-sast.ts')) return false;
+      if (relPath.includes('test') || relPath.endsWith('security-sast.ts') || isDocFile(relPath)) return false;
       if (line.includes('DOMPurify') || line.includes('sanitizeHtml') || line.includes('<svg') || line.includes('_SCRIPT') || line.includes('THEME_')) return false;
       return line.includes('dangerouslySetInnerHTML');
     },
