@@ -444,12 +444,22 @@ describe('Safety Controls Integration in Headless Mode', () => {
 
   describe('Auto-Pilot Command Policy Integration', () => {
     it('identifies safe read-only commands for automatic approval in smart mode', () => {
-      expect(isSafeCommand('npm test tests/file.test.ts')).toBe(true);
-      expect(isSafeCommand('npx vitest run tests/teamwork-cli.test.ts')).toBe(true);
       expect(isSafeCommand('git status --short')).toBe(true);
       expect(isSafeCommand('git diff HEAD')).toBe(true);
-      expect(isSafeCommand('npm run lint')).toBe(true);
-      expect(isSafeCommand('npx tsc --noEmit')).toBe(true);
+      expect(isSafeCommand('cat package.json')).toBe(true);
+      expect(isSafeCommand('ls -la src')).toBe(true);
+    });
+
+    /*
+     * P0.5 S3 (residual B1(b)): runner KHÔNG còn là lệnh "an toàn tự chạy".
+     * `npm test`/`npx vitest` thực thi code do agent viết ra nên phải hỏi ở mọi
+     * chế độ — xem `isRunnerCommand` trong lib/auto-pilot.ts.
+     */
+    it('runner commands are NOT auto-safe (they execute agent-written code)', () => {
+      expect(isSafeCommand('npm test tests/file.test.ts')).toBe(false);
+      expect(isSafeCommand('npx vitest run tests/teamwork-cli.test.ts')).toBe(false);
+      expect(isSafeCommand('npm run lint')).toBe(false);
+      expect(isSafeCommand('npx tsc --noEmit')).toBe(false);
     });
 
     it('classifies destructive commands as requiring user approval or blocked', () => {

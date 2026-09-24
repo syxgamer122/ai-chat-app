@@ -333,6 +333,8 @@ export interface VyenBridge {
     toggle(id: string, enabled?: boolean): Promise<{ ok: boolean; schedule?: ScheduleRecord }>;
     runNow(id: string): Promise<{ ok: boolean; sessionId?: string; error?: string }>;
     status(): Promise<{ running: boolean; workspaceRoot: string; lastTickAt: number }>;
+    /** Kill-switch: dừng/tiếp tục MỌI lịch headless (S3/B5). */
+    setKillSwitch(paused: boolean): Promise<{ ok: boolean; paused: boolean; path: string }>;
   };
   /** Kho mã hoá safeStorage cho API key provider — optional như `llm`. */
   secure?: VyenSecureStoreApi;
@@ -581,6 +583,9 @@ function createWebBridge(): VyenBridge {
         callWebBridge<{ ok: boolean; sessionId?: string; error?: string }>('vyen:scheduler-run-now', { id }),
       status: () =>
         callWebBridge<{ running: boolean; workspaceRoot: string; lastTickAt: number }>('vyen:scheduler-status'),
+      /** Bật/tắt kill-switch: dừng MỌI lịch headless (S3/B5). */
+      setKillSwitch: (paused: boolean) =>
+        callWebBridge<{ ok: boolean; paused: boolean; path: string }>('vyen:scheduler-kill-switch', { paused }),
     },
   };
 }

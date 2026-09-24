@@ -12,6 +12,7 @@
  */
 
 import child_process from 'node:child_process';
+import { spawnArgv } from '@/lib/safe-spawn';
 import path from 'node:path';
 import {
   AgentCapabilityScope,
@@ -443,21 +444,31 @@ export class ProcessTreeSupervisor {
     const timeoutMs = options.timeoutMs || 30000;
     const maxBuffer = options.maxBufferBytes || 1024 * 1024 * 2; // 2MB default
 
+    // Spawn KHÔNG QUA SHELL (S3): argv + binary tuyệt đối, `shell: false`.
+    let child: child_process.ChildProcess;
+    try {
+      child = spawnArgv(command, {
+        cwd: options.cwd,
+        detached: process.platform !== 'win32',
+        env: { ...process.env, ...options.env },
+        windowsHide: true,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return Promise.resolve({
+        code: 126,
+        stdout: '',
+        stderr: `[EXEC POLICY] ${message}`,
+        durationMs: Date.now() - startTime,
+        timedOut: false,
+      });
+    }
+
     return new Promise((resolve) => {
       let stdout = '';
       let stderr = '';
       let timedOut = false;
       let settled = false;
-
-      // Spawn shell process with detached process group where supported
-      const isWin = process.platform === 'win32';
-      const child = child_process.spawn(command, {
-        cwd: options.cwd,
-        shell: true,
-        detached: !isWin,
-        env: { ...process.env, ...options.env },
-        windowsHide: true,
-      });
 
       const timer = setTimeout(() => {
         timedOut = true;

@@ -134,7 +134,34 @@ function newAuditId(): string {
 }
 
 /**
- * Append disk anchor log entry to .vyen/audit/anchor.log (or custom path).
+ * Đường dẫn anchor chuẩn — NGOÀI workspace (P0.5 S3, residual B3(a)).
+ *
+ * Anchor cùng nằm trong workspace thì người/agent sở hữu workspace cũng sở hữu
+ * anchor: xoá `.vyen/audit/anchor.log` là mất toàn bộ dấu vết. Anchor giờ nằm
+ * ở `~/.vyen/audit/anchor.log` — ngoài tầm ghi file của agent. Có thể override
+ * bằng biến môi trường cho người dùng muốn giữ ở nơi khác (vd ổ USB).
+ */
+export function getDiskAnchorPath(): string {
+  const override =
+    typeof process !== 'undefined' && process.env
+      ? process.env.VYEN_AUDIT_ANCHOR_PATH
+      : undefined;
+  if (override) return override;
+  const home =
+    typeof process !== 'undefined' && process.env
+      ? (process.env.VYEN_HOME_DIR ?? process.env.HOME ?? process.env.USERPROFILE ?? process.cwd())
+      : '.';
+  const dir = home.replace(/[/\\]$/, '');
+  return `${dir}${sep()}vyen${sep()}audit${sep()}anchor.log`;
+}
+
+function sep(): string {
+  return typeof process !== 'undefined' && process.platform === 'win32' ? '\\' : '/';
+}
+
+/**
+ * Append disk anchor log entry to `~/.vyen/audit/anchor.log` (ngoài workspace),
+ * hoặc `customPath` nếu caller truyền.
  */
 export async function appendDiskAnchor(
   anchor: { seq: number; hash: string; ts: number },
@@ -144,7 +171,7 @@ export async function appendDiskAnchor(
     if (typeof process !== 'undefined' && process.versions?.node) {
       const fs = await import('node:fs/promises');
       const path = await import('node:path');
-      const logFile = customPath || path.join(process.cwd(), '.vyen', 'audit', 'anchor.log');
+      const logFile = customPath || getDiskAnchorPath();
       await fs.mkdir(path.dirname(logFile), { recursive: true });
       await fs.appendFile(logFile, JSON.stringify(anchor) + '\n', 'utf8');
       return;
@@ -154,22 +181,23 @@ export async function appendDiskAnchor(
   }
 
   // Desktop bridge fallback when running in desktop app web view
-  try {
-    if (typeof window !== 'undefined') {
-      const { isVyenDesktop } = await import('@/lib/desktop-bridge');
-      if (isVyenDesktop()) {
-        const { desktopFsWrite, desktopFsRead } = await import('@/lib/desktop-fs');
-        const relativeLogPath = customPath || '.vyen/audit/anchor.log';
-        let existing = '';
-        try {
-          const r = await desktopFsRead(relativeLogPath);
-          if (r?.content) existing = r.content;
-        } catch {
-          // File does not exist yet
+  try {      if (typeof window !== 'undefined') {
+        const { isVyenDesktop } = await import('@/lib/desktop-bridge');
+        if (isVyenDesktop()) {
+          const { desktopFsWrite, desktopFsRead } = await import('@/lib/desktop-fs');
+          // Desktop bridge bị jail trong workspace nên không ghi được ngoài root:
+          // vẫn ghi anchor trong `.vyen/audit/` (kèm giới hạn đã ghi ở J.1/B3).
+          const relativeLogPath = customPath || '.vyen/audit/anchor.log';
+          let existing = '';
+          try {
+            const r = await desktopFsRead(relativeLogPath);
+            if (r?.content) existing = r.content;
+          } catch {
+            // File does not exist yet
+          }
+          await desktopFsWrite(relativeLogPath, existing + JSON.stringify(anchor) + '\n');
         }
-        await desktopFsWrite(relativeLogPath, existing + JSON.stringify(anchor) + '\n');
       }
-    }
   } catch (err) {
     console.warn('[audit-log] Ghi anchor log ra đĩa thất bại:', err);
   }
@@ -271,6 +299,16 @@ export interface ChainVerificationResult {
   totalChecked: number;
   brokenSeq?: number;
   reason?: string;
+  /**
+   * Số bản ghi ĐÃ BỊ PRUNE ở đầu chuỗi (P0.5 S3, residual B3(b)).
+   * `undefined` = không xác định; `0` = chuỗi đầy đủ từ genesis.
+   */
+  prunedBeforeSeq?: number;
+  /**
+   * Chuỗi bắt đầu từ seq > 1: `verifyChain` chỉ có thể xác nhận phần còn lại.
+   * Đây là giới hạn thật của mô hình append-only + prune, KHÔNG phải lỗi.
+   */
+  partialChain?: boolean;
 }
 
 /**
@@ -282,6 +320,16 @@ export async function verifyChain(entries?: StoredAuditLogEntry[]): Promise<Chai
     if (!list || list.length === 0) {
       return { valid: true, totalChecked: 0 };
     }
+
+    /*
+     * Chuỗi đã bị prune: bản ghi đầu tiên có `seq > 1`. Khi đó `prevHash` của nó
+     * trỏ tới bản ghi KHÔNG còn trong DB nên không thể kiểm chứng giá trị đó —
+     * đây là giới hạn thật của việc cắt đầu chuỗi, không phải hư hỏng. Ta
+     * đánh dấu `partialChain` để UI/caller biết chỉ phần còn lại được xác nhận.
+     * Mọi liên kết TỪ bản ghi thứ hai trở đi vẫn phải khớp tuyệt đối.
+     */
+    const prunedBeforeSeq = list[0].seq > 1 ? list[0].seq - 1 : undefined;
+    const partialChain = prunedBeforeSeq !== undefined;
 
     for (let i = 0; i < list.length; i++) {
       const entry = list[i];
@@ -314,6 +362,21 @@ export async function verifyChain(entries?: StoredAuditLogEntry[]): Promise<Chai
             totalChecked: i,
             brokenSeq: entry.seq,
             reason: `Bản ghi đầu tiên (seq 1) có prevHash không hợp lệ: ${entry.prevHash}`,
+            ...(partialChain ? { prunedBeforeSeq, partialChain } : {}),
+          };
+        }
+        // Chuỗi đã prune: prevHash phải khác null — nếu null thì có thể là
+        // bản ghi đầu tiên bị xoá rồi giả mạo thành genesis mới.
+        if (partialChain && entry.prevHash === null) {
+          return {
+            valid: false,
+            totalChecked: i,
+            brokenSeq: entry.seq,
+            reason:
+              `Chuỗi bắt đầu từ seq ${entry.seq} (đã prune) nhưng bản ghi đầu có prevHash = null — ` +
+              `không thể phân biệt với genesis giả mạo.`,
+            prunedBeforeSeq,
+            partialChain: true,
           };
         }
       } else if (prevEntry) {
@@ -323,6 +386,7 @@ export async function verifyChain(entries?: StoredAuditLogEntry[]): Promise<Chai
             totalChecked: i,
             brokenSeq: entry.seq,
             reason: `Đứt gãy chuỗi số thứ tự: seq ${entry.seq} sau seq ${prevEntry.seq}`,
+            ...(partialChain ? { prunedBeforeSeq, partialChain } : {}),
           };
         }
         if (entry.prevHash !== prevEntry.hash) {
@@ -331,6 +395,7 @@ export async function verifyChain(entries?: StoredAuditLogEntry[]): Promise<Chai
             totalChecked: i,
             brokenSeq: entry.seq,
             reason: `Liên kết băm bị phá vỡ tại seq ${entry.seq}: prevHash (${entry.prevHash}) != hash trước (${prevEntry.hash})`,
+            ...(partialChain ? { prunedBeforeSeq, partialChain } : {}),
           };
         }
       }
@@ -357,11 +422,16 @@ export async function verifyChain(entries?: StoredAuditLogEntry[]): Promise<Chai
           totalChecked: i,
           brokenSeq: entry.seq,
           reason: `Phát hiện giả mạo tại seq ${entry.seq}: hash thực tế (${entry.hash}) != hash kỳ vọng (${expectedHash})`,
+          ...(partialChain ? { prunedBeforeSeq, partialChain } : {}),
         };
       }
     }
 
-    return { valid: true, totalChecked: list.length };
+    return {
+      valid: true,
+      totalChecked: list.length,
+      ...(partialChain ? { prunedBeforeSeq, partialChain } : {}),
+    };
   } catch (err) {
     return {
       valid: false,

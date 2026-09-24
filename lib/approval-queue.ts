@@ -28,6 +28,15 @@
 /** Loại phê duyệt. Mở rộng ở đây khi thêm loại modal mới. */
 export type ApprovalKind = 'diff' | 'shell';
 
+/**
+ * Token phê duyệt gắn với đúng payload đã hiển thị (xem `lib/approval-binding.ts`).
+ * `null` = luồng cũ, không ràng buộc (giữ tương thích cho call site chưa nối).
+ */
+export interface ApprovalBindingToken {
+  kind: ApprovalKind;
+  fingerprint: string;
+}
+
 export interface ApprovalQueueConfig<TItem> {
   /** Gọi cho MỌI yêu cầu, kể cả khi phải xếp hàng. */
   onRequest?: () => void;
@@ -43,6 +52,8 @@ export interface ApprovalQueueConfig<TItem> {
 interface Entry<TItem> {
   item: TItem;
   resolve: (approved: boolean) => void;
+  /** Token ràng buộc payload của mục này (nếu caller đã nối binding). */
+  binding?: ApprovalBindingToken;
 }
 
 export class ApprovalQueue<TItem> {
@@ -56,10 +67,18 @@ export class ApprovalQueue<TItem> {
    *
    * Trả về `true` nếu mục được hiện NGAY, `false` nếu phải xếp hàng — hữu ích
    * cho test và cho caller muốn biết mình có phải chờ không.
+   *
+   * `binding` là token phê duyệt gắn với payload cụ thể (P0.5 S3). Caller phải
+   * verify lại bằng `lib/approval-binding.ts` TRƯỚC khi thực thi — hàng đợi chỉ
+   * mang theo, không tự kiểm.
    */
-  request(item: TItem, resolve: (approved: boolean) => void): boolean {
+  request(
+    item: TItem,
+    resolve: (approved: boolean) => void,
+    binding?: ApprovalBindingToken,
+  ): boolean {
     this.cfg.onRequest?.();
-    const entry: Entry<TItem> = { item, resolve };
+    const entry: Entry<TItem> = { item, resolve, ...(binding ? { binding } : {}) };
     if (this.active) {
       this.waiting.push(entry);
       return false;
@@ -91,6 +110,14 @@ export class ApprovalQueue<TItem> {
   /** Có modal phê duyệt nào đang hiện không. */
   get isBusy(): boolean {
     return this.active !== null;
+  }
+
+  /**
+   * Token ràng buộc của mục đang hiện — caller dùng để verify trước khi chạy.
+   * `undefined` nghĩa là mục này không gắn binding (luồng cũ).
+   */
+  get activeBinding(): ApprovalBindingToken | undefined {
+    return this.active?.binding;
   }
 
   /** Số yêu cầu đang chờ (không tính mục đang hiện). */

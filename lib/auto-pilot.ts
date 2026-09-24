@@ -55,28 +55,47 @@ export interface AutoApproveContext {
  * Pattern matching is done against the FIRST token of the command.
  */
 const SAFE_COMMAND_PATTERNS: RegExp[] = [
-  // Test runners
-  /^npm\s+(?:test|run\s+test)/i,
-  /^npx\s+(?:vitest|jest|mocha|ava)\b/i,
-  /^yarn\s+test/i,
-  /^pnpm\s+(?:test|run\s+test)/i,
-  // Linters (read-only analysis)
-  /^npm\s+run\s+(?:lint|typecheck|check|format:\s*check)/i,
-  /^npx\s+(?:eslint|tsc|prettier\s+--check)\b/i,
   // Git read-only
   /^git\s+(?:status|log|diff|show|branch|remote|tag|stash\s+list|reflog)/i,
-  // Build (non-destructive, output to dist/build)
-  /^npm\s+(?:run\s+)?build/i,
-  /^npx\s+(?:tsc|vite\s+build|next\s+build|webpack)\b/i,
-  // Package info
-  /^npm\s+(?:ls|list|outdated|info|view|search)\b/i,
-  /^npx\s+(?:npm-check|depcheck)\b/i,
   // File reading / listing
   /^(?:cat|head|tail|less|more|wc|file|stat|ls|dir|find|grep|rg|fd)\b/i,
   // Version checks (read-only) — strictly version flags only, no arbitrary args
   /^node\s+(?:--version|-v)\s*$/i,
   /^python(?:3)?\s+(?:--version|-V)\s*$/i,
 ];
+
+/**
+ * LỆNH THỰC THI CODE — KHÔNG BAO GIỜ auto-approve (P0.5 S3, residual B1(b)).
+ *
+ * `npm test` / `npx vitest` / `npm run build` trước đây nằm trong
+ * SAFE_COMMAND_PATTERNS, nên ở chế độ Smart chúng chạy không cần hỏi. Nhưng
+ * runner thực thi code MÀ AGENT ĐÃ VIẾT: `fs_write` (đã hỏi) rồi `npm test` (tự
+ * chạy) là đường RCE trọn vẹn chỉ với MỘT lần phê duyệt. Đặc biệt `npx <pkg>`
+ * còn tải và chạy gói từ registry — không phải lệnh đọc.
+ *
+ * Bỏ khỏi allowlist, KHÔNG xoá khả năng chạy: lệnh vẫn hợp lệ (shell-policy cho
+ * phép), chỉ là phải hỏi người dùng ở MỌI chế độ kể cả Smart.
+ */
+const RUNNER_COMMAND_PATTERNS: RegExp[] = [
+  /^npm\s+(?:run|test|start|stop|restart|exec|rebuild|ci|install|i|uninstall|unlink|update|upgrade)\b/i,
+  /^npx\s+\S/i,
+  /^pnpm\s+(?:run|test|exec|dlx|install|i|add|remove|update)\b/i,
+  /^yarn\s+\S/i,
+  /^bun\s+(?:run|test|x|install|add|remove)\b/i,
+  /^node\s+(?!--version\b|-v\b)\S/i,
+  /^python(?:3)?\s+(?!--version\b|-V\b)\S/i,
+  /^tsc\b|^eslint\b|^prettier\b|^webpack\b|^vite\b|^vitest\b|^jest\b|^next\b/i,
+];
+
+/**
+ * Lệnh có thực thi code do agent kiểm soát không (runner / script / REPL).
+ * Dùng để hạ chế độ: Smart cũng phải hỏi.
+ */
+export function isRunnerCommand(command: string): boolean {
+  const trimmed = command.trim();
+  if (!trimmed) return false;
+  return RUNNER_COMMAND_PATTERNS.some((p) => p.test(trimmed));
+}
 
 /**
  * Commands that are ALWAYS destructive and MUST require approval,
@@ -154,10 +173,14 @@ const WRITE_TOOLS = new Set([
 /**
  * Check if a shell command matches any safe pattern.
  * Compiles the command via strict argv tokenizer and allowlist (shell: false paradigm).
+ *
+ * Lệnh runner (`npm test`, `npx vitest`, …) KHÔNG BAO GIỜ trả `true` ở đây —
+ * xem `isRunnerCommand` và chú thích residual B1(b).
  */
 export function isSafeCommand(command: string): boolean {
   const trimmed = command.trim();
   if (!trimmed) return false;
+  if (isRunnerCommand(trimmed)) return false;
   try {
     const compiled = compileShellCommand(trimmed);
     if (compiled.bin === 'git' && compiled.args.length > 0) {
@@ -250,6 +273,7 @@ function recordTaintedEgress(ctx: AutoApproveContext): void {
  * | ON        | smart    | write/destr.  | ASK         |
  * | ON        | never    | non-blocked   | AUTO        |
  * | ON        | never    | ALWAYS_BLOCK  | ASK         |
+ * | any       | any      | runner cmd    | ASK         |
  */
 export function shouldAutoApprove(ctx: AutoApproveContext): boolean {
   // ── Mode chat_only: vô hiệu hoàn toàn tool ──
@@ -277,6 +301,14 @@ export function shouldAutoApprove(ctx: AutoApproveContext): boolean {
     if (ctx.args.cwd && !validateSafeRelativePath(String(ctx.args.cwd)).ok) {
       return false;
     }
+  }
+
+  // ── 0c. Runner commands: thực thi code agent đã viết → HỎI Ở MỌI CHẾ ĐỘ ──
+  // Đặt TRƯỚC user rules / per-tool override / YOLO: runner là đường RCE
+  // ("fs_write đã hỏi" + "npm test tự chạy"), nên override `auto` và policy
+  // `never` (YOLO) đều KHÔNG được tự duyệt. Người dùng vẫn duyệt được.
+  if (ctx.toolName === 'shell_run' && isRunnerCommand(String(ctx.args.command ?? ''))) {
+    return false;
   }
 
   // ── 0b. P0.3: Protect auto-execute and sensitive configuration files ──

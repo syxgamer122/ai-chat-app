@@ -91,9 +91,9 @@
 | 12 file ≥400 dòng | — (phản biện: 64,6%) | 12 file ✅; tổng 12.394 = **64,79%** (theo `wc -l`) / 12.406 = **64,65%** (theo bảng §3) | ✅ bậc độ lớn khớp |
 | 18 file <100 dòng | — (phản biện nêu 18) | **18** | ✅ khớp |
 | Migration Dexie | 19 | **19** (`lib/db.ts:705` = v19) | ✅ khớp |
-| File test | 163/163 PASS | **163** file `tests/*.test.ts` | ✅ khớp số **file** |
+| File test | 163/163 PASS | tại 2026-09-23: **163** file `tests/*.test.ts`. Cây hiện tại (2026-09-24): **165** file | ✅ khớp số **file** ở thời điểm đối soát |
 | Số test | 2.456/2.456 PASS | 🕓 không chạy được (không có `node_modules`) | chưa xác nhận |
-| README | — | bảng tech stack ghi *"Dexie — schema 16 phiên bản"* trong khi thân README dùng v18/v19 | ❌ drift nội bộ README |
+| README | — | bảng tech stack ghi *"Dexie — schema 16 phiên bản"* trong khi thân README dùng v18/v19 | ✅ **đã sửa 2026-09-24** — README nay ghi **schema 19** (khớp `lib/db.ts`) |
 
 ---
 
@@ -186,3 +186,96 @@ rg -n "Content-Security-Policy" .                                  # 0 hit
 - **A5**: taint vẫn in-memory theo lượt (reset khi appendMessage user) — đúng thiết kế, nhưng provenance không persist xuyên reload; wrapper chỉ phủ tool client (fs/shell/git/MCP/relay) + web_* qua toolInvocations, KHÔNG phủ tool server thuần (memory_search...) vì chúng không thành toolInvocation. `isEgressTool` vẫn nhận diện bằng `includes('push'\|'curl'\|...)` — bypass được bằng lệnh không chứa keyword (đã ghi nhận từ lần đối soát đầu, chưa sửa).
 - **A8**: CSP dùng `'unsafe-inline'` cho script (khối theme) — cần nonce + middleware/proxy để siết thêm; `connect-src *` là trade-off của BYOK.
 - **A1/A3/A4/A6/A7/C1**: nguyên trạng theo mục F (PATH kế thừa, runner trong allowlist, `lib/teamwork/*` còn `shell: true`, không CAS/Web Locks, anchor trong workspace, không TTL grant, không snapshot migration).
+
+---
+
+## J. Đối soát vòng 2 — phản biện "thẩm định v3.1, 5 blocker B1–B5" (2026-09-24, HEAD `3febca9`)
+
+> Bản phản biện thứ hai thẩm định `DOCS_TSX_ARCHITECTURE.md` v3.1 dưới góc nhìn Principal Engineer:
+> 5 blocker (B1 shell denylist, B2 không chống prompt-injection, B3 audit log không bất biến,
+> B4 duyệt không gắn payload, B5 autonomous/cron không ngân sách cứng) + bảng điểm lại #1–#13.
+> Bằng chứng dưới đây đo trực tiếp trên cây hiện tại bằng `rg` / `sed` — mọi đường dẫn tồn tại trong repo
+> (tự kiểm chứng bằng `npm run docs:check`).
+
+### J.1. Bảng phán quyết 5 blocker
+
+| # | Luận điểm phản biện | Phán quyết | Bằng chứng trong code | Residual thật còn lại |
+|---|---|---|---|---|
+| **B1** | Shell là denylist metacharacter; argument injection (`git -c`, `find -exec`, `tar --to-command`, `npm run`, `awk`) đạt RCE không cần metacharacter | ⚠️ **ĐÚNG MỘT PHẦN — mô tả đã cũ một thế hệ** | Mô hình hiện tại KHÔNG phải denylist chuỗi: tokenizer argv + allowlist binary/subcommand + `SAFE_ENV` + `shell:false` (`lib/shell-policy.cjs`; thực thi `spawn(bin, args, {shell:false})` tại `lib/ipc.cjs:596`). Argument injection đã bị chặn ở đúng các vector phản biện nêu: `DANGEROUS_GIT_OPTIONS` chặn `-c`/`--config`/`--exec-path`/`--upload-pack`/`--receive-pack` (`lib/shell-policy.cjs:148-157`); `find`/`fd` NGOÀI allowlist (chủ ý — ghi chú §6); `node`/`python` chỉ `--version` (:305-315); `awk`, `tar` không nằm trong allowlist | (a) `getSafeEnv` giữ `path` kế thừa (:330) → không resolve binary tuyệt đối; (b) runner trong allowlist thực thi code agent viết: `npm test\|build\|lint\|typecheck\|check` (:159) + `npx vitest\|jest\|eslint\|tsc\|prettier\|webpack` (:160) — `fs_write` + 1 lần duyệt là RCE; (c) `lib/teamwork/sandbox/process-manager.ts:95`, `lib/teamwork/permission-broker.ts:456`, `lib/cli/cli-surface.ts:443` vẫn `shell: true`; (d) không ranh giới OS |
+| **B2** | Không có bất kỳ lớp chống prompt injection / taint tracking nào — từ không xuất hiện trong tài liệu | ❌ **SAI sau khi sửa — đúng khi phản biện viết trên v3.1** | Khi phản biện được viết, guard tồn tại nhưng DEAD WIRING (`rg "markTurnUntrustedInput"` = 0 call site) — phản biện đúng về thực chất. Tại HEAD `3febca9` đã nối dây trọn vẹn: nguồn ngoài đánh dấu taint qua `lib/taint-tracker.ts` (`untrustedSourceForTool` :225 — fs, MCP, web, shell/bg_run, git_diff/log, run_code) từ `lib/fs-access.ts`, `lib/desktop-fs.ts`, `lib/mcp/bridge.ts`, `components/chat-interface.tsx`; khi lượt nhiễm, `lib/auto-pilot.ts:259` (`isTurnTainted && isEgressTool`) hạ cấp tool exfil sang `ask` + `recordTaintedEgress` (:212) ghi provenance vào audit log; trần ngân sách `AUTO_BUDGET_LIMITS` (`lib/taint-tracker.ts:22`: 12 tool calls / 5 file / 500 KB / 3 shell mỗi lượt) vượt trần ép `ask` (:266-267); lớp hai `lib/injection-guard.ts` lọc payload web; CSP phát hành từ `next.config.js` (regression `tests/csp-config.test.ts`). Tài liệu v3.3 đã đưa A5 vào §1.3 | (a) `isEgressTool` (`lib/taint-tracker.ts:160`) dò keyword `push/curl/wget/fetch/http` → bypass bằng lệnh không chứa keyword; (b) taint in-memory theo lượt, provenance không persist xuyên reload; (c) tool server thuần (memory_search…) không thành toolInvocation nên không được phủ |
+| **B3** | "Immutable Audit Log" ghi vào Dexie app có toàn quyền ghi/xóa, không hash chain, không chữ ký ⇒ không dùng làm bằng chứng | ⚠️ **ĐÚNG MỘT PHẦN — một nửa đã cũ** | Hash chain CÓ: `seq + prevHash + SHA-256(prevHash \|\| canonicalJSON)` với hàng đợi tuần tự + `verifyChain()` + disk anchor `{seq,hash,ts}` ra `.vyen/audit/anchor.log` (`lib/audit-log.ts:20-259`) — phản biện khẳng định "không có hash chain" là sai. Nhưng mệnh đề gốc đúng ở tầng lưu trữ: vẫn nằm trong Dexie cùng origin | (a) anchor nằm TRONG workspace, chỉ `ask` khi ghi `.vyen/**` — không `deny` tuyệt đối; (b) `prune` (:181, :252) cắt đầu chuỗi, chưa xác nhận `verifyChain` xử lý prefix đã prune; (c) không ký bằng OS keychain; (d) từ ngữ đã sửa toàn bộ thành "tamper-evident" |
+| **B4** | Có approval queue nhưng không có cơ chế "ký đúng thứ đã xem" — diff được duyệt và lệnh thực thi có thể lệch qua re-render / đổi chat / retry | ⚠️ **ĐÚNG MỘT PHẦN** | Với GHI ĐĨA: ràng buộc payload đã có — `expectedBaseHash` bắt buộc ở `lib/fs-access.ts:440-478` + `lib/staging.ts:31-50`; lệch hash ⇒ hủy ghi `[TOCTOU]` và giữ file trong staging để re-confirm (`components/chat-interface.tsx:742-786`). Với MCP: grant gắn `serverId:toolName:schemaHash` tính lại mỗi lần gọi (`lib/mcp/ipc-handlers.cjs:100-166`) — đổi schema là mất grant | (a) `ApprovalQueue` (`lib/approval-queue.ts`) chỉ là trọng tài FIFO một modal — resolve `boolean`, KHÔNG có token gắn `toolCallId`/payload hash cho shell; (b) lệnh shell được duyệt có thể khác lệnh thực thi nếu args tái tổng hợp — chưa có canonical payload hash; (c) đổi chat giữa chờ duyệt vẫn phụ thuộc FSM P1 (chưa làm) |
+| **B5** | Autonomous + scheduler cron chạy headless không có ngân sách cứng ⇒ vòng lặp lỗi phá workspace lúc 3 giờ sáng | ⚠️ **ĐÚNG MỘT PHẦN** | Trần ngân sách mỗi LƯỢT auto đã có (`AUTO_BUDGET_LIMITS`, gọi tại `lib/auto-pilot.ts:266`): 12 tool calls / 5 file / 500 KB / 3 shell — vượt trần hạ về `ask` | (a) scheduler headless (`lib/scheduler/runner.ts` — recipe cron, tự tạo session CLI) chưa có trần token/thời gian cấp PHIÊN; (b) trần auto hiện theo lượt chat, không phủ đường headless; (c) không có kill-switch toàn cục |
+
+### J.2. Điểm lại bảng #1–#13 của phản biện vòng 2 (so với điểm phản biện đưa ra trên v3.1)
+
+| Mục | Phản biện chấm trên v3.1 | Điểm lại 2026-09-24 | Căn cứ |
+|---|---|---|---|
+| #2 Shell Safety | 40% | **~75%** | Mô hình argv-allowlist đã đúng; trừ 4 residual B1 (runner allowlist, 3× `shell: true`, PATH kế thừa, không OS jail) |
+| #9 Audit Log | 50% | **~85%** | Hash chain + anchor + `verifyChain` có thật (phản biện khẳng định "không có" là sai); trừ anchor trong workspace + prune |
+| #1 TOCTOU | 85% | **85% (giữ)** | Hash guard chặn lệch base, nhưng chưa CAS/Web Locks, chưa tmp→fsync→rename, chưa verify sau ghi (A3 nguyên trạng) |
+| #10 Policy-as-data | 75% | **~90%** | Rug-pull đã chặn bằng schemaHash tính lại mỗi lần gọi + persist (phản biện vòng 2 không xét yếu tố này) |
+| #11 IME | đồng ý báo động giả + thêm guard timestamp | **chấp nhận ghi chú** | Guard 3 lớp có thật (`components/composer.tsx:626-630`: `composingRef` + `native.isComposing` + `keyCode===229`); `keyCode` deprecated — việc thêm guard theo `compositionend`/timestamp hợp lệ, backlog nhỏ |
+| #12 ContextMeter | đồng ý báo động giả, cảnh báo hiệu năng | **hiệu chỉnh** | Component là presentational `memo`; điểm nóng thật là re-render mỗi token của chat-interface (C4: 0 hit `useSyncExternalStore`) — đã sửa mô tả §3/§4 docs |
+| #13 Attachment Blob | đồng ý một phần, thiếu quota/GC | **đúng, giữ residual** | Cascade delete theo chat có (`lib/db.ts:879-883`) nên không có blob mồ côi khi XÓA CHAT; nhưng không có `navigator.storage.estimate()` đâu cả — quota monitor là việc thật (D4) |
+
+### J.3. Hai blocker phản biện vòng 2 nêu ngoài B1–B5 (đã xử lý / đã có lộ trình)
+
+| # | Luận điểm | Trạng thái |
+|---|---|---|
+| **B2-docs** | Bóc tách God Component nên diễn ra SAU khi có lưới an toàn hành vi | **ĐỒNG Ý — đã chốt thành thứ tự thi công** ở §6 P1 mục 4 của `DOCS_TSX_ARCHITECTURE.md`: security modules là hạt giống của tầng `core/`, P1 chỉ mở khi residual P0.5 đóng |
+| **B3-docs** | Tài liệu tự phản biện mục 5 là tốt, nhưng cần risk register thay bảng "100%" | **chấp nhận một phần** — vòng 2 này đã hạ mũi tự đánh giá (75%/85%/90%) kèm residual; chuyển trọn vẹn sang risk register (test ID + owner + ngày review) thuộc đợt D4, chưa làm |
+
+### J.4. Số liệu vòng 2 kiểm chứng lại (lệnh tái lập)
+
+```bash
+rg -c "markTurnUntrustedInput\|noteUntrustedToolResult" lib components   # >0: taint đã nối dây (trước đây 0 call site)
+rg -n "Content-Security-Policy" next.config.js                            # có: CSP đã phát hành (trước đây 0 hit)
+rg -n "shell: true" lib/teamwork lib/cli                                  # 3 hit: residual B1(c)
+rg -n "AUTO_BUDGET_LIMITS" lib/taint-tracker.ts lib/auto-pilot.ts         # trần ngân sách auto
+rg -n "DANGEROUS_GIT_OPTIONS" lib/shell-policy.cjs                        # chặn git -c (vector B1)
+ls tests/taint-tracker.test.ts tests/csp-config.test.ts                   # regression test vòng 2
+```
+
+### J.5. Thứ tự ưu tiên cập nhật sau vòng 2
+
+> **Trạng thái**: hàng P0 và P0.5 đã thi công xong ở đợt S3 — xem mục K. Các hạng dưới đây
+> giữ nguyên làm danh sách việc **còn lại** (residual sau S3).
+
+| Hạng | Việc | Ghi chú |
+|---|---|
+| P0 (còn thật) | Đóng residual B4: token phê duyệt gắn `toolCallId` + canonical payload hash cho shell | Phản biện đúng ở điểm này; giải pháp gợi ý: reuse `schemaHash` pattern của MCP |
+| P0.5 | B1: bỏ runner khỏi allowlist hoặc yêu cầu duyệt riêng `npm`/`npx`; ép `shell:false` ở 3 điểm teamwork/cli; resolve binary tuyệt đối thay vì kế thừa `path` | Mô hình không cần đổi — chỉ siết 4 residual |
+| P0.5 | B5: trần token/thời gian cấp phiên cho scheduler headless + kill-switch | Đường headless hiện chỉ chịu trần theo lượt chat |
+| P0.5 | B3: anchor ra ngoài workspace (nơi người dùng chọn) + test `verifyChain` trên chuỗi đã prune | |
+| P1 | C1 snapshot migration + B2 ports/conformance test → rồi mới bóc God Component | Giữ nguyên thứ tự vòng 1 (E: "B2 trước B1") |
+| P2 | D4 quota monitor (`navigator.storage.estimate`) + D5 alertdialog/scroll-gate | Kèm risk register |
+
+---
+
+## K. Đợt thi công S3 — đóng 4 residual P0/P0.5 của vòng 2 (2026-09-24)
+
+> Mục J.5 là kế hoạch; mục này là **kết quả thi công** trên cây hiện tại. Mọi dòng đều
+> kiểm chứng bằng test thật, không phải kỳ vọng. HEAD kiểm chứng: `3febca9` + S3.
+
+| Mục J.5 | Việc đã làm | Bằng chứng | Residual còn lại |
+|---|---|---|---|
+| **P0 — B4** | Approval được **ký vào đúng payload đã hiển thị**: token SHA-256 theo canonical JSON, hạn 10 phút, dùng đúng một lần; `consumeApprovalToken` chạy TRƯỚC khi thực thi lệnh, lệch ⇒ audit `blocked` + không chạy. **S3b: áp dụng cho CẢ diff** (`{path, oldText, newText, toolName}`) qua cùng cơ chế | `lib/approval-binding.ts` (mới), `lib/approval-queue.ts` (`request(..., binding)`, `activeBinding`), `components/chat-interface.tsx` (`showShellModal`/`showDiffModal` sinh token; `consumeShellApproval` + `consumeDiffApproval` xác thực), `tests/approval-binding.test.ts` (17 test) | (a) Token sống trong RAM: đóng tab là mất (chấp nhận được — hủy thì an toàn); (b) chưa gắn `toolCallId` ở call site (module đã hỗ trợ `toolCallId`, wiring thuộc P1 FSM) |
+| **P0.5 — B1(b)** | Runner (`npm test/build/ci`, `npx *`, `pnpm/yarn/bun run`, `node script.js`, `python -c`) **không còn auto-approve ở BẤT KỲ chế độ**, kể cả YOLO và override `auto` — đóng đường RCE “1 lần duyệt `fs_write` + tự chạy test” | `lib/auto-pilot.ts` (`isRunnerCommand` + gate 0c đặt trước user rules/override/policy), `tests/auto-pilot.test.ts` (37 test, gồm “runner KHÔNG auto kể cả override auto”) | Không còn: xem hàng S3b bên dưới |
+| **P0.5 — B5** | Phiên headless có **ngân sách cứng cấp phiên**: hard timeout 10 phút, trần 3 phiên mỗi tick, kill-switch `.vyen/scheduler-paused`, tự tắt lịch sau 3 lỗi liên tiếp (reset khi bật lại). **S3b: đã có nút “Dừng khẩn cấp” trong UI** + bridge handler | `lib/scheduler/runner.ts` (`SessionBudget`, `withRunTimeout`, `isKillSwitchActive`, `setKillSwitch`, `budgetExceeded`), `lib/bridge/server-bridge.ts` (`vyen:scheduler-kill-switch`), `lib/desktop-bridge.ts` (`scheduler.setKillSwitch`), `components/scheduler/scheduler-panel.tsx` (nút Dừng/Tiếp tục), `tests/session-budget.test.ts` (13 test) | Runner bên ngoài không nhận `AbortSignal` nên lượt quá trần bị *coi là thất bại* chứ chưa bị huỷ tiến trình |
+| **P0.5 — B3** | Anchor audit chuyển ra **NGOÀI workspace** (`~/.vyen/audit/anchor.log`, override `VYEN_AUDIT_ANCHOR_PATH`); `verifyChain` phân biệt rõ chuỗi đã prune (`prunedBeforeSeq`, `partialChain`) và **từ chối** trường hợp chain bắt đầu từ seq>1 nhưng `prevHash=null` (genesis giả mạo) | `lib/audit-log.ts` (`getDiskAnchorPath`, `ChainVerificationResult.partialChain`), `tests/s1-security-hardening.test.ts` | Desktop bridge bị jail trong workspace nên nhánh desktop vẫn anchor ở `.vyen/audit/`; chưa ký OS keychain |
+
+**Kiểm chứng**: `npx tsc --noEmit` sạch · `npx vitest run` → **168 file / 2.526 test PASS** (trước S3: 165 file / 2.472 test theo mục I; thêm `tests/approval-binding.test.ts`, `tests/session-budget.test.ts`, `tests/safe-spawn.test.ts`).
+
+### K.1. Đợt S3b — đóng nốt residual B1(a) + B1(c), mở rộng B4/B5 ra UI
+
+| Residual | Việc đã làm | Bằng chứng | Còn lại |
+|---|---|---|---|
+| **B1(c)** — 3 executor `shell: true` | Không executor nội bộ nào còn shell: `spawnArgv`/`runArgvCommand` cắt chuỗi thành argv + `shell: false`; Windows chạy npm qua `cmd.exe /d /s /c` với argv tường minh (tắt AutoRun) | `lib/safe-spawn.ts` (mới), `lib/teamwork/sandbox/process-manager.ts`, `lib/teamwork/permission-broker.ts`, `lib/cli/cli-surface.ts`, `tests/safe-spawn.test.ts` (15 test, gồm hàng rào “không file nào còn `shell: true`”) | Lệnh thật sự cần pipe/`&&`/redirect giờ bị **từ chối có lỗi rõ ràng** thay vì chạy dưới shell — executor cần pipeline phải tự chia nhiều tiến trình |
+| **B1(a)** — `PATH` kế thừa | `resolveBinaryAbsolute` tra binary trong thư mục hệ thống (`/usr/bin`, `/bin`, `/usr/sbin`, `/sbin`, `System32`…) và **từ chối** nếu không thấy (không fallback). `getSafeEnv(root)` dựng lại `PATH` = `node_modules/.bin` của workspace + thư mục hệ thống, **không kế thừa PATH của user** | `lib/shell-policy.cjs` (`resolveBinaryAbsolute`, `buildSafePath`, `SYSTEM_BIN_DIRS`), `lib/ipc.cjs` (`shellRun` dùng binary tuyệt đối + `getSafeEnv(root)`), `tests/safe-spawn.test.ts` | `PATH` vẫn còn `node_modules/.bin` của workspace — **có chủ đích**: `npx`/npm script cần PATH để tìm `node` và tool cục bộ; đây là ranh giới tin cậy, không phải sơ hở |
+| **B4 (mở rộng)** | Diff dùng chung token binding, ký `{path, oldText, newText, toolName}` | `components/chat-interface.tsx` (`showDiffModal` + `consumeDiffApproval`) | `toolCallId` vẫn chưa gắn ở call site (chờ P1 FSM) |
+| **B5 (mở rộng)** | Kill-switch có nút UI + bridge handler | `vyen:scheduler-kill-switch`, `scheduler.setKillSwitch`, nút trong `scheduler-panel.tsx` | Nút chỉ hiệu lực qua desktop bridge; web-only chưa có runner daemon nên không cần |
+
+**Hai điểm hạnh nghịch đáng ghi lại**:
+1. Bỏ runner khỏi allowlist làm **đỏ 2 test cũ** (`tests/taint-tracker.test.ts`, `tests/teamwork-cli.test.ts`) vì chúng dùng `npm test` làm ví dụ “lệnh an toàn”. Đã sửa test dùng lệnh chỉ-đọc (`git status`) — đây là cập nhật kỳ vọng có chủ đích, không phải nới lỏng.
+2. `SAFE_COMMAND_PATTERNS` từng liệt kê `npm ls|outdated|view...` nhưng `lib/shell-policy.cjs` chặn trước (`NPM_ALLOWED_SCRIPTS` chỉ có `test|build|lint|typecheck|check`) ⇒ pattern chết. Đã xoá pattern chết thay vì để lại giả lập “đã bảo vệ”.

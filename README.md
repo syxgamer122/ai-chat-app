@@ -157,7 +157,7 @@ Hệ thống Cài đặt được tổ chức lại theo 6 nhóm chức năng tr
 
 - **Subagent delegate**: agent chính giao task độc lập cho subagent chạy với context riêng (không thấy lịch sử chat), không thể đệ quy (subagent không có `delegate`), giới hạn mặc định 10 turns (tối đa 25). Subagent vẫn dùng được tool trên máy bạn (fs/shell/git/MCP) nhờ relay: server phát annotation xuống renderer, renderer thực thi rồi POST kết quả về `/api/chat/subagent-relay`. Hoạt động cả đường native function-calling lẫn emulated.
 - **Sub-recipes**: session chạy recipe có `sub_recipes` thì mỗi sub-recipe trở thành một tool `subrecipe__<name>` (schema sinh từ parameters, giá trị gắn cứng không đè được) + tool `subrecipe__batch` chạy nhiều cái **song song cap 3** (kết quả JSON từng lane hiển thị card subagent, Stop hủy được cả lô). `return_mode`: `summary` (mặc định, ≤ 2.000 ký tự) hoặc `full`. Sub-recipe là leaf worker — không delegate, không lồng sub-recipe (chống đệ quy).
-- **Orchestrator sweep**: mở panel orchestrator, nhập mục tiêu — hệ thống tự phân rã thành lưới N cấu hình chạy song song (bấm Dừng là thật sự ngưng tiêu token), chấm điểm xếp hạng từng bản, vẽ heatmap theo trục và tổng hợp một đáp án cuối. Bấm **"Thêm vào hội thoại"** để ghi đáp án vào hội thoại như một message assistant (có gắn nhãn nguồn orchestrator).
+- **Nhãn nguồn orchestrator (còn lại sau khi gỡ sweep)**: `OrchestratorBadge` vẫn render khi message có annotation `orchestratorAdopted` (đọc qua `getOrchestratorAdoptedAnnotation`). Panel sweep, route `/api/orchestrate` và bộ engine/grid/metrics của orchestrator **đã được gỡ**. <!-- docs-check:ignore --> — hiện không còn producer nào ghi annotation này, phần còn sống của `lib/orchestrator/` chỉ là `scheduler.ts` (pool giới hạn đồng thời).
 - **Plan & checklist**: task lớn được phân rã bằng `plan_create`/`plan_update`; UI hiện checklist tiến độ (Chờ/Đang làm/Xong/Lỗi/Bỏ qua) kèm progress bar. **Plan Mode** khoá agent ở chế độ khảo sát — chỉ đọc/liệt kê/tìm và hỏi làm rõ, tool ghi bị vô hiệu cho tới khi bạn chuyển sang Act.
 - **Self-improvement lessons**: agent tự lưu bài học sau khi sửa bug khó / phát hiện pattern hay bằng `lesson_save` (3 loại: rule / pattern / gotcha, tối đa 400 ký tự); các bài học được inject vào system prompt của các phiên sau.
 
@@ -177,10 +177,10 @@ Hệ thống Cài đặt được tổ chức lại theo 6 nhóm chức năng tr
 | Framework | Next.js 16 (App Router, Turbopack) |
 | UI | React 19, Tailwind CSS, lucide-react |
 | Trạng thái | Zustand (persist localStorage) |
-| Lưu trữ | Dexie (IndexedDB) — schema 16 phiên bản có migration |
+| Lưu trữ | Dexie (IndexedDB) — schema 19 phiên bản có migration |
 | AI | AI SDK (`ai` + `@ai-sdk/openai`), stream qua API routes Node.js |
 | Virtualization | @tanstack/react-virtual |
-| Desktop | Launcher Edge/Chrome `--app` vào Next.js local (cửa sổ riêng, ~35MB RAM) |
+| Desktop | Launcher Edge/Chrome `--app` vào Next.js local (`npm run app:fast`, cửa sổ riêng, ~35MB RAM) |
 | MCP | `@modelcontextprotocol/sdk` (client chạy trong bridge Node.js của desktop/CLI, phê duyệt 4 cấp) |
 
 ## Chạy dự án
@@ -192,27 +192,67 @@ npm run build    # production build (type-check bật)
 npm run start
 npm test         # unit tests (vitest)
 npm run lint     # eslint
+npm run typecheck  # tsc --noEmit
 
 # Bản desktop (launcher Edge/Chrome --app nhẹ — không Electron/Tauri)
 npm run app        # mặc định: mở cửa sổ app Edge/Chrome --app vào Next.js local
+npm run app:fast   # alias của app — đường mở nhanh, kết nối lại server đang chạy nếu có
 npm run desktop    # alias của app
 npm run cli        # CLI: npx tsx bin/vyen.ts cli
+npm run teamwork   # Teamwork multi-agent engine (headless): npx tsx bin/teamwork.ts
 # Desktop tự chủ: chỉ cần cấu hình Nhà cung cấp trong app — không cần .env.local
 ```
 
 ## Biến môi trường (`.env.local`)
 
-| Biến | Bắt buộc | Mô tả |
-|---|---|---|
-| `OPENAI_API_KEY` | — | API key cho gateway ở CHẾ ĐỘ DEMO web (người dùng có provider riêng thì không cần) |
-| `OPENAI_API_KEYS` | — | Nhiều key cách nhau bởi `,` `;` hoặc xuống dòng — bật failover pool |
-| `OPENAI_BASE_URL` | — | Gateway tương thích OpenAI (vd `https://anticode.vn/v1`) |
-| `ACCESS_CODE` | — | Yêu cầu mã truy cập (Bearer) khi gọi `/api/chat` và `/api/title` |
-| `ALLOWED_ORIGIN_HOSTS` | — | Host origin phụ được chấp nhận, cách nhau `,` |
-| `DIAG_SECRET` | — | Bật `/api/diag` (mặc định **khóa 403**); gọi: `curl -H "x-diag-secret: ..." /api/diag` |
-| `MODEL_ALIAS_MAP` | — | JSON map tên model nội bộ → tên thật trên gateway, không cần deploy lại |
-| `TITLE_MODEL_CHAIN` | — | Chuỗi model dự phòng sinh tiêu đề khi không có provider active, mặc định `gpt-5-4-nano,gpt-4o-mini,gpt-5-6-terra,deepseek-v4-flash`; có provider active thì model người dùng đang chọn được ưu tiên trước (tương tự `COMPACT_MODEL_CHAIN`, `ORCHESTRATE_MODEL_CHAIN`) |
-| `CHAT_DEBUG_ERRORS` | — | `true` để kèm body lỗi upstream vào message |
+Bảng dưới là **các biến mà code thật sự đọc** — kiểm chứng bằng `npm run docs:check`. Không biến nào bắt buộc: bản desktop/CLI tự chủ sau khi cấu hình Nhà cung cấp trong app.
+
+**Gateway & CLI headless**
+
+| Biến | Mô tả |
+|---|---|
+| `OPENAI_API_KEY` | Key gateway kiểu OpenAI cho CLI headless (đầu chuỗi dự phòng trong `lib/cli/interactive-agent.ts`); người dùng có provider riêng trong Cài đặt thì không cần |
+| `ANTHROPIC_API_KEY` | Key dự phòng kế tiếp trong chuỗi của CLI |
+| `OPENROUTER_API_KEY` | Như trên, đồng thời tự chọn `https://openrouter.ai/api/v1` làm baseUrl khi chưa đặt `VYEN_BASE_URL` |
+| `GEMINI_API_KEY` / `GROQ_API_KEY` / `DEEPSEEK_API_KEY` | Key dự phòng của CLI; mỗi key tự gắn baseUrl của nhà cung cấp đó |
+| `VYEN_API_KEY` | Key chung của Vyen, đứng cuối chuỗi dự phòng |
+| `VYEN_BASE_URL` | Base URL tường minh cho CLI (ưu tiên cao nhất) |
+| `VYEN_MODEL` | Ép model cho CLI |
+| `VYEN_MOCK_AGENT` | `1` = chạy agent giả, không gọi mạng |
+| `MODEL_ALIAS_MAP` | JSON map tên model nội bộ → tên thật trên gateway, không cần deploy lại |
+| `TITLE_MODEL_CHAIN` | Chuỗi model dự phòng sinh tiêu đề khi không có provider active, mặc định `gpt-5-4-nano,gpt-4o-mini,gpt-5-6-terra,deepseek-v4-flash`; có provider active thì model người dùng đang chọn được ưu tiên trước |
+| `COMPACT_MODEL_CHAIN` | Tương tự, cho `/api/compact` |
+| `CHAT_DEBUG_ERRORS` | `true` để kèm body lỗi upstream vào message |
+| `CHAT_STREAM_BUDGET_MS` | Ngân sách stream của `/api/chat`, mặc định `270000` (4,5 phút) |
+
+**Tìm kiếm web** — đặt một trong các biến này để tra cứu đáng tin (hai endpoint scrape của DuckDuckGo nay trả 403):
+
+| Biến | Mô tả |
+|---|---|
+| `TINYFISH_API_KEY` | Search API (có bản miễn phí) |
+| `SEARXNG_URL` | Instance SearXNG tự host; nhận nhiều instance cách nhau `,` |
+| `BRAVE_SEARCH_KEY` | Brave Search API |
+| `TAVILY_API_KEY` | Tavily API |
+
+**Bảo vệ route**
+
+| Biến | Mô tả |
+|---|---|
+| `ACCESS_CODE` | Yêu cầu mã truy cập (Bearer) khi gọi route LLM/web |
+| `ALLOWED_ORIGIN_HOSTS` | Host origin phụ được chấp nhận, cách nhau `,` |
+| `TRUSTED_PROXY_HOPS` | Số hop proxy tin cậy khi đọc `x-forwarded-for`, mặc định `1`; chạy trực tiếp không qua proxy thì đặt `0` |
+| `TRUST_PROXY_IP_HEADERS` | `1` = tin thêm các header IP phụ do proxy gửi |
+
+**Desktop launcher**
+
+| Biến | Mô tả |
+|---|---|
+| `VYEN_WORKSPACE_ROOT` | Workspace root của phiên desktop/CLI |
+| `VYEN_USER_DATA_DIR` | Thư mục dữ liệu riêng của bản desktop (chứa bridge token) |
+| `VYEN_BRIDGE_TOKEN` | Token cho `/api/bridge` khi tự chạy server ở chế độ dev |
+| `VYEN_LAUNCHER_NO_BROWSER` | `1` = chỉ khởi động server, không mở cửa sổ app |
+| `VYEN_USE_NPM` | `1` = buộc launcher dùng `npm` thay vì trình chạy mặc định |
+| `DEBUG_VYEN_BRIDGE` | `1` = log chi tiết các lời gọi bridge |
 
 ## Kiến trúc
 
@@ -226,8 +266,10 @@ app/api/chat    — TRUNG TÂM điều phối: same-origin + access-code + rate-
                   không hỗ trợ function calling
 app/api/chat/subagent-relay — POST kết quả tool client mà renderer thực thi
                   hộ subagent đang chạy server-side
-app/api/orchestrate — SSE orchestrator sweep: plan → spawn N agent song song →
-                  ranking + heatmap → synthesize
+app/api/pdf      — trích text PDF (unpdf) phía server cho tài liệu đính kèm
+app/api/providers/models — POST { baseUrl, apiKey } → fetch `${baseUrl}/models`
+                  phía server (né CORS + chặn Origin của một số gateway)
+app/api/server-config — trả capability mặc định của model server-side (metadata tĩnh)
 app/api/vision   — mô tả ảnh workspace / ảnh MCP thành text bằng model
                   vision của provider active (BYOK — client gửi headers
                   provider + model vision đã chọn)
@@ -235,8 +277,6 @@ app/api/compact  — nén hội thoại dài thành summary có state tích lũy
 app/api/title    — sinh tiêu đề, chống prompt-injection, heuristic fallback
 app/api/web      — proxy tra cứu web: DuckDuckGo lite→html + đọc trang
                   (SSRF guard từng hop redirect, trần 1.5MB/12s mỗi trang)
-app/api/diag     — chẩn đoán upstream (khóa mặc định, secret qua header)
-
 app/api/bridge   — cầu nối desktop: endpoint local-only + token, chuyển tiếp
                   fs/shell/git/MCP xuống Node bridge server của launcher
 scripts/launch-desktop.cjs — launcher mặc định: mở cửa sổ Edge/Chrome --app
@@ -245,8 +285,9 @@ bin/vyen.ts       — CLI Vyen (`npm run cli` / `npm run vyen`)
 
 lib/             — logic agent thuần, test được trong node:
                   agent-tools (server + client tool defs), emulated-agent,
-                  subagent + subagent-relay, orchestrator/ (engine, grid,
-                  metrics, scheduler), auto-pilot (phê duyệt), staging,
+                  subagent + subagent-relay, orchestrator/ (scheduler —
+                  runPool giới hạn đồng thời, dùng bởi subagent + sub-recipe),
+                  auto-pilot (phê duyệt), staging,
                   goal-loop, debug-loop, lessons, plan (subtask-plan),
                   mcp/ (tool-mapper, bridge, image-content), fs-vision,
                   context-compaction, reasoning-capability,
@@ -278,7 +319,6 @@ components/{diff-confirm,shell-confirm,plan-panel,staging-panel,
              subagent-card,workspace-checkpoints} — UI phê duyệt + tiến độ agent
 components/recipes/            — panel Recipes (list, form tham số, Run,
                                  Import/Export, share link preview)
-components/orchestrator/       — panel sweep: thẻ từng cell + heatmap
 components/mcp/                — settings MCP + hộp thoại phê duyệt 4 cấp
 
 .vyen/                          — cấu hình per-workspace do agent/people dùng

@@ -145,8 +145,11 @@ describe('Egress Guard — taint chặn tool ra ngoài', () => {
 
   it('nhiễm nhưng tool KHÔNG ra ngoài thì không bị hạ cấp', () => {
     markTurnUntrustedInput('c2', 'fs_read:README.md', 64);
-    expect(isEgressTool('shell_run', { command: 'npm test' })).toBe(false);
-    expect(guard('shell_run', { command: 'npm test' }, 'c2')).toBe(true);
+    // Dùng lệnh CHỈ-ĐỌC: `git status` không phải egress và không phải runner.
+    // (`npm test` từng là ví dụ ở đây, nhưng sau P0.5 S3 runner luôn phải hỏi —
+    //  nên không dùng nó để chứng minh "không hạ cấp" nữa.)
+    expect(isEgressTool('shell_run', { command: 'git status' })).toBe(false);
+    expect(guard('shell_run', { command: 'git status' }, 'c2')).toBe(true);
     expect(guard('fs_read', { path: 'a.ts' }, 'c2')).toBe(true);
   });
 

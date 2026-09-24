@@ -1,0 +1,25 @@
+name: Docs sync
+
+on:
+  push:
+    paths:
+      - '**/*.md'
+      - 'package.json'
+      - 'scripts/check-docs-sync.cjs'
+  pull_request:
+    paths:
+      - '**/*.md'
+      - 'package.json'
+      - 'scripts/check-docs-sync.cjs'
+  workflow_dispatch:
+
+jobs:
+  docs-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      # Không cần `npm ci`: script chỉ dùng node builtin + `git ls-files`.
+      - run: npm run docs:check

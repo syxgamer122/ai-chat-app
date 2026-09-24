@@ -1,80 +1,94 @@
-# Kiến Trúc Tối Ưu Hóa Desktop, Web & CLI
+# Kiến Trúc Desktop, Web & CLI — Vyen
 
-## 1. Nguyên nhân gốc rễ: Tại sao Electron cũ lại "lag vc dell cả mở lên được"?
-
-Trước đây, khi người dùng chạy `npm run app:dev`:
-1. **Lồng Next.js bên trong Electron**: `electron/main.cjs` tự spawn một process con chạy `electron.exe ELECTRON_RUN_AS_NODE=1 next dev -p 3457`.
-2. **Khởi động lạnh Turbopack cực nặng trên Windows**: Turbopack khi biên dịch trang chủ `/` trên Windows I/O mất từ 82s đến 180s. Cửa sổ Electron bị treo cứng với màn hình loading spinner.
-3. **Lãng phí tài nguyên khổng lồ**: Electron tải thêm một bản sao Chromium đầy đủ (~200MB file thực thi, ăn thêm 500MB–800MB RAM), khiến máy tính bị quá tải CPU 100% và nghẽn bộ nhớ.
-4. **Lệch Port & Khóa chặt năng lực vào Electron**:
-   - Nếu lập trình viên đã chạy `npm run dev` ngoài terminal (port 3000), Electron cũ chỉ thăm dò port 3457 -> cố đẻ thêm một server thứ 2 -> đè crash nhau.
-   - Toàn bộ năng lực agent (chạy shell, sửa file trực tiếp, git, MCP) bị nhốt chặt trong `electron/preload.cjs` (`window.vyen`). Khi người dùng mở trình duyệt web thường tại `http://localhost:3000`, họ bị tước mất quyền chạy shell và sửa file trực tiếp, buộc phải dùng Electron dù Electron giật lag.
+> **Đồng bộ với codebase ngày 2026-09-24.** Bản trước của tài liệu này mô tả Electron và lộ trình Tauri:
+> trong repo **không còn thư mục `electron/` và không có `src-tauri/`**. Desktop hiện tại là launcher mở
+> WebView sẵn có của hệ điều hành (Edge/Chrome `--app`), không nhúng thêm runtime nào.
 
 ---
 
-## 2. Bài học từ Pi (`earendil-works/pi`) và Goose (`aaif-goose/goose`)
+## 1. Ba đường chạy (đều dùng chung một core trong `lib/`)
 
-### A. Triết lý từ Pi (Minimalist & Terminal-First):
-- **Core Primitives**: Pi tối giản hóa harness vào đúng 4 công cụ nền tảng: `read`, `write`, `edit`, `bash`.
-- **Zero GUI Overhead**: Chạy trực tiếp từ terminal (`pi`), khởi động tức thì trong <100ms, không cần mở trình duyệt hay Electron nếu chỉ cần code.
-- **Web UI tách rời**: Web UI chỉ là một client mỏng kết nối tới agent server qua HTTP/WebSocket, không nhồi nhét server vào trong Electron.
+| Đường | Lệnh | Entry point | Đặc điểm |
+|---|---|---|---|
+| **Terminal CLI** | `npm run cli` / `npm run vyen` | `bin/vyen.ts` | Không GUI, chạy headless; `npm run teamwork` cho quy trình multi-agent |
+| **Fast Desktop** | `npm run app:fast` (= `npm run app` = `npm run desktop`) | `scripts/launch-desktop.cjs` | Cửa sổ app không URL bar, không tab; tái dùng Edge/Chrome/WebView2 có sẵn |
+| **Universal Web** | `npm run dev` → mở `http://localhost:3000` | `app/api/bridge` + `lib/bridge/` | Full tool (fs/shell/git/MCP) ngay trên trình duyệt thường |
 
-### B. Bài học từ Goose (Từ bỏ Electron sang Tauri v2):
-- **Di cư khỏi Electron**: Dự án Goose ban đầu dùng Electron nhưng sau đó đã quyết định chuyển sang **Tauri v2** (Rust + WebView2 của hệ điều hành).
-- **Lợi ích**:
-  - Dung lượng giảm từ 150MB+ xuống ~15MB.
-  - RAM giảm từ 600MB xuống ~35MB–50MB.
-  - Tận dụng Webview có sẵn của Windows (Edge Chromium WebView2), khởi động trong chớp mắt.
-- **Client-Server Architecture**: Daemon agent chạy độc lập, Desktop app chỉ là lớp vỏ hiển thị (Shell).
+Ba đường này chia sẻ cùng lớp an toàn (path-guard, auto-pilot, staging, audit log) và cùng
+`lib/` logic — không có nhánh code riêng cho từng môi trường.
 
 ---
 
-## 3. Hệ sinh thái 3 tầng tối ưu mới của Vyen
+## 2. Vì sao bỏ Electron
 
-Vyen đã được tái cấu trúc toàn diện theo kiến trúc hiện đại của Pi & Goose:
+- Electron nhúng thêm một bản Chromium đầy đủ (~200MB, 500–800MB RAM) trong khi máy Windows 10/11
+  đã có sẵn WebView2/Edge Chromium.
+- Launcher Electron cũ tự spawn `next dev` bên trong tiến trình Electron → Turbopack khởi động lạnh
+  trên Windows I/O rất chậm, cửa sổ treo ở màn hình loading.
+- Quyền năng agent (shell, sửa file, git, MCP) bị nhốt trong preload của Electron (cầu `window.vyen`,
+  đã bị xoá cùng thư mục `electron/`), nên mở bằng trình duyệt thường là mất tool.
 
+Lời giải: **không nhúng runtime** — launcher mở cửa sổ app của trình duyệt có sẵn, còn quyền năng
+agent đưa xuống `/api/bridge` để mọi trình duyệt dùng được.
+
+---
+
+## 3. Launcher `scripts/launch-desktop.cjs`
+
+### 3.1. Cổng và tái sử dụng server
+
+- Danh sách cổng mặc định: `DEFAULT_PORTS = [3000, 3001, 3002, 3457]`.
+- `probe(port)` gọi `GET http://127.0.0.1:<port>/api/server-config` (timeout 2.5s) để nhận diện
+  **server Vyen đang chạy**. Nếu có → launcher kết nối thẳng, **không spawn** tiến trình trùng
+  (triệt tiêu `EADDRINUSE`).
+- Nếu chưa có server → spawn `next dev` (hoặc `next start` khi build sẵn) ở cổng khả dụng đầu tiên.
+
+### 3.2. Tham số dòng lệnh
+
+```bash
+node scripts/launch-desktop.cjs [tùy chọn]
+
+--port, -p <number>           Cổng Next.js server (mặc định: autodetect 3000/3001/3002/3457)
+--workspace, -w <path>        Thư mục làm việc (workspace root)
+--window-size <width,height>  Kích thước cửa sổ (mặc định: 1360,880)
+--dev                         Bắt buộc chạy server ở chế độ dev (next dev)
+--no-open                     Chỉ khởi động server, không mở cửa sổ browser
+--help, -h                    Hiển thị hướng dẫn
 ```
-                  ┌──────────────────────────────────────────────┐
-                  │          Vyen AI Coding Agent Suite          │
-                  └──────────────────────┬───────────────────────┘
-                                         │
-        ┌────────────────────────────────┼────────────────────────────────┐
-        ▼                                ▼                                ▼
-  [1. TERMINAL CLI]             [2. FAST DESKTOP]               [3. UNIVERSAL WEB]
-  (Chuẩn Pi)                    (Chuẩn Goose / WebView2)        (Chuẩn Web Bridge)
-  `npm run cli`                 `npm run app:fast`              `npm run dev` -> Browser
-  `bin/vyen.ts`                 `scripts/launch-desktop.cjs`    `/api/bridge` + WebBridge
-  ─────────────────             ────────────────────────        ─────────────────────────
-  - Startup: <100ms             - Startup: <300ms               - Mở bằng Edge/Chrome/Brave
-  - 4 Primitives:               - RAM: ~35MB (giảm 90%)         - 100% full tool (fs, shell,
-    read, write, edit, bash     - Native App Window              git, mcp) ngay trong web!
-  - Headless Teamwork Engine      (không URL bar, không tabs)   - Không phụ thuộc Electron
-```
 
-### 1. Universal Web Bridge (`lib/bridge/server-bridge.ts` & `app/api/bridge/route.ts`)
-- Thay vì giam cầm `window.vyen` trong Electron, Vyen nay sở hữu **Universal Web Bridge**:
-  - Khi mở `http://localhost:3000` trên trình duyệt bất kỳ (Chrome, Edge, Arc, Brave), client tự động kết nối với `/api/bridge`.
-  - `/api/bridge` tái sử dụng trọn vẹn lớp bảo vệ path-guard, Goose-style smart truncation, Git runner, và MCP manager đã được kiểm chứng qua 98 test suites.
-  - **Kết quả**: Bạn có thể dùng 100% tính năng coding harness, chạy lệnh build/test, gọi MCP tools TRỰC TIẾP TRÊN TRÌNH DUYỆT MÀ KHÔNG CẦN ELECTRON.
+Biến môi trường launcher đọc: `PORT` (cổng ưu tiên), `VYEN_WORKSPACE_ROOT` (workspace root),
+`VYEN_USER_DATA_DIR` (thư mục dữ liệu riêng của bản desktop).
 
-### 2. Fast Desktop App Mode (`npm run app:fast` hoặc `npm run desktop`)
-- Tận dụng runtime Edge WebView2 có sẵn trên mọi máy Windows 10/11:
-  - Khởi động cửa sổ App độc lập bằng lệnh: `msedge --app=http://localhost:3000/ --app-id=vyen-desktop`.
-  - Cửa sổ không có thanh địa chỉ, không tab thừa, mượt mà như app native.
-  - Bộ nhớ RAM chỉ ~35MB thay vì 600MB của Electron.
-  - Thời gian mở cửa sổ < 0.3 giây!
+### 3.3. Bridge token
 
-### 3. Unified Terminal CLI Harness (`npm run cli` hoặc `npx tsx bin/vyen.ts`)
-- Được thiết kế theo triết lý của Pi:
-  - `npm run cli`: REPL terminal tương tác trực tiếp với các lệnh `:read`, `:bash`, `:teamwork`.
-  - `npx tsx bin/vyen.ts teamwork --goal "..."`: Chạy quy trình Multi-Agent Teamwork 2-phase headless.
-  - Không cần bật GUI, tối ưu tuyệt đối cho dev thích dùng terminal.
+- Mỗi phiên launcher spawn server mới sẽ **sinh một bridge token** và ghi vào `userDataDir`
+  (`lib/bridge/bridge-token.ts` là nguồn chân lý; launcher chỉ mirror đường dẫn).
+- Server con nhận token qua `VYEN_BRIDGE_TOKEN`; renderer vào app bằng `/#bt=<token>`.
+- Server đang chạy từ trước (đường reconnect) thì token phải đọc từ file trong `userDataDir` —
+  launcher không tự sinh lại, tránh ghi đè token của phiên đang phục vụ.
 
-### 4. Tối ưu hóa Electron gốc (`electron/main.cjs`)
-- Nếu người dùng vẫn muốn chạy Electron:
-  - **Tự động gắn vào port 3000**: Nếu dev server đã chạy ngoài terminal, Electron gắn kết nối ngay lập tức (zero wait, không compile lại).
-  - **Bật tăng tốc GPU & chống giật lag Windows**: Thêm các switch `CalculateNativeWinOcclusion`, `enable-gpu-rasterization`.
+---
 
-### 5. Lộ trình Tauri v2 (`src-tauri/tauri.conf.json`)
-- Đã cấu hình sẵn file `src-tauri/tauri.conf.json` chuẩn Tauri v2.
-- Khi máy có sẵn môi trường Rust/Cargo, có thể build Vyen thành file `.exe` độc lập siêu nhẹ (~15MB) tương tự bản Desktop mới nhất của Goose.
+## 4. Universal Web Bridge
+
+- `lib/bridge/server-bridge.ts` — path-guard, cắt output theo kiểu Goose, git runner, MCP manager;
+  đây chính là lớp đã được kiểm chứng qua bộ test và **không phụ thuộc Electron**.
+- `lib/bridge/bridge-token.ts` — sinh/kiểm tra/so sánh token (timing-safe).
+- `app/api/bridge/route.ts` — endpoint chỉ nhận **request local** (`isLocalRequest`) + token hợp lệ.
+  Rate-limit 30 request **sai token**/phút/IP; token đúng không bị chặn (agent gọi bridge dồn dập:
+  fs tools, git, vision).
+- Phía renderer: `lib/desktop-bridge.ts` chọn đường gọi (bridge HTTP khi mở bằng desktop/trình duyệt,
+  IPC khi có shell desktop).
+- **Chế độ dev**: khởi động server với biến `VYEN_BRIDGE_TOKEN` rồi mở `/#bt=<token>` — không cần
+  chạy launcher.
+
+---
+
+## 5. Trạng thái Tauri
+
+`docs/DESKTOP-CHOICE.md` (2026-09-03) chốt **Tauri v2 cho M2**, nhưng tới nay **chưa triển khai**:
+không có `src-tauri/`, không có `tauri.conf.json`, và không có script build Rust trong `package.json`. <!-- docs-check:ignore -->
+Đường desktop đang dùng là Edge/Chrome `--app` ở mục 3.
+
+Nếu quay lại Tauri, tài liệu này phải được viết lại kèm số đo thật (RAM, cold-start) — bản cũ đã
+ghi các ô `đo thật M3` và tới giờ vẫn chưa có số.

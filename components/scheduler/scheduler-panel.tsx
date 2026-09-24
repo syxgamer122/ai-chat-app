@@ -41,6 +41,7 @@ const CRON_PRESETS = [
 ];
 
 async function toggleScheduleRecord(s: ScheduleRecord): Promise<void> {
+  // (giữ nguyên phần thân hàm bên dưới)
   const updated: ScheduleRecord = {
     ...s,
     enabled: !s.enabled,
@@ -101,6 +102,14 @@ export function SchedulerPanel() {
   const setCurrentChatId = useAppStore((s) => s.setCurrentChatId);
 
   const [isEditing, setIsEditing] = useState(false);
+  /*
+   * Kill-switch toàn cục (S3/B5): dừng mọi lịch headless. Không có state này,
+   * mọi "trần ngân sách" chỉ chạy được khi scheduler đang bật — cần một nút
+   * dừng khẩn cấp để người dùng cắt ngay khi nghi lịch đang làm hỏng việc.
+   * Sentinel file do bridge quản lý (`.vyen/scheduler-paused`).
+   */
+  const [killSwitchOn, setKillSwitchOn] = useState(false);
+  const [killSwitchBusy, setKillSwitchBusy] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [recipeId, setRecipeId] = useState('');
   const [recipeName, setRecipeName] = useState('');
@@ -244,6 +253,47 @@ export function SchedulerPanel() {
             <span>Thêm lịch mới</span>
           </button>
         )}
+      </div>
+
+      {/*
+       * Dừng khẩn cấp toàn bộ lịch. Khi BẬT, mọi tick bị bỏ trống và
+       * `executeScheduledRun` từ chối ở cửa — kể cả lệnh "Run now" thủ công.
+       */}
+      <div className="flex items-center justify-between gap-3 border border-border-hairline bg-surface-raised px-3 py-2">
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5 font-semibold text-text-primary">
+            {killSwitchOn ? <AlertCircle size={13} className="text-status-error" /> : <CheckCircle2 size={13} />}
+            <span>{killSwitchOn ? 'Scheduler đang tạm dừng' : 'Scheduler đang hoạt động'}</span>
+          </div>
+          <p className="mt-0.5 text-[11px] text-text-muted">
+            {killSwitchOn
+              ? 'Không lịch nào chạy, kể cả Run now. Bật lại để tiếp tục cron.'
+              : 'Có thể dừng khẩn cấp mọi lịch khi nghi một job đang chạy lỗi.'}
+          </p>
+        </div>
+        <button
+          type="button"
+          disabled={killSwitchBusy}
+          aria-pressed={killSwitchOn}
+          onClick={async () => {
+            const bridge = vyenDesktop();
+            if (!bridge?.scheduler?.setKillSwitch) return;
+            setKillSwitchBusy(true);
+            try {
+              const next = !killSwitchOn;
+              const res = await bridge.scheduler.setKillSwitch(next);
+              setKillSwitchOn(Boolean(res?.paused ?? next));
+            } catch {
+              // Bridge lỗi: giữ trạng thái cũ, không giả vờ đã bật/tắt.
+            } finally {
+              setKillSwitchBusy(false);
+            }
+          }}
+          className="flex shrink-0 items-center gap-1.5 rounded-none border border-border-hairline px-2.5 py-1 text-xs font-semibold text-text-primary transition hover:bg-surface-overlay disabled:opacity-50"
+        >
+          {killSwitchBusy ? <Loader2 size={13} className="animate-spin" /> : killSwitchOn ? <Play size={13} /> : <Pause size={13} />}
+          <span>{killSwitchOn ? 'Tiếp tục' : 'Dừng khẩn cấp'}</span>
+        </button>
       </div>
 
       {isEditing && (

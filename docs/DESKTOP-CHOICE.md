@@ -22,3 +22,11 @@ PoC = **Tauri v2 (A) + CLI + Web kiểu OpenCode/Pi (D)**, kèm đường **Edge
 ## 4. Kế hoạch M2/M3
 - M2: Tauri conf hợp lệ + chuẩn hóa `app:fast`; **xóa Electron** theo chốt. Không giữ song song.
 - M3: `npx tsc --noEmit` + `npm run build` + `npm test` PASS; đo RAM/cold-start thật đường nhẹ (<5s `app:fast`) rồi điền số thay mọi ô `đo thật M3`.
+
+## 5. Trạng thái triển khai (cập nhật 2026-09-24)
+- **Electron: đã xóa** đúng kế hoạch M2 — repo không còn `electron/`.
+- **Tauri v2: chưa triển khai** — không có `src-tauri/`, không có `tauri.conf.json`, không có bước build Rust trong `package.json`. <!-- docs-check:ignore -->
+- **Đường desktop đang chạy**: launcher WebView sẵn có của hệ điều hành — `scripts/launch-desktop.cjs`, lệnh `npm run app:fast` (= `npm run app` = `npm run desktop`).
+- **Các ô `đo thật M3` (RAM, cold-start) vẫn chưa có số** — xem `docs/DESKTOP_ARCHITECTURE.md` §5.
+
+Chi tiết kiến trúc hiện tại: `docs/DESKTOP_ARCHITECTURE.md`.

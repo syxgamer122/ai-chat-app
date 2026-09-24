@@ -435,16 +435,26 @@ const runApp = async (argv: string[]): Promise<void> => {
 };
 
 const runServe = async (): Promise<void> => {
-  const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-  const child = process.platform === 'win32'
-    ? spawn(`${npmCmd} run dev`, {
+  /*
+   * S3: KHÔNG dùng `shell: true` ở đây nữa.
+   *
+   * Windows không spawn được `npm.cmd` trực tiếp (đây là batch shim, Node cố tình
+   * chặn). Cách đúng là gọi `cmd.exe` với argv TƯỜNG MINH — không nối chuỗi, không
+   * nội suy biến, và `/d` tắt AutoRun của cmd.exe (một vector persist gổ).
+   * Lệnh là hằng số trong source nên không có dữ liệu người dùng để bị inject.
+   * POSIX dùng đường dẫn tuyệt đối, không phụ thuộc PATH.
+   */
+  const isWin = process.platform === 'win32';
+  const child = isWin
+    ? spawn(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', 'npm.cmd', 'run', 'dev'], {
         cwd: APP_ROOT,
         stdio: 'inherit',
-        shell: true,
+        shell: false,
       })
-    : spawn(npmCmd, ['run', 'dev'], {
+    : spawn('/usr/bin/npm', ['run', 'dev'], {
         cwd: APP_ROOT,
         stdio: 'inherit',
+        shell: false,
       });
   child.on('exit', (code) => {
     process.exit(code ?? 0);

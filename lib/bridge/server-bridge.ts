@@ -296,6 +296,19 @@ export function initServerBridge(): BridgeDispatcher {
     return getSchedulerDaemonStatus();
   });
 
+  /*
+   * Kill-switch toàn cục (S3/B5): dừng MỌI lịch chạy headless bằng sentinel file
+   * `.vyen/scheduler-paused` trong workspace. Đây là đường dừng khẩn cấp: lợi
+   * dụng nó tự động khi có dấu hiệu vòng lặp lỗi, người dùng bấm tắt khi nghi.
+   */
+  handlers.set('vyen:scheduler-kill-switch', async (_event, payload) => {
+    const { setKillSwitch, isKillSwitchActive, getKillSwitchPath } = await import('@/lib/scheduler/runner');
+    const root = defaultWorkspace;
+    const paused = Boolean((payload as { paused?: boolean } | undefined)?.paused);
+    setKillSwitch(root, paused);
+    return { ok: true, paused: isKillSwitchActive(root), path: getKillSwitchPath(root) };
+  });
+
   // Tự động khởi chạy scheduler daemon ngầm nếu chưa chạy
   void import('@/lib/scheduler/runner').then(({ startSchedulerDaemon }) => {
     startSchedulerDaemon(defaultWorkspace, 30_000);

@@ -9,6 +9,7 @@ import { CwdGuard } from './cwd-lockdown';
 import { EnvScrubber } from './env-scrubber';
 import { TempIsolationManager } from './temp-isolation';
 import { SandboxedExecutionOptions, SandboxedExecutionResult } from './types';
+import { spawnArgv } from '@/lib/safe-spawn';
 
 export class SandboxedProcessManager {
   /**
@@ -88,15 +89,33 @@ export class SandboxedProcessManager {
       };
     }
 
-    // 4. Spawn Subprocess with Process Group Isolation
+    // 4. Spawn Subprocess with Process Group Isolation — KHÔNG QUA SHELL (S3).
+    // `spawnArgv` cắt chuỗi thành argv + resolve binary tuyệt đối trong thư mục
+    // hệ thống, rồi spawn với `shell: false`. Lệnh cần metacharacter bị từ chối
+    // rõ ràng thay vì chạy dưới `/bin/sh -c`.
     const isWin = process.platform === 'win32';
-    const child: child_process.ChildProcess = child_process.spawn(options.command, [], {
-      cwd: execCwd,
-      shell: true,
-      detached: !isWin,
-      env: effectiveEnv as NodeJS.ProcessEnv,
-      windowsHide: true,
-    });
+    let child: child_process.ChildProcess;
+    try {
+      child = spawnArgv(options.command, {
+        cwd: execCwd,
+        detached: !isWin,
+        env: effectiveEnv as NodeJS.ProcessEnv,
+        windowsHide: true,
+      });
+    } catch (err) {
+      // Policy/spawn failure: trả về kết quả lỗi có cấu trúc, không throw ra ngoài
+      // (hợp đồng của hàm là luôn resolve SandboxedExecutionResult).
+      if (tempDir) await TempIsolationManager.cleanupTempDir(tempDir);
+      const message = err instanceof Error ? err.message : String(err);
+      return {
+        code: 126,
+        stdout: '',
+        stderr: `[EXEC POLICY] ${message}`,
+        durationMs: Date.now() - startTime,
+        timedOut: false,
+        tempDirectory: tempDir,
+      };
+    }
 
     return new Promise<SandboxedExecutionResult>((resolve) => {
       let stdout = '';

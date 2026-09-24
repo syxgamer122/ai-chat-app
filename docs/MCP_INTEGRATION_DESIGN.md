@@ -1,5 +1,18 @@
 # Vyen MCP Integration Architecture Design v2 (Deep Dive)
 
+> **Trạng thái (đồng bộ 2026-09-24)**: đây là **bản thiết kế đề xuất** viết từ thời Vyen còn Electron,
+> không phải đặc tả hiện trạng. Phần đã hiện thực khác bản thiết kế ở các điểm sau:
+>
+> - **Không còn Electron** ⇒ mọi đường dẫn `electron/mcp/**` trong tài liệu này không tồn tại.
+>   MCP client nằm ở `lib/mcp/` và chạy trong **Node bridge** của desktop/CLI (`lib/bridge/`,
+>   `app/api/bridge/route.ts`), không phải main process của Electron.
+> - Tool MCP vẫn hiện diện với model dạng `mcp__<server>__<tool>`, phê duyệt 4 cấp, có whitelist
+>   `available_tools`, grant gắn `schemaHash` (xem `lib/mcp/` và mục A6 của `CRITIQUE_RECONCILIATION.md`).
+> - Exec-policy thực tế là `lib/shell-policy.cjs` (tokenizer argv + allowlist), không phải
+>   `electron/mcp/exec-policy.ts`.
+> - **Orchestrator sweep đã bị gỡ**: `lib/orchestrator/` nay chỉ còn `scheduler.ts` (pool giới hạn
+>   đồng thời), nên mục 1.3 nhắc `lib/orchestrator/engine.ts` là mô tả lịch sử.
+
 ## 1. Kiến trúc tham khảo - Deep Findings
 
 ### 1.1 Goose: IPC ≠ MCP Communication ⚡ KEY INSIGHT
@@ -58,11 +71,10 @@
 - Model trả `<tool_call>{json}</tool_call>` → parse → execute → feed back
 - Loop protection: round budget, per-round call cap, dedupe, anti-hallucination
 
-**Orchestrator** (`lib/orchestrator/engine.ts`):
-- Plan → Spawn N agents song song → Review/Synthesize
-- Mỗi agent context RIÊNG, không thấy transcript của nhau
-- Stream events: planning → sweeping → ranking → synthesizing → done
-- WorkerContext inject LLM implementation (deps injection pattern)
+**Orchestrator** (`lib/orchestrator/scheduler.ts`):
+- `runPool` — pool giới hạn đồng thời (mặc định 3), huỷ được bằng AbortSignal, thứ tự kết quả
+  khớp thứ tự đầu vào; dùng bởi subagent và sub-recipe
+- Panel sweep, route `/api/orchestrate` và bộ engine/grid/metrics cũ **đã bị gỡ** (xem banner đầu file)
 
 ## 2. Architecture Design cho Vyen (Revised)
 
@@ -70,7 +82,9 @@
 
 Goose dùng Rust backend riêng (goosed) + ACP protocol vì họ cần performance cao và multi-client. Vyen là Next.js app, không cần layer phức tạp đó.
 
-**Vyen approach**: MCP Client chạy TRONG Electron main process, communicate qua IPC (đơn giản hơn, phù hợp scale).
+**Vyen approach (thực tế đã chọn)**: MCP client chạy trong Node bridge của desktop/CLI và trong `lib/mcp/`;
+renderer gọi qua `/api/bridge`. Sơ đồ `electron` dưới đây giữ nguyên như bản thiết kế ban đầu — đọc kèm
+banner đầu file.
 
 ```
 ┌─────────────────────────────────────────────────────┐

@@ -21,6 +21,7 @@ import {
 import { AVAILABLE_MODELS } from '@/lib/models';
 import { shouldShowThinkingControl } from '@/lib/reasoning-capability';
 import { ApprovalQueue } from '@/lib/approval-queue';
+import { createApprovalToken, consumeApprovalToken } from '@/lib/approval-binding';
 import { recordAuditLog } from '@/lib/audit-log';
 import { noteUntrustedToolResult, setActiveTaintConversation } from '@/lib/taint-tracker';
 import { deriveModelOption, toggleFavorite, upsertRecent } from '@/lib/model-meta';
@@ -1037,23 +1038,104 @@ export default function ChatInterface() {
       }),
   );
 
-  const showApproval = useCallback(
-    (make: (resolve: (approved: boolean) => void) => ApprovalItem): Promise<boolean> =>
+  /**
+   * Diff: cùng cơ chế binding của shell (S3) — token ký payload
+   * `{ path, oldText, newText, toolName }` mà modal hiển thị, hạn 10 phút, một lần.
+   * Lệch ở bất kỳ thành phần nào (kể cả `existedBefore`) ⇒ chặn, không ghi.
+   */
+  const showDiffModal = useCallback(
+    (
+      s: Omit<DiffConfirmState, 'open' | 'resolve'> & { toolName?: string; existedBefore?: boolean },
+    ): Promise<{ approved: boolean; fingerprint: string | null }> =>
       new Promise((resolve) => {
-        approvalQueue.request(make(resolve), resolve);
+        const token = createApprovalToken({
+          kind: 'diff',
+          payload: { path: s.path, oldText: s.oldText, newText: s.newText, toolName: s.toolName },
+        });
+        const resolveOnce = (approved: boolean) =>
+          resolve({ approved, fingerprint: token?.fingerprint ?? null });
+        approvalQueue.request(
+          { kind: 'diff', state: { ...s, open: true, resolve: resolveOnce } },
+          resolveOnce,
+          token ? { kind: 'diff', fingerprint: token.fingerprint } : undefined,
+        );
       }),
     [approvalQueue],
   );
 
-  const showDiffModal = useCallback(
-    (s: Omit<DiffConfirmState, 'open' | 'resolve'>): Promise<boolean> =>
-      showApproval((resolve) => ({ kind: 'diff', state: { ...s, open: true, resolve } })),
-    [showApproval],
+  /** Chặn cuối cho diff — xem `consumeShellApproval` (cùng nguyên tắc). */
+  const consumeDiffApproval = useCallback(
+    (
+      fingerprint: string | null | undefined,
+      s: { path: string; oldText: string; newText: string; toolName?: string },
+    ): boolean => {
+      if (!fingerprint) return false;
+      const verdict = consumeApprovalToken(fingerprint, {
+        kind: 'diff',
+        payload: { path: s.path, oldText: s.oldText, newText: s.newText, toolName: s.toolName },
+      });
+      if (verdict.ok) return true;
+      void recordAuditLog({
+        action: 'rejection',
+        tool: s.toolName || 'fs_edit',
+        target: s.path,
+        decision: 'blocked',
+        payload: { path: s.path },
+        chatId: chatKey,
+        details: { reason: verdict.reason ?? 'approval_binding_failed' },
+      });
+      return false;
+    },
+    [chatKey],
   );
+  /**
+   * Shell / run_code: mỗi lần mở modal sinh MỘT token phê duyệt gắn với đúng
+   * payload sắp hiển thị (P0.5 S3 — chống duyệt A thực thi B). Token chỉ có
+   * hiệu lực 10 phút và dùng đúng một lần; call site verify lại bằng
+   * `consumeApprovalToken` TRƯỚC khi chạy lệnh.
+   */
   const showShellModal = useCallback(
-    (s: Omit<ShellConfirmState, 'open' | 'resolve'>): Promise<boolean> =>
-      showApproval((resolve) => ({ kind: 'shell', state: { ...s, open: true, resolve } })),
-    [showApproval],
+    (
+      s: Omit<ShellConfirmState, 'open' | 'resolve'>,
+      kind: 'shell' | 'run_code' = 'shell',
+    ): Promise<{ approved: boolean; fingerprint: string | null }> =>
+      new Promise((resolve) => {
+        const token = createApprovalToken({ kind, payload: { command: s.command, cwd: s.cwd } });
+        const resolveOnce = (approved: boolean) =>
+          resolve({ approved, fingerprint: token?.fingerprint ?? null });
+        approvalQueue.request(
+          { kind: 'shell', state: { ...s, open: true, resolve: resolveOnce } },
+          resolveOnce,
+          token ? { kind: 'shell', fingerprint: token.fingerprint } : undefined,
+        );
+      }),
+    [approvalQueue],
+  );
+
+  /**
+   * Chặn cuối trước khi thực thi: duyệt có đúng payload đang chạy không.
+   * Lệch → audit `blocked` và trả false, KHÔNG chạy lệnh.
+   */
+  const consumeShellApproval = useCallback(
+    (fingerprint: string | null | undefined, kind: 'shell' | 'run_code', s: { command: string; cwd?: string }): boolean => {
+      if (!fingerprint) return false;
+      const verdict = consumeApprovalToken(fingerprint, {
+        kind,
+        payload: { command: s.command, cwd: s.cwd },
+      });
+      if (verdict.ok) return true;
+      void recordAuditLog({
+        action: 'rejection',
+        tool: kind,
+        target: s.command,
+        decision: 'blocked',
+        payload: s,
+        chatId: chatKey,
+        details: { reason: verdict.reason ?? 'approval_binding_failed' },
+      });
+      return false;
+    },
+    [chatKey],
   );
 
   /*
@@ -1176,7 +1258,9 @@ export default function ChatInterface() {
         });
         return true;
       }
-      const approved = await showShellModal(s);
+      const outcome = await showShellModal(s, 'shell');
+      /* Chặn cuối: duyệt phải khớp đúng lệnh sắp chạy, còn hạn, chưa dùng. */
+      const approved = outcome.approved && consumeShellApproval(outcome.fingerprint, 'shell', s);
       void recordAuditLog({
         action: approved ? 'approval' : 'rejection',
         tool: 'shell_run',
@@ -1184,10 +1268,11 @@ export default function ChatInterface() {
         decision: approved ? 'approved' : 'rejected',
         payload: s,
         chatId: chatKey,
+        ...(outcome.approved && !approved ? { details: { reason: 'approval_binding_failed' } } : {}),
       });
       return approved;
     },
-    [autoPilot, approvalPolicy, toolPermissions, showShellModal, chatKey],
+    [autoPilot, approvalPolicy, toolPermissions, showShellModal, consumeShellApproval, chatKey],
   );
 
   const autoApproveCode = useCallback(
@@ -1212,17 +1297,21 @@ export default function ChatInterface() {
         });
         return true;
       }
-      const approved = await showShellModal({ command: `[run_code]:\n${s.code}` });
+      const outcome = await showShellModal({ command: `[run_code]:\n${s.code}` }, 'run_code');
+      /* run_code chạy `s.code`, modal hiện `[run_code]:\n<code>` — bind đúng payload đã xem. */
+      const approved =
+        outcome.approved && consumeShellApproval(outcome.fingerprint, 'run_code', { command: `[run_code]:\n${s.code}` });
       void recordAuditLog({
         action: approved ? 'approval' : 'rejection',
         tool: 'run_code',
         decision: approved ? 'approved' : 'rejected',
         payload: s,
         chatId: chatKey,
+        ...(outcome.approved && !approved ? { details: { reason: 'approval_binding_failed' } } : {}),
       });
       return approved;
     },
-    [autoPilot, approvalPolicy, toolPermissions, showShellModal, chatKey],
+    [autoPilot, approvalPolicy, toolPermissions, showShellModal, consumeShellApproval, chatKey],
   );
 
   const autoApproveDiff = useCallback(
@@ -1265,7 +1354,8 @@ export default function ChatInterface() {
         });
         return true;
       }
-      const approved = await showDiffModal(s);
+      const outcome = await showDiffModal(s);
+      const approved = outcome.approved && consumeDiffApproval(outcome.fingerprint, s);
       void recordAuditLog({
         action: approved ? 'approval' : 'rejection',
         tool,
@@ -1273,10 +1363,11 @@ export default function ChatInterface() {
         decision: approved ? 'approved' : 'rejected',
         payload: s,
         chatId: chatKey,
+        ...(outcome.approved && !approved ? { details: { reason: 'approval_binding_failed' } } : {}),
       });
       return approved;
     },
-    [autoPilot, approvalPolicy, toolPermissions, showDiffModal, chatKey],
+    [autoPilot, approvalPolicy, toolPermissions, showDiffModal, consumeDiffApproval, chatKey],
   );
 
   useEffect(() => {

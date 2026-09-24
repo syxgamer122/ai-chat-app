@@ -120,6 +120,8 @@ export function toggleSchedule(workspaceRoot: string, id: string, enabled?: bool
   item.enabled = enabled ?? !item.enabled;
   item.updatedAt = Date.now();
   saveSchedulesToFile(workspaceRoot, list);
+  // Bật lại = bộ đếm lỗi liên tiếp bắt đầu lại từ 0 (người dùng đã can thiệp).
+  if (item.enabled) consecutiveFailures.delete(id);
   return item;
 }
 
@@ -154,6 +156,117 @@ export interface ExecutionResult {
   output?: string;
   error?: string;
   durationMs: number;
+  /** Lý do bị chặn bởi ngân sách phiên (nếu có) — dùng để hiển thị cho user. */
+  budgetExceeded?: 'duration' | 'kill_switch' | 'run_limit';
+}
+
+/* ------------------------------------------------------------------ */
+/* Ngân sách phiên headless (P0.5 S3 — chống B5)                        */
+/* ------------------------------------------------------------------ */
+/*
+ * Scheduler chạy headless, không người canh. Trần `AUTO_BUDGET_LIMITS` của
+ * lib/taint-tracker chỉ tính THEO LƯỢT chat — đường headless không đi qua đó,
+ * nên một recipe lặp vô hạn có thể chạy tới sáng mà không bao giờ dừng.
+ *
+ * Ba lớp chặn ở đây:
+ * 1. `maxRunDurationMs`  — phiên quá thời gian bị cắt (hard timeout).
+ * 2. `maxRunsPerTick`    — một tick không chạy quá N phiên (chặn bão cron).
+ * 3. `kill_switch`      — sentinel file để dừng tất cả lịch khi cần (B5).
+ *
+ * Ngưỡng đặt theo thực tế: recipe hợp lệ chạy vài chục giây; 10 phút đã là trần
+ * trên cho một phiên headless, còn giây phút cho cron job dài. Sửa được qua
+ * `configureSessionBudget` mà không cần sửa policy toàn cục.
+ */
+export const DEFAULT_SESSION_BUDGET = Object.freeze({
+  /** Trần thời gian một phiên headless. */
+  maxRunDurationMs: 10 * 60 * 1000,
+  /** Số phiên tối đa một tick (chặn nhiều lịch trùng phút). */
+  maxRunsPerTick: 3,
+  /** Số lỗ liên tiếp trước khi tự tắt lịch (chặn vòng lặp lỗi). */
+  maxConsecutiveFailures: 3,
+});
+
+export type SessionBudget = {
+  maxRunDurationMs: number;
+  maxRunsPerTick: number;
+  maxConsecutiveFailures: number;
+};
+
+let sessionBudget: SessionBudget = { ...DEFAULT_SESSION_BUDGET };
+
+/** Điều chỉnh ngân sách phiên (test hoặc policy theo workspace). */
+export function configureSessionBudget(overrides: Partial<SessionBudget>): SessionBudget {
+  sessionBudget = { ...sessionBudget, ...overrides };
+  return sessionBudget;
+}
+
+/** Đọc ngân sách phiên hiện tại. */
+export function getSessionBudget(): SessionBudget {
+  return { ...sessionBudget };
+}
+
+/** Đếm lỗ liên tiếp theo schedule — reset khi một lần chạy thành công. */
+const consecutiveFailures = new Map<string, number>();
+
+/** Tên sentinel file: tồn tại = dừng mọi lịch chạy. */
+export const KILL_SWITCH_FILENAME = 'scheduler-paused';
+
+export function getKillSwitchPath(workspaceRoot: string): string {
+  return path.resolve(workspaceRoot, '.vyen', KILL_SWITCH_FILENAME);
+}
+
+/** Bật/tắt kill-switch. Tắt = xoá sentinel (nếu có). */
+export function setKillSwitch(workspaceRoot: string, paused: boolean): void {
+  const file = getKillSwitchPath(workspaceRoot);
+  if (paused) {
+    ensureParentDir(file);
+    fs.writeFileSync(
+      file,
+      JSON.stringify({ pausedAt: new Date().toISOString(), by: 'vyen' }) + '\n',
+      'utf8',
+    );
+    return;
+  }
+  try {
+    if (fs.existsSync(file)) fs.unlinkSync(file);
+  } catch {
+    // Bỏ qua: không có sentinel cũng tương đương đã tắt
+  }
+}
+
+/** Kill-switch đang bật không. */
+export function isKillSwitchActive(workspaceRoot: string): boolean {
+  try {
+    return fs.existsSync(getKillSwitchPath(workspaceRoot));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Bọc promise bằng hard timeout. Không cancel được promise gốc (runner bên
+ * ngoài không nhận AbortSignal), nhưng lượt này bị coi là thất bại và ghi vào
+ * lịch — đủ để chặn vòng lặp không dừng.
+ */
+async function withRunTimeout<T>(work: Promise<T>, timeoutMs: number): Promise<{ timedOut: boolean; value?: T }> {
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    return { timedOut: false, value: await work };
+  }
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<{ timedOut: true }>((resolve) => {
+    timer = setTimeout(() => resolve({ timedOut: true }), timeoutMs);
+    // Không giữ process sống chỉ vì timer của một lượt headless.
+    timer.unref?.();
+  });
+  try {
+    const winner = await Promise.race([
+      work.then((value) => ({ timedOut: false as const, value })),
+      timeout,
+    ]);
+    return winner;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 /**
@@ -167,9 +280,25 @@ export async function executeScheduledRun(
   workspaceRoot: string,
   schedule: ScheduleRecord,
   customRunner?: (recipe: Recipe) => Promise<{ ok: boolean; text: string; error?: string }>,
+  budget: SessionBudget = sessionBudget,
 ): Promise<ExecutionResult> {
   const startedAt = Date.now();
   const sessionId = `sched-${schedule.id.slice(0, 8)}-${Date.now()}`;
+
+  // Lớp chặn 3: kill-switch toàn cục — dừng trước cả khi ghi trạng thái running.
+  if (isKillSwitchActive(workspaceRoot)) {
+    schedule.lastStatus = 'failure';
+    schedule.lastError = 'Scheduler đang tạm dừng (kill-switch)';
+    schedule.updatedAt = Date.now();
+    upsertSchedule(workspaceRoot, schedule);
+    return {
+      ok: false,
+      sessionId,
+      error: schedule.lastError,
+      durationMs: Date.now() - startedAt,
+      budgetExceeded: 'kill_switch',
+    };
+  }
 
   // Đổi trạng thái running
   schedule.lastStatus = 'running';
@@ -186,12 +315,23 @@ export async function executeScheduledRun(
     let runOk = true;
     let runText = '';
     let runError: string | undefined;
+    let timedOut = false;
 
     if (customRunner) {
-      const res = await customRunner(recipe);
-      runOk = res.ok;
-      runText = res.text;
-      runError = res.error;
+      // Lớp chặn 1: hard timeout cấp phiên. Quá trần ⇒ thất bại, không ghi session thành công.
+      const outcome = await withRunTimeout(
+        Promise.resolve().then(() => customRunner(recipe)),
+        budget.maxRunDurationMs,
+      );
+      if (outcome.timedOut || outcome.value === undefined) {
+        timedOut = true;
+        runOk = false;
+        runError = `Phiên headless vượt trần thời gian (${budget.maxRunDurationMs}ms) — đã bị cắt`;
+      } else {
+        runOk = outcome.value.ok;
+        runText = outcome.value.text;
+        runError = outcome.value.error;
+      }
     } else {
       // Chuẩn bị các tham số mặc định và render template
       const resolved = resolveParameters(recipe, {});
@@ -242,12 +382,30 @@ export async function executeScheduledRun(
 
     upsertSchedule(workspaceRoot, schedule);
 
+    // Lớp chặn bổ sung: lỗi liên tiếp ⇒ tự tắt lịch (chống vòng lặp lỗi 3h sáng).
+    if (runOk) {
+      consecutiveFailures.delete(schedule.id);
+    } else {
+      const count = (consecutiveFailures.get(schedule.id) ?? 0) + 1;
+      consecutiveFailures.set(schedule.id, count);
+      if (count >= budget.maxConsecutiveFailures && schedule.enabled) {
+        schedule.enabled = false;
+        schedule.lastError = `${runError ?? 'Thất bại'} — đã tự tắt sau ${count} lần lỗi liên tiếp`;
+        schedule.updatedAt = Date.now();
+        upsertSchedule(workspaceRoot, schedule);
+        /* Xoá bộ đếm: khi người dùng bật lại, lịch phải có ngân sách lỗi MỚI,
+           nếu không lần bật lại đầu tiên sẽ lập tức bị tắt vì lỗi cũ. */
+        consecutiveFailures.delete(schedule.id);
+      }
+    }
+
     return {
       ok: runOk,
       sessionId,
       output: runText,
       error: runError,
       durationMs: Date.now() - startedAt,
+      ...(timedOut ? { budgetExceeded: 'duration' as const } : {}),
     };
   } catch (err: any) {
     const errorMsg = err?.message || String(err);
@@ -274,7 +432,11 @@ export async function tickScheduler(
   workspaceRoot: string,
   now: Date = new Date(),
   customRunner?: (recipe: Recipe) => Promise<{ ok: boolean; text: string; error?: string }>,
+  budget: SessionBudget = sessionBudget,
 ): Promise<string[]> {
+  // Kill-switch: một tick bị bỏ trống hoàn toàn, không ghi file, không chạy gì.
+  if (isKillSwitchActive(workspaceRoot)) return [];
+
   const schedules = loadSchedulesFromFile(workspaceRoot);
   const currentMinute = Math.floor(now.getTime() / 60000);
   const executedIds: string[] = [];
@@ -288,9 +450,11 @@ export async function tickScheduler(
     if (lastMin === currentMinute) continue;
 
     if (matchesCron(item.cron, now)) {
+      // Lớp chặn 2: trần số phiên mỗi tick — chặn bão cron.
+      if (executedIds.length >= budget.maxRunsPerTick) break;
       lastExecutedMinute.set(item.id, currentMinute);
       executedIds.push(item.id);
-      void executeScheduledRun(workspaceRoot, item, customRunner);
+      void executeScheduledRun(workspaceRoot, item, customRunner, budget);
     }
   }
 

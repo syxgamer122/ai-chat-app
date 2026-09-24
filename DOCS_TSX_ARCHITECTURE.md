@@ -1,6 +1,6 @@
 # TÀI LIỆU THIẾT KẾ KIẾN TRÚC MÃ NGUỒN UI & FRONTEND (TSX) — DỰ ÁN VYEN
-> **Phiên bản**: v3.2 (Đồng bộ hóa số liệu sau Gói P0 Bảo Mật, P2 Tối Ưu UX/Virtualizer, P3 Policy & Audit Log và sprint hardening S1–S2)  
-> **Cập nhật lúc**: 2026-09-22 (số liệu đối chiếu tại HEAD `6768422`)  
+> **Phiên bản**: v3.5 (Vòng 2 đối soát phản biện "thẩm định v3.1": blocker B1–B5 + bảng điểm lại #1–#13 — xem §5.0; đợt S3/S3b đóng toàn bộ residual P0/P0.5)  
+> **Cập nhật lúc**: 2026-09-24 (S3b: bỏ `shell: true` khỏi executor nội bộ, binary resolve tuyệt đối, token cho diff, nút kill-switch)  
 > **Mục đích tài liệu**: Cung cấp bản đặc tả kỹ thuật toàn diện, tuyệt đối chính xác về thiết kế mã nguồn, cấu trúc Component, luồng dữ liệu (Data Flow), cơ chế quản lý trạng thái (State Management), cơ chế an toàn duyệt mã (Human-in-the-Loop & Guardrails) của toàn bộ **58 file `.tsx`** (tổng cộng **19,130 dòng code** loại trừ trailing newlines, tương đương **19,188 dòng** khi tính cả dòng rỗng cuối file) trong dự án Vyen. Tài liệu này được thiết kế chuyên biệt để các hệ thống AI (Claude, GPT, Gemini...) phân tích, phản biện kiến trúc và đánh giá chất lượng kỹ thuật mà không cần truy cập trực tiếp vào hệ thống file.
 
 ---
@@ -140,7 +140,7 @@ RootLayout (app/layout.tsx)
 | 3 | **M2: Core Harness** | `components/chat-interface.tsx` | 6,183 | Đầu não điều phối: stream, tool runtime, TOCTOU guard, CWD jail, abort queue, audit log (32.22%) |
 | 4 | | `components/sidebar.tsx` | 609 | Quản lý phiên chat, tìm kiếm fulltext tiếng Việt, workspace link |
 | 5 | | `components/composer.tsx` | 1,068 | Ô nhập đa năng, voice STT, slash commands, Draft Persist vào localStorage, 3-layer IME guard |
-| 6 | | `components/context-meter.tsx` | 94 | Thước đo ngữ cảnh token, tính toán riêng cho active thread |
+| 6 | | `components/context-meter.tsx` | 94 | Thước đo ngữ cảnh token (presentational `memo`, nhận `used`/`max` từ chat-interface) |
 | 7 | | `components/model-selector.tsx` | 457 | Dropdown chọn model phân nhóm theo nhà cung cấp & khả năng |
 | 8 | **M3: Message Tree** | `components/chat/message-list.tsx` | 600 | Danh sách tin nhắn ảo hóa TanStack Virtual, tách stream message ra ngoài virtualizer, width-aware LRU cache |
 | 9 | | `components/chat/message-item.tsx` | 425 | Hàng tin nhắn đơn lẻ, thinking block, inline edit, actions |
@@ -210,9 +210,10 @@ RootLayout (app/layout.tsx)
 - **`components/chat-interface.tsx` (6,183 dòng — 32.22% toàn bộ code TSX)**:
   *Đầu não điều phối toàn bộ vòng đời tác vụ, streaming token, và phân phối công cụ*:
   - **TOCTOU Guard (P0)**: Tính toán và kiểm tra SHA-256 base hash trước khi ghi đĩa cho `fs_edit`, `fs_write`, `code_patch`. Nếu hash trên đĩa khác base hash thời điểm đọc, lập tức hủy ghi và trả lỗi `[TOCTOU] File đã bị thay đổi trên đĩa bởi tiến trình khác`.
-  - **CWD Sandbox & Shell Chaining (P0)**: Toàn bộ đường dẫn thực thi lệnh shell được khóa chặt chẽ trong workspace root thông qua `validateSafeRelativePath`. Chặn đứng triệt để metacharacters (`&&`, `||`, `;`, `|`, `$()`, `>`, `<`) và denylist các flag nguy hiểm của `node`/`python`.
+  - **CWD Sandbox & Shell Chaining (P0)**: Lệnh không đi qua string denylist mà được **tokenize thành argv + allowlist binary/subcommand + `SAFE_ENV` + `shell: false`** (`lib/shell-policy.cjs`): metacharacters (`&&`, `||`, `;`, `|`, `$()`, `>`, `<`, backtick, newline) bị tokenizer từ chối; `git -c/--config/--upload-pack/--receive-pack` nằm trong `DANGEROUS_GIT_OPTIONS`; `node`/`python` chỉ còn `--version`. CWD bị jail trong workspace root qua `validateSafeRelativePath` (web) và `lib/path-guard.cjs` (desktop). **Đợt S3**: lệnh thực thi code do agent viết (`npm test/build`, `npx *`, `node script.js`, `python -c`) **không bao giờ auto-approve** kể cả YOLO — `isRunnerCommand` trong `lib/auto-pilot.ts`.
+  - **Approval Binding (S3)**: mỗi lần mở modal shell/run_code sinh token SHA-256 theo canonical payload đã hiển thị, hạn 10 phút, dùng một lần; `consumeApprovalToken` chạy trước khi thực thi — lệch payload / hết hạn / replay đều bị chặn và ghi audit `blocked` (`lib/approval-binding.ts`).
   - **ApprovalQueue Abort on Stop (P0)**: Khi người dùng bấm nút "Dừng" (Stop), hàm `handleStop` kích hoạt `approvalQueue.abortAll(false)` để lập tức giải phóng toàn bộ pending promises của các modal duyệt, ngăn chặn treo luồng.
-  - **Audit Logging Bất Biến (P3)**: Ghi lại đầy đủ mọi quyết định duyệt/từ chối công cụ kèm payload vào bảng Dexie v19 `auditLogs` thông qua `lib/audit-log.ts`.
+  - **Audit Logging Tamper-Evident (P3)**: Ghi lại đầy đủ mọi quyết định duyệt/từ chối công cụ kèm payload vào bảng Dexie v19 `auditLogs` thông qua `lib/audit-log.ts`; hash chain + `verifyChain`; anchor `{seq,hash,ts}` ghi ra **ngoài workspace** tại `~/.vyen/audit/anchor.log` (đợt S3) để agent sở hữu workspace không xoá được dấu vết. `verifyChain` trả `prunedBeforeSeq`/`partialChain` khi chuỗi đã bị prune, và từ chối chain bắt đầu từ `seq > 1` nhưng `prevHash = null` (genesis giả mạo).
 - **`components/sidebar.tsx` (609 dòng)**:
   - Quản lý cây danh sách phiên chat, tìm kiếm full-text tiếng Việt có fold dấu (`foldText`), nhóm lịch sử theo ngày (`date-groups.ts`).
   - Hỗ trợ đổi tên inline, ghim cuộc trò chuyện, xuất dữ liệu và banner tự động nhận diện kết nối lại thư mục workspace tương ứng.
@@ -221,7 +222,7 @@ RootLayout (app/layout.tsx)
   - **3-Layer IME Composition Guard**: Kiểm soát chặt chẽ 3 tầng điều kiện (`composingRef`, `nativeEvent.isComposing`, `keyCode === 229`) loại bỏ triệt để lỗi vô tình gửi tin nhắn sớm khi gõ phím Enter để bỏ dấu tiếng Việt Telex/VNI (tại dòng 626-630).
   - Tích hợp voice STT Web Speech API, menu gõ tắt `/`, TaskMenu và bộ chọn model.
 - **`components/context-meter.tsx` (94 dòng)**:
-  - Thước đo dung lượng ngữ cảnh token thời gian thực, tính toán chuẩn xác riêng cho active thread hiện tại thông qua `reconstructActiveThreadSafe`.
+  - Component presentational `memo` chỉ nhận `used`/`max`. `contextUsage` được tính ở `components/chat-interface.tsx` trên active path qua `reconstructActiveThreadSafe` (3 call site) rồi truyền xuống.
 - **`components/model-selector.tsx` (457 dòng)**:
   - Dropdown chọn model phân loại theo nhóm nhà cung cấp, hiển thị badge khả năng (vision, function calling, reasoning).
 
@@ -277,7 +278,7 @@ RootLayout (app/layout.tsx)
 - **`components/recipes/recipes-panel.tsx` (584 dòng)**:
   - Trình quản trị và chạy quy trình tự động hóa YAML Recipes (`.vyen/recipes/*.yaml`), form tham số, retry state machine và chạy song song sub-recipes.
 - **`components/scheduler/scheduler-panel.tsx` (504 dòng)**:
-  - Giao diện quản lý lịch chạy cron tự động, kích hoạt các phiên làm việc headless ngầm theo biểu thức cron tiêu chuẩn.
+  - Giao diện quản lý lịch chạy cron tự động, kích hoạt các phiên làm việc headless ngầm theo biểu thức cron tiêu chuẩn. Runner headless có **ngân sách cấp phiên** (`lib/scheduler/runner.ts`): hard timeout 10 phút, trần 3 phiên mỗi tick, kill-switch bằng sentinel `.vyen/scheduler-paused`, tự tắt lịch sau 3 lần lỗi liên tiếp.
 - **`components/subagent-card.tsx` (132 dòng)**:
   - Card hiển thị tiến độ, công cụ đang gọi và kết quả tóm tắt của subagent chạy song song (được render bên trong `ToolTrace`).
 - **`components/tools-panel.tsx` (257 dòng)**:
@@ -320,6 +321,20 @@ RootLayout (app/layout.tsx)
 
 ## 5. ĐỐI SOÁT PHẢN BIỆN CHUYÊN SÂU CỦA PRINCIPAL ARCHITECT & MA TRẬN KIỂM CHỨNG THỰC TẾ
 
+### 5.0. Đối soát vòng 2 (2026-09-24, HEAD `3febca9`): 5 blocker B1–B5 & điểm lại
+
+> Phản biện vòng 2 thẩm định trên nền tài liệu v3.1. Chi tiết đầy đủ kèm bằng chứng `file:dòng` nằm ở `CRITIQUE_RECONCILIATION.md` mục J. Tóm lược trạng thái sau vòng sửa:
+
+| # | Blocker | Trạng thái hiện tại | Residual thật |
+|---|---|---|---|
+| **B1** | Shell denylist / argument injection | Mô hình là tokenizer argv + allowlist + `shell: false` (`lib/shell-policy.cjs`); **S3: runner không bao giờ auto-approve**; **S3b: binary resolve TUYỆT ĐỐI trong thư mục hệ thống, `PATH` dựng lại (không kế thừa), và 3 executor nội bộ đã bỏ `shell: true`** (`lib/safe-spawn.ts`) | Chưa có ranh giới OS (uid/seccomp/Job Object); lệnh cần shell thật bị từ chối thay vì chạy |
+| **B2** | Không có chống prompt injection | **Đã nối dây đầy đủ** tại commit `3febca9`: taint mọi nguồn ngoài (fs, MCP, web, shell, run_code) → Egress Guard hạ cấp exfil sang `ask` + trần ngân sách tự hành + CSP | `isEgressTool` dò keyword — bypass được; taint in-memory theo lượt |
+| **B3** | Audit log "bất biến" | Tamper-evident có thật: hash chain + `verifyChain` + disk anchor; **S3: anchor chuyển ra NGOÀI workspace** (`~/.vyen/audit/anchor.log`, override `VYEN_AUDIT_ANCHOR_PATH`) và `verifyChain` phân biệt chuỗi đã prune | Anchor nhánh desktop vẫn ở `.vyen/audit/` (bridge bị jail); chưa ký OS keychain |
+| **B4** | Phê duyệt không gắn payload | **S3/S3b: approval token ký đúng payload** cho shell, `run_code` **và diff** (`lib/approval-binding.ts`) — SHA-256 canonical, hạn 10 phút, một lần; lệch ⇒ audit `blocked` + không chạy. Ghi đĩa chặn bằng `expectedBaseHash`; MCP grant gắn `schemaHash` | Token sống trong RAM; chưa gắn `toolCallId` ở call site |
+| **B5** | Autonomous/cron không ngân sách cứng | Trần mỗi lượt auto (12 tool calls / 5 file / 500 KB / 3 shell) + **S3/S3b: ngân sách cấp phiên headless** — hard timeout 10 phút, trần 3 phiên mỗi tick, kill-switch (`.vyen/scheduler-paused`, có **nút UI** trong `scheduler-panel.tsx`), tự tắt sau 3 lỗi liên tiếp | Lượt quá trần bị coi là thất bại chứ chưa huỷ tiến trình (runner không nhận `AbortSignal`) |
+
+**Điểm lại sau vòng sửa**: #2 Shell → **~85%**; #9 Audit → **~90%**; #1 TOCTOU → **giữ 85%**; #10 Policy-as-data → **~90%**. Bảng đầy đủ ở mục J + K của `CRITIQUE_RECONCILIATION.md`.
+
 | # | Luận điểm của Architect | Đánh giá thực tế | Trạng thái xử lý trong Codebase |
 |---|---|---|---|
 | **1** | **TOCTOU trong File System**: Phê duyệt trên diff cũ, ghi đè không kiểm tra thay đổi trên đĩa. | **CHÍNH XÁC (P0)** | **[ĐÃ HOÀN THÀNH 100%]**: SHA-256 base hash verification trong `chat-interface.tsx` và `lib/staging.ts`. |
@@ -333,7 +348,7 @@ RootLayout (app/layout.tsx)
 | **9** | **Audit Log Bất Biến**: Cần ghi nhận mọi thao tác duyệt/ghi/lệnh shell. | **CHÍNH XÁC (P3)** | **[ĐÃ HOÀN THÀNH 100%]**: Tạo bảng Dexie v19 `auditLogs` và module `lib/audit-log.ts`. |
 | **10** | **Policy-as-data Scope**: Phân quyền path glob (`src/**`) và deny MCP mặc định. | **CHÍNH XÁC (P3)** | **[ĐÃ HOÀN THÀNH 100%]**: Xây dựng bộ so khớp glob chuẩn xác và áp dụng chính sách deny-by-default cho dynamic MCP tools. |
 | **11** | **IME Composition tiếng Việt**: Gửi sớm khi gõ Enter tiếng Việt Telex/VNI. | **BÁO ĐỘNG GIẢ (FALSE ALARM)** | Đã có sẵn 3 lớp phòng thủ trong `components/composer.tsx:626-630` (`composingRef`, `native.isComposing`, `keyCode === 229`). |
-| **12** | **ContextMeter tính trên toàn cây**: Phê bình ContextMeter tính sai nhánh. | **BÁO ĐỘNG GIẢ (FALSE ALARM)** | `contextUsage` vốn đã được tính riêng cho active path qua `reconstructActiveThreadSafe`. |
+| **12** | **ContextMeter tính trên toàn cây**: Phê bình ContextMeter tính sai nhánh. | **BÁO ĐỘNG GIẢ (FALSE ALARM)** — hiệu chỉnh vòng 2: bản thân `ContextMeter` là presentational `memo`; `contextUsage` do chat-interface tính trên active path rồi truyền `used`/`max` xuống. Điểm nóng hiệu năng thật là re-render mỗi token của chat-interface (mục C4). | `reconstructActiveThreadSafe` chỉ có 3 call site trong `components/chat-interface.tsx`. |
 | **13** | **Lưu trữ Attachment Base64**: Phê bình tốn 33% và ép base64 vào Dexie. | **BÁO ĐỘNG GIẢ MỘT PHẦN** | `lib/db.ts:69` lưu trực tiếp structured-clone `Blob`, không dùng base64. |
 
 ---
@@ -341,10 +356,17 @@ RootLayout (app/layout.tsx)
 ## 6. HIỆN TRẠNG THỰC THI & LỘ TRÌNH TÁI CẤU TRÚC (P0, P2, P3 HOÀN TẤT -> P1 KẾ HOẠCH)
 
 ### Hiện Trạng Đã Hoàn Thành — [163/163 Test Files PASS · 2,456/2,456 Tests PASS]
-- [x] **Gói P0 (Bảo Mật & Toàn Vẹn)**: TOCTOU hash guard, loại bỏ shell RCE, CWD jail, auto-execute file protection, ApprovalQueue abort, `storage.persist()`.
+
+> **Đồng bộ 2026-09-24**: các con số PASS bên dưới là mốc kiểm chứng tại HEAD `6768422` (2026-09-22).
+> Cây hiện tại đã có **165 file `tests/*.test.ts`** (khi đó 163). Phần đặc tả kiến trúc — 58 file `.tsx`,
+> schema Dexie v19, danh sách API route — đã đối chiếu lại và vẫn khớp codebase.
+> Vòng 2 (2026-09-24, HEAD `3febca9`): Egress Guard đã nối dây thật (A5) + CSP (A8) — chi tiết §5.0.
+> **Đợt S3 + S3b (2026-09-24)**: `tsc --noEmit` sạch; `vitest run` → **168 file / 2.526 test PASS**. Đóng toàn bộ residual P0/P0.5: approval binding cho shell/run_code/diff (`lib/approval-binding.ts`), runner gate (`lib/auto-pilot.ts`), ngân sách phiên headless + nút kill-switch (`lib/scheduler/runner.ts`, `components/scheduler/scheduler-panel.tsx`), audit anchor ngoài workspace (`lib/audit-log.ts`), executor không shell + binary tuyệt đối (`lib/safe-spawn.ts`).
+- [x] **Gói P0 (Bảo Mật & Toàn Vẹn)**: TOCTOU hash guard, loại bỏ shell RCE, CWD jail, auto-execute file protection, ApprovalQueue abort, `storage.persist()`; **S3/S3b**: approval token ký payload (shell/run_code/diff), runner gate, binary resolve tuyệt đối, executor không shell.
 - [x] **Gói P2 (Tối Ưu UX & Virtualization)**: Tách stream message khỏi virtualizer, width-aware LRU `HEIGHT_CACHE`, draft persistence chống mất chữ, tool-call pairing normalizer chống lỗi 400.
-- [x] **Gói P3 (Chính Sách & Kiểm Toán)**: Bảng Dexie v19 `auditLogs`, ghi nhật ký kiểm toán chống giả mạo (tamper-evident: hash chain + `verifyChain` + anchor `.vyen/audit/anchor.log`), bộ so khớp đường dẫn glob (`matchesGlobPattern`), deny-by-default cho dynamic MCP.
+- [x] **Gói P3 (Chính Sách & Kiểm Toán)**: Bảng Dexie v19 `auditLogs`, ghi nhật ký kiểm toán chống giả mạo (tamper-evident: hash chain + `verifyChain` + anchor **ngoài workspace** tại `~/.vyen/audit/anchor.log`, override bằng `VYEN_AUDIT_ANCHOR_PATH`), bộ so khớp đường dẫn glob (`matchesGlobPattern`), deny-by-default cho dynamic MCP.
 - [x] **Kiểm chứng tại HEAD `6768422` (2026-09-22)**: `tsc --noEmit` sạch; `vitest run` **163/163 test file PASS · 2,456/2,456 test PASS**; `node tests/sprint-s1-verification.cjs` và `node tests/sprint-s2-verification.cjs` đều PASS (gồm toàn bộ kiểm tra bảo mật shell policy).
+- [x] **Đợt S3 — đóng 4 residual P0/P0.5 của vòng 2 (2026-09-24)**: (1) **B4** approval token ký đúng payload đã xem, hạn 10 phút, một lần (`lib/approval-binding.ts`); (2) **B1(b)** runner `npm`/`npx`/`pnpm`/`yarn`/`bun`/`node script` không bao giờ auto-approve kể cả YOLO và override `auto`; (3) **B5** ngân sách cấp phiên headless: timeout 10 phút + trần 3 phiên/tick + kill-switch + auto-disable sau 3 lỗi; (4) **B3** anchor audit ra `~/.vyen/audit/anchor.log` (ngoài workspace) + `verifyChain` phân biệt chuỗi đã prune. Chi tiết + residual tồn tại: mục K của `CRITIQUE_RECONCILIATION.md`.
 - [x] **5 lỗi chặn đã sửa trong đợt kiểm chứng này**: (1) comment JSDoc chưa đóng trong `lib/fs-access.ts` nuốt cả hàm `isProtectedFsPath` → `TS2304` + `ReferenceError` lúc chạy; (2) `const crypto` khai báo trùng ở module scope trong `lib/ipc.cjs` → SyntaxError làm sập toàn bộ bridge IPC; (3) `fsWrite` tự so `err.name === 'NotFoundError'` thay vì dùng helper chung `isNotFoundError()` cùng module → tạo file mới luôn thất bại; (4) `lib/shell-policy.cjs` thiếu `grep`/`echo`/`printf` trong allowlist đọc-only → `shell_run` từ chối cả lệnh chỉ-đọc vô hại; (5) `npx vite build`/`npx next build` bị chặn vì `vite`/`next` không nằm trong `NPX_ALLOWED_BINS` (nay tách thành `NPX_REQUIRED_SUBCOMMANDS` — vẫn chặn `vite dev`/`next dev`).
 - [x] **Ghi chú bảo mật (chủ ý)**: `find`/`fd` vẫn NGOÀI allowlist dù `SAFE_COMMAND_PATTERNS` của `lib/auto-pilot.ts` có liệt kê — `find ... -exec <cmd> +` và `-delete` chạy/ghi được mà tokenizer không chặn (không cần dấu `;`), nên hai binary này phải đòi phê duyệt thay vì auto-approve.
 - **Flaky theo môi trường**: `tests/web-backend.test.ts` phụ thuộc mạng (DuckDuckGo/SearXNG) — khi pass khi fail tùy kết nối, không phải lỗi logic.
@@ -363,3 +385,4 @@ RootLayout (app/layout.tsx)
    - Loại bỏ triệt để nguy cơ stale closure khi người dùng đổi chat/workspace trong lúc đang chờ duyệt diff.
 3. **Web Locks Multi-tab Concurrency**:
    - Sử dụng Web Locks API `navigator.locks.request('chat-runtime:' + chatId)` để đảm bảo chỉ có 1 tab duy nhất làm Leader runtime thực thi, các tab khác làm Observer hiển thị.
+4. **Thứ tự thi công (chốt theo phản biện vòng 2)**: lưới an toàn hành vi (bảo mật) trước bóc tách God Component — các module bảo mật đã viết (`lib/shell-policy.cjs`, `lib/taint-tracker.ts`, `lib/audit-log.ts`, `lib/staging.ts`) chính là hạt giống đầu tiên của tầng `core/` mới; P1 chỉ mở khi các residual P0.5 (runner trong allowlist, 3 điểm `shell: true`, anchor trong workspace) đã đóng.

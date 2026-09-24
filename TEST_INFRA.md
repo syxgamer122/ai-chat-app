@@ -3,7 +3,7 @@
 ## Test Philosophy
 - Opaque-box, requirement-driven. No dependency on implementation design.
 - Methodology: Category-Partition + Boundary Value Analysis (BVA) + Pairwise Combinatorial Testing + Real-World Workload Testing.
-- Target: 100% pass across all existing test files (128 files, 1850+ tests) plus all new test suites covering R1, R2, R3, R4, and R5.
+- Target: 100% pass across all existing test files (165 file tại 2026-09-24; mốc lúc viết đặc tả là 128 file/1850+ test) plus all new test suites covering R1, R2, R3, R4, and R5.
 
 ## Feature Inventory Mapping
 | # | Feature | Source | Tier 1 (Coverage) | Tier 2 (BVA) | Tier 3 (Cross) | Tier 4 (Scenario) |
@@ -46,7 +46,7 @@
   - `tests/teamwork-contracts-sandbox.test.ts`: Covers Zod contracts, provenance chains, pre/post flight gates, env scrubber, cwd lockdown, process tree timeout.
   - `tests/teamwork-ledger-context.test.ts`: Covers bitemporal ledger ($T_v$ vs $T_t$), append-only JSONL, replay, progressive context tiers, ontology triples.
   - `tests/teamwork-engine-integrated.test.ts`: Covers full end-to-end multi-agent workflow exercising DAG, checkpoints, approval gate, contracts, and ledger in headless CLI mode.
-  - Existing 128 test files in `tests/`: Regression baseline (must remain 100% PASS).
+  - Existing test files in `tests/` (165 file tại 2026-09-24): Regression baseline (must remain 100% PASS).
 
 ## Real-World Application Scenarios (Tier 4)
 | # | Scenario | Features Exercised | Complexity |
@@ -62,4 +62,4 @@
 - Tier 2: ≥5 per feature (boundary conditions, cycles, timeouts, error cascades)
 - Tier 3: Pairwise coverage of major feature interactions
 - Tier 4: ≥5 realistic end-to-end application scenarios
-- Regression: 100% pass across all 128 existing test files (1850+ tests)
+- Regression: 100% pass across all existing test files (165 tại 2026-09-24)
