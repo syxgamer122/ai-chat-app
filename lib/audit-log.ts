@@ -441,6 +441,8 @@ export async function verifyChain(entries?: StoredAuditLogEntry[]): Promise<Chai
   }
 }
 
+export const verifyAuditLogChain = verifyChain;
+
 export interface AuditLogFilter {
   tool?: string;
   action?: string;

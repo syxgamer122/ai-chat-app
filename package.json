@@ -60,5 +60,8 @@
     "tsx": "4.23.13",
     "typescript": "5.9.3",
     "vitest": "4.1.11"
+  },
+  "optionalDependencies": {
+    "@rolldown/binding-win32-x64-msvc": "1.2.11"
   }
 }

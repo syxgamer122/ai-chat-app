@@ -6,9 +6,9 @@
  * thêm một mục cấu hình chỉ nên phải sửa file này, không phải cuộn qua phần render.
  */
 
-import { Brain, Database, Layers, Server, Shield, Sliders } from 'lucide-react';
+import { Activity, Brain, Database, Layers, Server, Shield, Sliders } from 'lucide-react';
 
-export type SettingsTab = 'appearance' | 'providers' | 'safety' | 'extensions' | 'memory' | 'data';
+export type SettingsTab = 'appearance' | 'providers' | 'safety' | 'extensions' | 'memory' | 'data' | 'telemetry';
 
 export const SETTINGS_TABS: Array<{
   id: SettingsTab;
@@ -52,6 +52,12 @@ export const SETTINGS_TABS: Array<{
     description: 'Sao lưu phục hồi, thống kê token, lịch chạy recipe và quản lý dữ liệu.',
     icon: Database,
   },
+  {
+    id: 'telemetry',
+    label: 'Đo đạc & Quan sát',
+    description: 'Biểu đồ Waterfall đo đạc độ trễ turn, công cụ và token theo chuẩn OpenTelemetry.',
+    icon: Activity,
+  },
 ];
 
 interface SearchItem {
@@ -90,6 +96,7 @@ export const SETTINGS_SEARCH_ITEMS: SearchItem[] = [
   { id: 'data-stats', title: 'Thống kê token sử dụng', description: 'Biểu đồ tiêu thụ token và chi phí ước tính', tab: 'data', keywords: 'thong ke token usage stats cost' },
   { id: 'data-scheduler', title: 'Lịch chạy Recipe (Scheduler)', description: 'Chạy tác vụ định kỳ bằng biểu thức cron', tab: 'data', keywords: 'scheduler cron lich trinh hen gio' },
   { id: 'data-danger', title: 'Vùng nguy hiểm (Xóa dữ liệu)', description: 'Xóa sạch toàn bộ dữ liệu ứng dụng', tab: 'data', keywords: 'vung nguy hiem xoa sach reset clear database' },
+  { id: 'data-telemetry', title: 'Biểu đồ Waterfall Telemetry', description: 'Đo đạc độ trễ turn, streaming và công cụ', tab: 'telemetry', keywords: 'telemetry waterfall do dac thoi gian latency trace span opentelemetry' },
 ];
 
 export function resolveSettingsTab(tab?: string): SettingsTab {
@@ -111,6 +118,10 @@ export function resolveSettingsTab(tab?: string): SettingsTab {
     case 'schedules':
     case 'data':
       return 'data';
+    case 'telemetry':
+    case 'quan sat':
+    case 'do dac':
+      return 'telemetry';
     default:
       if (SETTINGS_TABS.some((t) => t.id === tab)) return tab as SettingsTab;
       return 'appearance';

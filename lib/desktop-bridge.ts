@@ -277,18 +277,26 @@ export interface VyenBridge {
     read(relPath: string): Promise<{ content: string; size: number }>;
     /** Có thể thiếu nếu renderer mới hơn main (app chưa restart) — caller phải check. */
     readImage?(relPath: string): Promise<{ mimeType: string; base64: string; size: number }>;
-    write(relPath: string, content: string): Promise<{ size: number }>;
+    write(relPath: string, content: string, expectedBaseHash?: string, hasDiff?: boolean): Promise<{ size: number }>;
     delete(relPath: string): Promise<void>;
     stat(relPath: string): Promise<VyenFsStat>;
     search(opts: { query: string } & VyenSearchOptions): Promise<VyenSearchMatch[]>;
   };
   shell: {
-    run(opts: { command: string; cwd?: string; timeoutMs?: number }): Promise<VyenRunResult>;
+    run(opts: {
+      command: string;
+      cwd?: string;
+      timeoutMs?: number;
+      approvalToken?: string;
+      toolCallId?: string;
+      chatId?: string;
+    }): Promise<VyenRunResult>;
     /** Spawn detached — trả jobId NGAY, output ghi file, sống qua restart. */
     runBg(opts: { command: string; timeoutSecs?: number }): Promise<{ jobId: string; pid?: number; note?: string; error?: string }>;
     /** Không có id → liệt kê mọi job (đã reconcile job pid chết sau restart). */
     bgStatus(id?: string): Promise<{ jobs: VyenBgJob[] }>;
     bgStop(id: string): Promise<{ ok: true; note?: string }>;
+    killByChatId?(chatId: string): Promise<{ killed: number }>;
   };
   git: {
     status(): Promise<VyenGitStatus>;
@@ -507,8 +515,13 @@ function createWebBridge(): VyenBridge {
       read: (relPath: string) => callWebBridge<{ content: string; size: number }>('vyen:fs-read', { relPath }),
       readImage: (relPath: string) =>
         callWebBridge<{ mimeType: string; base64: string; size: number }>('vyen:fs-read-image', { relPath }),
-      write: (relPath: string, content: string) =>
-        callWebBridge<{ size: number }>('vyen:fs-write', { relPath, content }),
+      write: (relPath: string, content: string, expectedBaseHash?: string, hasDiff?: boolean) =>
+        callWebBridge<{ size: number }>('vyen:fs-write', {
+          relPath,
+          content,
+          expectedBaseHash,
+          hasDiff: hasDiff ?? Boolean(expectedBaseHash),
+        }),
       delete: (relPath: string) => callWebBridge<void>('vyen:fs-delete', { relPath }),
       stat: (relPath: string) => callWebBridge<VyenFsStat>('vyen:fs-stat', { relPath }),
       search: (opts) => callWebBridge<VyenSearchMatch[]>('vyen:fs-search', opts),
@@ -518,6 +531,7 @@ function createWebBridge(): VyenBridge {
       runBg: (opts) => callWebBridge<{ jobId: string; pid?: number; note?: string; error?: string }>('vyen:bg-run', opts),
       bgStatus: (id?: string) => callWebBridge<{ jobs: VyenBgJob[] }>('vyen:bg-status', { id }),
       bgStop: (id: string) => callWebBridge<{ ok: true; note?: string }>('vyen:bg-stop', { id }),
+      killByChatId: (chatId: string) => callWebBridge<{ killed: number }>('vyen:shell-kill-by-chat', { chatId }),
     },
     git: {
       status: () => callWebBridge<VyenGitStatus>('vyen:git-status'),

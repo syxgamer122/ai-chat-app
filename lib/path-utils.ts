@@ -93,14 +93,35 @@ export function isProtectedPath(filePath: string): boolean {
   // 2. package.json (root hoặc bất kỳ sub-package.json nào)
   if (p === 'package.json' || p.endsWith('/package.json')) return true;
 
-  // 3. .vscode/**
+  // 3. Package manager configs (.npmrc, .yarnrc*, .pnpmfile.cjs)
+  const baseName = p.split('/').pop() || '';
+  if (baseName === '.npmrc' || baseName.startsWith('.yarnrc') || baseName === '.pnpmfile.cjs') return true;
+
+  // 4. Build & tool configurations (Config-as-code RCE prevention)
+  if (
+    baseName.endsWith('.config.js') ||
+    baseName.endsWith('.config.cjs') ||
+    baseName.endsWith('.config.mjs') ||
+    baseName.endsWith('.config.ts') ||
+    baseName.endsWith('.config.mts') ||
+    baseName.endsWith('.config.cts') ||
+    baseName.startsWith('tsconfig') ||
+    baseName === 'makefile' ||
+    baseName === '.gitattributes' ||
+    baseName === '.gitconfig' ||
+    baseName.startsWith('.gitconfig') ||
+    baseName === '.gitmodules'
+  ) {
+    return true;
+  }
+
+  // 5. .vscode/**
   if (p === '.vscode' || p.startsWith('.vscode/') || p.includes('/.vscode/') || p.endsWith('/.vscode')) return true;
 
-  // 4. .env* (.env, .env.local, nested config/.env, v.v.)
-  const baseName = p.split('/').pop() || '';
+  // 6. .env* (.env, .env.local, nested config/.env, v.v.)
   if (baseName.startsWith('.env')) return true;
 
-  // 5. .vyen/**
+  // 7. .vyen/**
   if (p === '.vyen' || p.startsWith('.vyen/') || p.includes('/.vyen/') || p.endsWith('/.vyen')) return true;
 
   return false;

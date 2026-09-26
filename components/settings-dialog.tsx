@@ -11,6 +11,7 @@ import { SafetyTab } from '@/components/settings/safety-tab';
 import { ExtensionsTab } from '@/components/settings/extensions-tab';
 import { MemoryTab } from '@/components/settings/memory-tab';
 import { DataTab } from '@/components/settings/data-tab';
+import { TelemetryTab } from '@/components/settings/telemetry-tab';
 import {
   SETTINGS_TABS,
   SETTINGS_SEARCH_ITEMS,
@@ -278,6 +279,17 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
             className={`settings-panel px-5 py-5 sm:px-6 space-y-4 ${tab === 'data' ? 'block' : 'hidden'}`}
           >
             {visited.has('data') && <DataTab />}
+          </div>
+
+          {/* TAB 7: ĐO ĐẠC & QUAN SÁT (TELEMETRY) */}
+          <div
+            role="tabpanel"
+            id="settings-panel-telemetry"
+            aria-labelledby="settings-tab-telemetry"
+            hidden={tab !== 'telemetry'}
+            className={`settings-panel px-5 py-5 sm:px-6 space-y-4 ${tab === 'telemetry' ? 'block' : 'hidden'}`}
+          >
+            {visited.has('telemetry') && <TelemetryTab />}
           </div>
         </div>
       </div>

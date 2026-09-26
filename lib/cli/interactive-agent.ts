@@ -15,6 +15,7 @@ import { createOpenAI } from '@ai-sdk/openai';
 import { streamText, tool, type CoreMessage } from 'ai';
 import { z } from 'zod';
 import { resolveWithin } from '../path-guard.cjs';
+import { compileShellCommand, getSafeEnv, resolveBinaryAbsolute } from '../shell-policy.cjs';
 import { runSecuritySast } from '../security-sast';
 import { renderToolsCommand } from './cli-surface';
 import { saveCliSession, type CliSessionData } from './session-manager';
@@ -132,15 +133,70 @@ export class CliCodingHarness {
 
   public bash(command: string, timeoutMs = 60_000): CliAgentToolResult {
     try {
-      const isWin = process.platform === 'win32';
-      const shell = isWin ? 'cmd.exe' : '/bin/sh';
-      const args = isWin ? ['/d', '/s', '/c', command] : ['-c', command];
+      let compiled;
+      try {
+        compiled = compileShellCommand(command);
+      } catch (err) {
+        return {
+          ok: false,
+          error: `[SHELL POLICY VIOLATION] ${err instanceof Error ? err.message : String(err)}`,
+        };
+      }
 
-      const res = spawnSync(shell, args, {
+      const isWin = process.platform === 'win32';
+      let binName = compiled.bin;
+      if (isWin && (binName === 'npm' || binName === 'pnpm' || binName === 'npx' || binName === 'yarn')) {
+        binName = `${binName}.cmd`;
+      }
+
+      let bin: string | null = resolveBinaryAbsolute(binName);
+      let args = compiled.args;
+
+      if (!bin && isWin) {
+        if (binName === 'echo' || binName === 'dir') {
+          bin = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'cmd.exe');
+          args = ['/d', '/c', binName, ...compiled.args];
+        } else {
+          const nodeDir = path.dirname(process.execPath);
+          const gitDir = path.join(process.env.ProgramFiles || 'C:\\Program Files', 'Git', 'cmd');
+          const gitDir64 = path.join(process.env.ProgramW6432 || 'C:\\Program Files', 'Git', 'cmd');
+          const exts = ['', '.exe', '.cmd', '.bat'];
+          for (const dir of [nodeDir, gitDir, gitDir64]) {
+            for (const ext of exts) {
+              const candidate = path.join(dir, binName + ext);
+              if (fs.existsSync(candidate)) {
+                bin = candidate;
+                break;
+              }
+            }
+            if (bin) break;
+          }
+        }
+      }
+
+      if (!bin) {
+        return {
+          ok: false,
+          error: `[SHELL POLICY] Không tìm thấy binary "${binName}" trong thư mục hệ thống tin cậy.`,
+        };
+      }
+
+      let spawnBin = bin;
+      let spawnArgs = args;
+      if (isWin && bin && (bin.toLowerCase().endsWith('.cmd') || bin.toLowerCase().endsWith('.bat'))) {
+        spawnBin = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'cmd.exe');
+        spawnArgs = ['/d', '/c', bin, ...args];
+      }
+
+      const safeEnv = getSafeEnv(this.workspaceRoot);
+
+      const res = spawnSync(spawnBin, spawnArgs, {
         cwd: this.workspaceRoot,
         timeout: timeoutMs,
         encoding: 'utf8',
         windowsHide: true,
+        shell: false,
+        env: safeEnv as unknown as NodeJS.ProcessEnv,
         maxBuffer: 10 * 1024 * 1024,
       });
 

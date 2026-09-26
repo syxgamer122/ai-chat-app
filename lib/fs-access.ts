@@ -190,7 +190,10 @@ function sanitizeFsError(e: unknown): string {
  */
 export function isProtectedFsPath(path: string): boolean {
   const p = path.replace(/\\/g, '/').toLowerCase();
-  return (
+  const basename = p.split('/').pop() || '';
+
+  // 1. Git & Node modules internals
+  if (
     p === '.git' ||
     p.startsWith('.git/') ||
     p.includes('/.git/') ||
@@ -199,7 +202,48 @@ export function isProtectedFsPath(path: string): boolean {
     p.startsWith('node_modules/') ||
     p.includes('/node_modules/') ||
     p.endsWith('/node_modules')
-  );
+  ) {
+    return true;
+  }
+
+  // 2. Package manager configs
+  if (basename === '.npmrc' || basename.startsWith('.yarnrc') || basename === '.pnpmfile.cjs') {
+    return true;
+  }
+
+  // 3. Build & tool configurations (Config-as-code RCE prevention)
+  if (
+    basename.endsWith('.config.js') ||
+    basename.endsWith('.config.cjs') ||
+    basename.endsWith('.config.mjs') ||
+    basename.endsWith('.config.ts') ||
+    basename.endsWith('.config.mts') ||
+    basename.endsWith('.config.cts') ||
+    basename.startsWith('tsconfig') ||
+    basename === 'makefile' ||
+    basename === '.gitattributes' ||
+    basename === '.gitconfig' ||
+    basename.startsWith('.gitconfig') ||
+    basename === '.gitmodules'
+  ) {
+    return true;
+  }
+
+  // 4. Vyen & VS Code system configs
+  if (
+    p === '.vyen' ||
+    p.startsWith('.vyen/') ||
+    p.includes('/.vyen/') ||
+    p.endsWith('/.vyen') ||
+    p === '.vscode' ||
+    p.startsWith('.vscode/') ||
+    p.includes('/.vscode/') ||
+    p.endsWith('/.vscode')
+  ) {
+    return true;
+  }
+
+  return false;
 }
 
 /**

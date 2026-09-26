@@ -12,9 +12,9 @@ function readComponent(relPath: string): string {
 
 describe('A11y Contract & Accessibility Compliance', () => {
   describe('Settings Dialog Tab & Panel ARIA linkage', () => {
-    it('declares the 6 unified semantic tabs', () => {
+    it('declares the 7 unified semantic tabs', () => {
       const tabIds = SETTINGS_TABS.map((t) => t.id);
-      expect(tabIds).toEqual(['appearance', 'providers', 'safety', 'extensions', 'memory', 'data']);
+      expect(tabIds).toEqual(['appearance', 'providers', 'safety', 'extensions', 'memory', 'data', 'telemetry']);
     });
 
     it('ensures each role="tab" aria-controls points to a matching static tabpanel id', () => {

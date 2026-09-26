@@ -6,7 +6,7 @@ Vyen is a high-assurance multi-agent coding harness running dual-mode (headless 
 2. **Human-in-the-loop & thẩm định trực quan**: Human-in-the-loop approval interrupts, cryptographic interrupt tokens, visual diff visualizer, ASCII/Unicode flow sketches, code-shape AST outline, `<show-me>` visual inspection artifacts, and cybernetic control loop (Sensor -> Controller -> Actuator -> Disturbance).
 3. **Hợp đồng công cụ & sandbox**: Typed Zod tool contracts with strict schema validation, provenance-gated writes with SHA-256 hash chains, dual-gate pre-flight and post-flight guardrails, process sandboxing with regex environment variable scrubbing, CWD lockdown, disposable temp directories, and clean process tree teardown.
 4. **Ledger bitemporal & ngữ cảnh**: Bitemporal Codebase Ledger decoupling Valid Time ($T_v$) from Transaction Time ($T_t$), append-only JSONL audit ledger, point-in-time state replay, 3-tier progressive context querying (Index, Decisions, Diffs), and semantic knowledge ontology triples.
-5. **Full Compatibility & Zero Regression Engine**: Seamless integration into `TeamworkEngine` (`lib/teamwork/engine.ts`), `HeadlessToolRunner` (`lib/teamwork/tools.ts`), and `bin/teamwork.ts`, maintaining 100% backward compatibility and passing the full existing test suite (165 file `tests/*.test.ts` tại 2026-09-24 — mốc 128 file/1850+ test là con số lúc viết đặc tả) plus all new test suites.
+5. **Full Compatibility & Zero Regression Engine**: Seamless integration into `TeamworkEngine` (`lib/teamwork/engine.ts`), `HeadlessToolRunner` (`lib/teamwork/tools.ts`), and `bin/teamwork.ts`, maintaining 100% backward compatibility and passing the full existing test suite (181 file `tests/*.test.ts` — 2,538 tests PASS sau đợt S3/S3b & PR 1) plus all new test suites.
 
 ## Feature Inventory
 | # | Feature | Description | Milestone | Source |
@@ -37,7 +37,7 @@ Vyen is a high-assurance multi-agent coding harness running dual-mode (headless 
 | 24 | TeamworkEngine DAG & Checkpoint Integration | Wire DAG scheduler, backoff retry, and checkpointing into `lib/teamwork/engine.ts` | M5 | Core Vyen Integration |
 | 25 | ToolRunner Strict Contract & Sandbox Integration | Wire Zod tool contracts, provenance, and sandboxing into `lib/teamwork/tools.ts` | M5 | Core Vyen Integration |
 | 26 | CLI & Headless Runner Upgrades | Expose DAG visualization, pause/resume flags, approval prompt, and ledger replay in `bin/teamwork.ts` | M5 | Core Vyen Integration |
-| 27 | Full Compatibility & Zero Regression Verification | Pass 100% of the existing test suite (165 file `tests/*.test.ts` tại 2026-09-24) and all new Vitest suites | M5 | Core Vyen Integration |
+| 27 | Full Compatibility & Zero Regression Verification | Pass 100% of the existing test suite (181 file `tests/*.test.ts` — 2,538 tests PASS sau đợt S3/S3b & PR 1) and all new Vitest suites | M5 | Core Vyen Integration |
 
 ## Milestones
 | # | Name | Scope | Dependencies | Status |

@@ -132,6 +132,40 @@ describe('Approval Binding — ký đúng thứ đã xem (B4)', () => {
       });
       expect(wrong.reason).toBe('approval_tool_call_mismatch');
     });
+
+    it('không dùng chéo token giữa hai chatId', () => {
+      const token = createApprovalToken({
+        kind: 'shell',
+        payload: { command: 'ls' },
+        chatId: 'chat-1',
+      })!;
+      expect(
+        verifyApprovalToken(token.fingerprint, { kind: 'shell', payload: { command: 'ls' }, chatId: 'chat-1' }).ok,
+      ).toBe(true);
+      const wrong = verifyApprovalToken(token.fingerprint, {
+        kind: 'shell',
+        payload: { command: 'ls' },
+        chatId: 'chat-2',
+      });
+      expect(wrong.reason).toBe('approval_chat_mismatch');
+    });
+
+    it('không dùng chéo token giữa hai workspaceFingerprint', () => {
+      const token = createApprovalToken({
+        kind: 'shell',
+        payload: { command: 'ls' },
+        workspaceFingerprint: 'ws-hash-1',
+      })!;
+      expect(
+        verifyApprovalToken(token.fingerprint, { kind: 'shell', payload: { command: 'ls' }, workspaceFingerprint: 'ws-hash-1' }).ok,
+      ).toBe(true);
+      const wrong = verifyApprovalToken(token.fingerprint, {
+        kind: 'shell',
+        payload: { command: 'ls' },
+        workspaceFingerprint: 'ws-hash-2',
+      });
+      expect(wrong.reason).toBe('approval_workspace_mismatch');
+    });
   });
 
   describe('consumeApprovalToken — dùng đúng một lần', () => {

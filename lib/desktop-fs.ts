@@ -6,7 +6,6 @@
  */
 import { isVyenDesktop, vyenDesktop } from '@/lib/desktop-bridge';
 import { noteUntrustedToolResult } from '@/lib/taint-tracker';
-export { createApprovalArtifact, acquireDiskLock } from '@/lib/file-lock';
 
 // Mirror trần của lib/fs-access.ts — giữ đồng bộ để desktop không
 // đọc được nhiều hơn web rồi làm phình context ở nơi khác.
@@ -157,7 +156,12 @@ export async function desktopFsReadImage(rawPath: string): Promise<DesktopImageR
   };
 }
 
-export async function desktopFsWrite(rawPath: string, content: string): Promise<{ path: string; bytes: number; created: boolean }> {
+export async function desktopFsWrite(
+  rawPath: string,
+  content: string,
+  expectedBaseHash?: string,
+  hasDiff?: boolean,
+): Promise<{ path: string; bytes: number; created: boolean }> {
   const b = requireBridge();
   // Xác định created bằng stat trước khi ghi
   let created = true;
@@ -167,7 +171,7 @@ export async function desktopFsWrite(rawPath: string, content: string): Promise<
   } catch {
     // stat ném (chưa có file) → coi như created
   }
-  const r = await b.fs.write(rawPath, content);
+  const r = await b.fs.write(rawPath, content, expectedBaseHash, hasDiff);
   return { path: rawPath, bytes: r.size, created };
 }
 

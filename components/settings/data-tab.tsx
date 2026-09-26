@@ -22,6 +22,7 @@ import { AutoBackupSection } from '@/components/settings/auto-backup-section';
 
 const UsageStats = dynamic(() => import('@/components/usage-stats').then((m) => m.UsageStats), { ssr: false, loading: SectionLoading });
 const SchedulerPanel = dynamic(() => import('@/components/scheduler/scheduler-panel').then((m) => m.SchedulerPanel), { ssr: false, loading: SectionLoading });
+const StorageQuotaMeter = dynamic(() => import('@/components/storage-quota-meter').then((m) => m.StorageQuotaMeter), { ssr: false, loading: SectionLoading });
 
 type Status = { kind: 'idle' | 'busy' | 'ok' | 'error'; message?: string };
 
@@ -155,6 +156,10 @@ export function DataTab() {
             {status.message}
           </p>
         )}
+      </div>
+
+      <div className="settings-card settings-card-body">
+        <StorageQuotaMeter />
       </div>
 
       <div className="settings-card settings-card-body">

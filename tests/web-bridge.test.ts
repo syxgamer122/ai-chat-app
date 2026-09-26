@@ -51,8 +51,14 @@ describe('Universal Web Bridge (Server Dispatcher)', () => {
   });
 
   it('invokeBridgeChannel vyen:shell-run thực thi lệnh shell an toàn', async () => {
+    const { createApprovalToken } = await import('../lib/approval-binding');
+    const token = createApprovalToken({
+      kind: 'shell',
+      payload: { command: 'echo vyen-bridge-ok', cwd: undefined },
+    });
     const res = (await invokeBridgeChannel('vyen:shell-run', {
       command: 'echo vyen-bridge-ok',
+      approvalToken: token?.fingerprint,
     })) as { code: number; stdout: string; durationMs: number };
 
     expect(res.code).toBe(0);

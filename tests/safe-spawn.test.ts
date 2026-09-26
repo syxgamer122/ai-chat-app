@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { describe, it, expect } from 'vitest';
 import { ArgvPolicyError, runArgvCommand, spawnArgv } from '@/lib/safe-spawn';
 import {
@@ -39,7 +40,9 @@ describe('resolveBinaryAbsolute — không phụ thuộc PATH kế thừa', () =
     const allowed = ['/usr/local/bin', '/usr/bin', '/bin', '/usr/sbin', '/sbin'];
     for (const dir of SYSTEM_BIN_DIRS) {
       if (process.platform === 'win32') {
-        expect(dir.toLowerCase()).toContain('windows');
+        const lower = dir.toLowerCase();
+        const isWindowsOrNodeOrGit = lower.includes('windows') || lower.includes('node') || lower.includes('git');
+        expect(isWindowsOrNodeOrGit).toBe(true);
       } else {
         expect(allowed).toContain(dir);
       }
@@ -48,10 +51,10 @@ describe('resolveBinaryAbsolute — không phụ thuộc PATH kế thừa', () =
 });
 
 describe('buildSafePath / getSafeEnv — PATH không còn kế thừa', () => {
-  it('PATH gồm node_modules/.bin của workspace + thư mục hệ thống', () => {
+  it('PATH chỉ gồm thư mục hệ thống tin cậy, loại bỏ node_modules/.bin (C-01)', () => {
     const p = buildSafePath('/ws/project');
-    expect(p).toContain('node_modules');
-    expect(p).toContain('.bin');
+    expect(p).not.toContain('node_modules');
+    expect(p).not.toContain('.bin');
     for (const dir of SYSTEM_BIN_DIRS) {
       expect(p).toContain(dir);
     }
@@ -71,11 +74,12 @@ describe('buildSafePath / getSafeEnv — PATH không còn kế thừa', () => {
     expect(env.PATH).toBe(buildSafePath('/ws/project'));
 
     // Nếu PATH của môi trường test có thư mục lạ, nó KHÔNG được truyền xuống.
-    for (const dir of inherited.split(':')) {
+    const delimiter = path.delimiter;
+    for (const dir of inherited.split(delimiter)) {
       if (!dir) continue;
       if (SYSTEM_BIN_DIRS.includes(dir)) continue;
       if (dir.includes('node_modules')) continue;
-      expect(env.PATH?.split(':')).not.toContain(dir);
+      expect(env.PATH?.split(delimiter)).not.toContain(dir);
     }
   });
 

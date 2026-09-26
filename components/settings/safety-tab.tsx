@@ -11,14 +11,18 @@
  * components/settings/ — tránh luồn chục prop qua nhiều tầng chỉ để lấy `settings`.
  */
 
-import { Zap } from 'lucide-react';
+import { Zap, ShieldCheck } from 'lucide-react';
+import React, { useState } from 'react';
 import dynamic from 'next/dynamic';
 import { useAppStore } from '@/lib/store';
 import { SectionLoading } from '@/components/settings/section-loading';
 
 const ToolPermissionsTable = dynamic(() => import('@/components/tool-permissions-table').then((m) => m.ToolPermissionsTable), { ssr: false, loading: SectionLoading });
+const AuditViewerDialog = dynamic(() => import('@/components/audit-viewer-dialog').then((m) => m.AuditViewerDialog), { ssr: false });
+const McpToolGrantsPanel = dynamic(() => import('@/components/mcp/tool-grants-panel').then((m) => m.McpToolGrantsPanel), { ssr: false, loading: SectionLoading });
 
 export function SafetyTab() {
+  const [isAuditViewerOpen, setIsAuditViewerOpen] = useState(false);
   const settings = useAppStore((s) => s.settings);
   const updateSettings = useAppStore((s) => s.updateSettings);
 
@@ -104,6 +108,36 @@ export function SafetyTab() {
           </div>
         </details>
       )}
+
+      {/* Nhật ký kiểm toán an toàn (Tamper-Evident Audit Log) */}
+      <div className="border border-border-hairline bg-surface-raised p-3 flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5">
+            <ShieldCheck size={14} className="text-status-success" />
+            <span className="text-xs font-semibold text-text-primary">
+              Nhật ký kiểm toán an toàn (Tamper-Evident Audit Log)
+            </span>
+          </div>
+          <p className="mt-0.5 text-[11px] text-text-muted">
+            Xem lịch sử phê duyệt, can thiệp đĩa và lệnh shell gắn chuỗi băm SHA-256 đối soát với anchor đĩa.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setIsAuditViewerOpen(true)}
+          className="btn-secondary text-xs px-3 py-1.5 shrink-0"
+        >
+          Mở Nhật ký Kiểm toán
+        </button>
+      </div>
+
+      <AuditViewerDialog
+        isOpen={isAuditViewerOpen}
+        onClose={() => setIsAuditViewerOpen(false)}
+      />
+
+      {/* Quản trị cấp quyền MCP động */}
+      {settings.approvalPolicy !== 'chat_only' && <McpToolGrantsPanel />}
 
       {/* Code Mode */}
       {settings.approvalPolicy !== 'chat_only' && (
